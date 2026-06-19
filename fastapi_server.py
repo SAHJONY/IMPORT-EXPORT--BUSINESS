@@ -1,6 +1,6 @@
 import uvicorn
 from fastapi import FastAPI, HTTPException, Depends, Header, Request, Body
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
@@ -39,6 +39,13 @@ orders = {}
 @app.get("/health")
 async def health_check():
     return {"status": "ok"}
+
+# Serve the cinematic hero page at root
+@app.get("/", response_class=FileResponse)
+async def root_page():
+    # Serve the static HTML file from the frontend folder
+    file_path = Path(__file__).parent / "frontend" / "index.html"
+    return FileResponse(path=file_path, media_type="text/html")
 
 # ----- Owner‑only order endpoints -----
 
