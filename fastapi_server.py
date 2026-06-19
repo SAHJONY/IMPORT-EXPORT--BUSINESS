@@ -43,10 +43,6 @@ async def health_check():
 # Mount static files (including the cinematic hero page)
 app.mount("/", StaticFiles(directory="frontend", html=True), name="static_root")
 
-# Serve root by redirecting to the index page
-@app.get("/", response_class=RedirectResponse)
-async def root_redirect():
-    return RedirectResponse(url="/index.html")
 
 # ----- Owner‑only order endpoints -----
 
