@@ -5,8 +5,8 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 import json
-import subprocess
-import shlex
+from pathlib import Path
+import sys
 
 from database import get_connection
 from auth import verify_owner, verify_participant, generate_participant_token
@@ -54,14 +54,15 @@ async def ui_generate(query: str, domain: str = "product", stack: str = "html-ta
     script_path = Path(__file__).parent / "ui-ux-pro-max-skill" / "src" / "ui-ux-pro-max" / "scripts" / "search.py"
     if not script_path.exists():
         raise HTTPException(status_code=500, detail="UI/UX skill script not found")
-    cmd = f"python3 {script_path} \"{query}\" --domain {domain} --stack {stack} -n 5"
+    cmd = [sys.executable, str(script_path), query, "--domain", domain, "--stack", stack, "-n", "5"]
     try:
-        result = subprocess.check_output(shlex.split(cmd), stderr=subprocess.STDOUT, timeout=30).decode()
-    except subprocess.CalledProcessError as e:
-        raise HTTPException(status_code=500, detail=f"UI/UX skill error: {e.output.decode()}")
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        if result.returncode != 0:
+            raise HTTPException(status_code=500, detail=f"UI/UX skill error: {result.stderr}")
+        output = result.stdout
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-    return {"query": query, "domain": domain, "stack": stack, "results": result}
+    return {"query": query, "domain": domain, "stack": stack, "results": output}
 
 # ----- Owner‑only order endpoints -----
 
