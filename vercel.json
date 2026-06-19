@@ -4,6 +4,7 @@
     { "src": "fastapi_server.py", "use": "@vercel/python" }
   ],
   "routes": [
+    { "handle": "filesystem" },
     { "src": "/(.*)", "dest": "fastapi_server.py" }
   ]
 }
