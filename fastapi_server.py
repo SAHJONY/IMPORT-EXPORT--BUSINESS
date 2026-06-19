@@ -5,11 +5,14 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 import json
+import subprocess
+import shlex
 
 from database import get_connection
 from auth import verify_owner, verify_participant, generate_participant_token
 
 from config_loader import load_config, save_config
+
 
 
 app = FastAPI(title="Cuba Veg Export API", version="1.0.0")
@@ -40,11 +43,28 @@ orders = {}
 async def health_check():
     return {"status": "ok"}
 
-# Mount static files (including the cinematic hero page)
-app.mount("/", StaticFiles(directory="frontend", html=True), name="static_root")
 
+
+# ----- UI/UX generation endpoint (uses ui-ux-pro-max skill) -----
+@app.get("/ui/generate")
+async def ui_generate(query: str, domain: str = "product", stack: str = "html-tailwind", authorized: bool = Depends(verify_owner)):
+    """Run the ui-ux-pro-max search script and return results.
+    Example: /ui/generate?query=dashboard+layout&domain=landing&stack=nextjs
+    """
+    script_path = Path(__file__).parent / "ui-ux-pro-max-skill" / "src" / "ui-ux-pro-max" / "scripts" / "search.py"
+    if not script_path.exists():
+        raise HTTPException(status_code=500, detail="UI/UX skill script not found")
+    cmd = f"python3 {script_path} \"{query}\" --domain {domain} --stack {stack} -n 5"
+    try:
+        result = subprocess.check_output(shlex.split(cmd), stderr=subprocess.STDOUT, timeout=30).decode()
+    except subprocess.CalledProcessError as e:
+        raise HTTPException(status_code=500, detail=f"UI/UX skill error: {e.output.decode()}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    return {"query": query, "domain": domain, "stack": stack, "results": result}
 
 # ----- Owner‑only order endpoints -----
+
 
 # ----- Dynamic trade config endpoints -----
 @app.post("/order")
