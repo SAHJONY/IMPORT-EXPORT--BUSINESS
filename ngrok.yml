@@ -1,0 +1,9 @@
+version: 2
+authtoken: YOUR_NGROK_AUTHTOKEN
+log: ngrok.log
+region: us
+tunnels:
+  my_fastapi_50001:
+    addr: 51111
+    proto: http
+    inspect: false

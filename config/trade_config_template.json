@@ -1,0 +1,25 @@
+{
+  "country": "Cuba",
+  "industry": "Agriculture",
+  "product": "Tomato",
+  "legal": {
+    "ofs": {
+      "license_required": true,
+      "license_type": "Agricultural Export"
+    },
+    "customs": {
+      "hts_code": "080610",
+      "origin_certificate": true
+    }
+  },
+  "logistics": {
+    "port": "Havana",
+    "incoterm": "FOB",
+    "freight": "sea"
+  },
+  "agents": {
+    "producer": "auto_producer_agent",
+    "importer": "auto_importer_agent",
+    "distributor": "auto_distributor_agent"
+  }
+}

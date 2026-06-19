@@ -1,0 +1,13 @@
+Company,Contact,Email,Product_Mix,Price_per_lb_USD
+United Natural Foods,UNFI Procurement,sales@unfi.com,"Garlic;Onion;Tomato;Cucumber;Pepper;Lettuce;Cabbage;Beet",0.78
+Sysco Corporation,Produce Manager,produce@supplier.sysco.com,"Tomato;Pepper;Lettuce;Cabbage",0.70
+US Foods,Head of Produce,produce@usfoods.com,"Onion;Tomato;Cucumber;Pepper",0.68
+Gordon Food Service,Supply Chain Lead,sales@gfs.com,"Garlic;Onion;Lettuce;Beet",0.72
+Performance Food Group,Buyer,produce@pfgc.com,"Tomato;Pepper;Cabbage",0.70
+FreshPoint,Account Manager,sales@freshpoint.com,"Cucumber;Lettuce;Beet",0.68
+KeHE Distributors,Senior Buyer,sales@kehe.com,"Garlic;Tomato;Pepper",0.73
+Whole Foods Market,Produce Buyer,produce@wholefoods.com,"Garlic;Onion;Lettuce;Cabbage",0.95
+Trader Joe's,Category Manager,supplier@traderjoes.com,"Tomato;Cucumber;Pepper;Beet",0.90
+Kroger,Produce Manager,produce@kroger.com,"Onion;Lettuce;Cabbage;Beet",0.88
+Costco Wholesale,Fresh Produce Lead,produce@costco.com,"Garlic;Onion;Tomato;Pepper",0.85
+Walmart,Fresh Produce Buyer,produce@walmart.com,"All",0.80
