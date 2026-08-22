@@ -1,0 +1,60 @@
+name: Deployment Doctor
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm install --ignore-scripts=false
+
+      - name: Deployment Doctor
+        run: npm run doctor
+
+      - name: Production frontend build
+        run: npm run build
+
+      - name: Verify required build artifacts
+        run: |
+          test -f dist/index.html
+          test -f dist/landing.html
+          test -f dist/start.html
+          test -f dist/cuba-private-sector.html
+          test -f dist/private-sector-cuba.html
+          echo "Build artifacts verified."
+
+  production-smoke:
+    if: github.ref == 'refs/heads/main'
+    needs: validate
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Smoke current production
+        run: node tools/deployment-guard.mjs --url=https://import-export-business.vercel.app || true

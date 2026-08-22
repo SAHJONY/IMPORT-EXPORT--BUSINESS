@@ -5,6 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "doctor": "node tools/deployment-guard.mjs",
+    "doctor:live": "node tools/deployment-guard.mjs --url=https://import-export-business.vercel.app",
+    "prebuild": "node tools/deployment-guard.mjs",
     "build": "vite build",
     "preview": "vite preview"
   },
