@@ -9,8 +9,10 @@
     { "src": "/business", "dest": "/landing.html" },
     { "src": "/start", "dest": "/start.html" },
     { "src": "/owner-login", "dest": "/owner-login.html" },
+    { "src": "/owner/telegram", "dest": "/owner-telegram.html" },
     { "src": "/cuba-private-sector", "dest": "/cuba-private-sector.html" },
 
+    { "src": "/telegram(.*)", "dest": "unified_api.py" },
     { "src": "/business-email(.*)", "dest": "unified_api.py" },
     { "src": "/owner-auth(.*)", "dest": "unified_api.py" },
     { "src": "/crm(.*)", "dest": "unified_api.py" },
