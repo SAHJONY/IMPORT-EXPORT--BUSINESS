@@ -32,6 +32,8 @@
     { "src": "/employee/ai-brain", "dest": "/ai-brain.html" },
     { "src": "/owner/us-import", "dest": "/us-import.html" },
     { "src": "/employee/us-import", "dest": "/us-import.html" },
+    { "src": "/owner/(global-sourcing|managed-trade|intermediary|business-readiness)", "dest": "/trade-module.html" },
+    { "src": "/employee/(global-sourcing|managed-trade|intermediary|business-readiness)", "dest": "/trade-module.html" },
     { "handle": "filesystem" },
     { "src": "/(.*)", "dest": "/index.html" }
   ]
