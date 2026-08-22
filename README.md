@@ -1,108 +1,47 @@
-# SAHJONY Global Trade Intelligence OS
+# SAHJONY Global Trade OS
 
-An AI-agentic operating system for import/export businesses: sourcing, buyer intelligence, landed-cost analysis, compliance, counterparty risk, logistics, documentation, shipment monitoring, treasury and executive decision support.
+Production-oriented import/export operating system with governed sourcing, market intelligence, compliance, document movement, communications, shipment tracking, treasury and owner controls.
 
-## Architecture
+## Role workspaces
 
-The platform uses a **deterministic release policy** around AI agents. LLMs may research, summarize, rank and recommend, but they cannot override mandatory compliance, classification or counterparty-risk gates.
+- Owner: `/owner`
+- Employee: `/employee`
+- Customer / participant: `/customer`
+- Messages: `/owner/messages`, `/employee/messages`, `/customer/messages`
+- Documents: `/owner/documents`, `/employee/documents`, `/customer/documents`
+- Shipping: `/owner/shipping`, `/employee/shipping`, `/customer/shipping`
 
-Core layers:
+## Seamless business communications
 
-- **FastAPI control plane** — owner API, workflows, health and readiness.
-- **Agentic Trade OS** — landed cost, compliance, counterparty, logistics and margin policy engines.
-- **13-agent registry** — sourcing, buyers, classification, compliance, documents, logistics, treasury, monitoring and executive copilot.
-- **InsForge backend** — Postgres, Auth, Storage, Edge Functions, Realtime and AI/model infrastructure.
-- **Audit trail** — trade cases, agent runs, decisions, checks, documents and events.
+Messages, document movements, shipment milestones, exceptions, approvals, payment/compliance events and other operational events are designed to flow into one case-linked business timeline with role-scoped visibility. Customer-facing events can create portal notification records; external channels stay fail-closed until an approved provider and participant consent are configured.
 
-## InsForge
+## End-to-end shipment tracking
 
-Set server-only credentials through environment variables. Never commit project-admin credentials to Git.
+Shipment tracking covers the operational lifecycle from booking/pickup through origin handling, export customs, main carriage, transshipment, import customs, destination handling and final delivery. The model supports ocean, air, ground, LCL, parcel and multimodal movements.
 
-```bash
-cp .env.example .env
-```
+Tracking data is persisted in InsForge using:
 
-Required for the current server adapter:
+- `shipments`
+- `shipment_milestones`
+- `shipment_sync_events`
 
-```text
-OWNER_TOKEN=<long-random-owner-token>
-INSFORGE_BASE_URL=https://<project>.<region>.insforge.app
-INSFORGE_API_KEY=<project-admin-key>
-INSFORGE_ANON_KEY=<public-anon-key>
-```
+Every customer-visible milestone or exception can publish into the unified business communications timeline. Exception events are marked action-required and can generate portal notifications.
 
-Apply the database schema in:
+The backend already includes a server-side Maersk OAuth adapter. Production tracking sync requires approved Maersk credentials plus a contracted API path supplied through `MAERSK_TRACKING_PATH_TEMPLATE`; the application intentionally does not guess a carrier endpoint.
 
-```text
-insforge/migrations/001_trade_os.sql
-```
+## Production data schemas
 
-The schema creates trade cases, counterparties, shipments, documents, compliance checks, agent runs, auditable trade decisions and event history.
+Apply before enabling the respective features:
 
-## API
+- `insforge/communications.sql`
+- `insforge/business_communications.sql`
+- `insforge/documents.sql`
+- `insforge/shipments.sql`
 
-Start locally:
+## Security and release policy
 
-```bash
-pip install -r requirements.txt
-uvicorn fastapi_server:app --reload --port 50001
-```
-
-Key endpoints:
-
-- `GET /health` — service and InsForge configuration status.
-- `GET /v2/platform/readiness` — production gate and blockers.
-- `GET /v2/agents` — agent registry.
-- `POST /v2/trade/simulate` — deterministic trade analysis without persistence.
-- `POST /v2/trade/analyze` — analysis plus optional InsForge persistence.
-- `POST /run/{agent-name}` — governed workflow queue entrypoint.
-
-Example scenario:
-
-```json
-{
-  "scenario": {
-    "mode": "import",
-    "origin_country": "Mexico",
-    "destination_country": "United States",
-    "product": "Fresh avocados",
-    "hs_code": "080440",
-    "quantity": 1000,
-    "unit_cost": 1.0,
-    "freight_cost": 250,
-    "insurance_cost": 25,
-    "duty_rate_pct": 0,
-    "broker_fees": 100,
-    "inland_cost": 125,
-    "target_sale_price_per_unit": 2.5,
-    "incoterm": "FOB",
-    "supplier_verified": true,
-    "buyer_verified": true,
-    "documents_complete": true,
-    "sanctions_screened": true,
-    "product_regulatory_reviewed": true
-  },
-  "persist": true
-}
-```
-
-## Release policy
-
-A trade remains `HOLD` when mandatory sanctions/admissibility/classification gates are incomplete. `REVIEW` means owner/human review is required. `READY` is a planning release state, not legal advice, customs clearance, financing approval or a guarantee that a shipment is admissible.
-
-## Security baseline
-
-- `.env` is not tracked.
-- Runtime databases are not tracked.
-- Participant tokens are stored as hashes in the legacy compatibility layer.
-- InsForge project-admin credentials remain server-only.
-- CI compiles the Python code and executes policy tests on pushes and pull requests.
-
-## Next production milestones
-
-1. Provision/connect the InsForge project and apply the migration.
-2. Replace legacy participant SQLite with InsForge Auth + RLS.
-3. Add live customs/tariff, sanctions, carrier, FX and trade-data connectors.
-4. Add document storage and OCR/structured extraction through InsForge Storage/Functions.
-5. Build the owner command center and real-time shipment/exception dashboard.
-6. Add human approval workflows for financial, legal and external actions.
+- Owner-only controls remain fail-closed.
+- Employee operations are separate from executive treasury/configuration authority.
+- Customer/participant visibility must remain tenant-scoped.
+- Customer documents and shipment milestones must use authenticated RLS/storage authorization before sensitive live records are exposed.
+- Consequential compliance, payment, treasury and trade release decisions are not performed through chat or tracking updates.
