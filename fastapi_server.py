@@ -4,7 +4,6 @@ import json
 import os
 import subprocess
 import sys
-from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
@@ -83,8 +82,18 @@ async def _persist_decision(scenario: TradeScenario, evaluation: dict[str, Any])
         "readiness_score": decision["readiness_score"],
         "release_gate": decision["release_gate"],
     }
-    inserted = await backend.insert("trade_cases", case_payload)
-    return inserted
+    return await backend.insert("trade_cases", case_payload)
+
+
+@app.get("/", response_class=HTMLResponse)
+async def owner_command_center(request: Request):
+    """Primary product experience. Operational JSON stays on /health and /v2/* only."""
+    return templates.TemplateResponse("owner_command_center.html", {"request": request})
+
+
+@app.get("/dashboard", response_class=HTMLResponse)
+async def dashboard(request: Request):
+    return templates.TemplateResponse("owner_command_center.html", {"request": request})
 
 
 @app.get("/health")
@@ -274,11 +283,6 @@ async def my_submissions(info: dict = Depends(verify_participant)):
     finally:
         conn.close()
     return {"submissions": rows}
-
-
-@app.get("/dashboard", response_class=HTMLResponse)
-async def dashboard(request: Request):
-    return templates.TemplateResponse("dashboard.html", {"request": request})
 
 
 if __name__ == "__main__":
