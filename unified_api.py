@@ -18,6 +18,7 @@ from cuba_current_api import app as cuba_current_app
 from cuba_transition_api import app as cuba_transition_app
 from cuba_trade_desk_api import app as cuba_trade_desk_app
 from cuba_private_business_api import app as cuba_private_business_app
+from cuba_private_sector_lead_api import app as cuba_private_sector_lead_app
 from managed_trade_gateway_api import app as managed_trade_app
 from managed_trade_intermediary_api import app as intermediary_app
 from global_supplier_sourcing_api import app as global_sourcing_app
@@ -27,7 +28,7 @@ from fastapi_server import app as core_app
 
 app = FastAPI(
     title="SAHJONY Global Trade Unified API",
-    version="2.1.0",
+    version="2.2.0",
     docs_url=None,
     redoc_url=None,
 )
@@ -49,6 +50,7 @@ for subapp in (
     cuba_transition_app,
     cuba_trade_desk_app,
     cuba_private_business_app,
+    cuba_private_sector_lead_app,
     managed_trade_app,
     intermediary_app,
     global_sourcing_app,
