@@ -13,7 +13,7 @@ from auth import verify_owner_token
 
 app = FastAPI(
     title="SAHJONY Telegram Channel Gateway",
-    version="1.0.0",
+    version="1.1.0",
     docs_url=None,
     redoc_url=None,
 )
@@ -94,6 +94,7 @@ async def telegram_health() -> dict[str, Any]:
         "bot_username": os.getenv("TELEGRAM_BOT_USERNAME", "").strip() or None,
         "owner_only_management": True,
         "autonomous_external_commitments": False,
+        "fail_closed": True,
     }
 
 
@@ -103,7 +104,25 @@ async def telegram_bot(
 ) -> dict[str, Any]:
     _require_owner(authorization)
     result = await _telegram_call("getMe")
-    return {"bot": result.get("result")}
+    return {"status": "ok", "bot": result.get("result")}
+
+
+@app.get("/telegram/channel")
+async def telegram_channel(
+    authorization: str | None = Header(None, alias="Authorization"),
+) -> dict[str, Any]:
+    _require_owner(authorization)
+    result = await _telegram_call("getChat", {"chat_id": _channel_id()})
+    chat = result.get("result") or {}
+    return {
+        "status": "ok",
+        "channel": {
+            "id": chat.get("id"),
+            "title": chat.get("title"),
+            "username": chat.get("username"),
+            "type": chat.get("type"),
+        },
+    }
 
 
 @app.post("/telegram/publish")
@@ -127,6 +146,23 @@ async def telegram_publish(
         "message_id": message.get("message_id"),
         "chat": message.get("chat"),
     }
+
+
+@app.post("/telegram/test")
+async def telegram_test(
+    authorization: str | None = Header(None, alias="Authorization"),
+) -> dict[str, Any]:
+    _require_owner(authorization)
+    result = await _telegram_call(
+        "sendMessage",
+        {
+            "chat_id": _channel_id(),
+            "text": "SAHJONY Global Trade · Telegram integration verified.\nTrade OS communications channel is online.",
+            "disable_notification": True,
+        },
+    )
+    message = result.get("result") or {}
+    return {"verified": True, "message_id": message.get("message_id")}
 
 
 @app.post("/telegram/pin")
@@ -180,6 +216,25 @@ async def telegram_configure_webhook(
     return {"configured": True, "telegram": result.get("result")}
 
 
+@app.get("/telegram/webhook/info")
+async def telegram_webhook_info(
+    authorization: str | None = Header(None, alias="Authorization"),
+) -> dict[str, Any]:
+    _require_owner(authorization)
+    result = await _telegram_call("getWebhookInfo")
+    info = result.get("result") or {}
+    return {
+        "status": "ok",
+        "webhook": {
+            "url": info.get("url"),
+            "pending_update_count": info.get("pending_update_count"),
+            "last_error_date": info.get("last_error_date"),
+            "last_error_message": info.get("last_error_message"),
+            "max_connections": info.get("max_connections"),
+        },
+    }
+
+
 @app.post("/telegram/webhook")
 async def telegram_webhook(
     update: dict[str, Any],
@@ -190,12 +245,12 @@ async def telegram_webhook(
     if not supplied or not secrets.compare_digest(supplied, expected):
         raise HTTPException(status_code=403, detail="Invalid Telegram webhook secret")
 
-    # The gateway intentionally acknowledges inbound updates without executing
-    # external business commitments. Higher-level routing can consume these
-    # events later under explicit SAHJONY owner/compliance policies.
+    # Inbound Telegram updates are acknowledged as events only. They never inherit
+    # Owner authority and cannot release trades, move money or create commitments.
     return {
         "accepted": True,
         "update_id": update.get("update_id"),
         "has_channel_post": "channel_post" in update or "edited_channel_post" in update,
         "autonomous_commitment_executed": False,
+        "owner_authority_granted": False,
     }
