@@ -15,11 +15,10 @@
     { "src": "cuba_current_api.py", "use": "@vercel/python" },
     { "src": "cuba_transition_api.py", "use": "@vercel/python" },
     { "src": "cuba_trade_desk_api.py", "use": "@vercel/python" },
+    { "src": "cuba_private_business_api.py", "use": "@vercel/python" },
     { "src": "fastapi_server.py", "use": "@vercel/python" }
   ],
   "routes": [
-    { "src": "/owner/cuba-desk", "dest": "/cuba-desk.html" },
-    { "src": "/employee/cuba-desk", "dest": "/cuba-desk.html" },
     { "src": "/communications/(.*)", "dest": "communication_api.py" },
     { "src": "/document-storage(.*)", "dest": "document_storage_api.py" },
     { "src": "/documents(.*)", "dest": "document_api.py" },
@@ -29,6 +28,7 @@
     { "src": "/language(.*)", "dest": "translation_api.py" },
     { "src": "/collaboration(.*)", "dest": "collaboration_api.py" },
     { "src": "/finance(.*)", "dest": "finance_api.py" },
+    { "src": "/cuba-private(.*)", "dest": "cuba_private_business_api.py" },
     { "src": "/cuba-desk(.*)", "dest": "cuba_trade_desk_api.py" },
     { "src": "/cuba-transition(.*)", "dest": "cuba_transition_api.py" },
     { "src": "/cuba(.*)", "dest": "cuba_current_api.py" },
