@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 from auth import verify_customer_token, verify_owner_token
 from insforge_backend import InsForgeConfigurationError, get_backend
 
-app = FastAPI(title="SAHJONY Global Trade Documents", version="1.0.0", docs_url=None, redoc_url=None)
+app = FastAPI(title="SAHJONY Global Trade Documents", version="1.1.0", docs_url=None, redoc_url=None)
 
 Role = Literal["owner","employee","customer"]
 Status = Literal["requested","customer_submitted","employee_review","correction_requested","owner_review","approved","released","rejected","archived"]
@@ -42,12 +42,12 @@ TRANSITIONS = {
     "rejected":{"correction_requested","archived"},
     "archived":set(),
 }
-
 ROLE_MOVES = {
     "customer":{"customer_submitted"},
     "employee":{"employee_review","correction_requested","owner_review","rejected","archived"},
     "owner":{"requested","correction_requested","owner_review","approved","released","rejected","archived"},
 }
+ACTION_STATUSES={"requested","correction_requested","owner_review"}
 
 def now(): return datetime.now(timezone.utc).isoformat()
 
@@ -75,9 +75,37 @@ async def audit(document_id, actor, from_status, to_status, note):
     await get_backend().insert("document_movements",event)
     return event
 
+async def publish_timeline(doc, actor, from_status, to_status, note):
+    customer_visible=bool(doc.get("customer_visible")) or actor["role"]=="customer" or to_status in {"requested","correction_requested","released"}
+    visibility="customer" if customer_visible and doc.get("customer_id") else "internal"
+    if to_status=="owner_review": visibility="internal"
+    if to_status=="approved" and not doc.get("customer_visible"): visibility="internal"
+    action=to_status in ACTION_STATUSES
+    labels={"requested":"Document requested","correction_requested":"Correction required","owner_review":"Owner review required"}
+    row={
+        "event_id":f"evt_{secrets.token_urlsafe(16)}","event_type":"document","source_type":"trade_document",
+        "source_id":doc["document_id"],"trade_case_id":doc.get("trade_case_id"),"customer_id":doc.get("customer_id"),
+        "actor_role":actor["role"],"actor_id":actor["id"],"visibility":visibility,
+        "title":f"{doc.get('title','Document')} · {to_status.replace('_',' ')}",
+        "summary":note or f"Document moved from {from_status or 'created'} to {to_status}.",
+        "action_required":action,"action_label":labels.get(to_status),
+        "priority":"high" if to_status in {"correction_requested","rejected"} else "normal",
+        "event_status":"open","payload":{"document_type":doc.get("document_type"),"version":doc.get("version"),"from_status":from_status,"to_status":to_status},
+        "created_at":now(),"updated_at":now(),
+    }
+    await get_backend().insert("business_events",row)
+    if visibility=="customer" and doc.get("customer_id"):
+        await get_backend().insert("outbound_notifications",{
+            "notification_id":f"ntf_{secrets.token_urlsafe(16)}","event_id":row["event_id"],"recipient_role":"customer",
+            "recipient_id":doc["customer_id"],"channel":"portal","destination":None,"subject":row["title"],"body":row["summary"],
+            "delivery_status":"delivered","provider":"native_portal","provider_message_id":None,"attempts":1,"last_error":None,
+            "created_at":now(),"updated_at":now(),
+        })
+    return row
+
 @app.get("/documents/health")
 async def health():
-    return {"status":"ok","service":"document-movement","configured":bool(os.getenv("INSFORGE_BASE_URL") and os.getenv("INSFORGE_API_KEY")),"storage_enabled":os.getenv("INSFORGE_STORAGE_ENABLED","false").lower()=="true"}
+    return {"status":"ok","service":"document-movement","version":"1.1.0","configured":bool(os.getenv("INSFORGE_BASE_URL") and os.getenv("INSFORGE_API_KEY")),"storage_enabled":os.getenv("INSFORGE_STORAGE_ENABLED","false").lower()=="true","timeline_integration":True}
 
 @app.post("/documents")
 async def create_document(payload: DocumentCreate, x_role: str|None=Header(None,alias="X-Role"), authorization: str|None=Header(None,alias="Authorization"), x_employee_id: str|None=Header(None,alias="X-Employee-Id")):
@@ -88,17 +116,18 @@ async def create_document(payload: DocumentCreate, x_role: str|None=Header(None,
     doc_id=f"doc_{secrets.token_urlsafe(16)}"; ts=now()
     row={"document_id":doc_id,"trade_case_id":payload.trade_case_id,"customer_id":customer_id,"document_type":payload.document_type,"title":payload.title,"storage_object_key":payload.storage_object_key,"version":payload.version,"status":status,"customer_visible":payload.customer_visible if actor["role"]!="customer" else True,"created_by_role":actor["role"],"created_by_id":actor["id"],"created_at":ts,"updated_at":ts}
     try:
-        result=await get_backend().insert("trade_documents",row); await audit(doc_id,actor,None,status,"Document registered")
+        result=await get_backend().insert("trade_documents",row)
+        movement=await audit(doc_id,actor,None,status,"Document registered")
+        timeline=await publish_timeline(row,actor,None,status,"Document registered")
     except InsForgeConfigurationError as exc: raise HTTPException(503,str(exc)) from exc
     except Exception as exc: raise HTTPException(503,f"Document persistence unavailable: {type(exc).__name__}") from exc
-    return {"document":row,"persistence":result}
+    return {"document":row,"movement":movement,"timeline_event":timeline,"persistence":result}
 
 @app.get("/documents")
 async def list_documents(trade_case_id: str|None=Query(default=None,max_length=160), customer_id: str|None=Query(default=None,max_length=160), x_role: str|None=Header(None,alias="X-Role"), authorization: str|None=Header(None,alias="Authorization"), x_employee_id: str|None=Header(None,alias="X-Employee-Id")):
     actor=identity(x_role,authorization,x_employee_id); params={"order":"updated_at.desc","limit":"250"}
     if trade_case_id: params["trade_case_id"]=f"eq.{trade_case_id}"
-    if actor["role"]=="customer":
-        params["customer_id"]=f"eq.{actor['id']}"; params["customer_visible"]="eq.true"
+    if actor["role"]=="customer": params["customer_id"]=f"eq.{actor['id']}"; params["customer_visible"]="eq.true"
     elif customer_id: params["customer_id"]=f"eq.{customer_id}"
     try: rows=await get_backend().select("trade_documents",params=params)
     except Exception as exc: raise HTTPException(503,f"Document persistence unavailable: {type(exc).__name__}") from exc
@@ -117,10 +146,11 @@ async def move_document(document_id: str, payload: MoveRequest, x_role: str|None
     values={"status":payload.to_status,"updated_at":now()}
     if payload.customer_visible is not None:
         if actor["role"]=="customer": raise HTTPException(403,"Customers cannot change visibility policy")
-        values["customer_visible"]=payload.customer_visible
+        values["customer_visible"]=payload.customer_visible; doc["customer_visible"]=payload.customer_visible
     result=await get_backend().patch("trade_documents",values,params={"document_id":f"eq.{document_id}"})
     event=await audit(document_id,actor,current,payload.to_status,payload.note)
-    return {"document_id":document_id,"from_status":current,"to_status":payload.to_status,"movement":event,"persistence":result}
+    timeline=await publish_timeline(doc,actor,current,payload.to_status,payload.note)
+    return {"document_id":document_id,"from_status":current,"to_status":payload.to_status,"movement":event,"timeline_event":timeline,"persistence":result}
 
 @app.get("/documents/{document_id}/movements")
 async def movements(document_id: str, x_role: str|None=Header(None,alias="X-Role"), authorization: str|None=Header(None,alias="Authorization"), x_employee_id: str|None=Header(None,alias="X-Employee-Id")):
