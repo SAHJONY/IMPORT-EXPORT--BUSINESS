@@ -16,6 +16,7 @@
     { "src": "cuba_transition_api.py", "use": "@vercel/python" },
     { "src": "cuba_trade_desk_api.py", "use": "@vercel/python" },
     { "src": "cuba_private_business_api.py", "use": "@vercel/python" },
+    { "src": "managed_trade_gateway_api.py", "use": "@vercel/python" },
     { "src": "fastapi_server.py", "use": "@vercel/python" }
   ],
   "routes": [
@@ -28,6 +29,7 @@
     { "src": "/language(.*)", "dest": "translation_api.py" },
     { "src": "/collaboration(.*)", "dest": "collaboration_api.py" },
     { "src": "/finance(.*)", "dest": "finance_api.py" },
+    { "src": "/managed-trade(.*)", "dest": "managed_trade_gateway_api.py" },
     { "src": "/cuba-private(.*)", "dest": "cuba_private_business_api.py" },
     { "src": "/cuba-desk(.*)", "dest": "cuba_trade_desk_api.py" },
     { "src": "/cuba-transition(.*)", "dest": "cuba_transition_api.py" },
