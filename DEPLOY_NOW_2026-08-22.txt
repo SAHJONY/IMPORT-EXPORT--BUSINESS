@@ -1,2 +1,3 @@
 Production deployment trigger after Vercel Hobby quota reset window.
-Target main includes routing and FileResponse fallback fixes through commit 5c8481b.
+Target main includes interactive legal framework and contextual payment controls through commit a54d09806c8a7c82594141eb671d6d4b436db67d.
+Release trigger: 2026-08-22 20:12 UTC.
