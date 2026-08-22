@@ -2,11 +2,13 @@
   "version": 2,
   "builds": [
     { "src": "index.html", "use": "@vercel/static" },
+    { "src": "dashboard.html", "use": "@vercel/static" },
     { "src": "fastapi_server.py", "use": "@vercel/python" }
   ],
   "routes": [
     { "src": "/$", "dest": "/index.html" },
-    { "src": "/dashboard/?$", "dest": "/index.html" },
+    { "src": "/owner/?$", "dest": "/dashboard.html" },
+    { "src": "/dashboard/?$", "dest": "/dashboard.html" },
     { "handle": "filesystem" },
     { "src": "/(.*)", "dest": "fastapi_server.py" }
   ]

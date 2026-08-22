@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#07111f" />
+  <title>Owner Command Center · SAHJONY Global Trade</title>
+  <style>
+    :root{--bg:#07111f;--panel:#0c1929;--panel2:#102239;--line:rgba(255,255,255,.10);--text:#f7fbff;--muted:#94a9bf;--accent:#56d7ff;--accent2:#79f2c0;--warn:#ffca67;--danger:#ff7f86;--shadow:0 24px 80px rgba(0,0,0,.35)}
+    *{box-sizing:border-box} html{background:var(--bg)} body{margin:0;font-family:Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:radial-gradient(circle at 15% -10%,rgba(86,215,255,.16),transparent 34%),radial-gradient(circle at 85% 0,rgba(121,242,192,.10),transparent 28%),var(--bg);color:var(--text);min-height:100vh}
+    a{color:inherit;text-decoration:none}.shell{max-width:1480px;margin:auto;padding:18px}.topbar{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:14px 16px;border:1px solid var(--line);background:rgba(8,21,36,.80);backdrop-filter:blur(18px);border-radius:18px;position:sticky;top:10px;z-index:10;box-shadow:var(--shadow)}
+    .brand{display:flex;align-items:center;gap:12px}.mark{width:38px;height:38px;border-radius:12px;background:linear-gradient(135deg,var(--accent),var(--accent2));box-shadow:0 0 40px rgba(86,215,255,.25)}.brand strong{font-size:14px;letter-spacing:.12em}.brand small{display:block;color:var(--muted);margin-top:3px}.nav{display:flex;align-items:center;gap:10px;font-size:12px}.nav a{padding:9px 12px;border:1px solid var(--line);border-radius:999px;color:#d9e8f5}.nav a.active{background:rgba(86,215,255,.12);color:var(--accent)}
+    .hero{display:grid;grid-template-columns:1.35fr .65fr;gap:18px;margin-top:18px}.card{border:1px solid var(--line);border-radius:22px;background:linear-gradient(180deg,rgba(18,41,67,.76),rgba(8,20,34,.90));box-shadow:var(--shadow)}.hero-main{padding:34px}.eyebrow{color:var(--accent);font-size:12px;font-weight:800;letter-spacing:.18em;text-transform:uppercase}.hero h1{font-size:clamp(34px,5vw,70px);line-height:.96;letter-spacing:-.045em;margin:13px 0 16px;max-width:850px}.hero p{color:var(--muted);font-size:17px;line-height:1.6;max-width:760px}.chips{display:flex;flex-wrap:wrap;gap:9px;margin-top:24px}.chip{border:1px solid var(--line);border-radius:999px;padding:8px 11px;color:#cfe3f5;font-size:12px;background:rgba(255,255,255,.03)}
+    .hero-side{padding:26px;display:flex;flex-direction:column;justify-content:space-between}.score{font-size:72px;line-height:1;font-weight:800;letter-spacing:-.06em}.score small{font-size:14px;color:var(--muted);letter-spacing:0}.meter{height:8px;background:rgba(255,255,255,.08);border-radius:999px;overflow:hidden;margin:13px 0 8px}.meter span{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--accent),var(--accent2))}.gate{display:flex;justify-content:space-between;padding:12px 0;border-top:1px solid var(--line);font-size:13px}.gate span:last-child{font-weight:700}
+    .metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-top:14px}.metric{padding:20px}.metric label{display:block;color:var(--muted);font-size:12px;margin-bottom:12px}.metric strong{font-size:28px;letter-spacing:-.03em}.metric small{display:block;color:var(--muted);margin-top:6px}.grid{display:grid;grid-template-columns:1.2fr .8fr;gap:14px;margin-top:14px}.section{padding:22px}.section-head{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:16px}.section h2{margin:0;font-size:18px}.section-head span{color:var(--muted);font-size:12px}.opportunity{display:grid;grid-template-columns:1fr auto;gap:12px;padding:15px 0;border-top:1px solid var(--line)}.opportunity:first-of-type{border-top:0}.route{font-weight:700}.sub{color:var(--muted);font-size:12px;margin-top:5px}.pill{align-self:center;border-radius:999px;padding:7px 10px;font-size:11px;font-weight:800}.review{background:rgba(255,202,103,.12);color:var(--warn)}.hold{background:rgba(255,127,134,.12);color:var(--danger)}
+    .agents{display:grid;grid-template-columns:repeat(2,1fr);gap:9px}.agent{padding:13px;border:1px solid var(--line);border-radius:14px;background:rgba(255,255,255,.025)}.agent strong{font-size:12px}.agent span{display:block;color:var(--muted);font-size:11px;margin-top:5px}.footer{color:var(--muted);font-size:11px;text-align:center;padding:22px}
+    @media(max-width:900px){.hero,.grid{grid-template-columns:1fr}.metrics{grid-template-columns:repeat(2,1fr)}}
+    @media(max-width:560px){.shell{padding:10px}.topbar{top:6px;align-items:flex-start}.nav{flex-direction:column}.hero-main{padding:24px 19px}.hero-side,.section{padding:18px}.metrics{grid-template-columns:1fr 1fr;gap:9px}.metric{padding:15px}.metric strong{font-size:22px}.agents{grid-template-columns:1fr}.hero h1{font-size:42px}.hero p{font-size:15px}.score{font-size:58px}}
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <div class="brand"><div class="mark"></div><div><strong>SAHJONY GLOBAL TRADE</strong><small>Owner Operating System</small></div></div>
+      <nav class="nav"><a href="/">Public Overview</a><a class="active" href="/dashboard">Owner Dashboard</a></nav>
+    </header>
+    <section class="hero">
+      <div class="card hero-main">
+        <div class="eyebrow">Private Owner Command Center</div>
+        <h1>Control the trade.<br/>Verify every gate.<br/>Release with evidence.</h1>
+        <p>Operational control for sourcing, buyer intelligence, HTS, sanctions, landed cost, logistics, treasury, persistence and final production release.</p>
+        <div class="chips"><span class="chip">13-agent control plane</span><span class="chip">Fail-closed governance</span><span class="chip">Global opportunity engine</span><span class="chip">Official trade-data feeds</span></div>
+      </div>
+      <aside class="card hero-side">
+        <div><div class="eyebrow">Production Readiness</div><div class="score" id="readinessScore">--<small>/100</small></div><div class="meter"><span id="meterFill"></span></div><div class="sub">Live backend readiness. No illustrative score.</div></div>
+        <div><div class="gate"><span>Runtime</span><span style="color:var(--accent2)">ONLINE</span></div><div class="gate"><span>Release policy</span><span>FAIL-CLOSED</span></div><div class="gate"><span>InsForge</span><span id="insforgeState" style="color:var(--warn)">CHECKING</span></div></div>
+      </aside>
+    </section>
+    <section class="metrics">
+      <div class="card metric"><label>ACTIVE AGENTS</label><strong>13</strong><small>Policy-governed registry</small></div>
+      <div class="card metric"><label>MARKET INTELLIGENCE</label><strong>LIVE</strong><small>UN Comtrade + U.S. sources</small></div>
+      <div class="card metric"><label>COMPLIANCE MODE</label><strong>STRICT</strong><small>AI override disabled</small></div>
+      <div class="card metric"><label>PRODUCTION</label><strong>200</strong><small>Health endpoint verified</small></div>
+    </section>
+    <section class="grid">
+      <div class="card section">
+        <div class="section-head"><h2>Opportunity Pipeline</h2><span>Aggregate market feeds live; named counterparties require verification</span></div>
+        <div class="opportunity"><div><div class="route">Mexico → United States · Fresh Produce</div><div class="sub">Classification, margin and counterparty evidence required</div></div><span class="pill review">REVIEW</span></div>
+        <div class="opportunity"><div><div class="route">Vietnam → United States · Consumer Goods</div><div class="sub">Awaiting verified duty and logistics inputs</div></div><span class="pill hold">HOLD</span></div>
+        <div class="opportunity"><div><div class="route">United States → LATAM · Industrial Supply</div><div class="sub">Candidate corridor for evidence-based evaluation</div></div><span class="pill review">REVIEW</span></div>
+      </div>
+      <div class="card section">
+        <div class="section-head"><h2>Agent Workforce</h2><span>13 registered</span></div>
+        <div class="agents">
+          <div class="agent"><strong>Trade Orchestrator</strong><span>Case coordination</span></div><div class="agent"><strong>Supplier Intelligence</strong><span>Sourcing & verification</span></div><div class="agent"><strong>Buyer Intelligence</strong><span>Demand & commercial fit</span></div><div class="agent"><strong>Classification</strong><span>HS/HTS candidate review</span></div><div class="agent"><strong>Compliance</strong><span>Sanctions & admissibility</span></div><div class="agent"><strong>Logistics</strong><span>Routes & exceptions</span></div><div class="agent"><strong>Treasury</strong><span>FX & working capital</span></div><div class="agent"><strong>Executive Copilot</strong><span>Owner decision support</span></div>
+        </div>
+      </div>
+    </section>
+    <div class="footer">SAHJONY Global Trade Intelligence OS · AI recommendations cannot bypass mandatory compliance gates.</div>
+  </main>
+  <script>
+    fetch('/health').then(r=>r.json()).then(data=>{
+      const configured=!!(data.insforge&&data.insforge.configured);
+      document.getElementById('insforgeState').textContent=configured?'CONNECTED':'NOT CONNECTED';
+      document.getElementById('insforgeState').style.color=configured?'var(--accent2)':'var(--warn)';
+      const score=Math.max(0,Math.min(100,Number(data.readiness_score)||0));
+      document.getElementById('readinessScore').innerHTML=score+'<small>/100</small>';
+      document.getElementById('meterFill').style.width=score+'%';
+    }).catch(()=>{document.getElementById('readinessScore').innerHTML='--<small>/100</small>';document.getElementById('insforgeState').textContent='UNKNOWN';});
+  </script>
+</body>
+</html>
