@@ -50,10 +50,27 @@ create table if not exists collaboration_grants (
   revoked_by_role text,
   revoked_by_id text
 );
-
 create index if not exists collaboration_grants_case_idx on collaboration_grants(trade_case_id);
 create index if not exists collaboration_grants_participant_idx on collaboration_grants(participant_id);
 create index if not exists collaboration_grants_status_idx on collaboration_grants(status, expires_at);
+
+create table if not exists collaboration_shared_items (
+  id bigserial primary key,
+  item_id text not null unique,
+  grant_id text not null references collaboration_grants(grant_id) on delete cascade,
+  module text not null,
+  resource_type text not null,
+  resource_id text,
+  title text not null,
+  summary text,
+  payload jsonb not null default '{}'::jsonb,
+  source_locale text default 'en-US',
+  legal_or_regulatory boolean not null default false,
+  created_by_role text not null,
+  created_by_id text not null,
+  created_at timestamptz not null default now()
+);
+create index if not exists collaboration_shared_items_grant_idx on collaboration_shared_items(grant_id, created_at);
 
 create table if not exists collaboration_access_events (
   id bigserial primary key,
@@ -86,4 +103,5 @@ create table if not exists collaboration_comments (
 create index if not exists collaboration_comments_case_idx on collaboration_comments(trade_case_id, created_at desc);
 
 comment on table collaboration_grants is 'Least-privilege participant sharing grants. Store only SHA-256 token hashes; never persist raw bearer tokens.';
+comment on table collaboration_shared_items is 'Curated share-safe snapshots. Never mirror raw internal tables into external grants.';
 comment on table collaboration_access_events is 'Append-only audit of participant share access, denials, expiration and revocation.';
