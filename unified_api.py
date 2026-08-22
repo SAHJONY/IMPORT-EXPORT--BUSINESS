@@ -25,11 +25,12 @@ from global_supplier_sourcing_api import app as global_sourcing_app
 from business_readiness_api import app as business_readiness_app
 from us_import_desk_api import app as us_import_app
 from ai_brain_api import app as ai_brain_app
+from customer_crm_api import app as customer_crm_app
 from fastapi_server import app as core_app
 
 app = FastAPI(
     title="SAHJONY Global Trade Unified API",
-    version="2.3.0",
+    version="3.0.0",
     docs_url=None,
     redoc_url=None,
 )
@@ -37,6 +38,7 @@ app = FastAPI(
 # Preserve every existing route path exactly as defined by the domain apps.
 for subapp in (
     core_app,
+    customer_crm_app,
     communications_app,
     documents_app,
     document_storage_app,
