@@ -18,6 +18,8 @@
     { "src": "fastapi_server.py", "use": "@vercel/python" }
   ],
   "routes": [
+    { "src": "/owner/cuba-desk", "dest": "/cuba-desk.html" },
+    { "src": "/employee/cuba-desk", "dest": "/cuba-desk.html" },
     { "src": "/communications/(.*)", "dest": "communication_api.py" },
     { "src": "/document-storage(.*)", "dest": "document_storage_api.py" },
     { "src": "/documents(.*)", "dest": "document_api.py" },
