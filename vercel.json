@@ -9,11 +9,13 @@
     { "src": "shipping.html", "use": "@vercel/static" },
     { "src": "compliance.html", "use": "@vercel/static" },
     { "src": "commercial.html", "use": "@vercel/static" },
+    { "src": "global_i18n.js", "use": "@vercel/static" },
     { "src": "communication_api.py", "use": "@vercel/python" },
     { "src": "document_api.py", "use": "@vercel/python" },
     { "src": "shipment_api.py", "use": "@vercel/python" },
     { "src": "compliance_api.py", "use": "@vercel/python" },
     { "src": "commercial_api.py", "use": "@vercel/python" },
+    { "src": "translation_api.py", "use": "@vercel/python" },
     { "src": "fastapi_server.py", "use": "@vercel/python" }
   ],
   "routes": [
@@ -39,6 +41,7 @@
     { "src": "/shipments(.*)", "dest": "shipment_api.py" },
     { "src": "/compliance(.*)", "dest": "compliance_api.py" },
     { "src": "/commercial(.*)", "dest": "commercial_api.py" },
+    { "src": "/language(.*)", "dest": "translation_api.py" },
     { "src": "/dashboard/?$", "status": 308, "headers": { "Location": "/owner" } },
     { "src": "/client/?$", "status": 308, "headers": { "Location": "/customer" } },
     { "src": "/portal/?$", "status": 308, "headers": { "Location": "/customer" } },
