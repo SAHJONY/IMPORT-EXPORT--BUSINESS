@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import hmac
 import os
 import secrets
 from typing import Any
@@ -13,7 +15,7 @@ from auth import verify_owner_token
 
 app = FastAPI(
     title="SAHJONY Telegram Channel Gateway",
-    version="1.1.0",
+    version="1.2.0",
     docs_url=None,
     redoc_url=None,
 )
@@ -48,10 +50,44 @@ def _channel_id() -> str:
 
 
 def _webhook_secret() -> str:
-    secret = os.getenv("TELEGRAM_WEBHOOK_SECRET", "").strip()
-    if not secret:
-        raise HTTPException(status_code=503, detail="Telegram webhook secret is not configured")
-    return secret
+    explicit = os.getenv("TELEGRAM_WEBHOOK_SECRET", "").strip()
+    if explicit:
+        return explicit
+
+    # Avoid another manually-managed secret when the Owner security root already
+    # exists. The derived secret is deterministic, isolated by purpose and never
+    # returned by the API.
+    owner_secret = os.getenv("OWNER_SESSION_SECRET", "").strip()
+    if not owner_secret:
+        raise HTTPException(
+            status_code=503,
+            detail="Telegram webhook secret cannot be derived because OWNER_SESSION_SECRET is not configured",
+        )
+    return hmac.new(
+        owner_secret.encode("utf-8"),
+        b"SAHJONY:telegram:webhook:v1",
+        hashlib.sha256,
+    ).hexdigest()
+
+
+def _webhook_url() -> str:
+    explicit = os.getenv("TELEGRAM_WEBHOOK_URL", "").strip()
+    if explicit:
+        return explicit
+
+    base = (
+        os.getenv("TRADE_OS_URL", "").strip()
+        or os.getenv("APP_URL", "").strip()
+    )
+    if not base:
+        production_host = os.getenv("VERCEL_PROJECT_PRODUCTION_URL", "").strip()
+        deployment_host = os.getenv("VERCEL_URL", "").strip()
+        host = production_host or deployment_host
+        if host:
+            base = f"https://{host}"
+    if not base:
+        base = "https://import-export-business.vercel.app"
+    return f"{base.rstrip('/')}/telegram/webhook"
 
 
 def _require_owner(authorization: str | None) -> None:
@@ -84,13 +120,19 @@ async def _telegram_call(method: str, payload: dict[str, Any] | None = None) -> 
 
 @app.get("/telegram/health")
 async def telegram_health() -> dict[str, Any]:
+    webhook_secret_ready = bool(
+        os.getenv("TELEGRAM_WEBHOOK_SECRET", "").strip()
+        or os.getenv("OWNER_SESSION_SECRET", "").strip()
+    )
     return {
         "status": "ok",
         "service": "sahjony-telegram-channel-gateway",
         "bot_token_configured": bool(os.getenv("TELEGRAM_BOT_TOKEN")),
         "channel_configured": bool(os.getenv("TELEGRAM_CHANNEL_ID")),
-        "webhook_secret_configured": bool(os.getenv("TELEGRAM_WEBHOOK_SECRET")),
-        "webhook_url_configured": bool(os.getenv("TELEGRAM_WEBHOOK_URL")),
+        "webhook_secret_configured": webhook_secret_ready,
+        "webhook_secret_mode": "explicit" if os.getenv("TELEGRAM_WEBHOOK_SECRET", "").strip() else "derived_from_owner_session_secret",
+        "webhook_url_configured": True,
+        "webhook_url": _webhook_url(),
         "bot_username": os.getenv("TELEGRAM_BOT_USERNAME", "").strip() or None,
         "owner_only_management": True,
         "autonomous_external_commitments": False,
@@ -201,9 +243,7 @@ async def telegram_configure_webhook(
     authorization: str | None = Header(None, alias="Authorization"),
 ) -> dict[str, Any]:
     _require_owner(authorization)
-    webhook_url = os.getenv("TELEGRAM_WEBHOOK_URL", "").strip()
-    if not webhook_url:
-        raise HTTPException(status_code=503, detail="Telegram webhook URL is not configured")
+    webhook_url = _webhook_url()
     result = await _telegram_call(
         "setWebhook",
         {
@@ -213,7 +253,11 @@ async def telegram_configure_webhook(
             "allowed_updates": ["channel_post", "edited_channel_post", "message"],
         },
     )
-    return {"configured": True, "telegram": result.get("result")}
+    return {
+        "configured": True,
+        "webhook_url": webhook_url,
+        "telegram": result.get("result"),
+    }
 
 
 @app.get("/telegram/webhook/info")
