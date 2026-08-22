@@ -1,5 +1,5 @@
 from fastapi import FastAPI, Header, HTTPException
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, Field
 
 from auth import (
     OWNER_SESSION_TTL_SECONDS,
@@ -15,7 +15,7 @@ app = FastAPI(title="SAHJONY Owner Authentication", version="1.0.0", docs_url=No
 
 
 class OwnerLoginRequest(BaseModel):
-    email: EmailStr
+    email: str = Field(min_length=3, max_length=320)
     password: str = Field(min_length=8, max_length=256)
 
 
