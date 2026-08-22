@@ -8,10 +8,9 @@ from pathlib import Path
 from typing import Any
 
 import uvicorn
-from fastapi import Body, Depends, FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi import Body, Depends, FastAPI, HTTPException
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
 from agentic_control_plane import control_plane
@@ -28,11 +27,10 @@ app = FastAPI(
 )
 
 BASE_DIR = Path(__file__).parent
+INDEX_FILE = BASE_DIR / "index.html"
 static_dir = BASE_DIR / "static"
-templates_dir = BASE_DIR / "templates"
 if static_dir.exists():
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
-templates = Jinja2Templates(directory=str(templates_dir))
 
 
 class Order(BaseModel):
@@ -65,6 +63,12 @@ def _insforge_status() -> dict[str, Any]:
     }
 
 
+def _command_center_response() -> FileResponse:
+    if not INDEX_FILE.exists():
+        raise HTTPException(status_code=503, detail="Command Center shell is unavailable")
+    return FileResponse(str(INDEX_FILE), media_type="text/html")
+
+
 async def _persist_decision(scenario: TradeScenario, evaluation: dict[str, Any]) -> Any:
     backend = get_backend()
     decision = evaluation["decision"]
@@ -85,15 +89,14 @@ async def _persist_decision(scenario: TradeScenario, evaluation: dict[str, Any])
     return await backend.insert("trade_cases", case_payload)
 
 
-@app.get("/", response_class=HTMLResponse)
-async def owner_command_center(request: Request):
-    """Primary product experience. Operational JSON stays on /health and /v2/* only."""
-    return templates.TemplateResponse("owner_command_center.html", {"request": request})
+@app.get("/", include_in_schema=False)
+async def owner_command_center():
+    return _command_center_response()
 
 
-@app.get("/dashboard", response_class=HTMLResponse)
-async def dashboard(request: Request):
-    return templates.TemplateResponse("owner_command_center.html", {"request": request})
+@app.get("/dashboard", include_in_schema=False)
+async def dashboard():
+    return _command_center_response()
 
 
 @app.get("/health")
