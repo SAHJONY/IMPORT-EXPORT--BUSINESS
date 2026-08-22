@@ -1,0 +1,201 @@
+from __future__ import annotations
+
+import os
+import secrets
+from typing import Any
+
+import httpx
+from fastapi import FastAPI, Header, HTTPException
+from pydantic import BaseModel, Field
+
+from auth import verify_owner_token
+
+
+app = FastAPI(
+    title="SAHJONY Telegram Channel Gateway",
+    version="1.0.0",
+    docs_url=None,
+    redoc_url=None,
+)
+
+
+class TelegramPublish(BaseModel):
+    text: str = Field(min_length=1, max_length=4096)
+    disable_notification: bool = False
+    protect_content: bool = False
+
+
+class TelegramMessageAction(BaseModel):
+    message_id: int = Field(gt=0)
+
+
+class TelegramWebhookRequest(BaseModel):
+    drop_pending_updates: bool = False
+
+
+def _bot_token() -> str:
+    token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+    if not token:
+        raise HTTPException(status_code=503, detail="Telegram bot token is not configured")
+    return token
+
+
+def _channel_id() -> str:
+    channel = os.getenv("TELEGRAM_CHANNEL_ID", "").strip()
+    if not channel:
+        raise HTTPException(status_code=503, detail="Telegram channel is not configured")
+    return channel
+
+
+def _webhook_secret() -> str:
+    secret = os.getenv("TELEGRAM_WEBHOOK_SECRET", "").strip()
+    if not secret:
+        raise HTTPException(status_code=503, detail="Telegram webhook secret is not configured")
+    return secret
+
+
+def _require_owner(authorization: str | None) -> None:
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing or malformed Authorization header")
+    token = authorization.removeprefix("Bearer ").strip()
+    if not verify_owner_token(token):
+        raise HTTPException(status_code=403, detail="Invalid owner credential")
+
+
+async def _telegram_call(method: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    token = _bot_token()
+    url = f"https://api.telegram.org/bot{token}/{method}"
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            response = await client.post(url, json=payload or {})
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=503, detail=f"Telegram provider unavailable: {type(exc).__name__}") from exc
+
+    try:
+        body = response.json()
+    except ValueError as exc:
+        raise HTTPException(status_code=502, detail="Telegram returned an invalid response") from exc
+
+    if response.status_code >= 400 or not body.get("ok"):
+        description = str(body.get("description") or "Telegram request failed")[:500]
+        raise HTTPException(status_code=502, detail=description)
+    return body
+
+
+@app.get("/telegram/health")
+async def telegram_health() -> dict[str, Any]:
+    return {
+        "status": "ok",
+        "service": "sahjony-telegram-channel-gateway",
+        "bot_token_configured": bool(os.getenv("TELEGRAM_BOT_TOKEN")),
+        "channel_configured": bool(os.getenv("TELEGRAM_CHANNEL_ID")),
+        "webhook_secret_configured": bool(os.getenv("TELEGRAM_WEBHOOK_SECRET")),
+        "webhook_url_configured": bool(os.getenv("TELEGRAM_WEBHOOK_URL")),
+        "bot_username": os.getenv("TELEGRAM_BOT_USERNAME", "").strip() or None,
+        "owner_only_management": True,
+        "autonomous_external_commitments": False,
+    }
+
+
+@app.get("/telegram/bot")
+async def telegram_bot(
+    authorization: str | None = Header(None, alias="Authorization"),
+) -> dict[str, Any]:
+    _require_owner(authorization)
+    result = await _telegram_call("getMe")
+    return {"bot": result.get("result")}
+
+
+@app.post("/telegram/publish")
+async def telegram_publish(
+    payload: TelegramPublish,
+    authorization: str | None = Header(None, alias="Authorization"),
+) -> dict[str, Any]:
+    _require_owner(authorization)
+    result = await _telegram_call(
+        "sendMessage",
+        {
+            "chat_id": _channel_id(),
+            "text": payload.text,
+            "disable_notification": payload.disable_notification,
+            "protect_content": payload.protect_content,
+        },
+    )
+    message = result.get("result") or {}
+    return {
+        "published": True,
+        "message_id": message.get("message_id"),
+        "chat": message.get("chat"),
+    }
+
+
+@app.post("/telegram/pin")
+async def telegram_pin(
+    payload: TelegramMessageAction,
+    authorization: str | None = Header(None, alias="Authorization"),
+) -> dict[str, Any]:
+    _require_owner(authorization)
+    await _telegram_call(
+        "pinChatMessage",
+        {
+            "chat_id": _channel_id(),
+            "message_id": payload.message_id,
+            "disable_notification": True,
+        },
+    )
+    return {"pinned": True, "message_id": payload.message_id}
+
+
+@app.post("/telegram/delete")
+async def telegram_delete(
+    payload: TelegramMessageAction,
+    authorization: str | None = Header(None, alias="Authorization"),
+) -> dict[str, Any]:
+    _require_owner(authorization)
+    await _telegram_call(
+        "deleteMessage",
+        {"chat_id": _channel_id(), "message_id": payload.message_id},
+    )
+    return {"deleted": True, "message_id": payload.message_id}
+
+
+@app.post("/telegram/webhook/configure")
+async def telegram_configure_webhook(
+    payload: TelegramWebhookRequest,
+    authorization: str | None = Header(None, alias="Authorization"),
+) -> dict[str, Any]:
+    _require_owner(authorization)
+    webhook_url = os.getenv("TELEGRAM_WEBHOOK_URL", "").strip()
+    if not webhook_url:
+        raise HTTPException(status_code=503, detail="Telegram webhook URL is not configured")
+    result = await _telegram_call(
+        "setWebhook",
+        {
+            "url": webhook_url,
+            "secret_token": _webhook_secret(),
+            "drop_pending_updates": payload.drop_pending_updates,
+            "allowed_updates": ["channel_post", "edited_channel_post", "message"],
+        },
+    )
+    return {"configured": True, "telegram": result.get("result")}
+
+
+@app.post("/telegram/webhook")
+async def telegram_webhook(
+    update: dict[str, Any],
+    x_telegram_bot_api_secret_token: str | None = Header(None, alias="X-Telegram-Bot-Api-Secret-Token"),
+) -> dict[str, Any]:
+    expected = _webhook_secret()
+    supplied = (x_telegram_bot_api_secret_token or "").strip()
+    if not supplied or not secrets.compare_digest(supplied, expected):
+        raise HTTPException(status_code=403, detail="Invalid Telegram webhook secret")
+
+    # The gateway intentionally acknowledges inbound updates without executing
+    # external business commitments. Higher-level routing can consume these
+    # events later under explicit SAHJONY owner/compliance policies.
+    return {
+        "accepted": True,
+        "update_id": update.get("update_id"),
+        "has_channel_post": "channel_post" in update or "edited_channel_post" in update,
+        "autonomous_commitment_executed": False,
+    }
