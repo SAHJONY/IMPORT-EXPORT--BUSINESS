@@ -11,6 +11,7 @@
     { "src": "/owner-login", "dest": "/owner-login.html" },
     { "src": "/cuba-private-sector", "dest": "/cuba-private-sector.html" },
 
+    { "src": "/business-email(.*)", "dest": "unified_api.py" },
     { "src": "/owner-auth(.*)", "dest": "unified_api.py" },
     { "src": "/crm(.*)", "dest": "unified_api.py" },
     { "src": "/communications/(.*)", "dest": "unified_api.py" },
