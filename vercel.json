@@ -1,18 +1,19 @@
 {
   "version": 2,
   "builds": [
-    { "src": "index.html", "use": "@vercel/static" },
-    { "src": "client.html", "use": "@vercel/static" },
-    { "src": "dashboard.html", "use": "@vercel/static" },
+    { "src": "access_portal.py", "use": "@vercel/python" },
     { "src": "fastapi_server.py", "use": "@vercel/python" }
   ],
   "routes": [
-    { "src": "/$", "dest": "/index.html" },
-    { "src": "/client/?$", "dest": "/client.html" },
-    { "src": "/portal/?$", "dest": "/client.html" },
-    { "src": "/owner/?$", "dest": "/dashboard.html" },
-    { "src": "/dashboard/?$", "dest": "/dashboard.html" },
-    { "handle": "filesystem" },
+    { "src": "/owner/?$", "dest": "access_portal.py" },
+    { "src": "/employee/?$", "dest": "access_portal.py" },
+    { "src": "/customer/?$", "dest": "access_portal.py" },
+    { "src": "/login/(.*)", "dest": "access_portal.py" },
+    { "src": "/auth/(.*)", "dest": "access_portal.py" },
+    { "src": "/dashboard/?$", "status": 308, "headers": { "Location": "/owner" } },
+    { "src": "/client/?$", "status": 308, "headers": { "Location": "/customer" } },
+    { "src": "/portal/?$", "status": 308, "headers": { "Location": "/customer" } },
+    { "src": "/$", "status": 308, "headers": { "Location": "/employee" } },
     { "src": "/(.*)", "dest": "fastapi_server.py" }
   ]
 }
