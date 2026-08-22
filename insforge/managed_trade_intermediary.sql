@@ -92,3 +92,57 @@ create table if not exists managed_trade_role_assignments (
 create index if not exists idx_managed_engagements_case on managed_trade_engagements(managed_case_id,status);
 create index if not exists idx_managed_economics_case on managed_trade_economics(managed_case_id,status);
 create index if not exists idx_managed_role_assignments_case on managed_trade_role_assignments(managed_case_id,role_key);
+
+-- Hard fail-closed release guard. A managed-trade case cannot become releasable unless
+-- the intermediary engagement, compensation economics, and essential legal roles are verified.
+create or replace function enforce_managed_intermediary_release()
+returns trigger language plpgsql as $$
+declare
+  engagement_ready boolean;
+  economics_ready boolean;
+  verified_role_count integer;
+begin
+  if new.release_allowed is true and coalesce(old.release_allowed,false) is distinct from true then
+    select exists(
+      select 1 from managed_trade_engagements e
+      where e.engagement_id = new.engagement_agreement_id
+        and e.status = 'ACTIVE'
+        and e.owner_approved = true
+        and e.compensation_disclosed = true
+    ) into engagement_ready;
+
+    select exists(
+      select 1 from managed_trade_economics x
+      where x.economics_id = new.economics_id
+        and x.managed_case_id = new.managed_case_id
+        and x.status = 'APPROVED'
+        and x.owner_approved = true
+    ) into economics_ready;
+
+    select count(distinct role_key) into verified_role_count
+    from managed_trade_role_assignments r
+    where r.managed_case_id = new.managed_case_id
+      and r.verified = true
+      and r.role_key in ('SELLER_OF_RECORD','BUYER_OF_RECORD','EXPORTER_OF_RECORD','IMPORTER_OF_RECORD','SAHJONY_COMMERCIAL_ROLE');
+
+    if not engagement_ready then
+      raise exception 'Managed trade release denied: active approved intermediary engagement required';
+    end if;
+    if not economics_ready then
+      raise exception 'Managed trade release denied: approved intermediary economics required';
+    end if;
+    if verified_role_count < 5 then
+      raise exception 'Managed trade release denied: verified seller, buyer, exporter, importer, and SAHJONY commercial role assignments required';
+    end if;
+    if new.intermediary_mode = true and new.takes_title_to_goods = true then
+      raise exception 'Managed trade release denied: intermediary mode cannot take title to goods';
+    end if;
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_enforce_managed_intermediary_release on managed_trade_cases;
+create trigger trg_enforce_managed_intermediary_release
+before update of release_allowed on managed_trade_cases
+for each row execute function enforce_managed_intermediary_release();
