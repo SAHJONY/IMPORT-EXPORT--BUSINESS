@@ -36,18 +36,8 @@ def _connector_pass(connector_health: dict[str, Any] | None, name: str) -> bool:
     return bool(item.get("configured") and item.get("reachable"))
 
 
-def evaluate_production_readiness(
-    *,
-    runtime_ok: bool = True,
-    e2e_ok: bool | None = None,
-    connector_health: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    """Fail-closed production readiness for the complete import-export OS.
-
-    Verification flags are intentionally separate from configuration flags. A provider,
-    schema, RLS policy, ledger, backup, or workflow is not treated as production-ready
-    merely because environment variables exist.
-    """
+def evaluate_production_readiness(*, runtime_ok: bool = True, e2e_ok: bool | None = None, connector_health: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Fail-closed production readiness for the complete import-export OS."""
     auth_provider = os.getenv("AUTH_PROVIDER", "").strip().lower()
     if e2e_ok is None:
         e2e_ok = _true("E2E_TRADE_WORKFLOW_VERIFIED")
@@ -71,24 +61,22 @@ def evaluate_production_readiness(
         logistics_evidence = "Logistics provider configured"
         fx_evidence = "FX provider configured"
 
-    translation_provider_ok = (
-        os.getenv("TRANSLATION_PROVIDER", "").strip().lower() == "azure"
-        and _present("AZURE_TRANSLATOR_ENDPOINT")
-        and _present("AZURE_TRANSLATOR_KEY")
-    )
+    translation_provider_ok = os.getenv("TRANSLATION_PROVIDER", "").strip().lower() == "azure" and _present("AZURE_TRANSLATOR_ENDPOINT") and _present("AZURE_TRANSLATOR_KEY")
+    secure_storage_configured = all(_present(x) for x in ["INSFORGE_S3_ENDPOINT", "INSFORGE_S3_ACCESS_KEY_ID", "INSFORGE_S3_SECRET_ACCESS_KEY", "INSFORGE_STORAGE_BUCKET"])
+    production_identity = auth_provider == "insforge" and _present("INSFORGE_ANON_KEY") and not _true("ALLOW_LEGACY_LOCAL_AUTH")
 
     gates = [
         ReadinessGate("production_runtime", runtime_ok, True, "HTTP runtime health", "Deploy a healthy production revision."),
         ReadinessGate("insforge_backend", _present("INSFORGE_BASE_URL") and _present("INSFORGE_API_KEY"), True, "InsForge server credentials present", "Configure InsForge production project credentials."),
-        ReadinessGate("insforge_auth", auth_provider == "insforge" and _present("INSFORGE_ANON_KEY"), True, "AUTH_PROVIDER=insforge and public key present", "Enable InsForge Auth/JWT for user-facing access."),
-        ReadinessGate("tenant_rls_verified", _true("INSFORGE_RLS_VERIFIED"), True, "Live tenant/role RLS verification recorded", "Run cross-tenant owner/staff/customer/external isolation tests and only then set INSFORGE_RLS_VERIFIED=true."),
-        ReadinessGate("all_schemas_applied", _true("INSFORGE_SCHEMAS_APPLIED"), True, "Production schemas applied and checked", "Apply and verify every current InsForge schema before release."),
+        ReadinessGate("production_identity", production_identity, True, "InsForge JWT identity selected and legacy local participant auth disabled", "Use verified InsForge Auth/JWT identity and keep ALLOW_LEGACY_LOCAL_AUTH=false."),
+        ReadinessGate("tenant_rls_verified", _true("INSFORGE_RLS_VERIFIED"), True, "Live tenant/role RLS verification recorded", "Apply identity_access.sql, run cross-tenant owner/staff/customer isolation tests, then set INSFORGE_RLS_VERIFIED=true."),
+        ReadinessGate("all_schemas_applied", _true("INSFORGE_SCHEMAS_APPLIED"), True, "All production schemas applied and checked", "Apply and verify every current InsForge schema, including identity_access.sql."),
         ReadinessGate("owner_mfa", _true("OWNER_MFA_REQUIRED"), True, "Owner MFA policy enabled", "Require MFA for owner/admin access."),
         ReadinessGate("restricted_party_screening", screening_ok, True, screening_evidence, "Restore/configure authoritative sanctions screening connectivity."),
         ReadinessGate("tariff_classification", tariff_ok, True, tariff_evidence, "Configure authoritative tariff/HTS data provider."),
         ReadinessGate("logistics_provider", logistics_ok and _true("CARRIER_E2E_VERIFIED"), True, logistics_evidence + "; carrier E2E verified", "Configure carrier provider and verify real milestone normalization/ETA/exception flow."),
         ReadinessGate("fx_execution_provider", fx_ok, True, fx_evidence, "Configure bank/settlement FX provider."),
-        ReadinessGate("durable_documents", _true("INSFORGE_STORAGE_ENABLED") and _true("SIGNED_DOCUMENT_STORAGE_VERIFIED"), True, "Private storage plus signed upload/download flow verified", "Verify private signed storage, MIME/size validation, retention and access controls."),
+        ReadinessGate("secure_document_storage", _true("INSFORGE_STORAGE_ENABLED") and secure_storage_configured and _true("SIGNED_DOCUMENT_STORAGE_VERIFIED"), True, "Private S3-compatible storage, server-derived keys and signed upload/download flow verified", "Create dedicated InsForge S3 credentials and verify signed upload, head-object validation, malware gate, download, retention and legal hold."),
         ReadinessGate("global_translation", translation_provider_ok and _true("MULTILINGUAL_E2E_VERIFIED"), True, "Translation provider plus multilingual/RTL E2E verified", "Configure Azure Translator and verify language persistence, RTL, source preservation and regulated-review behavior."),
         ReadinessGate("collaboration_isolation", _true("COLLABORATION_E2E_VERIFIED"), True, "External-share expiry/revocation/scope isolation verified", "Run external sharing isolation, expiration, revocation and curated-item tests."),
         ReadinessGate("accounting_ledger", _true("ACCOUNTING_LEDGER_VERIFIED") and _true("PAYMENT_RECONCILIATION_VERIFIED"), True, "Double-entry ledger and payment reconciliation verified", "Post test balanced/reversal journals and reconcile test payments before live financial operations."),
@@ -100,12 +88,5 @@ def evaluate_production_readiness(
     ]
     critical = [g for g in gates if g.critical]
     passed = sum(1 for g in critical if g.passed)
-    score = round(passed / len(critical) * 100)
     blockers = [g.name for g in critical if not g.passed]
-    return {
-        "score": score,
-        "production_ready": not blockers,
-        "release_gate": "READY" if not blockers else "HOLD",
-        "gates": [asdict(g) for g in gates],
-        "blockers": blockers,
-    }
+    return {"score": round(passed / len(critical) * 100), "production_ready": not blockers, "release_gate": "READY" if not blockers else "HOLD", "gates": [asdict(g) for g in gates], "blockers": blockers}
