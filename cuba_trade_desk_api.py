@@ -8,9 +8,10 @@ from pydantic import BaseModel, Field
 from auth import verify_owner_token
 from insforge_backend import get_backend
 
-app=FastAPI(title='SAHJONY Cuba Authorized Trade Desk',version='1.0.0',docs_url=None,redoc_url=None)
+app=FastAPI(title='SAHJONY Cuba Authorized Trade Desk',version='1.1.0',docs_url=None,redoc_url=None)
 Role=Literal['owner','employee']
 REQUIRED_GATES=[
+ ('private_business_eligibility','Cuban private business / independent private sector eligibility'),
  ('product_classification','Product classification / ECCN or EAR99'),
  ('authorization_scope','Government authorization / license exception scope'),
  ('end_user_end_use','End user and end use eligibility'),
@@ -63,6 +64,7 @@ class AuthorizationIn(BaseModel):
 class CaseIn(BaseModel):
  employee_id:str
  authorization_id:str|None=None
+ private_business_id:str|None=None
  product_description:str
  product_id:str|None=None
  eccn:str|None=None
@@ -85,7 +87,7 @@ async def audit(case_id,actor,event,summary,payload=None):
  await get_backend().insert('cuba_trade_audit',{'event_id':f'cta_{secrets.token_urlsafe(10)}','trade_case_id':case_id,'actor_role':actor['role'],'actor_id':actor['id'],'event_type':event,'summary':summary,'payload':payload or {},'created_at':now()})
 
 @app.get('/cuba-desk/health')
-async def health(): return {'status':'ok','service':'cuba-authorized-trade-desk','country':'CU','fail_closed':True,'required_gates':len(REQUIRED_GATES),'employee_release_authority':False}
+async def health(): return {'status':'ok','service':'cuba-authorized-trade-desk','country':'CU','fail_closed':True,'required_gates':len(REQUIRED_GATES),'employee_release_authority':False,'private_business_eligibility_required_when_linked':True}
 
 @app.get('/cuba-desk/employees')
 async def employees(x_role:str|None=Header(None,alias='X-Role'),authorization:str|None=Header(None,alias='Authorization'),x_employee_id:str|None=Header(None,alias='X-Employee-Id')):
@@ -131,11 +133,14 @@ async def create_case(p:CaseIn,x_role:str|None=Header(None,alias='X-Role'),autho
  if actor['role']=='employee' and p.employee_id!=actor['id']: raise HTTPException(403,'Employees may only create their own trade cases')
  emp=await get_backend().select('cuba_trade_employees',params={'employee_id':f'eq.{p.employee_id}','status':'eq.ACTIVE','limit':'1'}) or []
  if not emp or not emp[0].get('may_prepare'): raise HTTPException(403,'Employee is not authorized to prepare Cuba transactions')
+ if p.private_business_id:
+  businesses=await get_backend().select('cuba_private_businesses',params={'private_business_id':f'eq.{p.private_business_id}','status':'eq.ACTIVE','limit':'1'}) or []
+  if not businesses: raise HTTPException(404,'Cuban private business record not found')
  cid=f'cut_{secrets.token_urlsafe(10)}'; ts=now()
  row={'trade_case_id':cid,**p.model_dump(),'origin_country':'US','destination_country':'CU','status':'DRAFT','release_allowed':False,'owner_approved':False,'created_at':ts,'updated_at':ts}
  await get_backend().insert('cuba_trade_cases',row)
  gates=[{'gate_id':f'cug_{secrets.token_urlsafe(10)}','trade_case_id':cid,'gate_key':k,'gate_label':label,'status':'PENDING','created_at':ts,'updated_at':ts} for k,label in REQUIRED_GATES]
- await get_backend().insert('cuba_trade_case_gates',gates); await audit(cid,actor,'case_created','US -> CU trade case created in fail-closed DRAFT')
+ await get_backend().insert('cuba_trade_case_gates',gates); await audit(cid,actor,'case_created','US -> CU trade case created in fail-closed DRAFT',{'private_business_id':p.private_business_id})
  return {'case':row,'gates':gates}
 
 @app.patch('/cuba-desk/cases/{case_id}/gates/{gate_key}')
@@ -158,11 +163,17 @@ async def authorize_case(case_id:str,x_role:str|None=Header(None,alias='X-Role')
  if not case.get('authorization_id'): raise HTTPException(409,'Government authorization record is required')
  auths=await get_backend().select('cuba_trade_authorizations',params={'authorization_id':f'eq.{case["authorization_id"]}','status':'eq.VERIFIED','limit':'1'}) or []
  if not auths: raise HTTPException(409,'Government authorization has not been verified')
+ if case.get('private_business_id'):
+  businesses=await get_backend().select('cuba_private_businesses',params={'private_business_id':f'eq.{case["private_business_id"]}','eligibility_status':'eq.ELIGIBLE','eligible_independent_private_sector':'eq.true','restricted_party_screening_status':'eq.CLEAR','status':'eq.ACTIVE','limit':'1'}) or []
+  if not businesses: raise HTTPException(409,'Linked Cuban private business has not passed independent-private-sector eligibility and screening')
+  business=businesses[0]
+  if business.get('uses_cuban_owned_bank') and (auths[0].get('license_exception') or '').upper()=='SCP':
+   raise HTTPException(409,'SCP transaction involving a Cuban-owned bank requires a different compliant payment path or specific authorization review')
  gates=await get_backend().select('cuba_trade_case_gates',params={'trade_case_id':f'eq.{case_id}','limit':'100'}) or []
  by={g.get('gate_key'):g.get('status') for g in gates}; missing=[k for k,_ in REQUIRED_GATES if by.get(k) not in {'PASS','NOT_APPLICABLE'}]
  if missing: raise HTTPException(409,'Transaction cannot be authorized; incomplete gates: '+', '.join(missing))
  ts=now(); await get_backend().patch('cuba_trade_cases',{'status':'AUTHORIZED','release_allowed':True,'release_reason':'Verified authorization plus all required gates passed','owner_approved':True,'owner_approved_at':ts,'updated_at':ts},params={'trade_case_id':f'eq.{case_id}'})
- await audit(case_id,actor,'case_authorized','Owner authorized lawful US -> CU transaction after verified authorization and all gates passed')
+ await audit(case_id,actor,'case_authorized','Owner authorized lawful US -> CU transaction after verified authorization, private-business eligibility where applicable, and all gates passed')
  return {'trade_case_id':case_id,'status':'AUTHORIZED','release_allowed':True}
 
 @app.post('/cuba-desk/cases/{case_id}/hold')
