@@ -4,10 +4,14 @@
     { "src": "index.html", "use": "@vercel/static" },
     { "src": "client.html", "use": "@vercel/static" },
     { "src": "dashboard.html", "use": "@vercel/static" },
+    { "src": "communications.html", "use": "@vercel/static" },
     { "src": "communication_api.py", "use": "@vercel/python" },
     { "src": "fastapi_server.py", "use": "@vercel/python" }
   ],
   "routes": [
+    { "src": "/owner/messages/?$", "dest": "/communications.html" },
+    { "src": "/employee/messages/?$", "dest": "/communications.html" },
+    { "src": "/customer/messages/?$", "dest": "/communications.html" },
     { "src": "/owner/?$", "dest": "/dashboard.html" },
     { "src": "/employee/?$", "dest": "/index.html" },
     { "src": "/customer/?$", "dest": "/client.html" },
