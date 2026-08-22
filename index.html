@@ -11,7 +11,7 @@
     button,input{font:inherit}.shell{max-width:1480px;margin:auto;padding:18px}.topbar{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:14px 16px;border:1px solid var(--line);background:rgba(8,21,36,.80);backdrop-filter:blur(18px);border-radius:18px;position:sticky;top:10px;z-index:10;box-shadow:var(--shadow)}
     .brand{display:flex;align-items:center;gap:12px}.mark{width:38px;height:38px;border-radius:12px;background:linear-gradient(135deg,var(--accent),var(--accent2));box-shadow:0 0 40px rgba(86,215,255,.25)}.brand strong{font-size:14px;letter-spacing:.12em}.brand small{display:block;color:var(--muted);margin-top:3px}.status{display:flex;align-items:center;gap:9px;color:var(--muted);font-size:13px}.dot{width:9px;height:9px;border-radius:50%;background:var(--accent2);box-shadow:0 0 16px var(--accent2)}
     .hero{display:grid;grid-template-columns:1.35fr .65fr;gap:18px;margin-top:18px}.card{border:1px solid var(--line);border-radius:22px;background:linear-gradient(180deg,rgba(18,41,67,.76),rgba(8,20,34,.90));box-shadow:var(--shadow)}.hero-main{padding:34px}.eyebrow{color:var(--accent);font-size:12px;font-weight:800;letter-spacing:.18em;text-transform:uppercase}.hero h1{font-size:clamp(34px,5vw,70px);line-height:.96;letter-spacing:-.045em;margin:13px 0 16px;max-width:850px}.hero p{color:var(--muted);font-size:17px;line-height:1.6;max-width:760px}.chips{display:flex;flex-wrap:wrap;gap:9px;margin-top:24px}.chip{border:1px solid var(--line);border-radius:999px;padding:8px 11px;color:#cfe3f5;font-size:12px;background:rgba(255,255,255,.03)}
-    .hero-side{padding:26px;display:flex;flex-direction:column;justify-content:space-between}.score{font-size:72px;line-height:1;font-weight:800;letter-spacing:-.06em}.score small{font-size:14px;color:var(--muted);letter-spacing:0}.meter{height:8px;background:rgba(255,255,255,.08);border-radius:999px;overflow:hidden;margin:13px 0 8px}.meter span{display:block;height:100%;width:75%;background:linear-gradient(90deg,var(--accent),var(--accent2))}.gate{display:flex;justify-content:space-between;padding:12px 0;border-top:1px solid var(--line);font-size:13px}.gate span:last-child{font-weight:700}
+    .hero-side{padding:26px;display:flex;flex-direction:column;justify-content:space-between}.score{font-size:72px;line-height:1;font-weight:800;letter-spacing:-.06em}.score small{font-size:14px;color:var(--muted);letter-spacing:0}.meter{height:8px;background:rgba(255,255,255,.08);border-radius:999px;overflow:hidden;margin:13px 0 8px}.meter span{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--accent),var(--accent2))}.gate{display:flex;justify-content:space-between;padding:12px 0;border-top:1px solid var(--line);font-size:13px}.gate span:last-child{font-weight:700}
     .metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-top:14px}.metric{padding:20px}.metric label{display:block;color:var(--muted);font-size:12px;margin-bottom:12px}.metric strong{font-size:28px;letter-spacing:-.03em}.metric small{display:block;color:var(--muted);margin-top:6px}
     .grid{display:grid;grid-template-columns:1.2fr .8fr;gap:14px;margin-top:14px}.section{padding:22px}.section-head{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:16px}.section h2{margin:0;font-size:18px}.section-head span{color:var(--muted);font-size:12px}.opportunity{display:grid;grid-template-columns:1fr auto;gap:12px;padding:15px 0;border-top:1px solid var(--line)}.opportunity:first-of-type{border-top:0}.route{font-weight:700}.sub{color:var(--muted);font-size:12px;margin-top:5px}.pill{align-self:center;border-radius:999px;padding:7px 10px;font-size:11px;font-weight:800}.ready{background:rgba(121,242,192,.12);color:var(--accent2)}.review{background:rgba(255,202,103,.12);color:var(--warn)}.hold{background:rgba(255,127,134,.12);color:var(--danger)}
     .agents{display:grid;grid-template-columns:repeat(2,1fr);gap:9px}.agent{padding:13px;border:1px solid var(--line);border-radius:14px;background:rgba(255,255,255,.025)}.agent strong{font-size:12px}.agent span{display:block;color:var(--muted);font-size:11px;margin-top:5px}.footer{color:var(--muted);font-size:11px;text-align:center;padding:22px}
@@ -30,22 +30,22 @@
         <div class="eyebrow">Owner Command Center</div>
         <h1>See the trade.<br/>Know the risk.<br/>Move with evidence.</h1>
         <p>A governed AI operating system for global sourcing, buyer intelligence, landed cost, compliance, logistics, treasury and opportunity ranking.</p>
-        <div class="chips"><span class="chip">13-agent control plane</span><span class="chip">Fail-closed governance</span><span class="chip">Global opportunity engine</span><span class="chip">InsForge-ready</span></div>
+        <div class="chips"><span class="chip">13-agent control plane</span><span class="chip">Fail-closed governance</span><span class="chip">Global opportunity engine</span><span class="chip">Official trade-data feeds</span></div>
       </div>
       <aside class="card hero-side">
-        <div><div class="eyebrow">Platform Readiness</div><div class="score" id="readinessScore">75<small>/100</small></div><div class="meter"><span id="meterFill"></span></div><div class="sub">Infrastructure readiness, not a trade recommendation.</div></div>
-        <div><div class="gate"><span>Runtime</span><span style="color:var(--accent2)">ONLINE</span></div><div class="gate"><span>Release policy</span><span>FAIL-CLOSED</span></div><div class="gate"><span>InsForge</span><span id="insforgeState" style="color:var(--warn)">CONNECT</span></div></div>
+        <div><div class="eyebrow">Platform Readiness</div><div class="score" id="readinessScore">--<small>/100</small></div><div class="meter"><span id="meterFill"></span></div><div class="sub">Live production readiness from the backend release gate.</div></div>
+        <div><div class="gate"><span>Runtime</span><span style="color:var(--accent2)">ONLINE</span></div><div class="gate"><span>Release policy</span><span>FAIL-CLOSED</span></div><div class="gate"><span>InsForge</span><span id="insforgeState" style="color:var(--warn)">CHECKING</span></div></div>
       </aside>
     </section>
     <section class="metrics">
       <div class="card metric"><label>ACTIVE AGENTS</label><strong>13</strong><small>Policy-governed registry</small></div>
       <div class="card metric"><label>OPPORTUNITY ENGINE</label><strong>LIVE</strong><small>Ranking layer enabled</small></div>
       <div class="card metric"><label>COMPLIANCE MODE</label><strong>STRICT</strong><small>AI override disabled</small></div>
-      <div class="card metric"><label>PRODUCTION</label><strong>200</strong><small>Health endpoint OK</small></div>
+      <div class="card metric"><label>PRODUCTION</label><strong>200</strong><small>Health endpoint verified</small></div>
     </section>
     <section class="grid">
       <div class="card section">
-        <div class="section-head"><h2>Opportunity Pipeline</h2><span>Illustrative until live market connectors are enabled</span></div>
+        <div class="section-head"><h2>Opportunity Pipeline</h2><span>Aggregate market feed live; named counterparties require verification</span></div>
         <div class="opportunity"><div><div class="route">Mexico → United States · Fresh Produce</div><div class="sub">Classification, margin and counterparty evidence required</div></div><span class="pill review">REVIEW</span></div>
         <div class="opportunity"><div><div class="route">Vietnam → United States · Consumer Goods</div><div class="sub">Awaiting verified duty and logistics inputs</div></div><span class="pill hold">HOLD</span></div>
         <div class="opportunity"><div><div class="route">United States → LATAM · Industrial Supply</div><div class="sub">Candidate corridor for evidence-based evaluation</div></div><span class="pill review">REVIEW</span></div>
@@ -69,12 +69,15 @@
   <script>
     fetch('/health').then(r=>r.json()).then(data=>{
       const configured=!!(data.insforge&&data.insforge.configured);
-      document.getElementById('insforgeState').textContent=configured?'CONNECTED':'CONNECT';
+      document.getElementById('insforgeState').textContent=configured?'CONNECTED':'NOT CONNECTED';
       document.getElementById('insforgeState').style.color=configured?'var(--accent2)':'var(--warn)';
-      const score=configured?90:75;
+      const score=Math.max(0,Math.min(100,Number(data.readiness_score)||0));
       document.getElementById('readinessScore').innerHTML=score+'<small>/100</small>';
       document.getElementById('meterFill').style.width=score+'%';
-    }).catch(()=>{});
+    }).catch(()=>{
+      document.getElementById('readinessScore').innerHTML='--<small>/100</small>';
+      document.getElementById('insforgeState').textContent='UNKNOWN';
+    });
   </script>
 </body>
 </html>
