@@ -8,6 +8,14 @@ from fastapi import Header, HTTPException
 from database import get_connection
 
 
+def _true(name: str) -> bool:
+    return os.getenv(name, "false").strip().lower() == "true"
+
+
+def _production_identity_required() -> bool:
+    return _true("PRODUCTION_MODE") and os.getenv("AUTH_PROVIDER", "").strip().lower() == "insforge" and not _true("ALLOW_LEGACY_LOCAL_AUTH")
+
+
 def _owner_token() -> str:
     token = os.getenv("OWNER_TOKEN")
     if not token:
@@ -28,6 +36,10 @@ def verify_owner_token(provided: str) -> bool:
 
 
 def verify_customer_token(provided: str):
+    # The SQLite participant-token path is transitional only. Production InsForge mode must
+    # use verified JWT identities + app_memberships/RLS; it fails closed until that client flow is wired.
+    if _production_identity_required():
+        return None
     token_hash = hash_token(provided)
     conn = get_connection()
     try:
@@ -52,6 +64,8 @@ def verify_owner(token: str | None = Header(None, alias="Authorization")):
 
 
 def verify_participant(token: str | None = Header(None, alias="Authorization")):
+    if _production_identity_required():
+        raise HTTPException(status_code=503, detail="Legacy participant tokens are disabled in production; use verified InsForge Auth identity")
     if not token or not token.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Missing or malformed Authorization header")
     provided = token.removeprefix("Bearer ").strip()
@@ -62,4 +76,6 @@ def verify_participant(token: str | None = Header(None, alias="Authorization")):
 
 
 def generate_participant_token() -> str:
+    if _production_identity_required():
+        raise RuntimeError("Legacy participant token issuance is disabled in production")
     return secrets.token_urlsafe(48)
