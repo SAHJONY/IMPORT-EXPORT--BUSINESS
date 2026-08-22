@@ -13,7 +13,8 @@ from urllib.parse import quote_plus
 
 import httpx
 
-from credentialed_providers import fx_execution_provider, maersk_provider
+from credentialed_providers import airwallex_provider, fx_execution_provider, maersk_provider
+from market_intelligence import census_trade_feed
 
 
 @dataclass(frozen=True)
@@ -29,13 +30,6 @@ class ConnectorHealth:
 
 
 class TradeConnectorRegistry:
-    """Official/public and credentialed trade-data connectors.
-
-    Reachability never means a transaction is compliant. Screening hits,
-    classification, admissibility, licensing and other consequential trade decisions
-    remain fail-closed and require source-specific evidence/review.
-    """
-
     OFAC_SDN_URL = "https://sanctionslistservice.ofac.treas.gov/api/PublicationPreview/exports/SDN.CSV"
     OFAC_NON_SDN_URL = "https://sanctionslistservice.ofac.treas.gov/api/PublicationPreview/exports/CONSOLIDATED.CSV"
     CSL_INFO_URL = "https://www.trade.gov/consolidated-screening-list"
@@ -43,7 +37,7 @@ class TradeConnectorRegistry:
     USITC_HTS_SEARCH = "https://hts.usitc.gov/reststop/search"
     ECB_FX_URL = "https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml"
     FED_H10_URL = "https://www.federalreserve.gov/datadownload/choose.aspx?rel=h10"
-    USER_AGENT = "SAHJONY-Global-Trade-OS/2.3 (+https://import-export-business.vercel.app)"
+    USER_AGENT = "SAHJONY-Global-Trade-OS/2.4 (+https://import-export-business.vercel.app)"
 
     def __init__(self) -> None:
         self._cache: dict[str, tuple[float, Any]] = {}
@@ -114,12 +108,10 @@ class TradeConnectorRegistry:
         keyword = keyword.strip()
         if len(keyword) < 2:
             raise ValueError("HTS keyword must contain at least two characters")
-        url = f"{self.USITC_HTS_SEARCH}?keyword={quote_plus(keyword)}"
-        response = await self._get(url, timeout=20)
-        payload = response.json()
+        response = await self._get(f"{self.USITC_HTS_SEARCH}?keyword={quote_plus(keyword)}", timeout=20)
         return {
             "query": keyword,
-            "results": payload,
+            "results": response.json(),
             "source": "United States International Trade Commission Harmonized Tariff Schedule REST API",
             "scope": "US_IMPORTS",
             "checked_at": self._stamp(),
@@ -170,57 +162,36 @@ class TradeConnectorRegistry:
         checked_at = self._stamp()
         checks: list[ConnectorHealth] = []
 
-        checks.append(ConnectorHealth(
-            "ofac_sanctions_data", True, await self._reachable(self.OFAC_SDN_URL), True,
-            "Direct SDN/non-SDN datasets with required automated-request User-Agent.",
-            "U.S. Treasury OFAC Sanctions List Service", checked_at,
-        ))
-
-        checks.append(ConnectorHealth(
-            "trade_gov_csl_public", True, await self._reachable(self.CSL_INFO_URL), True,
-            "Official CSL source; authenticated API mode remains optional for fuzzy API search.",
-            "U.S. International Trade Administration Consolidated Screening List", checked_at,
-        ))
+        checks.append(ConnectorHealth("ofac_sanctions_data", True, await self._reachable(self.OFAC_SDN_URL), True, "Direct SDN/non-SDN datasets with automated-request User-Agent.", "U.S. Treasury OFAC Sanctions List Service", checked_at))
+        checks.append(ConnectorHealth("trade_gov_csl_public", True, await self._reachable(self.CSL_INFO_URL), True, "Official CSL source; authenticated API mode remains optional for fuzzy API search.", "U.S. International Trade Administration Consolidated Screening List", checked_at))
 
         trade_key = os.getenv("TRADE_GOV_API_KEY", "").strip()
-        checks.append(ConnectorHealth(
-            "trade_gov_authenticated_api", bool(trade_key), bool(trade_key) and await self._reachable(self.ITA_API_CATALOG_URL), True,
-            "Optional authenticated ITA API access for CSL/FTA tariff APIs.",
-            "U.S. International Trade Administration Data Services Platform", checked_at,
-        ))
+        checks.append(ConnectorHealth("trade_gov_authenticated_api", bool(trade_key), bool(trade_key) and await self._reachable(self.ITA_API_CATALOG_URL), True, "Optional authenticated ITA API access for CSL/FTA tariff APIs.", "U.S. International Trade Administration Data Services Platform", checked_at))
 
         usitc_health_url = f"{self.USITC_HTS_SEARCH}?keyword=cotton"
-        checks.append(ConnectorHealth(
-            "tariff_classification", True, await self._reachable(usitc_health_url), True,
-            "Official USITC HTS REST API. Supports U.S. import classification/tariff research; other jurisdictions remain corridor-specific and fail-closed.",
-            "United States International Trade Commission", checked_at, "US_IMPORTS",
-        ))
+        checks.append(ConnectorHealth("tariff_classification", True, await self._reachable(usitc_health_url), True, "Official USITC HTS REST API. U.S. imports only; other jurisdictions remain corridor-specific and fail-closed.", "United States International Trade Commission", checked_at, "US_IMPORTS"))
 
-        checks.append(ConnectorHealth(
-            "ecb_fx_reference", True, await self._reachable(self.ECB_FX_URL), True,
-            "Daily official reference rates for planning; not transaction execution rates.",
-            "European Central Bank", checked_at,
-        ))
+        checks.append(ConnectorHealth("ecb_fx_reference", True, await self._reachable(self.ECB_FX_URL), True, "Daily official reference rates for planning; not transaction execution rates.", "European Central Bank", checked_at))
+        checks.append(ConnectorHealth("federal_reserve_h10", True, await self._reachable(self.FED_H10_URL), True, "Official Federal Reserve H.10 FX reference dataset discovery source.", "Board of Governors of the Federal Reserve System", checked_at))
 
-        checks.append(ConnectorHealth(
-            "federal_reserve_h10", True, await self._reachable(self.FED_H10_URL), True,
-            "Official U.S. Federal Reserve H.10 foreign-exchange reference dataset discovery source.",
-            "Board of Governors of the Federal Reserve System", checked_at,
-        ))
+        market_ok = await census_trade_feed.health()
+        checks.append(ConnectorHealth("market_trade_feed", census_trade_feed.configured, market_ok, True, "Monthly live U.S. import/export demand and origin/destination signals by HS and country. Aggregate market intelligence, not counterparty identity verification.", "U.S. Census International Trade API", checked_at, "US_TRADE"))
 
         maersk_ok = await maersk_provider.health()
-        checks.append(ConnectorHealth(
-            "logistics_tracking", maersk_provider.configured, maersk_ok, True,
-            "Maersk Track & Trace OAuth2 client-credentials adapter. Production access requires approved Maersk API product credentials and customer scoping where applicable.",
-            "A.P. Moller - Maersk Developer Portal", checked_at,
-        ))
+        checks.append(ConnectorHealth("logistics_tracking", maersk_provider.configured, maersk_ok, True, "Maersk server-to-server tracking adapter. ChatGPT Maersk app is separately installed; production backend still requires approved API credentials.", "A.P. Moller - Maersk Developer Portal", checked_at))
 
-        fx_ok = await fx_execution_provider.health()
-        checks.append(ConnectorHealth(
-            "fx_execution", fx_execution_provider.configured, fx_ok, False,
-            "Executable/settlement FX adapter. Provider account must be KYC-approved and explicitly configured; ECB/Fed remain reference-only.",
-            os.getenv("FX_EXECUTION_PROVIDER", "configured provider") or "configured provider", checked_at,
-        ))
+        fx_provider = os.getenv("FX_EXECUTION_PROVIDER", "").strip().lower()
+        if fx_provider == "airwallex":
+            fx_configured = airwallex_provider.configured
+            fx_ok = await airwallex_provider.health()
+            fx_source = "Airwallex"
+            fx_detail = "Airwallex Client API adapter using server-side Client ID/API key authentication; production requires approved account/KYC and scoped credentials."
+        else:
+            fx_configured = fx_execution_provider.configured
+            fx_ok = await fx_execution_provider.health()
+            fx_source = os.getenv("FX_EXECUTION_PROVIDER", "configured provider") or "configured provider"
+            fx_detail = "Generic executable/settlement FX adapter; provider account must be KYC-approved and explicitly configured."
+        checks.append(ConnectorHealth("fx_execution", fx_configured, fx_ok, False, fx_detail, fx_source, checked_at))
 
         serialized = [asdict(check) for check in checks]
         by_name = {item.name: item for item in checks}
