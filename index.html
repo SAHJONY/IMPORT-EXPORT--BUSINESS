@@ -6,9 +6,38 @@
   <meta name="theme-color" content="#050b13" />
   <meta name="description" content="SAHJONY Global Trade — worldwide sourcing and managed-trade operating system" />
   <title>SAHJONY Global Trade</title>
+  <style>
+    :root{--bg:#050b13;--panel:#0b1523;--line:rgba(255,255,255,.12);--text:#f7fbff;--muted:#98acc1;--cyan:#5ad8ff;--green:#74efb5}*{box-sizing:border-box}html,body{margin:0;min-height:100%;background:radial-gradient(circle at 12% 0,rgba(90,216,255,.14),transparent 30%),radial-gradient(circle at 90% 0,rgba(116,239,181,.09),transparent 28%),var(--bg);color:var(--text);font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}a{color:inherit;text-decoration:none}.fallback{min-height:100vh;padding:24px;display:flex;flex-direction:column}.fallback-nav{display:flex;justify-content:space-between;align-items:center;gap:16px;max-width:1440px;width:100%;margin:0 auto}.fallback-brand{display:flex;gap:12px;align-items:center}.fallback-mark{width:40px;height:40px;border-radius:12px;background:linear-gradient(135deg,var(--cyan),var(--green))}.fallback-brand strong{display:block;font-size:13px;letter-spacing:.14em}.fallback-brand span{display:block;color:var(--muted);font-size:11px;margin-top:4px}.fallback-links{display:flex;gap:8px;flex-wrap:wrap}.fallback-links a,.fallback-actions a{border:1px solid var(--line);border-radius:999px;padding:10px 14px;font-size:12px}.fallback-links a.primary,.fallback-actions a.primary{background:linear-gradient(135deg,var(--cyan),var(--green));color:#031017;border:0;font-weight:800}.fallback-main{max-width:1440px;width:100%;margin:auto;display:grid;grid-template-columns:1.15fr .85fr;gap:18px;align-items:center;padding:72px 0}.fallback-copy{padding:26px 0}.fallback-eyebrow{color:var(--cyan);font-size:12px;font-weight:800;letter-spacing:.18em}.fallback h1{font-size:clamp(44px,7vw,96px);line-height:.9;letter-spacing:-.055em;margin:18px 0;max-width:900px}.fallback h1 span{color:var(--green)}.fallback p{color:var(--muted);font-size:18px;line-height:1.65;max-width:780px}.fallback-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:28px}.fallback-actions a{padding:14px 18px;border-radius:12px;font-size:14px}.fallback-panel{border:1px solid var(--line);border-radius:24px;background:linear-gradient(180deg,rgba(16,29,45,.94),rgba(8,17,29,.96));padding:22px}.fallback-panel h2{font-size:15px;margin:0 0 14px}.fallback-step{display:grid;grid-template-columns:36px 1fr;gap:12px;padding:13px 0;border-top:1px solid var(--line)}.fallback-step:first-of-type{border-top:0}.fallback-step span{color:var(--cyan);font-size:11px;font-weight:800}.fallback-step strong{font-size:13px}.fallback-foot{max-width:1440px;width:100%;margin:0 auto;color:var(--muted);font-size:11px;padding:18px 0}@media(max-width:900px){.fallback-main{grid-template-columns:1fr;padding:44px 0}.fallback-nav{align-items:flex-start;flex-direction:column}.fallback h1{font-size:54px}}@media(max-width:560px){.fallback{padding:14px}.fallback h1{font-size:44px}.fallback p{font-size:15px}}
+  </style>
 </head>
 <body>
-  <div id="root"></div>
+  <div id="root">
+    <div class="fallback" id="static-fallback">
+      <header class="fallback-nav">
+        <div class="fallback-brand"><div class="fallback-mark"></div><div><strong>SAHJONY GLOBAL TRADE</strong><span>Worldwide Sourcing · Managed Trade</span></div></div>
+        <nav class="fallback-links"><a href="/customer">Customer</a><a href="/employee">Employee</a><a class="primary" href="/owner">Owner OS</a></nav>
+      </header>
+      <main class="fallback-main">
+        <section class="fallback-copy">
+          <div class="fallback-eyebrow">GLOBAL SOURCING · TRADE ORCHESTRATION · DELIVERY</div>
+          <h1>Tell us what your business needs. <span>We source the world.</span></h1>
+          <p>SAHJONY coordinates supplier discovery, due diligence, commercial terms, trade documentation, compliance, payment paths, logistics, delivery and reconciliation through one governed operating system.</p>
+          <div class="fallback-actions"><a class="primary" href="/start">Start a sourcing request</a><a href="/owner">Open operating system</a></div>
+        </section>
+        <aside class="fallback-panel">
+          <h2>TRADE CONTROL PLANE</h2>
+          <div class="fallback-step"><span>01</span><strong>Customer need & intake</strong></div>
+          <div class="fallback-step"><span>02</span><strong>Worldwide supplier sourcing</strong></div>
+          <div class="fallback-step"><span>03</span><strong>Supplier due diligence</strong></div>
+          <div class="fallback-step"><span>04</span><strong>Commercial terms & economics</strong></div>
+          <div class="fallback-step"><span>05</span><strong>Compliance & documentation</strong></div>
+          <div class="fallback-step"><span>06</span><strong>Payment path & logistics</strong></div>
+          <div class="fallback-step"><span>07</span><strong>Delivery & reconciliation</strong></div>
+        </aside>
+      </main>
+      <footer class="fallback-foot">SAHJONY Global Trade · Full-stack managed-trade operating system</footer>
+    </div>
+  </div>
   <script type="module" src="/src/main.tsx"></script>
 </body>
 </html>
