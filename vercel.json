@@ -7,11 +7,13 @@
     { "src": "fastapi_server.py", "use": "@vercel/python" }
   ],
   "routes": [
-    { "src": "/$", "dest": "/index.html" },
-    { "src": "/client/?$", "dest": "/client.html" },
-    { "src": "/portal/?$", "dest": "/client.html" },
     { "src": "/owner/?$", "dest": "/dashboard.html" },
-    { "src": "/dashboard/?$", "dest": "/dashboard.html" },
+    { "src": "/employee/?$", "dest": "/index.html" },
+    { "src": "/customer/?$", "dest": "/client.html" },
+    { "src": "/dashboard/?$", "status": 308, "headers": { "Location": "/owner" } },
+    { "src": "/client/?$", "status": 308, "headers": { "Location": "/customer" } },
+    { "src": "/portal/?$", "status": 308, "headers": { "Location": "/customer" } },
+    { "src": "/$", "status": 308, "headers": { "Location": "/employee" } },
     { "handle": "filesystem" },
     { "src": "/(.*)", "dest": "fastapi_server.py" }
   ]
