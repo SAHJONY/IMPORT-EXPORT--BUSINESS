@@ -7,6 +7,7 @@
   ],
   "routes": [
     { "src": "/$", "dest": "/index.html" },
+    { "src": "/owner/?$", "dest": "/dashboard.html" },
     { "src": "/dashboard/?$", "dest": "/dashboard.html" },
     { "handle": "filesystem" },
     { "src": "/(.*)", "dest": "fastapi_server.py" }
