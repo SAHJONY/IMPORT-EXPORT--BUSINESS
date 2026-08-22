@@ -1,4 +1,4 @@
-import React from 'react';
+import {Component,StrictMode,type ErrorInfo,type PropsWithChildren} from 'react';
 import {createRoot} from 'react-dom/client';
 import App from './App';
 import '../app/globals.css';
@@ -6,9 +6,6 @@ import './workflow.css';
 
 const rootElement=document.getElementById('root');
 
-// Some Safari/private-browser contexts can throw when sessionStorage is read.
-// The role portals must still render in that environment, so install a tiny
-// in-memory replacement before React evaluates portal state initializers.
 (function installSafeSessionStorage(){
   try{
     const probe='__sahjony_storage_probe__';
@@ -45,10 +42,10 @@ function EmergencyScreen({message='The application encountered a client-side err
   </main>
 }
 
-class AppBoundary extends React.Component<React.PropsWithChildren, {failed:boolean;message:string}> {
+class AppBoundary extends Component<PropsWithChildren, {failed:boolean;message:string}> {
   state={failed:false,message:''};
   static getDerivedStateFromError(error:unknown){return {failed:true,message:error instanceof Error?error.message:'Unexpected client-side error'};}
-  componentDidCatch(error:unknown,info:React.ErrorInfo){console.error('SAHJONY_UI_CRASH',error,info);}
+  componentDidCatch(error:unknown,info:ErrorInfo){console.error('SAHJONY_UI_CRASH',error,info);}
   render(){return this.state.failed?<EmergencyScreen message={`A workspace failed to render: ${this.state.message}`}/>:this.props.children;}
 }
 
@@ -69,7 +66,7 @@ window.addEventListener('unhandledrejection',event=>{
 
 if(rootElement){
   try{
-    createRoot(rootElement).render(<React.StrictMode><AppBoundary><App/></AppBoundary></React.StrictMode>);
+    createRoot(rootElement).render(<StrictMode><AppBoundary><App/></AppBoundary></StrictMode>);
   }catch(error){
     console.error('SAHJONY_BOOT_FAILURE',error);
     hardFallback('The application could not initialize.');
