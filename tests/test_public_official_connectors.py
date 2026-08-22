@@ -1,11 +1,10 @@
-import pytest
+import asyncio
 
 from production_readiness import evaluate_production_readiness
 from trade_connectors import TradeConnectorRegistry
 
 
-@pytest.mark.asyncio
-async def test_ofac_screen_uses_current_dataset_shape_without_network(monkeypatch):
+def test_ofac_screen_uses_current_dataset_shape_without_network(monkeypatch):
     registry = TradeConnectorRegistry()
     sample = "name,program,country\nExample Trading LLC,TEST,US\nOther Entity,TEST,CA\n"
 
@@ -13,14 +12,13 @@ async def test_ofac_screen_uses_current_dataset_shape_without_network(monkeypatc
         return sample, "2026-08-22T15:00:00+00:00"
 
     monkeypatch.setattr(registry, "_cached_text", fake_cached_text)
-    result = await registry.ofac_screen("Example Trading")
+    result = asyncio.run(registry.ofac_screen("Example Trading"))
     assert result["candidate_match"] is True
     assert result["match_count"] >= 1
     assert result["release_effect"] == "REVIEW"
 
 
-@pytest.mark.asyncio
-async def test_ecb_reference_cross_rate_without_network(monkeypatch):
+def test_ecb_reference_cross_rate_without_network(monkeypatch):
     registry = TradeConnectorRegistry()
     sample = """<?xml version='1.0' encoding='UTF-8'?>
     <Envelope><Cube><Cube time='2026-08-21'><Cube currency='USD' rate='1.20'/><Cube currency='MXN' rate='24.00'/></Cube></Cube></Envelope>"""
@@ -29,7 +27,7 @@ async def test_ecb_reference_cross_rate_without_network(monkeypatch):
         return sample, "2026-08-22T15:00:00+00:00"
 
     monkeypatch.setattr(registry, "_cached_text", fake_cached_text)
-    result = await registry.fx_reference("USD", "MXN")
+    result = asyncio.run(registry.fx_reference("USD", "MXN"))
     assert result["rate"] == 20.0
     assert result["usage"] == "planning_reference_only"
 
