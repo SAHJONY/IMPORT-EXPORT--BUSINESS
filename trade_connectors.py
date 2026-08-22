@@ -9,8 +9,11 @@ import xml.etree.ElementTree as ET
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from typing import Any
+from urllib.parse import quote_plus
 
 import httpx
+
+from credentialed_providers import fx_execution_provider, maersk_provider
 
 
 @dataclass(frozen=True)
@@ -22,23 +25,25 @@ class ConnectorHealth:
     detail: str
     source: str
     checked_at: str
+    scope: str = "GLOBAL"
 
 
 class TradeConnectorRegistry:
-    """Official/public trade-data connectors used as evidence inputs.
+    """Official/public and credentialed trade-data connectors.
 
-    Connector reachability never means a transaction is compliant. Screening hits,
+    Reachability never means a transaction is compliant. Screening hits,
     classification, admissibility, licensing and other consequential trade decisions
-    remain fail-closed and require source-specific review.
+    remain fail-closed and require source-specific evidence/review.
     """
 
     OFAC_SDN_URL = "https://sanctionslistservice.ofac.treas.gov/api/PublicationPreview/exports/SDN.CSV"
     OFAC_NON_SDN_URL = "https://sanctionslistservice.ofac.treas.gov/api/PublicationPreview/exports/CONSOLIDATED.CSV"
     CSL_INFO_URL = "https://www.trade.gov/consolidated-screening-list"
     ITA_API_CATALOG_URL = "https://developer.trade.gov/apis"
+    USITC_HTS_SEARCH = "https://hts.usitc.gov/reststop/search"
     ECB_FX_URL = "https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml"
     FED_H10_URL = "https://www.federalreserve.gov/datadownload/choose.aspx?rel=h10"
-    USER_AGENT = "SAHJONY-Global-Trade-OS/2.2 (+https://import-export-business.vercel.app)"
+    USER_AGENT = "SAHJONY-Global-Trade-OS/2.3 (+https://import-export-business.vercel.app)"
 
     def __init__(self) -> None:
         self._cache: dict[str, tuple[float, Any]] = {}
@@ -76,20 +81,11 @@ class TradeConnectorRegistry:
         return re.sub(r"[^a-z0-9]+", " ", value.lower()).strip()
 
     async def ofac_screen(self, name: str, *, limit: int = 25) -> dict[str, Any]:
-        """Screen a name against current OFAC SDN and non-SDN CSV datasets.
-
-        This is a deterministic candidate-match screen, not a legal clearance. Any
-        candidate match must be reviewed against the official OFAC entry before release.
-        """
         query = self._normalize(name)
         if len(query) < 2:
             raise ValueError("screening name must contain at least two characters")
-
         matches: list[dict[str, Any]] = []
-        datasets = [
-            ("SDN", self.OFAC_SDN_URL, "ofac_sdn"),
-            ("NON_SDN", self.OFAC_NON_SDN_URL, "ofac_non_sdn"),
-        ]
+        datasets = [("SDN", self.OFAC_SDN_URL, "ofac_sdn"), ("NON_SDN", self.OFAC_NON_SDN_URL, "ofac_non_sdn")]
         fetched: dict[str, str] = {}
         for dataset, url, cache_key in datasets:
             text, fetched_at = await self._cached_text(cache_key, url, 6 * 60 * 60)
@@ -114,8 +110,23 @@ class TradeConnectorRegistry:
             "notice": "A no-match is not legal clearance. Candidate matches require official-record review and additional due diligence.",
         }
 
+    async def usitc_hts_search(self, keyword: str) -> dict[str, Any]:
+        keyword = keyword.strip()
+        if len(keyword) < 2:
+            raise ValueError("HTS keyword must contain at least two characters")
+        url = f"{self.USITC_HTS_SEARCH}?keyword={quote_plus(keyword)}"
+        response = await self._get(url, timeout=20)
+        payload = response.json()
+        return {
+            "query": keyword,
+            "results": payload,
+            "source": "United States International Trade Commission Harmonized Tariff Schedule REST API",
+            "scope": "US_IMPORTS",
+            "checked_at": self._stamp(),
+            "notice": "Search results assist classification research; final classification and applicable duty treatment must be verified against the current HTS and trade-specific legal facts.",
+        }
+
     async def ecb_reference_rates(self) -> dict[str, Any]:
-        """Return ECB daily euro reference rates for planning/analytics only."""
         xml_text, fetched_at = await self._cached_text("ecb_fx", self.ECB_FX_URL, 60 * 60)
         root = ET.fromstring(xml_text)
         observation_date: str | None = None
@@ -144,11 +155,10 @@ class TradeConnectorRegistry:
         rates = data["rates"]
         if base not in rates or quote not in rates:
             raise ValueError(f"Unsupported ECB reference currency pair: {base}/{quote}")
-        rate = rates[quote] / rates[base]
         return {
             "base": base,
             "quote": quote,
-            "rate": rate,
+            "rate": rates[quote] / rates[base],
             "observation_date": data["observation_date"],
             "fetched_at": data["fetched_at"],
             "source": data["source"],
@@ -160,17 +170,15 @@ class TradeConnectorRegistry:
         checked_at = self._stamp()
         checks: list[ConnectorHealth] = []
 
-        ofac_reachable = await self._reachable(self.OFAC_SDN_URL)
         checks.append(ConnectorHealth(
-            "ofac_sanctions_data", True, ofac_reachable, True,
-            "Direct SDN/non-SDN datasets; automated requests include the User-Agent required by OFAC SLS.",
+            "ofac_sanctions_data", True, await self._reachable(self.OFAC_SDN_URL), True,
+            "Direct SDN/non-SDN datasets with required automated-request User-Agent.",
             "U.S. Treasury OFAC Sanctions List Service", checked_at,
         ))
 
-        csl_reachable = await self._reachable(self.CSL_INFO_URL)
         checks.append(ConnectorHealth(
-            "trade_gov_csl_public", True, csl_reachable, True,
-            "Official CSL source and download/API discovery page; API-key mode remains optional for fuzzy API search.",
+            "trade_gov_csl_public", True, await self._reachable(self.CSL_INFO_URL), True,
+            "Official CSL source; authenticated API mode remains optional for fuzzy API search.",
             "U.S. International Trade Administration Consolidated Screening List", checked_at,
         ))
 
@@ -181,39 +189,37 @@ class TradeConnectorRegistry:
             "U.S. International Trade Administration Data Services Platform", checked_at,
         ))
 
-        ecb_reachable = await self._reachable(self.ECB_FX_URL)
+        usitc_health_url = f"{self.USITC_HTS_SEARCH}?keyword=cotton"
         checks.append(ConnectorHealth(
-            "ecb_fx_reference", True, ecb_reachable, True,
+            "tariff_classification", True, await self._reachable(usitc_health_url), True,
+            "Official USITC HTS REST API. Supports U.S. import classification/tariff research; other jurisdictions remain corridor-specific and fail-closed.",
+            "United States International Trade Commission", checked_at, "US_IMPORTS",
+        ))
+
+        checks.append(ConnectorHealth(
+            "ecb_fx_reference", True, await self._reachable(self.ECB_FX_URL), True,
             "Daily official reference rates for planning; not transaction execution rates.",
             "European Central Bank", checked_at,
         ))
 
-        fed_reachable = await self._reachable(self.FED_H10_URL)
         checks.append(ConnectorHealth(
-            "federal_reserve_h10", True, fed_reachable, True,
+            "federal_reserve_h10", True, await self._reachable(self.FED_H10_URL), True,
             "Official U.S. Federal Reserve H.10 foreign-exchange reference dataset discovery source.",
             "Board of Governors of the Federal Reserve System", checked_at,
         ))
 
-        tariff_provider = os.getenv("TARIFF_DATA_PROVIDER", "").strip()
-        tariff_ok = bool(trade_key) if tariff_provider.lower() in {"trade.gov", "ita", "ita_fta"} else bool(tariff_provider)
+        maersk_ok = await maersk_provider.health()
         checks.append(ConnectorHealth(
-            "tariff_classification", bool(tariff_provider), tariff_ok, tariff_provider.lower() in {"trade.gov", "ita", "ita_fta"},
-            tariff_provider or "Requires an authoritative product/corridor tariff provider; ITA FTA Tariff Rates API is supported when keyed.",
-            "configured provider", checked_at,
+            "logistics_tracking", maersk_provider.configured, maersk_ok, True,
+            "Maersk Track & Trace OAuth2 client-credentials adapter. Production access requires approved Maersk API product credentials and customer scoping where applicable.",
+            "A.P. Moller - Maersk Developer Portal", checked_at,
         ))
 
-        logistics_provider = os.getenv("LOGISTICS_DATA_PROVIDER", "").strip()
+        fx_ok = await fx_execution_provider.health()
         checks.append(ConnectorHealth(
-            "logistics_tracking", bool(logistics_provider), bool(logistics_provider), False,
-            logistics_provider or "Live carrier/forwarder connection still required.", "configured provider", checked_at,
-        ))
-
-        fx_execution = os.getenv("FX_EXECUTION_PROVIDER", "").strip()
-        checks.append(ConnectorHealth(
-            "fx_execution", bool(fx_execution), bool(fx_execution), False,
-            fx_execution or "ECB/Fed reference data are connected; bank/settlement execution provider remains required for executable quotes.",
-            "configured provider", checked_at,
+            "fx_execution", fx_execution_provider.configured, fx_ok, False,
+            "Executable/settlement FX adapter. Provider account must be KYC-approved and explicitly configured; ECB/Fed remain reference-only.",
+            os.getenv("FX_EXECUTION_PROVIDER", "configured provider") or "configured provider", checked_at,
         ))
 
         serialized = [asdict(check) for check in checks]
