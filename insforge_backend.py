@@ -11,10 +11,11 @@ class InsForgeConfigurationError(RuntimeError):
 
 
 class InsForgeBackend:
-    """Minimal trusted-server adapter for InsForge's database REST API.
+    """Trusted-server adapter for InsForge admin and database APIs.
 
-    Admin credentials never belong in browser code. User-facing flows should use
-    InsForge Auth and user JWTs/RLS; this adapter is for owner/server operations.
+    The admin key is server-only. Browser/user flows should use InsForge Auth,
+    user JWTs and RLS. This adapter is deliberately narrow so infrastructure
+    health and persistence can be audited independently of generative agents.
     """
 
     def __init__(self) -> None:
@@ -32,15 +33,24 @@ class InsForgeBackend:
             "Content-Type": "application/json",
         }
 
-    def _url(self, table: str) -> str:
+    def _records_url(self, table: str) -> str:
         if not table.replace("_", "").isalnum():
             raise ValueError("Invalid table name")
         return f"{self.base_url}/api/database/records/{table}"
 
+    async def metadata(self) -> dict[str, Any]:
+        """Verify authenticated connectivity using InsForge's admin metadata API."""
+        async with httpx.AsyncClient(timeout=10) as client:
+            response = await client.get(f"{self.base_url}/api/metadata", headers=self.headers)
+            response.raise_for_status()
+            payload = response.json()
+            return payload if isinstance(payload, dict) else {"raw": payload}
+
     async def insert(self, table: str, rows: dict[str, Any] | list[dict[str, Any]]) -> Any:
         payload = rows if isinstance(rows, list) else [rows]
+        headers = {**self.headers, "Prefer": "return=representation"}
         async with httpx.AsyncClient(timeout=20) as client:
-            response = await client.post(self._url(table), headers=self.headers, json=payload)
+            response = await client.post(self._records_url(table), headers=headers, json=payload)
             response.raise_for_status()
             return response.json() if response.content else None
 
@@ -51,7 +61,9 @@ class InsForgeBackend:
         params: dict[str, str] | None = None,
     ) -> Any:
         async with httpx.AsyncClient(timeout=20) as client:
-            response = await client.get(self._url(table), headers=self.headers, params=params or {})
+            response = await client.get(
+                self._records_url(table), headers=self.headers, params=params or {}
+            )
             response.raise_for_status()
             return response.json() if response.content else []
 
@@ -62,9 +74,10 @@ class InsForgeBackend:
         *,
         params: dict[str, str],
     ) -> Any:
+        headers = {**self.headers, "Prefer": "return=representation"}
         async with httpx.AsyncClient(timeout=20) as client:
             response = await client.patch(
-                self._url(table), headers=self.headers, params=params, json=values
+                self._records_url(table), headers=headers, params=params, json=values
             )
             response.raise_for_status()
             return response.json() if response.content else None
