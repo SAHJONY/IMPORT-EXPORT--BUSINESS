@@ -2,11 +2,14 @@
   "version": 2,
   "builds": [
     { "src": "index.html", "use": "@vercel/static" },
+    { "src": "client.html", "use": "@vercel/static" },
     { "src": "dashboard.html", "use": "@vercel/static" },
     { "src": "fastapi_server.py", "use": "@vercel/python" }
   ],
   "routes": [
     { "src": "/$", "dest": "/index.html" },
+    { "src": "/client/?$", "dest": "/client.html" },
+    { "src": "/portal/?$", "dest": "/client.html" },
     { "src": "/owner/?$", "dest": "/dashboard.html" },
     { "src": "/dashboard/?$", "dest": "/dashboard.html" },
     { "handle": "filesystem" },
