@@ -3,6 +3,7 @@ from fastapi import FastAPI
 # Import each existing FastAPI application and aggregate its routes into one
 # serverless entrypoint. This keeps the domain modules independent while
 # avoiding Vercel Hobby's per-deployment Serverless Function count limit.
+# Production routing is intentionally consolidated here.
 from communication_api import app as communications_app
 from document_api import app as documents_app
 from document_storage_api import app as document_storage_app
