@@ -5,6 +5,11 @@
     { "src": "unified_api.py", "use": "@vercel/python" }
   ],
   "routes": [
+    { "src": "/", "dest": "/landing.html" },
+    { "src": "/business", "dest": "/landing.html" },
+    { "src": "/start", "dest": "/start.html" },
+    { "src": "/cuba-private-sector", "dest": "/cuba-private-sector.html" },
+
     { "src": "/crm(.*)", "dest": "unified_api.py" },
     { "src": "/communications/(.*)", "dest": "unified_api.py" },
     { "src": "/document-storage(.*)", "dest": "unified_api.py" },
@@ -28,10 +33,7 @@
     { "src": "/cuba(.*)", "dest": "unified_api.py" },
     { "src": "/countries(.*)", "dest": "unified_api.py" },
     { "src": "/health", "dest": "unified_api.py" },
-    { "src": "/", "dest": "/landing.html" },
-    { "src": "/business", "dest": "/landing.html" },
-    { "src": "/start", "dest": "/start.html" },
-    { "src": "/cuba-private-sector", "dest": "/cuba-private-sector.html" },
+
     { "handle": "filesystem" },
     { "src": "/(.*)", "dest": "/index.html" }
   ]
