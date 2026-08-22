@@ -25,7 +25,7 @@ from trade_os import TradeScenario
 app = FastAPI(
     title="SAHJONY Global Trade Intelligence OS",
     description="AI-agentic import/export control plane with deterministic compliance release gates.",
-    version="2.1.0",
+    version="2.2.0",
 )
 
 BASE_DIR = Path(__file__).parent
@@ -51,6 +51,11 @@ class Submission(BaseModel):
 class PersistedTradeCase(BaseModel):
     scenario: TradeScenario
     persist: bool = True
+
+
+class ScreeningRequest(BaseModel):
+    name: str = Field(min_length=2, max_length=240)
+    limit: int = Field(default=25, ge=1, le=100)
 
 
 orders: dict[str, Order] = {}
@@ -111,7 +116,7 @@ async def health_check():
     return {
         "status": "ok",
         "service": "global-trade-intelligence-os",
-        "version": "2.1.0",
+        "version": "2.2.0",
         "insforge": _insforge_status(),
         "release_policy": "fail-closed",
         "production_ready": readiness["production_ready"],
@@ -127,6 +132,26 @@ async def list_agents(authorized: bool = Depends(verify_owner)):
 @app.get("/v2/connectors/health")
 async def connector_health(authorized: bool = Depends(verify_owner)):
     return await trade_connectors.health()
+
+
+@app.post("/v2/compliance/ofac/screen")
+async def ofac_screen(request: ScreeningRequest, authorized: bool = Depends(verify_owner)):
+    try:
+        return await trade_connectors.ofac_screen(request.name, limit=request.limit)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"OFAC screening source unavailable: {type(exc).__name__}") from exc
+
+
+@app.get("/v2/fx/reference")
+async def fx_reference(base: str = "USD", quote: str = "EUR", authorized: bool = Depends(verify_owner)):
+    try:
+        return await trade_connectors.fx_reference(base, quote)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Official FX reference source unavailable: {type(exc).__name__}") from exc
 
 
 @app.post("/v2/trade/analyze")
@@ -155,7 +180,8 @@ async def simulate_trade(scenario: TradeScenario, authorized: bool = Depends(ver
 
 @app.get("/v2/platform/readiness")
 async def platform_readiness(authorized: bool = Depends(verify_owner)):
-    return evaluate_production_readiness(runtime_ok=True)
+    connectors = await trade_connectors.health()
+    return evaluate_production_readiness(runtime_ok=True, connector_health=connectors)
 
 
 @app.get("/ui/generate")
