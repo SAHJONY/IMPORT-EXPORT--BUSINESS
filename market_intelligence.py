@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import Any
 
 import httpx
@@ -21,6 +21,74 @@ class MarketSignal:
     year_to_date_value_usd: int
     period: str
     source: str
+
+
+class UNComtradePreviewFeed:
+    """Anonymous global trade preview feed from UN Comtrade.
+
+    The preview API requires no account or subscription key, but is intentionally
+    rate-limited and capped. It is suitable for first-look market intelligence, not
+    exhaustive commercial due diligence or individual counterparty verification.
+    """
+
+    BASE_URL = "https://comtradeapi.un.org/public/v1/preview/C"
+
+    async def query(
+        self,
+        *,
+        period: str,
+        reporter_code: str,
+        flow_code: str,
+        hs_code: str,
+        partner_code: str = "0",
+        frequency: str = "A",
+        max_records: int = 500,
+    ) -> dict[str, Any]:
+        max_records = max(1, min(int(max_records), 500))
+        url = f"{self.BASE_URL}/{frequency}/HS"
+        params = {
+            "period": period,
+            "reporterCode": reporter_code,
+            "flowCode": flow_code,
+            "cmdCode": hs_code,
+            "partnerCode": partner_code,
+            "maxRecords": str(max_records),
+        }
+        async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
+            response = await client.get(url, params=params)
+            response.raise_for_status()
+            payload = response.json()
+        data = payload.get("data", []) if isinstance(payload, dict) else []
+        return {
+            "period": period,
+            "reporter_code": reporter_code,
+            "partner_code": partner_code,
+            "flow_code": flow_code,
+            "hs_code": hs_code,
+            "count": len(data),
+            "data": data,
+            "source": "UN Comtrade public preview API",
+            "scope": "GLOBAL_AGGREGATE_PREVIEW",
+            "notice": "Preview is capped/rate-limited aggregate trade intelligence and does not identify or verify individual buyers or suppliers.",
+        }
+
+    async def health(self) -> bool:
+        try:
+            async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
+                response = await client.get(
+                    f"{self.BASE_URL}/A/HS",
+                    params={
+                        "period": "2023",
+                        "reporterCode": "156",
+                        "flowCode": "X",
+                        "cmdCode": "TOTAL",
+                        "partnerCode": "0",
+                        "maxRecords": "1",
+                    },
+                )
+                return 200 <= response.status_code < 300
+        except httpx.HTTPError:
+            return False
 
 
 class CensusTradeFeed:
@@ -120,4 +188,5 @@ class CensusTradeFeed:
             return False
 
 
+un_comtrade_preview_feed = UNComtradePreviewFeed()
 census_trade_feed = CensusTradeFeed()
