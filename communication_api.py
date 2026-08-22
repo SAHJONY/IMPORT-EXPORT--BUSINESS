@@ -46,11 +46,7 @@ def _employee_token() -> str:
     return token
 
 
-def _identity(
-    role: str | None,
-    authorization: str | None,
-    employee_id: str | None,
-) -> dict[str, str]:
+def _identity(role: str | None, authorization: str | None, employee_id: str | None) -> dict[str, str]:
     if role not in {"owner", "employee", "customer"}:
         raise HTTPException(status_code=400, detail="X-Role must be owner, employee or customer")
     if not authorization or not authorization.startswith("Bearer "):
@@ -95,7 +91,7 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-@app.get("/health")
+@app.get("/communications/health")
 async def health() -> dict[str, Any]:
     configured = bool(os.getenv("INSFORGE_BASE_URL") and os.getenv("INSFORGE_API_KEY"))
     return {
@@ -103,12 +99,13 @@ async def health() -> dict[str, Any]:
         "service": "tri-role-communications",
         "persistence": "insforge",
         "configured": configured,
+        "employee_auth_configured": bool(os.getenv("EMPLOYEE_TOKEN")),
         "roles": ["owner", "employee", "customer"],
         "tenant_policy": "customer-isolated",
     }
 
 
-@app.post("/messages")
+@app.post("/communications/messages")
 async def create_message(
     payload: MessageCreate,
     x_role: str | None = Header(None, alias="X-Role"),
@@ -118,10 +115,7 @@ async def create_message(
     sender = _identity(x_role, authorization, x_employee_id)
     _validate_route(sender, payload)
 
-    customer_id = payload.customer_id
-    if sender["role"] == "customer":
-        customer_id = sender["id"]
-
+    customer_id = sender["id"] if sender["role"] == "customer" else payload.customer_id
     thread_id = payload.thread_id or f"thr_{secrets.token_urlsafe(16)}"
     message_id = f"msg_{secrets.token_urlsafe(18)}"
     created_at = _now()
@@ -151,7 +145,7 @@ async def create_message(
     return {"message": row, "persistence": result}
 
 
-@app.get("/messages")
+@app.get("/communications/messages")
 async def list_messages(
     thread_id: str | None = Query(default=None, max_length=120),
     customer_id: str | None = Query(default=None, max_length=160),
@@ -180,17 +174,18 @@ async def list_messages(
     except Exception as exc:
         raise HTTPException(status_code=503, detail=f"Communication persistence unavailable: {type(exc).__name__}") from exc
 
+    rows = rows or []
     if actor["role"] == "employee":
         rows = [
-            row for row in (rows or [])
+            row for row in rows
             if row.get("sender_role") == "employee"
             or row.get("recipient_role") == "employee"
             or row.get("escalation_requested") is True
         ]
-    return {"messages": rows or [], "actor": actor}
+    return {"messages": rows, "actor": actor}
 
 
-@app.patch("/messages/{message_id}")
+@app.patch("/communications/messages/{message_id}")
 async def update_message_status(
     message_id: str,
     payload: MessageStatus,
