@@ -1,0 +1,2 @@
+Deploy latest institutional Global Trade OS from main commit e2727be520ea1e016cd8f63bc3119d74edd6b92a.
+Triggered 2026-08-22.
