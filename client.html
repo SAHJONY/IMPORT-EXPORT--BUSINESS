@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#07111f" />
+  <title>SAHJONY Client Trade Portal</title>
+  <style>
+    :root{--bg:#07111f;--panel:#0d1b2d;--line:rgba(255,255,255,.10);--text:#f7fbff;--muted:#9db0c2;--accent:#56d7ff;--accent2:#79f2c0;--warn:#ffca67;--shadow:0 24px 80px rgba(0,0,0,.35)}
+    *{box-sizing:border-box}html{background:var(--bg)}body{margin:0;font-family:Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:radial-gradient(circle at 12% -10%,rgba(86,215,255,.16),transparent 35%),radial-gradient(circle at 88% 0,rgba(121,242,192,.10),transparent 28%),var(--bg);color:var(--text);min-height:100vh}a{color:inherit;text-decoration:none}.shell{max-width:1320px;margin:auto;padding:18px}.topbar{display:flex;justify-content:space-between;align-items:center;gap:14px;padding:14px 16px;border:1px solid var(--line);border-radius:18px;background:rgba(8,21,36,.82);backdrop-filter:blur(18px);position:sticky;top:10px;z-index:10;box-shadow:var(--shadow)}.brand{display:flex;align-items:center;gap:12px}.mark{width:38px;height:38px;border-radius:12px;background:linear-gradient(135deg,var(--accent),var(--accent2))}.brand strong{font-size:14px;letter-spacing:.12em}.brand small{display:block;color:var(--muted);margin-top:3px}.tag{padding:8px 11px;border:1px solid var(--line);border-radius:999px;color:var(--muted);font-size:12px}.hero{display:grid;grid-template-columns:1.2fr .8fr;gap:14px;margin-top:16px}.card{border:1px solid var(--line);border-radius:22px;background:linear-gradient(180deg,rgba(18,41,67,.78),rgba(8,20,34,.92));box-shadow:var(--shadow)}.hero-main{padding:32px}.eyebrow{font-size:12px;letter-spacing:.18em;text-transform:uppercase;color:var(--accent);font-weight:800}.hero h1{font-size:clamp(38px,5vw,66px);line-height:.98;letter-spacing:-.045em;margin:14px 0}.hero p{color:var(--muted);font-size:17px;line-height:1.6;max-width:720px}.side{padding:24px}.side h2{margin:8px 0 18px;font-size:20px}.statusrow{display:flex;justify-content:space-between;gap:12px;padding:13px 0;border-top:1px solid var(--line);font-size:13px}.statusrow:first-of-type{border-top:0}.ok{color:var(--accent2);font-weight:800}.wait{color:var(--warn);font-weight:800}.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:14px}.panel{padding:22px}.panel h3{margin:0 0 8px;font-size:17px}.panel p{margin:0;color:var(--muted);font-size:13px;line-height:1.55}.metric{font-size:30px;font-weight:800;letter-spacing:-.04em;margin:14px 0 6px}.list{display:grid;gap:9px;margin-top:14px}.item{padding:13px;border:1px solid var(--line);border-radius:14px;background:rgba(255,255,255,.025)}.item strong{font-size:13px}.item span{display:block;color:var(--muted);font-size:12px;margin-top:5px}.notice{margin-top:14px;padding:18px;border:1px solid var(--line);border-radius:18px;color:var(--muted);font-size:12px;line-height:1.6}.footer{text-align:center;color:var(--muted);font-size:11px;padding:24px}@media(max-width:900px){.hero{grid-template-columns:1fr}.grid{grid-template-columns:1fr 1fr}}@media(max-width:560px){.shell{padding:10px}.topbar{align-items:flex-start}.hero-main,.side,.panel{padding:18px}.hero h1{font-size:42px}.grid{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <div class="brand"><div class="mark"></div><div><strong>SAHJONY GLOBAL TRADE</strong><small>Client Trade Portal</small></div></div>
+      <span class="tag">CLIENT VIEW · LIMITED ACCESS</span>
+    </header>
+
+    <section class="hero">
+      <div class="card hero-main">
+        <div class="eyebrow">Your Trade Workspace</div>
+        <h1>Your shipment.<br/>Your documents.<br/>Your status.</h1>
+        <p>A focused customer portal for viewing your own trade cases, milestones, requested documents, quotes and shipment updates without exposing SAHJONY internal operating data.</p>
+      </div>
+      <aside class="card side">
+        <div class="eyebrow">Portal Access</div>
+        <h2>Customer visibility only</h2>
+        <div class="statusrow"><span>Own trade cases</span><span class="ok">VISIBLE</span></div>
+        <div class="statusrow"><span>Own documents</span><span class="ok">VISIBLE</span></div>
+        <div class="statusrow"><span>Shipment milestones</span><span class="ok">VISIBLE</span></div>
+        <div class="statusrow"><span>Internal margin / treasury</span><span class="wait">HIDDEN</span></div>
+        <div class="statusrow"><span>Final release controls</span><span class="wait">HIDDEN</span></div>
+      </aside>
+    </section>
+
+    <section class="grid">
+      <div class="card panel"><h3>My Trade Cases</h3><div class="metric">—</div><p>Active and historical client-authorized import/export cases will appear here after authentication is connected.</p></div>
+      <div class="card panel"><h3>Documents</h3><div class="metric">—</div><p>Commercial invoices, packing lists, evidence requests and client-visible files scoped only to your account.</p></div>
+      <div class="card panel"><h3>Shipment Status</h3><div class="metric">—</div><p>Client-visible carrier milestones, ETA and exception notices when a shipment is linked to your case.</p></div>
+      <div class="card panel"><h3>Quotes & Costs</h3><div class="list"><div class="item"><strong>Approved customer quote</strong><span>Only client-facing commercial amounts.</span></div><div class="item"><strong>Cost updates</strong><span>Changes requiring customer acknowledgment.</span></div></div></div>
+      <div class="card panel"><h3>Action Required</h3><div class="list"><div class="item"><strong>Documents requested</strong><span>Items your SAHJONY team needs from you.</span></div><div class="item"><strong>Approvals</strong><span>Customer acknowledgments only; no internal compliance release authority.</span></div></div></div>
+      <div class="card panel"><h3>Messages & Support</h3><div class="list"><div class="item"><strong>Case communications</strong><span>Centralized client-visible updates tied to your own case.</span></div><div class="item"><strong>Escalations</strong><span>Request assistance from your SAHJONY operations team.</span></div></div></div>
+    </section>
+
+    <div class="notice"><strong>Security model:</strong> this page defines the client-facing surface. Real tenant isolation, authentication, document authorization and per-client row-level access will be enforced through InsForge Auth + RLS before the portal is considered production-secure. Until then, no sensitive client records should be exposed through this static shell.</div>
+    <div class="footer">SAHJONY Global Trade · Client information is separated from internal employee and owner operating controls.</div>
+  </main>
+</body>
+</html>
