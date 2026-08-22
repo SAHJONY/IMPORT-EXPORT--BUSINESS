@@ -8,6 +8,14 @@ from fastapi import Header, HTTPException
 from database import get_connection
 
 
+def _true(name: str) -> bool:
+    return os.getenv(name, "false").strip().lower() == "true"
+
+
+def _production_identity_required() -> bool:
+    return _true("PRODUCTION_MODE") and os.getenv("AUTH_PROVIDER", "").strip().lower() == "insforge" and not _true("ALLOW_LEGACY_LOCAL_AUTH")
+
+
 def _owner_token() -> str:
     token = os.getenv("OWNER_TOKEN")
     if not token:
@@ -19,32 +27,55 @@ def hash_token(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
+def verify_owner_token(provided: str) -> bool:
+    try:
+        expected = _owner_token()
+    except RuntimeError:
+        return False
+    return hmac.compare_digest(provided, expected)
+
+
+def verify_customer_token(provided: str):
+    # The SQLite participant-token path is transitional only. Production InsForge mode must
+    # use verified JWT identities + app_memberships/RLS; it fails closed until that client flow is wired.
+    if _production_identity_required():
+        return None
+    token_hash = hash_token(provided)
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT participant_id, business_id FROM participants WHERE token_hash = ?",
+            (token_hash,),
+        ).fetchone()
+    finally:
+        conn.close()
+    if not row:
+        return None
+    return {"participant_id": row["participant_id"], "business_id": row["business_id"]}
+
+
 def verify_owner(token: str | None = Header(None, alias="Authorization")):
     if not token or not token.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Missing or malformed Authorization header")
     provided = token.removeprefix("Bearer ").strip()
-    if not hmac.compare_digest(provided, _owner_token()):
+    if not verify_owner_token(provided):
         raise HTTPException(status_code=403, detail="Invalid owner token")
     return True
 
 
 def verify_participant(token: str | None = Header(None, alias="Authorization")):
+    if _production_identity_required():
+        raise HTTPException(status_code=503, detail="Legacy participant tokens are disabled in production; use verified InsForge Auth identity")
     if not token or not token.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Missing or malformed Authorization header")
     provided = token.removeprefix("Bearer ").strip()
-    token_hash = hash_token(provided)
-    conn = get_connection()
-    cur = conn.cursor()
-    cur.execute(
-        "SELECT participant_id, business_id FROM participants WHERE token_hash = ?",
-        (token_hash,),
-    )
-    row = cur.fetchone()
-    conn.close()
-    if not row:
+    info = verify_customer_token(provided)
+    if not info:
         raise HTTPException(status_code=403, detail="Invalid participant token")
-    return {"participant_id": row["participant_id"], "business_id": row["business_id"]}
+    return info
 
 
 def generate_participant_token() -> str:
+    if _production_identity_required():
+        raise RuntimeError("Legacy participant token issuance is disabled in production")
     return secrets.token_urlsafe(48)
