@@ -1,0 +1,2 @@
+Production deployment trigger after Vercel Hobby quota reset window.
+Target main includes routing and FileResponse fallback fixes through commit 5c8481b.
