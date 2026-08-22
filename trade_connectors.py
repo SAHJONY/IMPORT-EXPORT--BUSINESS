@@ -14,7 +14,7 @@ from urllib.parse import quote_plus
 import httpx
 
 from credentialed_providers import airwallex_provider, fx_execution_provider, maersk_provider
-from market_intelligence import census_trade_feed
+from market_intelligence import census_trade_feed, un_comtrade_preview_feed
 
 
 @dataclass(frozen=True)
@@ -37,7 +37,7 @@ class TradeConnectorRegistry:
     USITC_HTS_SEARCH = "https://hts.usitc.gov/reststop/search"
     ECB_FX_URL = "https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml"
     FED_H10_URL = "https://www.federalreserve.gov/datadownload/choose.aspx?rel=h10"
-    USER_AGENT = "SAHJONY-Global-Trade-OS/2.4 (+https://import-export-business.vercel.app)"
+    USER_AGENT = "SAHJONY-Global-Trade-OS/2.5 (+https://import-export-business.vercel.app)"
 
     def __init__(self) -> None:
         self._cache: dict[str, tuple[float, Any]] = {}
@@ -174,11 +174,14 @@ class TradeConnectorRegistry:
         checks.append(ConnectorHealth("ecb_fx_reference", True, await self._reachable(self.ECB_FX_URL), True, "Daily official reference rates for planning; not transaction execution rates.", "European Central Bank", checked_at))
         checks.append(ConnectorHealth("federal_reserve_h10", True, await self._reachable(self.FED_H10_URL), True, "Official Federal Reserve H.10 FX reference dataset discovery source.", "Board of Governors of the Federal Reserve System", checked_at))
 
-        market_ok = await census_trade_feed.health()
-        checks.append(ConnectorHealth("market_trade_feed", census_trade_feed.configured, market_ok, True, "Monthly live U.S. import/export demand and origin/destination signals by HS and country. Aggregate market intelligence, not counterparty identity verification.", "U.S. Census International Trade API", checked_at, "US_TRADE"))
+        comtrade_ok = await un_comtrade_preview_feed.health()
+        checks.append(ConnectorHealth("market_trade_feed", True, comtrade_ok, True, "Credential-free UN Comtrade preview provides global aggregate trade flows for first-look demand/supply intelligence. Limited to preview caps/rate limits and not individual counterparty verification.", "United Nations Comtrade", checked_at, "GLOBAL_AGGREGATE_PREVIEW"))
+
+        census_ok = await census_trade_feed.health()
+        checks.append(ConnectorHealth("census_trade_feed", census_trade_feed.configured, census_ok, True, "Optional higher-specificity U.S. import/export feed by HS and country. Requires Census API key.", "U.S. Census International Trade API", checked_at, "US_TRADE"))
 
         maersk_ok = await maersk_provider.health()
-        checks.append(ConnectorHealth("logistics_tracking", maersk_provider.configured, maersk_ok, True, "Maersk server-to-server tracking adapter. ChatGPT Maersk app is separately installed; production backend still requires approved API credentials.", "A.P. Moller - Maersk Developer Portal", checked_at))
+        checks.append(ConnectorHealth("logistics_tracking", maersk_provider.configured, maersk_ok, True, "Maersk server-to-server tracking adapter. ChatGPT Maersk app is installed separately; production backend still requires approved API credentials.", "A.P. Moller - Maersk Developer Portal", checked_at))
 
         fx_provider = os.getenv("FX_EXECUTION_PROVIDER", "").strip().lower()
         if fx_provider == "airwallex":
