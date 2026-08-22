@@ -12,6 +12,7 @@
     { "src": "collaboration_api.py", "use": "@vercel/python" },
     { "src": "finance_api.py", "use": "@vercel/python" },
     { "src": "country_activation_api.py", "use": "@vercel/python" },
+    { "src": "cuba_current_api.py", "use": "@vercel/python" },
     { "src": "fastapi_server.py", "use": "@vercel/python" }
   ],
   "routes": [
@@ -24,6 +25,7 @@
     { "src": "/language(.*)", "dest": "translation_api.py" },
     { "src": "/collaboration(.*)", "dest": "collaboration_api.py" },
     { "src": "/finance(.*)", "dest": "finance_api.py" },
+    { "src": "/cuba(.*)", "dest": "cuba_current_api.py" },
     { "src": "/countries(.*)", "dest": "country_activation_api.py" },
     { "src": "/health", "dest": "fastapi_server.py" },
     { "handle": "filesystem" },
