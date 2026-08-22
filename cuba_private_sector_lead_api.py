@@ -3,13 +3,13 @@ from __future__ import annotations
 import os, secrets
 from datetime import datetime, timezone
 from typing import Literal
-from fastapi import FastAPI, Header, HTTPException, Request
-from pydantic import BaseModel, EmailStr, Field, model_validator
+from fastapi import FastAPI, Header, HTTPException
+from pydantic import BaseModel, Field, model_validator
 
 from auth import verify_owner_token
 from insforge_backend import get_backend
 
-app = FastAPI(title='SAHJONY Cuba Private Sector Acquisition', version='1.0.0', docs_url=None, redoc_url=None)
+app = FastAPI(title='SAHJONY Cuba Private Sector Acquisition', version='1.0.1', docs_url=None, redoc_url=None)
 
 
 def now() -> str:
@@ -42,7 +42,7 @@ class PublicLeadIn(BaseModel):
     business_name: str = Field(min_length=2, max_length=240)
     contact_name: str = Field(min_length=2, max_length=160)
     contact_method: Literal['EMAIL', 'WHATSAPP', 'PHONE', 'OTHER']
-    email: EmailStr | None = None
+    email: str | None = Field(default=None, max_length=254)
     phone_whatsapp: str | None = Field(default=None, max_length=80)
     province: str | None = Field(default=None, max_length=120)
     municipality: str | None = Field(default=None, max_length=120)
@@ -59,7 +59,7 @@ class PublicLeadIn(BaseModel):
     payment_preference: str | None = Field(default=None, max_length=240)
     notes: str | None = Field(default=None, max_length=3000)
     consent_to_business_contact: bool
-    website: str | None = Field(default=None, max_length=1)  # honeypot; real users leave blank
+    website: str | None = Field(default=None, max_length=1)
 
     @model_validator(mode='after')
     def validate_contact(self):
@@ -67,8 +67,9 @@ class PublicLeadIn(BaseModel):
             raise ValueError('Business-contact consent is required')
         if self.website:
             raise ValueError('Invalid submission')
-        if self.contact_method == 'EMAIL' and not self.email:
-            raise ValueError('Email is required for EMAIL contact method')
+        if self.contact_method == 'EMAIL':
+            if not self.email or '@' not in self.email or self.email.startswith('@') or self.email.endswith('@'):
+                raise ValueError('A valid email is required for EMAIL contact method')
         if self.contact_method in {'WHATSAPP', 'PHONE'} and not self.phone_whatsapp:
             raise ValueError('Phone/WhatsApp is required for this contact method')
         self.currency = self.currency.upper()
@@ -83,49 +84,24 @@ class PromoteIn(BaseModel):
 
 @app.get('/cuba-private-sector/health')
 async def health():
-    return {
-        'status': 'ok',
-        'service': 'cuba-private-sector-acquisition',
-        'public_intake': True,
-        'auto_authorization': False,
-        'auto_eligibility': False,
-        'fail_closed': True,
-    }
+    return {'status': 'ok', 'service': 'cuba-private-sector-acquisition', 'public_intake': True, 'auto_authorization': False, 'auto_eligibility': False, 'fail_closed': True}
 
 
 @app.post('/cuba-private-sector/leads')
-async def create_public_lead(payload: PublicLeadIn, request: Request):
+async def create_public_lead(payload: PublicLeadIn):
     lead_id = f'cpsl_{secrets.token_urlsafe(10)}'
     ts = now()
     row = payload.model_dump(exclude={'website'})
-    row.update({
-        'lead_id': lead_id,
-        'source': 'CUBA_PRIVATE_SECTOR_PORTAL',
-        'status': 'NEW',
-        'compliance_status': 'NOT_REVIEWED',
-        'managed_request_id': None,
-        'assigned_employee_id': None,
-        'submitted_at': ts,
-        'updated_at': ts,
-    })
+    row.update({'lead_id': lead_id, 'source': 'CUBA_PRIVATE_SECTOR_PORTAL', 'status': 'NEW', 'compliance_status': 'NOT_REVIEWED', 'managed_request_id': None, 'assigned_employee_id': None, 'submitted_at': ts, 'updated_at': ts})
     try:
         await get_backend().insert('cuba_private_sector_leads', row)
     except Exception as exc:
         raise HTTPException(503, 'Lead intake is not available until the production schema is applied') from exc
-    return {
-        'lead_id': lead_id,
-        'status': 'NEW',
-        'message': 'Solicitud recibida. SAHJONY revisará la empresa, el producto, la ruta de pago y los requisitos aplicables antes de presentar opciones de suministro.',
-        'important': 'El envío o la compra no quedan autorizados por esta solicitud. Cada operación requiere revisión específica.',
-    }
+    return {'lead_id': lead_id, 'status': 'NEW', 'message': 'Solicitud recibida. SAHJONY revisará la empresa, el producto, la ruta de pago y los requisitos aplicables antes de presentar opciones de suministro.', 'important': 'El envío o la compra no quedan autorizados por esta solicitud. Cada operación requiere revisión específica.'}
 
 
 @app.get('/cuba-private-sector/leads')
-async def list_leads(
-    x_role: str | None = Header(None, alias='X-Role'),
-    authorization: str | None = Header(None, alias='Authorization'),
-    x_employee_id: str | None = Header(None, alias='X-Employee-Id'),
-):
+async def list_leads(x_role: str | None = Header(None, alias='X-Role'), authorization: str | None = Header(None, alias='Authorization'), x_employee_id: str | None = Header(None, alias='X-Employee-Id')):
     actor = internal_identity(x_role, authorization, x_employee_id)
     params = {'order': 'submitted_at.desc', 'limit': '250'}
     if actor['role'] == 'employee':
@@ -134,13 +110,7 @@ async def list_leads(
 
 
 @app.post('/cuba-private-sector/leads/{lead_id}/promote')
-async def promote_lead(
-    lead_id: str,
-    payload: PromoteIn,
-    x_role: str | None = Header(None, alias='X-Role'),
-    authorization: str | None = Header(None, alias='Authorization'),
-    x_employee_id: str | None = Header(None, alias='X-Employee-Id'),
-):
+async def promote_lead(lead_id: str, payload: PromoteIn, x_role: str | None = Header(None, alias='X-Role'), authorization: str | None = Header(None, alias='Authorization'), x_employee_id: str | None = Header(None, alias='X-Employee-Id')):
     actor = internal_identity(x_role, authorization, x_employee_id)
     rows = await get_backend().select('cuba_private_sector_leads', params={'lead_id': f'eq.{lead_id}', 'limit': '1'}) or []
     if not rows:
@@ -151,34 +121,7 @@ async def promote_lead(
     assigned = payload.assigned_employee_id or (actor['id'] if actor['role'] == 'employee' else None)
     request_id = f'mtr_{secrets.token_urlsafe(10)}'
     ts = now()
-    managed = {
-        'request_id': request_id,
-        'requester_type': 'PRIVATE_BUSINESS',
-        'requester_ref': lead_id,
-        'private_business_id': payload.private_business_id,
-        'employee_id': assigned,
-        'product_need': lead.get('product_need'),
-        'specifications': lead.get('specifications'),
-        'quantity': lead.get('quantity'),
-        'target_budget': lead.get('target_budget'),
-        'currency': lead.get('currency') or 'USD',
-        'destination_country': 'CU',
-        'target_delivery_date': lead.get('target_delivery_date'),
-        'status': 'INTAKE',
-        'assigned_owner_id': 'owner',
-        'assigned_employee_id': assigned,
-        'created_at': ts,
-        'updated_at': ts,
-    }
+    managed = {'request_id': request_id, 'requester_type': 'PRIVATE_BUSINESS', 'requester_ref': lead_id, 'private_business_id': payload.private_business_id, 'employee_id': assigned, 'product_need': lead.get('product_need'), 'specifications': lead.get('specifications'), 'quantity': lead.get('quantity'), 'target_budget': lead.get('target_budget'), 'currency': lead.get('currency') or 'USD', 'destination_country': 'CU', 'target_delivery_date': lead.get('target_delivery_date'), 'status': 'INTAKE', 'assigned_owner_id': 'owner', 'assigned_employee_id': assigned, 'created_at': ts, 'updated_at': ts}
     await get_backend().insert('managed_trade_requests', managed)
-    await get_backend().patch(
-        'cuba_private_sector_leads',
-        {'status': 'KYB_REQUIRED', 'managed_request_id': request_id, 'assigned_employee_id': assigned, 'updated_at': ts},
-        params={'lead_id': f'eq.{lead_id}'},
-    )
-    return {
-        'lead_id': lead_id,
-        'managed_request_id': request_id,
-        'status': 'KYB_REQUIRED',
-        'next_step': 'Verify Cuban private-sector eligibility and transaction-specific product/payment authorization before supplier commitment.',
-    }
+    await get_backend().patch('cuba_private_sector_leads', {'status': 'KYB_REQUIRED', 'managed_request_id': request_id, 'assigned_employee_id': assigned, 'updated_at': ts}, params={'lead_id': f'eq.{lead_id}'})
+    return {'lead_id': lead_id, 'managed_request_id': request_id, 'status': 'KYB_REQUIRED', 'next_step': 'Verify Cuban private-sector eligibility and transaction-specific product/payment authorization before supplier commitment.'}
