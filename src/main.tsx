@@ -6,6 +6,28 @@ import './workflow.css';
 
 const rootElement=document.getElementById('root');
 
+// Some Safari/private-browser contexts can throw when sessionStorage is read.
+// The role portals must still render in that environment, so install a tiny
+// in-memory replacement before React evaluates portal state initializers.
+(function installSafeSessionStorage(){
+  try{
+    const probe='__sahjony_storage_probe__';
+    window.sessionStorage.setItem(probe,'1');
+    window.sessionStorage.removeItem(probe);
+  }catch(error){
+    const memory=new Map<string,string>();
+    const fallback:Storage={
+      get length(){return memory.size},
+      clear(){memory.clear()},
+      getItem(key:string){return memory.has(key)?memory.get(key)!:null},
+      key(index:number){return Array.from(memory.keys())[index]??null},
+      removeItem(key:string){memory.delete(key)},
+      setItem(key:string,value:string){memory.set(String(key),String(value))}
+    };
+    try{Object.defineProperty(window,'sessionStorage',{value:fallback,configurable:true});}catch{console.warn('SAHJONY_STORAGE_FALLBACK_UNAVAILABLE',error);}
+  }
+})();
+
 function EmergencyScreen({message='The application encountered a client-side error.'}:{message?:string}){
   return <main style={{minHeight:'100vh',background:'#050b13',color:'#f5f9ff',fontFamily:'Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif',padding:'28px'}}>
     <div style={{maxWidth:980,margin:'0 auto'}}>
@@ -32,7 +54,8 @@ class AppBoundary extends React.Component<React.PropsWithChildren, {failed:boole
 
 function hardFallback(reason:string){
   if(!rootElement)return;
-  rootElement.innerHTML=`<main style="min-height:100vh;background:#050b13;color:#f5f9ff;font-family:Inter,-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;padding:28px"><div style="max-width:980px;margin:0 auto"><div style="font-size:12px;font-weight:900;letter-spacing:.16em;color:#5ad8ff">SAHJONY GLOBAL TRADE</div><h1 style="font-size:clamp(42px,7vw,86px);line-height:.92;letter-spacing:-.05em;margin:28px 0 18px">Global Trade Operating System</h1><p style="max-width:720px;color:#9db2c5;font-size:17px;line-height:1.6">${reason.replace(/[<>&]/g,'')} The application remains accessible through the links below.</p><div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:24px"><a href="/" style="background:#5ad8ff;color:#021018;padding:12px 16px;border-radius:10px;text-decoration:none;font-weight:900">Business site</a><a href="/start" style="border:1px solid rgba(255,255,255,.15);color:#f5f9ff;padding:12px 16px;border-radius:10px;text-decoration:none">Start sourcing request</a><a href="/owner" style="border:1px solid rgba(255,255,255,.15);color:#f5f9ff;padding:12px 16px;border-radius:10px;text-decoration:none">Owner OS</a></div></div></main>`;
+  const safe=reason.replace(/[<>&]/g,'');
+  rootElement.innerHTML=`<main style="min-height:100vh;background:#050b13;color:#f5f9ff;font-family:Inter,-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;padding:28px"><div style="max-width:980px;margin:0 auto"><div style="font-size:12px;font-weight:900;letter-spacing:.16em;color:#5ad8ff">SAHJONY GLOBAL TRADE</div><h1 style="font-size:clamp(42px,7vw,86px);line-height:.92;letter-spacing:-.05em;margin:28px 0 18px">Global Trade Operating System</h1><p style="max-width:720px;color:#9db2c5;font-size:17px;line-height:1.6">${safe} The application remains accessible through the links below.</p><div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:24px"><a href="/" style="background:#5ad8ff;color:#021018;padding:12px 16px;border-radius:10px;text-decoration:none;font-weight:900">Business site</a><a href="/start" style="border:1px solid rgba(255,255,255,.15);color:#f5f9ff;padding:12px 16px;border-radius:10px;text-decoration:none">Start sourcing request</a><a href="/owner" style="border:1px solid rgba(255,255,255,.15);color:#f5f9ff;padding:12px 16px;border-radius:10px;text-decoration:none">Owner OS</a></div></div></main>`;
 }
 
 window.addEventListener('error',event=>{
