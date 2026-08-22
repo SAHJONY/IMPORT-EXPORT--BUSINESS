@@ -5,6 +5,9 @@ create table if not exists country_activation_profiles (
   country_name text not null,
   region text,
   operating_status text not null default 'BLOCKED' check (operating_status in ('READY','LIMITED','BLOCKED')),
+  scenario_mode text not null default 'LIVE' check (scenario_mode in ('LIVE','HYPOTHETICAL')),
+  live_execution_allowed boolean not null default true,
+  scenario_label text,
   default_currency text,
   default_locale text,
   notes text,
@@ -14,6 +17,11 @@ create table if not exists country_activation_profiles (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+-- Forward-compatible migration for projects where the table already exists.
+alter table country_activation_profiles add column if not exists scenario_mode text not null default 'LIVE';
+alter table country_activation_profiles add column if not exists live_execution_allowed boolean not null default true;
+alter table country_activation_profiles add column if not exists scenario_label text;
 
 create table if not exists country_activation_controls (
   id bigserial primary key,
@@ -59,6 +67,7 @@ create table if not exists trade_corridor_activations (
   origin_country_code text not null,
   destination_country_code text not null,
   status text not null default 'BLOCKED' check (status in ('READY','LIMITED','BLOCKED')),
+  execution_mode text not null default 'LIVE' check (execution_mode in ('LIVE','SIMULATION')),
   allowed_incoterms jsonb not null default '[]'::jsonb,
   supported_currencies jsonb not null default '[]'::jsonb,
   carrier_coverage boolean not null default false,
@@ -73,6 +82,8 @@ create table if not exists trade_corridor_activations (
   unique(origin_country_code, destination_country_code)
 );
 
+alter table trade_corridor_activations add column if not exists execution_mode text not null default 'LIVE';
+
 create table if not exists country_activation_audit (
   id bigserial primary key,
   event_id text not null unique,
@@ -86,6 +97,7 @@ create table if not exists country_activation_audit (
 );
 
 create index if not exists idx_country_activation_status on country_activation_profiles(operating_status, country_code);
+create index if not exists idx_country_activation_scenario on country_activation_profiles(scenario_mode, live_execution_allowed);
 create index if not exists idx_country_controls_country on country_activation_controls(country_code, control_key);
 create index if not exists idx_corridor_activation_status on trade_corridor_activations(status, origin_country_code, destination_country_code);
 create index if not exists idx_country_product_permission on country_product_permissions(country_code, product_id);
@@ -108,3 +120,4 @@ create index if not exists idx_country_product_permission on country_product_per
 -- data_privacy
 -- accounting_reconciliation
 -- A country cannot be READY unless all mandatory controls are READY or formally NOT_APPLICABLE and owner-approved.
+-- HYPOTHETICAL jurisdictions are simulation-only. live_execution_allowed=false is a hard boundary and must never be treated as a legal/compliance waiver for real-world activity.
