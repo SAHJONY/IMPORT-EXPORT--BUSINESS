@@ -19,12 +19,6 @@ class OAuthToken:
 
 
 class MaerskProvider:
-    """Server-side Maersk API adapter using OAuth 2.0 client credentials.
-
-    Credentials must remain in server environment variables. The exact tracking
-    resource path is configurable because Maersk exposes several tracking products.
-    """
-
     def __init__(self) -> None:
         self.client_id = os.getenv("MAERSK_CLIENT_ID", "").strip()
         self.client_secret = os.getenv("MAERSK_CLIENT_SECRET", "").strip()
@@ -78,13 +72,62 @@ class MaerskProvider:
             return False
 
 
-class ExecutableFXProvider:
-    """Generic server-side adapter for an approved FX/settlement provider.
+class AirwallexProvider:
+    """Airwallex server-side FX/settlement adapter.
 
-    This intentionally does not assume a provider. KYC/contracted accounts must be
-    established by the business before executable quotes or settlement can be used.
+    Production credentials are generated only after account onboarding. API keys and
+    tokens must remain server-side. Authentication tokens are reused until expiry.
     """
 
+    def __init__(self) -> None:
+        self.base_url = os.getenv("AIRWALLEX_API_BASE", "https://api.airwallex.com/api/v1").strip().rstrip("/")
+        self.client_id = os.getenv("AIRWALLEX_CLIENT_ID", "").strip()
+        self.api_key = os.getenv("AIRWALLEX_API_KEY", "").strip()
+        self.login_as = os.getenv("AIRWALLEX_LOGIN_AS", "").strip()
+        self._token: OAuthToken | None = None
+
+    @property
+    def configured(self) -> bool:
+        return bool(self.base_url and self.client_id and self.api_key)
+
+    async def _access_token(self) -> str:
+        if not self.configured:
+            raise ProviderConfigurationError("Airwallex production credentials are not configured")
+        if self._token and self._token.expires_at > time.time() + 60:
+            return self._token.access_token
+        headers = {"x-client-id": self.client_id, "x-api-key": self.api_key, "Content-Type": "application/json"}
+        if self.login_as:
+            headers["x-login-as"] = self.login_as
+        async with httpx.AsyncClient(timeout=15) as client:
+            response = await client.post(f"{self.base_url}/authentication/login", headers=headers)
+            response.raise_for_status()
+            payload = response.json()
+        token = payload.get("token")
+        if not token:
+            raise RuntimeError("Airwallex authentication did not return token")
+        self._token = OAuthToken(token, time.time() + 25 * 60)
+        return token
+
+    async def request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
+        token = await self._access_token()
+        headers = dict(kwargs.pop("headers", {}) or {})
+        headers["Authorization"] = f"Bearer {token}"
+        async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
+            response = await client.request(method, f"{self.base_url}/{path.lstrip('/')}", headers=headers, **kwargs)
+            response.raise_for_status()
+            return response
+
+    async def health(self) -> bool:
+        if not self.configured:
+            return False
+        try:
+            await self.request("GET", "/balances/current")
+            return True
+        except (httpx.HTTPError, RuntimeError, ProviderConfigurationError):
+            return False
+
+
+class ExecutableFXProvider:
     def __init__(self) -> None:
         self.base_url = os.getenv("FX_EXECUTION_API_BASE", "").strip().rstrip("/")
         self.api_key = os.getenv("FX_EXECUTION_API_KEY", "").strip()
@@ -109,4 +152,5 @@ class ExecutableFXProvider:
 
 
 maersk_provider = MaerskProvider()
+airwallex_provider = AirwallexProvider()
 fx_execution_provider = ExecutableFXProvider()
