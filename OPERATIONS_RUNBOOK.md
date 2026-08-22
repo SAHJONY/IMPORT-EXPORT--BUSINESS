@@ -1,38 +1,42 @@
-# Production Operations Runbook
+# OPERATIONS RUNBOOK
 
-## Release rule
+## Global release principle
+No trade is released because a dashboard says READY. Release requires the applicable live evidence, role authority and transaction gates.
 
-The business is live only when `/v2/platform/readiness` returns `production_ready=true`, `release_gate=READY`, `score=100`, and an empty blocker list. A healthy `/health` response alone is not sufficient.
+## Cuba Authorized Trade Desk
 
-## Required evidence
+### Owner setup
+1. Activate the real `CU` current-law jurisdiction.
+2. Apply `insforge/cuba_authorized_trade.sql`.
+3. Onboard each employee with a unique employee ID.
+4. Register the actual government authorization basis and attach its evidence document.
+5. Verify the authorization record only after confirming the authority, scope, dates and conditions.
 
-1. Production runtime: `/`, `/dashboard`, and `/health` all return expected 2xx responses.
-2. InsForge: authenticated metadata/database connectivity verified; migration `insforge/migrations/001_trade_os.sql` applied.
-3. Auth: InsForge Auth/JWT + RLS enabled for user-facing sessions. Owner/admin MFA required.
-4. Screening: restricted-party screening connected to U.S. government data. Treat matches as review/blocking events; verify underlying official source before release.
-5. Classification/tariffs: authoritative HTS/tariff source configured. Classification candidates require human verification before consequential release.
-6. Logistics: live quote/tracking provider configured and timestamps/source retained.
-7. FX: authoritative rate provider configured; source and effective timestamp retained.
-8. Documents: InsForge Storage enabled; document evidence attached to cases.
-9. Audit: retain trade decisions, evidence, approvals and overrides for at least 365 days.
-10. Backups: database/storage backups enabled and restore procedure tested.
-11. Monitoring: production errors and readiness regressions trigger owner/operations alerts.
-12. E2E: complete one production-safe trade workflow from case creation through evidence, screening, costing, document pack and final governed decision. Record the evidence before setting `E2E_TRADE_WORKFLOW_VERIFIED=true`.
+### Employee workflow
+1. Sign in with the employee's own identity/session.
+2. Open `/employee/cuba-desk`.
+3. Create a U.S. → Cuba case assigned to that employee.
+4. Identify the product and ECCN/EAR99 basis.
+5. Identify consignee, end user and end use.
+6. Link the verified government authorization record.
+7. Assemble supporting documents and evidence.
+8. Escalate for compliance/owner review.
 
-## Incident severity
+### Required transaction gates
+- product classification
+- government authorization / license-exception scope
+- end-user/end-use eligibility
+- restricted-party and sanctions screening
+- banking/payment-path compliance
+- required commercial/export/customs documents
+- logistics/carrier/forwarder route compliance
+- recordkeeping evidence
 
-- P0: unauthorized access, data loss, incorrect release of a blocked trade, sanctions/compliance control bypass. Disable consequential actions immediately.
-- P1: production unavailable, InsForge unavailable, screening/tariff evidence unavailable. Keep release gate HOLD.
-- P2: degraded non-critical market/logistics enrichment. Allow research/simulation only when compliance evidence remains valid.
+### Release rule
+Employees cannot self-release Cuba transactions. A case remains unreleasable until a verified authorization exists, every required gate is PASS or formally NOT_APPLICABLE, and the owner authorizes release.
 
-## Fail-closed behavior
+### Immediate HOLD triggers
+Put the case on HOLD when authorization scope is unclear, a screening candidate match exists, banking changes, end user/end use changes, product classification changes, authorization expires/revokes, required documentation is incomplete, or a carrier/forwarder refuses the route.
 
-No AI agent may override a mandatory compliance gate. If an authoritative dependency is unavailable or evidence is stale/ambiguous, the system must return HOLD/REVIEW rather than fabricate a positive result.
-
-## Backup and restore test
-
-At least monthly: create a backup, restore it into an isolated environment, verify trade cases, decisions, documents and audit events, record duration and integrity results, then delete the isolated restore.
-
-## Change management
-
-Changes go through CI. Production promotion requires passing tests and a verified Vercel deployment. Secrets must be configured through the deployment/backend secret stores and never committed to Git.
+### Current-law caveat
+OFAC/BIS and other applicable rules can change. Before each release, use current authoritative regulatory information and the exact transaction facts. The OS must never treat a license exception or general license as broader than its actual terms.
