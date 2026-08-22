@@ -2,17 +2,18 @@ from __future__ import annotations
 
 import os
 import secrets
+import time
 from datetime import datetime, timezone
 from typing import Literal
 
 import httpx
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, Header, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from auth import verify_customer_token, verify_owner_token
 from insforge_backend import get_backend
 
-app = FastAPI(title='SAHJONY Global Language & Translation', version='1.0.0', docs_url=None, redoc_url=None)
+app = FastAPI(title='SAHJONY Global Language & Translation', version='1.1.0', docs_url=None, redoc_url=None)
 Role = Literal['owner','employee','customer']
 
 RTL_LANGS = {'ar','fa','he','ur','ps','sd','ug','yi'}
@@ -21,6 +22,7 @@ CORE_LOCALES = [
     'hi','bn','pa','ta','te','mr','gu','zh-Hans','zh-Hant','ja','ko','vi','th','id','ms',
     'fil','sw','am','ha','yo','ig','zu','af','el','cs','ro','hu','sv','no','da','fi'
 ]
+PUBLIC_WINDOW: dict[str, list[float]] = {}
 
 class PreferenceUpdate(BaseModel):
     primary_locale: str = Field(default='en-US', min_length=2, max_length=35)
@@ -80,11 +82,20 @@ def azure_configured():
 def locale_direction(locale: str):
     return 'rtl' if locale.lower().split('-')[0] in RTL_LANGS else 'ltr'
 
+def public_ui_enabled():
+    return os.getenv('PUBLIC_UI_TRANSLATION_ENABLED','false').lower()=='true'
+
+def enforce_public_limit(request: Request):
+    ip=request.client.host if request.client else 'unknown'; ts=time.time(); window=PUBLIC_WINDOW.setdefault(ip,[])
+    window[:]=[x for x in window if ts-x<60]
+    max_per_minute=int(os.getenv('PUBLIC_UI_TRANSLATION_RPM','20'))
+    if len(window)>=max_per_minute: raise HTTPException(429,'Public UI translation rate limit exceeded')
+    window.append(ts)
+
 async def azure_translate(texts: list[str], target: str, source: str|None=None):
     if not azure_configured(): raise HTTPException(503,'Production translation provider is not configured')
     endpoint=os.getenv('AZURE_TRANSLATOR_ENDPOINT','').strip().rstrip('/')
-    key=os.getenv('AZURE_TRANSLATOR_KEY','').strip()
-    region=os.getenv('AZURE_TRANSLATOR_REGION','').strip()
+    key=os.getenv('AZURE_TRANSLATOR_KEY','').strip(); region=os.getenv('AZURE_TRANSLATOR_REGION','').strip()
     params={'api-version':'3.0','to':target}
     if source: params['from']=source
     headers={'Ocp-Apim-Subscription-Key':key,'Content-Type':'application/json'}
@@ -94,25 +105,39 @@ async def azure_translate(texts: list[str], target: str, source: str|None=None):
         r.raise_for_status(); data=r.json()
     out=[]
     for item in data:
-        trans=(item.get('translations') or [{}])[0]
-        detected=(item.get('detectedLanguage') or {}).get('language')
+        trans=(item.get('translations') or [{}])[0]; detected=(item.get('detectedLanguage') or {}).get('language')
         out.append({'text':trans.get('text',''),'detected_language':detected,'to':trans.get('to',target)})
     return out
 
 async def audit(translation_id,actor,action,detail=None):
-    await get_backend().insert('translation_audit_events',{
-        'event_id':f'tae_{secrets.token_urlsafe(14)}','translation_id':translation_id,
-        'actor_role':actor['role'],'actor_id':actor['id'],'action':action,'detail':detail,'created_at':now()})
+    await get_backend().insert('translation_audit_events',{'event_id':f'tae_{secrets.token_urlsafe(14)}','translation_id':translation_id,'actor_role':actor['role'],'actor_id':actor['id'],'action':action,'detail':detail,'created_at':now()})
 
 @app.get('/language/health')
 async def health():
-    return {'status':'ok','service':'global-language','provider':'azure-translator','provider_configured':azure_configured(),
-            'original_text_preserved':True,'legal_translation_requires_review':True,'rtl_supported':True,'bcp47':True}
+    return {'status':'ok','service':'global-language','provider':'azure-translator','provider_configured':azure_configured(),'public_ui_translation':public_ui_enabled(),'original_text_preserved':True,'legal_translation_requires_review':True,'rtl_supported':True,'bcp47':True}
 
 @app.get('/language/locales')
 async def locales():
-    return {'locales':CORE_LOCALES,'direction':{x:locale_direction(x) for x in CORE_LOCALES},
-            'provider_discovery':'Azure /languages endpoint when production credentials/network are available'}
+    locales=set(CORE_LOCALES)
+    endpoint=os.getenv('AZURE_TRANSLATOR_ENDPOINT','https://api.cognitive.microsofttranslator.com').strip().rstrip('/')
+    try:
+        async with httpx.AsyncClient(timeout=8) as client:
+            r=await client.get(f'{endpoint}/languages',params={'api-version':'3.0','scope':'translation'})
+            if r.is_success:
+                locales.update((r.json().get('translation') or {}).keys())
+    except httpx.HTTPError:
+        pass
+    ordered=sorted(locales)
+    return {'locales':ordered,'direction':{x:locale_direction(x) for x in ordered},'provider_discovery':True}
+
+@app.post('/language/ui-translate-batch')
+async def public_ui_translate(payload: BatchTranslateRequest, request: Request):
+    if not public_ui_enabled(): raise HTTPException(503,'Public UI translation is disabled')
+    enforce_public_limit(request)
+    if payload.source_type!='ui': raise HTTPException(403,'Public endpoint is UI-only')
+    if len(payload.texts)>60 or sum(len(t) for t in payload.texts)>12000: raise HTTPException(413,'Public UI translation batch too large')
+    result=await azure_translate(payload.texts,payload.target_locale,payload.source_locale)
+    return {'translations':result,'target_locale':payload.target_locale,'direction':locale_direction(payload.target_locale)}
 
 @app.get('/language/preferences')
 async def get_preferences(x_role: str|None=Header(None,alias='X-Role'), authorization: str|None=Header(None,alias='Authorization'), x_employee_id: str|None=Header(None,alias='X-Employee-Id')):
@@ -123,32 +148,21 @@ async def get_preferences(x_role: str|None=Header(None,alias='X-Role'), authoriz
 
 @app.put('/language/preferences')
 async def set_preferences(payload: PreferenceUpdate, x_role: str|None=Header(None,alias='X-Role'), authorization: str|None=Header(None,alias='Authorization'), x_employee_id: str|None=Header(None,alias='X-Employee-Id')):
-    actor=identity(x_role,authorization,x_employee_id); ts=now()
-    rows=await get_backend().select('language_preferences',params={'participant_role':f'eq.{actor["role"]}','participant_id':f'eq.{actor["id"]}','limit':'1'}) or []
+    actor=identity(x_role,authorization,x_employee_id); ts=now(); rows=await get_backend().select('language_preferences',params={'participant_role':f'eq.{actor["role"]}','participant_id':f'eq.{actor["id"]}','limit':'1'}) or []
     values={**payload.model_dump(),'updated_at':ts}
-    if rows:
-        await get_backend().patch('language_preferences',values,params={'participant_role':f'eq.{actor["role"]}','participant_id':f'eq.{actor["id"]}'})
-    else:
-        await get_backend().insert('language_preferences',{'preference_id':f'lng_{secrets.token_urlsafe(12)}','participant_role':actor['role'],'participant_id':actor['id'],**values,'created_at':ts})
+    if rows: await get_backend().patch('language_preferences',values,params={'participant_role':f'eq.{actor["role"]}','participant_id':f'eq.{actor["id"]}'})
+    else: await get_backend().insert('language_preferences',{'preference_id':f'lng_{secrets.token_urlsafe(12)}','participant_role':actor['role'],'participant_id':actor['id'],**values,'created_at':ts})
     return {'preferences':{'participant_role':actor['role'],'participant_id':actor['id'],**values},'direction':locale_direction(payload.primary_locale)}
 
 @app.post('/language/translate')
 async def translate(payload: TranslateRequest, x_role: str|None=Header(None,alias='X-Role'), authorization: str|None=Header(None,alias='Authorization'), x_employee_id: str|None=Header(None,alias='X-Employee-Id')):
-    actor=identity(x_role,authorization,x_employee_id)
-    sid=payload.source_id or f'adhoc_{secrets.token_urlsafe(10)}'
+    actor=identity(x_role,authorization,x_employee_id); sid=payload.source_id or f'adhoc_{secrets.token_urlsafe(10)}'
     cached=await get_backend().select('translations',params={'source_type':f'eq.{payload.source_type}','source_id':f'eq.{sid}','field_name':f'eq.{payload.field_name}','target_locale':f'eq.{payload.target_locale}','limit':'1'}) or []
-    if cached and cached[0].get('source_text')==payload.text:
-        return {'translation':cached[0],'cached':True,'direction':locale_direction(payload.target_locale)}
-    result=(await azure_translate([payload.text],payload.target_locale,payload.source_locale))[0]
-    tid=f'trn_{secrets.token_urlsafe(14)}'; review=payload.legal_or_regulatory
-    row={'translation_id':tid,'source_type':payload.source_type,'source_id':sid,'field_name':payload.field_name,
-         'source_locale':payload.source_locale or result.get('detected_language'),'target_locale':payload.target_locale,
-         'source_text':payload.text,'translated_text':result['text'],'provider':'azure-translator','provider_model':'text-v3',
-         'confidence':None,'legal_or_regulatory':payload.legal_or_regulatory,'human_review_required':review,
-         'human_review_status':'pending' if review else 'not_required','created_at':now()}
+    if cached and cached[0].get('source_text')==payload.text: return {'translation':cached[0],'cached':True,'direction':locale_direction(payload.target_locale)}
+    result=(await azure_translate([payload.text],payload.target_locale,payload.source_locale))[0]; tid=f'trn_{secrets.token_urlsafe(14)}'; review=payload.legal_or_regulatory
+    row={'translation_id':tid,'source_type':payload.source_type,'source_id':sid,'field_name':payload.field_name,'source_locale':payload.source_locale or result.get('detected_language'),'target_locale':payload.target_locale,'source_text':payload.text,'translated_text':result['text'],'provider':'azure-translator','provider_model':'text-v3','confidence':None,'legal_or_regulatory':payload.legal_or_regulatory,'human_review_required':review,'human_review_status':'pending' if review else 'not_required','created_at':now()}
     await get_backend().insert('translations',row); await audit(tid,actor,'translated','Original preserved; translation created')
-    return {'translation':row,'cached':False,'direction':locale_direction(payload.target_locale),
-            'authoritative':False if review else None,'notice':'Legal/customs translation requires designated human review.' if review else None}
+    return {'translation':row,'cached':False,'direction':locale_direction(payload.target_locale),'authoritative':False if review else None,'notice':'Legal/customs translation requires designated human review.' if review else None}
 
 @app.post('/language/translate-batch')
 async def translate_batch(payload: BatchTranslateRequest, x_role: str|None=Header(None,alias='X-Role'), authorization: str|None=Header(None,alias='Authorization'), x_employee_id: str|None=Header(None,alias='X-Employee-Id')):
