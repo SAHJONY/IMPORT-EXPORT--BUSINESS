@@ -4,6 +4,7 @@ from fastapi import FastAPI
 # serverless entrypoint. This keeps the domain modules independent while
 # avoiding Vercel Hobby's per-deployment Serverless Function count limit.
 # Production routing is intentionally consolidated here.
+from telegram_api import app as telegram_app
 from business_email_registry import app as business_email_app
 from owner_auth_api import app as owner_auth_app
 from communication_api import app as communications_app
@@ -32,13 +33,14 @@ from fastapi_server import app as core_app
 
 app = FastAPI(
     title="SAHJONY Global Trade Unified API",
-    version="3.2.0",
+    version="3.3.0",
     docs_url=None,
     redoc_url=None,
 )
 
 # Preserve every existing route path exactly as defined by the domain apps.
 for subapp in (
+    telegram_app,
     business_email_app,
     owner_auth_app,
     core_app,
