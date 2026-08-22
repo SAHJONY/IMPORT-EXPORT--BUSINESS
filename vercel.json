@@ -14,6 +14,7 @@
     { "src": "country_activation_api.py", "use": "@vercel/python" },
     { "src": "cuba_current_api.py", "use": "@vercel/python" },
     { "src": "cuba_transition_api.py", "use": "@vercel/python" },
+    { "src": "cuba_trade_desk_api.py", "use": "@vercel/python" },
     { "src": "fastapi_server.py", "use": "@vercel/python" }
   ],
   "routes": [
@@ -26,6 +27,7 @@
     { "src": "/language(.*)", "dest": "translation_api.py" },
     { "src": "/collaboration(.*)", "dest": "collaboration_api.py" },
     { "src": "/finance(.*)", "dest": "finance_api.py" },
+    { "src": "/cuba-desk(.*)", "dest": "cuba_trade_desk_api.py" },
     { "src": "/cuba-transition(.*)", "dest": "cuba_transition_api.py" },
     { "src": "/cuba(.*)", "dest": "cuba_current_api.py" },
     { "src": "/countries(.*)", "dest": "country_activation_api.py" },
