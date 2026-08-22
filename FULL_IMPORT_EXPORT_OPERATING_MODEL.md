@@ -1,55 +1,32 @@
-# SAHJONY Global Trade — Full Import/Export Operating Model
+# FULL IMPORT-EXPORT OPERATING MODEL
 
-## Canonical trade lifecycle
-Opportunity -> Buyer -> Quote -> Contract -> Supplier -> Purchase Order -> Treasury -> Production/QC -> Compliance -> Documents -> Shipment -> Customs -> Delivery -> Collection -> Profit Reconciliation -> Repeat Order.
+SAHJONY Global Trade OS manages the business lifecycle from opportunity through buyer, supplier, quote, contract, purchase order, treasury, production/QC, compliance, documents, shipment, customs, delivery, collection, accounting/reconciliation and repeat order.
 
-## Operating domains
-1. Supplier OS — legal entity, contacts, bank verification, MOQ, lead time, payment terms, certifications, quality/compliance performance.
-2. Buyer CRM — buyer verification, credit status, quotes, sales orders, payment terms, collections, profitability.
-3. Product Trade Passport — SKU, HTS, Schedule B, ECCN/EAR99, origin, marking, PGA profile, dangerous-goods status, target landed cost, sell price and margin floor.
-4. Corridor Master — origin/destination, Incoterm, broker, forwarder, transit assumptions and customs notes.
-5. Quote Engine — supplier cost + freight + duty + insurance + finance + other costs -> landed cost -> margin -> owner approval.
-6. Sales Orders — accepted customer commitment, deposits, payment terms and fulfillment status.
-7. Purchase Orders — supplier commitment, deposits, production dates and owner approval.
-8. Quality Control — sample, in-process, pre-shipment and receiving inspections; defects and evidence.
-9. Treasury — payables, receivables, beneficiary verification, maker-checker approvals, FX and settlement evidence.
-10. Inventory / 3PL — lot/location stock, reservations, damage and fulfillment.
-11. Communications — one case-linked timeline for messages, actions, approvals, documents, shipping and exceptions.
-12. Documents — controlled movement and release of invoices, packing lists, transport/customs documents, certificates and payment evidence.
-13. Shipping — booking through final delivery, carrier milestones, ETA changes and exceptions.
-14. Compliance — KYC, sanctions, HTS/ECCN, origin, valuation, importer/exporter responsibilities, bonds/entry, AES/EEI, licenses, forced labor, PGA, FCPA/antiboycott, insurance and records.
-15. Claims / Exceptions — holds, exams, damage, demurrage/detention, missed sailings, supplier delay, documentation error, denied-party match, rejected entry, nonpayment and insurance claim.
-16. Profit Ledger — final landed cost, revenue, gross profit, margin and reconciliation by case/product/supplier/buyer/corridor.
+## Worldwide country governance
+Every live country is governed through READY / LIMITED / BLOCKED controls. Country and corridor activation are fail-closed and evidence-based. Hypothetical jurisdictions never authorize live execution.
 
-## First Live Trade Ready gate
-A trade is not operationally live until all applicable controls are PASS or an owner-authorized, evidence-backed waiver exists:
-- supplier_verified
-- buyer_verified
-- product_passport
-- corridor_approved
-- quote_approved
-- sales_order
-- purchase_order
-- funds_ready
-- quality_passed
-- compliance_released
-- documents_ready
-- shipping_booked
-- insurance_active
-- delivery_completed
-- receivable_collected
-- profit_reconciled
+## Cuba today
+Real Cuba uses ISO code `CU` and is modeled as `LIVE/LIMITED` under the current legal framework. All U.S. → Cuba transactions require transaction-specific compliance review and evidence. The application does not create, broaden or waive a government license, license exception, general license, exemption or other authorization.
 
-## Role boundaries
-Owner: pricing/margin approval, treasury authority, compliance release, major exceptions, waivers and final profitability.
-Employee: sourcing, buyer operations, quoting preparation, procurement, QC coordination, documents, logistics and collections within approved authority.
-Customer/participant: only customer-scoped messages, approved documents, shipment visibility, compliance status and action requests. No supplier economics, internal margin, treasury controls or owner-only approvals.
+## Cuba Authorized Trade Desk
+The desk supports lawful transactions by authorized employees through:
+1. Individual employee assignment and status.
+2. Government authorization record and owner verification.
+3. Product classification (ECCN / EAR99) evidence.
+4. Authorization-scope matching.
+5. End-user and end-use eligibility.
+6. Restricted-party and sanctions screening.
+7. Banking/payment-path compliance.
+8. Commercial/export/customs document package.
+9. Carrier/forwarder and route compliance.
+10. Recordkeeping evidence.
+11. Owner release approval.
+12. Immutable-style audit evidence and immediate HOLD capability.
 
-## Fail-closed rules
-- No trade release with unresolved required compliance controls.
-- No employee override of owner-only release/waiver controls.
-- No customer access to internal supplier, margin or treasury data.
-- No beneficiary change without verification evidence.
-- No external notification channel without approved provider, verified contact and consent.
-- No carrier sync using guessed endpoints or unapproved credentials.
-- No claim of full live-business readiness without a successful end-to-end pilot trade and reconciliation.
+Employees may prepare their own assigned Cuba cases but do not receive unilateral release authority. Any failed or incomplete release gate keeps the transaction unreleasable.
+
+## Cuba future transition
+If the applicable Cuba legal restrictions are later removed, the real `CU` jurisdiction can only be promoted from LIMITED to READY after the separate Cuba Transition-to-Ready workflow verifies all required legal, banking, customs, carrier/insurance, country-control, corridor-control, effective-date and rollback-safety gates.
+
+## Production standard
+The software is only one layer of real business readiness. Production also requires verified identities/RLS, private document storage, live providers, accounting controls, backups/restores, monitoring, and production-safe end-to-end transaction testing.
