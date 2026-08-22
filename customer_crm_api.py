@@ -4,7 +4,7 @@ import os, secrets
 from datetime import datetime, timezone
 from typing import Literal
 from fastapi import FastAPI, Header, HTTPException
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, Field, field_validator
 from auth import verify_owner_token
 from insforge_backend import get_backend
 
@@ -31,7 +31,7 @@ class IntakeIn(BaseModel):
     legal_name:str=Field(min_length=2,max_length=240)
     trade_name:str|None=None
     contact_name:str=Field(min_length=2,max_length=160)
-    email:EmailStr
+    email:str=Field(min_length=5,max_length=320)
     phone:str|None=None
     country_code:str|None=None
     website:str|None=None
@@ -44,6 +44,14 @@ class IntakeIn(BaseModel):
     target_delivery_date:str|None=None
     preferred_incoterm:str|None=None
     notes:str|None=None
+
+    @field_validator('email')
+    @classmethod
+    def validate_email(cls,v:str)->str:
+        value=v.strip().lower()
+        if '@' not in value or value.startswith('@') or value.endswith('@') or '.' not in value.split('@',1)[1]:
+            raise ValueError('Valid email required')
+        return value
 
 class QualifyIn(BaseModel):
     status:Literal['QUALIFIED','NEEDS_INFO','DISQUALIFIED']
@@ -62,7 +70,7 @@ async def health(): return {'status':'ok','service':'customer-crm','public_intak
 
 @app.post('/crm/intake')
 async def public_intake(p:IntakeIn):
-    backend=get_backend(); ts=now(); email=str(p.email).lower().strip()
+    backend=get_backend(); ts=now(); email=p.email
     existing=await backend.select('customer_accounts',params={'email':f'eq.{email}','limit':'1'}) or []
     if existing:
         customer_id=existing[0]['customer_id']
