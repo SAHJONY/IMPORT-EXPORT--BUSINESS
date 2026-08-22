@@ -27,6 +27,7 @@
     { "src": "/cuba(.*)", "dest": "unified_api.py" },
     { "src": "/countries(.*)", "dest": "unified_api.py" },
     { "src": "/health", "dest": "unified_api.py" },
+    { "src": "/", "dest": "/landing.html" },
     { "src": "/cuba-private-sector", "dest": "/cuba-private-sector.html" },
     { "src": "/owner/ai-brain", "dest": "/ai-brain.html" },
     { "src": "/employee/ai-brain", "dest": "/ai-brain.html" },
