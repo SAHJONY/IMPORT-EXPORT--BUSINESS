@@ -28,6 +28,7 @@
     { "src": "/cuba(.*)", "dest": "unified_api.py" },
     { "src": "/countries(.*)", "dest": "unified_api.py" },
     { "src": "/health", "dest": "unified_api.py" },
+    { "src": "/start", "dest": "/start.html" },
     { "src": "/cuba-private-sector", "dest": "/cuba-private-sector.html" },
     { "handle": "filesystem" },
     { "src": "/(.*)", "dest": "/index.html" }
