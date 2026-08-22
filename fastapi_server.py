@@ -18,12 +18,14 @@ from auth import generate_participant_token, hash_token, verify_owner, verify_pa
 from config_loader import load_config, save_config
 from database import get_connection
 from insforge_backend import InsForgeConfigurationError, get_backend
+from production_readiness import evaluate_production_readiness
+from trade_connectors import trade_connectors
 from trade_os import TradeScenario
 
 app = FastAPI(
     title="SAHJONY Global Trade Intelligence OS",
     description="AI-agentic import/export control plane with deterministic compliance release gates.",
-    version="2.0.0",
+    version="2.1.0",
 )
 
 BASE_DIR = Path(__file__).parent
@@ -69,6 +71,10 @@ def _command_center_response() -> FileResponse:
     return FileResponse(str(INDEX_FILE), media_type="text/html")
 
 
+def _legacy_write_allowed() -> bool:
+    return os.getenv("PRODUCTION_MODE", "false").lower() != "true"
+
+
 async def _persist_decision(scenario: TradeScenario, evaluation: dict[str, Any]) -> Any:
     backend = get_backend()
     decision = evaluation["decision"]
@@ -101,12 +107,15 @@ async def dashboard():
 
 @app.get("/health")
 async def health_check():
+    readiness = evaluate_production_readiness(runtime_ok=True)
     return {
         "status": "ok",
         "service": "global-trade-intelligence-os",
-        "version": "2.0.0",
+        "version": "2.1.0",
         "insforge": _insforge_status(),
         "release_policy": "fail-closed",
+        "production_ready": readiness["production_ready"],
+        "readiness_score": readiness["score"],
     }
 
 
@@ -115,11 +124,13 @@ async def list_agents(authorized: bool = Depends(verify_owner)):
     return {"agents": control_plane.registry(), "count": len(control_plane.registry())}
 
 
+@app.get("/v2/connectors/health")
+async def connector_health(authorized: bool = Depends(verify_owner)):
+    return await trade_connectors.health()
+
+
 @app.post("/v2/trade/analyze")
-async def analyze_trade(
-    request: PersistedTradeCase,
-    authorized: bool = Depends(verify_owner),
-):
+async def analyze_trade(request: PersistedTradeCase, authorized: bool = Depends(verify_owner)):
     evaluation = control_plane.evaluate(request.scenario)
     queue = control_plane.next_agent_queue(request.scenario)
     persistence: dict[str, Any] = {"requested": request.persist, "persisted": False}
@@ -131,44 +142,24 @@ async def analyze_trade(
             persistence["reason"] = str(exc)
         except Exception as exc:
             persistence["reason"] = f"InsForge persistence failed: {type(exc).__name__}"
+    if os.getenv("PRODUCTION_MODE", "false").lower() == "true" and not persistence["persisted"]:
+        raise HTTPException(status_code=503, detail="Production trade analysis requires durable InsForge persistence")
     return {**evaluation, "agent_queue": queue, "persistence": persistence}
 
 
 @app.post("/v2/trade/simulate")
-async def simulate_trade(
-    scenario: TradeScenario,
-    authorized: bool = Depends(verify_owner),
-):
+async def simulate_trade(scenario: TradeScenario, authorized: bool = Depends(verify_owner)):
     evaluation = control_plane.evaluate(scenario)
     return {**evaluation, "agent_queue": control_plane.next_agent_queue(scenario)}
 
 
 @app.get("/v2/platform/readiness")
 async def platform_readiness(authorized: bool = Depends(verify_owner)):
-    insforge = _insforge_status()
-    checks = {
-        "owner_token": bool(os.getenv("OWNER_TOKEN")),
-        "insforge_backend": insforge["configured"],
-        "agent_registry": len(control_plane.registry()) >= 10,
-        "fail_closed_policy": True,
-        "secret_file_not_required": True,
-    }
-    score = round(sum(checks.values()) / len(checks) * 100)
-    return {
-        "score": score,
-        "checks": checks,
-        "production_ready": all(checks.values()),
-        "blockers": [name for name, passed in checks.items() if not passed],
-    }
+    return evaluate_production_readiness(runtime_ok=True)
 
 
 @app.get("/ui/generate")
-async def ui_generate(
-    query: str,
-    domain: str = "product",
-    stack: str = "html-tailwind",
-    authorized: bool = Depends(verify_owner),
-):
+async def ui_generate(query: str, domain: str = "product", stack: str = "html-tailwind", authorized: bool = Depends(verify_owner)):
     script_path = BASE_DIR / "ui-ux-pro-max-skill" / "src" / "ui-ux-pro-max" / "scripts" / "search.py"
     if not script_path.exists():
         raise HTTPException(status_code=500, detail="UI/UX skill script not found")
@@ -184,6 +175,8 @@ async def ui_generate(
 
 @app.post("/order")
 async def create_order(order: Order, authorized: bool = Depends(verify_owner)):
+    if not _legacy_write_allowed():
+        raise HTTPException(status_code=503, detail="Legacy in-memory orders are disabled in production")
     if order.id in orders:
         raise HTTPException(status_code=400, detail="Order already exists")
     orders[order.id] = order
@@ -198,11 +191,9 @@ async def get_order(order_id: str, authorized: bool = Depends(verify_owner)):
 
 
 @app.post("/config/{name}")
-async def save_trade_config(
-    name: str,
-    config: dict = Body(...),
-    authorized: bool = Depends(verify_owner),
-):
+async def save_trade_config(name: str, config: dict = Body(...), authorized: bool = Depends(verify_owner)):
+    if not _legacy_write_allowed():
+        raise HTTPException(status_code=503, detail="Local config writes are disabled in production")
     path = save_config(name, config)
     return {"msg": "config saved", "path": path}
 
@@ -228,18 +219,13 @@ async def run_workflow(name: str, authorized: bool = Depends(verify_owner)):
 
 
 @app.post("/admin/add_participant")
-async def add_participant(
-    business_id: str,
-    participant_id: str,
-    authorized: bool = Depends(verify_owner),
-):
+async def add_participant(business_id: str, participant_id: str, authorized: bool = Depends(verify_owner)):
+    if not _legacy_write_allowed():
+        raise HTTPException(status_code=503, detail="Legacy participant store is disabled in production; use InsForge Auth")
     token = generate_participant_token()
     conn = get_connection()
     try:
-        conn.execute(
-            "INSERT INTO participants (participant_id, business_id, token_hash) VALUES (?,?,?)",
-            (participant_id, business_id, hash_token(token)),
-        )
+        conn.execute("INSERT INTO participants (participant_id, business_id, token_hash) VALUES (?,?,?)", (participant_id, business_id, hash_token(token)))
         conn.commit()
     except Exception as exc:
         raise HTTPException(status_code=500, detail="Unable to create participant") from exc
@@ -250,12 +236,11 @@ async def add_participant(
 
 @app.post("/submit")
 async def submit_data(submission: Submission, info: dict = Depends(verify_participant)):
+    if not _legacy_write_allowed():
+        raise HTTPException(status_code=503, detail="Legacy submission store is disabled in production")
     conn = get_connection()
     try:
-        conn.execute(
-            "INSERT INTO submissions (business_id, participant_id, data_type, payload) VALUES (?,?,?,?)",
-            (info["business_id"], info["participant_id"], submission.data_type, json.dumps(submission.payload)),
-        )
+        conn.execute("INSERT INTO submissions (business_id, participant_id, data_type, payload) VALUES (?,?,?,?)", (info["business_id"], info["participant_id"], submission.data_type, json.dumps(submission.payload)))
         conn.commit()
     finally:
         conn.close()
@@ -264,6 +249,8 @@ async def submit_data(submission: Submission, info: dict = Depends(verify_partic
 
 @app.get("/admin/submissions")
 async def view_submissions(authorized: bool = Depends(verify_owner)):
+    if not _legacy_write_allowed():
+        raise HTTPException(status_code=503, detail="Legacy submission store is disabled in production")
     conn = get_connection()
     try:
         rows = [dict(row) for row in conn.execute("SELECT * FROM submissions ORDER BY timestamp DESC").fetchall()]
@@ -274,15 +261,11 @@ async def view_submissions(authorized: bool = Depends(verify_owner)):
 
 @app.get("/my_submissions")
 async def my_submissions(info: dict = Depends(verify_participant)):
+    if not _legacy_write_allowed():
+        raise HTTPException(status_code=503, detail="Legacy submission store is disabled in production")
     conn = get_connection()
     try:
-        rows = [
-            dict(row)
-            for row in conn.execute(
-                "SELECT * FROM submissions WHERE participant_id = ? ORDER BY timestamp DESC",
-                (info["participant_id"],),
-            ).fetchall()
-        ]
+        rows = [dict(row) for row in conn.execute("SELECT * FROM submissions WHERE participant_id = ? ORDER BY timestamp DESC", (info["participant_id"],)).fetchall()]
     finally:
         conn.close()
     return {"submissions": rows}
