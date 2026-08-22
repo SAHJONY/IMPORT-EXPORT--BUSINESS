@@ -22,11 +22,12 @@ from managed_trade_gateway_api import app as managed_trade_app
 from managed_trade_intermediary_api import app as intermediary_app
 from global_supplier_sourcing_api import app as global_sourcing_app
 from business_readiness_api import app as business_readiness_app
+from us_import_desk_api import app as us_import_app
 from fastapi_server import app as core_app
 
 app = FastAPI(
     title="SAHJONY Global Trade Unified API",
-    version="2.0.0",
+    version="2.1.0",
     docs_url=None,
     redoc_url=None,
 )
@@ -52,5 +53,6 @@ for subapp in (
     intermediary_app,
     global_sourcing_app,
     business_readiness_app,
+    us_import_app,
 ):
     app.include_router(subapp.router)
