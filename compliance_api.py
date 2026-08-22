@@ -11,31 +11,41 @@ from pydantic import BaseModel, Field
 from auth import verify_customer_token, verify_owner_token
 from insforge_backend import get_backend
 
-app = FastAPI(title="SAHJONY Global Trade Compliance", version="1.0.0", docs_url=None, redoc_url=None)
+app = FastAPI(title="SAHJONY Global Trade Compliance", version="1.1.0", docs_url=None, redoc_url=None)
 Role = Literal['owner','employee','customer']
 
 BASE_REQUIREMENTS = [
-    ('party_screening','OFAC/BIS','Restricted/denied-party screening'),
+    ('kyc','Company Policy','Counterparty identity, beneficial ownership and business-purpose review'),
+    ('party_screening','OFAC/BIS','Restricted/denied-party and sanctions screening for all transaction parties'),
+    ('anti_bribery','DOJ/SEC','Anti-bribery/FCPA risk review for agents, officials, gifts, commissions and unusual payments'),
+    ('antiboycott','BIS OAC','Antiboycott language review for contracts, purchase orders, letters of credit and shipping instructions'),
     ('classification','CBP/BIS/Census','HTS / Schedule B / ECCN determination'),
-    ('origin','CBP','Country of origin and marking review'),
-    ('valuation','CBP','Customs valuation and related-party/assist review'),
-    ('incoterms','Contract','Incoterm and responsibility allocation'),
-    ('documents','CBP/Carrier','Commercial invoice, packing list, transport document'),
-    ('broker_authority','CBP','Broker/forwarder authority and POA if applicable'),
-    ('bond','CBP','Customs bond applicability and sufficiency'),
-    ('entry','CBP','Cargo release and entry summary readiness'),
-    ('recordkeeping','CBP/BIS/Census','Regulatory record retention and audit evidence'),
+    ('origin','CBP','Country of origin, marking and preference eligibility review'),
+    ('valuation','CBP','Customs valuation, assists, royalties, commissions and related-party review'),
+    ('incoterms','Contract','Incoterm, title/risk transfer and responsibility allocation'),
+    ('contract','Company Legal','Executed commercial terms, warranties, inspection, rejection, force majeure and dispute terms'),
+    ('documents','CBP/Carrier','Commercial invoice, packing list, purchase/sales evidence and transport document'),
+    ('broker_authority','CBP','Broker/forwarder authority and power of attorney if applicable'),
+    ('insurance','Company Risk','Cargo insurance / trade-credit insurance applicability and evidence'),
+    ('recordkeeping','CBP/BIS/Census','Regulatory record retention, complete paper trail and audit evidence'),
+    ('claims','Company Legal','Loss, damage, delay, demurrage/detention and customs dispute/claim procedure'),
 ]
 EXPORT_REQUIREMENTS = [
     ('ear_scope','BIS','EAR jurisdiction / subject-to-EAR determination'),
-    ('license','BIS','License / license exception / NLR determination'),
-    ('end_use','BIS','End-use and end-user review'),
+    ('license','BIS','License / license exception / NLR determination and license conditions'),
+    ('end_use','BIS','End-use, end-user, intermediate consignee and diversion-risk review'),
     ('eei','Census/BIS','AES/EEI filing determination and ITN when required'),
+    ('export_documents','Carrier/Customs','Destination-country import documentation and export document consistency'),
 ]
 IMPORT_REQUIREMENTS = [
+    ('importer_of_record','CBP','Importer-of-record identity/number and reasonable-care ownership confirmed'),
+    ('bond','CBP','Customs bond applicability and sufficiency'),
+    ('entry','CBP','Cargo release, entry summary, duty deposit and ACE/broker filing readiness'),
     ('admissibility','CBP','Import admissibility and prohibited/restricted merchandise review'),
-    ('pga','Partner Government Agencies','Product-agency applicability review (FDA/USDA/EPA/FCC/CPSC/etc.)'),
-    ('duties','CBP/HTSUS','Duty, tariff, trade-remedy and special-program review'),
+    ('forced_labor','CBP','Forced-labor/UFLPA supply-chain traceability and entity-list risk review where applicable'),
+    ('pga','Partner Government Agencies','Product-agency applicability review (FDA/USDA/APHIS/EPA/FCC/CPSC/DOT/FTC/etc.)'),
+    ('duties','CBP/HTSUS','Duty, tariff, trade-remedy, quota and special-program review'),
+    ('labeling','CBP/PGA/FTC','Country-of-origin and product-specific labeling/marking review'),
 ]
 
 class ComplianceCreate(BaseModel):
