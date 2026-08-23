@@ -61,7 +61,8 @@ function checkRequiredFiles() {
     'public/landing.html',
     'public/start.html',
     'public/cuba-private-sector.html',
-    'public/cuba-private-sector-es.html',
+    'public/cuba-es.html',
+    'public/cuba-us-desk-card.html',
     'vercel.json',
     'unified_api.py'
   ];
@@ -92,7 +93,8 @@ function checkVercelRoutes() {
     '/': '/landing.html',
     '/business': '/landing.html',
     '/start': '/start.html',
-    '/cuba-private-sector': '/cuba-private-sector-es.html'
+    '/cuba-private-sector': '/cuba-es.html',
+    '/us-desk-card': '/cuba-us-desk-card.html'
   };
   for (const [src, dest] of Object.entries(criticalStatic)) {
     const idx = routes.findIndex((r) => r.src === src && r.dest === dest);
@@ -125,6 +127,7 @@ async function smokeTest(base) {
     ['/business', 'html'],
     ['/start', 'html'],
     ['/cuba-private-sector', 'html'],
+    ['/us-desk-card', 'html'],
     ['/crm/health', 'json'],
     ['/cuba-private-sector/health', 'json']
   ];
