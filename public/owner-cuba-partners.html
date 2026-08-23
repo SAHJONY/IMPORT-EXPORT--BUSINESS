@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>SAHJONY · Cuba Partner Command</title>
+  <meta name="robots" content="noindex,nofollow" />
+  <style>
+    :root{font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#f7f7f7;background:#080a0d}
+    *{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at top,#17202b 0,#0a0d12 42%,#050608 100%);min-height:100vh}
+    header{padding:28px 22px 12px;max-width:1220px;margin:auto}.eyebrow{font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:#98a7ba}.title{font-size:clamp(28px,5vw,48px);margin:8px 0 8px}.sub{color:#aeb8c5;max-width:780px;line-height:1.5}
+    main{max-width:1220px;margin:auto;padding:18px 22px 56px}.bar{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:18px}.btn{border:0;border-radius:12px;padding:11px 15px;font-weight:700;cursor:pointer}.primary{background:#f4f6f8;color:#090b0f}.secondary{background:#151a22;color:#e8edf4;border:1px solid #29313c}
+    .stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:18px}.stat,.panel{background:rgba(18,22,29,.88);border:1px solid #252d38;border-radius:18px;box-shadow:0 14px 42px rgba(0,0,0,.28)}.stat{padding:16px}.stat b{font-size:26px;display:block}.stat span{font-size:12px;color:#97a3b2}
+    .panel{padding:16px;margin-top:14px}.panel h2{margin:0 0 12px;font-size:19px}.grid{display:grid;gap:12px}.cards{grid-template-columns:repeat(auto-fit,minmax(290px,1fr))}.card{background:#0d1117;border:1px solid #222a34;border-radius:14px;padding:14px}.meta{font-size:12px;color:#9ba7b7;line-height:1.45}.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px}.pill{display:inline-flex;padding:5px 9px;border-radius:999px;background:#1b2330;font-size:11px;font-weight:800;letter-spacing:.03em}.usd{color:#bde4c7}.warn{color:#ffd69a}.small{font-size:12px;color:#9aa6b5}.empty{color:#8c98a8;padding:12px 2px}
+    select,input,textarea{width:100%;background:#0b0f14;color:#eef3f8;border:1px solid #2a3440;border-radius:10px;padding:9px 10px}textarea{min-height:72px;resize:vertical}.formgrid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.full{grid-column:1/-1}.save{margin-top:8px;width:100%;background:#dce6f2;color:#07101a;border:0;border-radius:10px;padding:10px;font-weight:800;cursor:pointer}.err{color:#ffb1b1}.ok{color:#bde4c7}@media(max-width:760px){.stats{grid-template-columns:1fr 1fr}.formgrid{grid-template-columns:1fr}.full{grid-column:auto}}
+  </style>
+  <script src="/global-language.js" defer></script>
+</head>
+<body>
+<header>
+  <div class="eyebrow">Private Owner OS · Partner Operations</div>
+  <h1 class="title">Cuba Partner Command</h1>
+  <div class="sub">Review collaborators, govern referrals and commissions, and keep every payout under Owner control. Commission accounting is USD-only. Customer platforms remain separate from this private workspace.</div>
+</header>
+<main>
+  <div class="bar"><button class="btn primary" id="refresh">Refresh</button><a class="btn secondary" href="/owner/payments" style="text-decoration:none">Open Payments</a><a class="btn secondary" href="/owner-login" style="text-decoration:none">Owner Login</a></div>
+  <div id="notice" class="small"></div>
+  <section class="stats">
+    <div class="stat"><b id="partnerCount">—</b><span>Partners</span></div>
+    <div class="stat"><b id="approvedCount">—</b><span>Approved</span></div>
+    <div class="stat"><b id="referralCount">—</b><span>Referrals</span></div>
+    <div class="stat"><b id="commissionTotal">—</b><span>Approved commission USD</span></div>
+  </section>
+  <section class="panel"><h2>Partner applications</h2><div id="partners" class="grid cards"><div class="empty">Loading…</div></div></section>
+  <section class="panel"><h2>Referral & commission pipeline</h2><div id="referrals" class="grid cards"><div class="empty">Loading…</div></div></section>
+</main>
+<script>
+const token=sessionStorage.getItem('sahjony.owner.token');
+if(!token) location.replace('/owner-login');
+const headers={'Authorization':`Bearer ${token}`,'X-Role':'owner','Content-Type':'application/json'};
+const notice=document.getElementById('notice');
+function money(v){return Number(v||0).toLocaleString(undefined,{style:'currency',currency:'USD'});}
+async function api(url,opts={}){const r=await fetch(url,{...opts,headers:{...headers,...(opts.headers||{})}}); if(r.status===401||r.status===403){sessionStorage.removeItem('sahjony.owner.token');location.replace('/owner-login');throw new Error('Owner authentication required');} const data=await r.json().catch(()=>({})); if(!r.ok) throw new Error(data.detail||`Request failed ${r.status}`); return data;}
+function esc(v){return String(v??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));}
+async function load(){notice.textContent='Loading partner operations…';notice.className='small';try{const [p,r]=await Promise.all([api('/cuba-partners-api/owner/partners'),api('/cuba-partners-api/owner/referrals')]);renderPartners(p.partners||[]);renderReferrals(r.referrals||[]);document.getElementById('partnerCount').textContent=(p.partners||[]).length;document.getElementById('approvedCount').textContent=(p.partners||[]).filter(x=>x.status==='APPROVED').length;document.getElementById('referralCount').textContent=(r.referrals||[]).length;document.getElementById('commissionTotal').textContent=money((r.referrals||[]).filter(x=>x.commission_status==='APPROVED').reduce((s,x)=>s+Number(x.commission_amount_usd||0),0));notice.textContent='Live Owner data loaded.';notice.className='small ok';}catch(e){notice.textContent=e.message;notice.className='small err';}}
+function renderPartners(items){const root=document.getElementById('partners');if(!items.length){root.innerHTML='<div class="empty">No partner applications yet.</div>';return;}root.innerHTML=items.map(x=>`<article class="card"><div class="row"><span class="pill">${esc(x.status)}</span><span class="pill">${esc(x.partner_id)}</span></div><h3>${esc(x.full_name)}</h3><div class="meta">${esc(x.phone||'')} ${esc(x.email||'')}<br>${esc(x.province||'')} ${esc(x.municipality||'')}<br>Created: ${esc(x.created_at||'')}</div><p class="small">${esc(x.network_description||x.experience||'No profile notes')}</p><div class="formgrid"><select id="ps-${esc(x.partner_id)}"><option>APPLIED</option><option>UNDER_REVIEW</option><option>APPROVED</option><option>HOLD</option><option>REJECTED</option><option>SUSPENDED</option></select><textarea id="pn-${esc(x.partner_id)}" class="full" placeholder="Owner note">${esc(x.owner_note||'')}</textarea></div><button class="save" onclick="savePartner('${esc(x.partner_id)}')">Save partner review</button></article>`).join('');items.forEach(x=>{const s=document.getElementById('ps-'+x.partner_id);if(s)s.value=x.status;});}
+function renderReferrals(items){const root=document.getElementById('referrals');if(!items.length){root.innerHTML='<div class="empty">No referrals yet.</div>';return;}root.innerHTML=items.map(x=>`<article class="card"><div class="row"><span class="pill">${esc(x.referral_status)}</span><span class="pill">${esc(x.commission_status)}</span><span class="pill usd">${money(x.commission_amount_usd)}</span></div><h3>${esc(x.prospect_name)}</h3><div class="meta">Referral: ${esc(x.referral_id)}<br>Partner: ${esc(x.partner_id)}<br>Type: ${esc(x.opportunity_type)}<br>Estimated value: ${money(x.estimated_value_usd)}</div><p class="small">${esc(x.description)}</p><div class="formgrid"><select id="rs-${esc(x.referral_id)}"><option>SUBMITTED</option><option>QUALIFYING</option><option>ACTIVE</option><option>CLOSED_WON</option><option>CLOSED_LOST</option><option>HOLD</option></select><select id="cs-${esc(x.referral_id)}"><option>NOT_EARNED</option><option>PENDING_REVIEW</option><option>APPROVED</option><option>PAYMENT_HOLD</option><option>VOID</option></select><input id="ca-${esc(x.referral_id)}" type="number" min="0" step="0.01" value="${esc(x.commission_amount_usd??'')}" placeholder="Commission USD"><textarea id="rn-${esc(x.referral_id)}" class="full" placeholder="Owner note">${esc(x.owner_note||'')}</textarea></div><button class="save" onclick="saveReferral('${esc(x.referral_id)}')">Save referral review</button></article>`).join('');items.forEach(x=>{const a=document.getElementById('rs-'+x.referral_id),b=document.getElementById('cs-'+x.referral_id);if(a)a.value=x.referral_status;if(b)b.value=x.commission_status;});}
+async function savePartner(id){try{await api('/cuba-partners-api/owner/partners/'+encodeURIComponent(id),{method:'PATCH',body:JSON.stringify({status:document.getElementById('ps-'+id).value,owner_note:document.getElementById('pn-'+id).value||'Reviewed by Owner'})});notice.textContent='Partner updated.';notice.className='small ok';load();}catch(e){notice.textContent=e.message;notice.className='small err';}}
+async function saveReferral(id){try{const raw=document.getElementById('ca-'+id).value;await api('/cuba-partners-api/owner/referrals/'+encodeURIComponent(id),{method:'PATCH',body:JSON.stringify({referral_status:document.getElementById('rs-'+id).value,commission_status:document.getElementById('cs-'+id).value,commission_amount_usd:raw===''?null:Number(raw),owner_note:document.getElementById('rn-'+id).value||'Reviewed by Owner'})});notice.textContent='Referral updated. Paid status must still go through governed payments.';notice.className='small ok';load();}catch(e){notice.textContent=e.message;notice.className='small err';}}
+document.getElementById('refresh').onclick=load;load();
+</script>
+</body>
+</html>
