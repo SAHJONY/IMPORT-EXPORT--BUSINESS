@@ -19,6 +19,10 @@ verifyApiRoute('/trade-agent(.*)','Trade Agent');
 verifyApiRoute('/trade-certification(.*)','Trade Certification');
 verifyApiRoute('/country-crm(.*)','Country CRM');
 verifyApiRoute('/lead-search(.*)','Global Lead Search');
+verifyApiRoute('/energy(.*)','SAHJONY Energy');
+
+const energyOwner=routes.findIndex(r=>r.src==='/owner/energy/crude-oil'&&r.dest==='/owner-energy-crude.html');
+if(energyOwner<0)failures.push('Missing Owner Crude Oil Command Center route');
 
 if(failures.length){for(const f of failures)console.error('FAIL ',f);process.exit(1)}
-console.log('PASS  Trade Agent, Trade Certification, Country CRM, and Global Lead Search routes reach unified_api.py before SPA fallback');
+console.log('PASS  Trade Agent, Trade Certification, Country CRM, Global Lead Search, and Energy routes reach production safely');
