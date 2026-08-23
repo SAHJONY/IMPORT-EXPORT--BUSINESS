@@ -5,10 +5,11 @@ from fastapi import FastAPI
 
 from auth import neon_auth_jwks_url, neon_auth_url
 from insforge_backend import persistent_backend_status
+from payment_engine import CANONICAL_TRANSACTION_CURRENCY, USD_ONLY_TRANSACTIONS
 from production_readiness import evaluate_production_readiness
 from trade_connectors import trade_connectors
 
-app = FastAPI(title="SAHJONY Production Activation Control", version="1.1.0", docs_url=None, redoc_url=None)
+app = FastAPI(title="SAHJONY Production Activation Control", version="1.2.0", docs_url=None, redoc_url=None)
 
 
 def _present(name: str) -> bool:
@@ -32,6 +33,11 @@ def _provider_state() -> dict:
             **persistence,
             "rls_verified": _true("PERSISTENCE_ISOLATION_VERIFIED") or _true("INSFORGE_RLS_VERIFIED"),
             "schemas_applied": _true("PERSISTENCE_SCHEMA_VERIFIED") or _true("INSFORGE_SCHEMAS_APPLIED"),
+        },
+        "payments": {
+            "canonical_transaction_currency": CANONICAL_TRANSACTION_CURRENCY,
+            "usd_only_transactions": USD_ONLY_TRANSACTIONS,
+            "fx_execution_required_for_customer_settlement": not USD_ONLY_TRANSACTIONS,
         },
         "ai": {
             "openai_configured": _present("OPENAI_API_KEY"),
@@ -64,15 +70,17 @@ def _external_requirements() -> list[dict]:
     if not persistence["configured"]:
         requirements.append({"area": "persistence", "action": "Attach Neon/Postgres to Vercel so DATABASE_URL/POSTGRES_URL exists, or configure InsForge server credentials."})
     if not _present("ANTHROPIC_API_KEY"):
-        requirements.append({"area": "ai", "action": "Add ANTHROPIC_API_KEY in Vercel and run AI Brain E2E verification."})
+        requirements.append({"area": "ai", "action": "Add ANTHROPIC_API_KEY in Vercel and run AI Brain E2E verification for governed dual-model high-stakes consensus."})
     if not (_present("AZURE_TRANSLATOR_ENDPOINT") and _present("AZURE_TRANSLATOR_KEY")):
-        requirements.append({"area": "translation", "action": "Add Azure Translator endpoint/key/region and run multilingual E2E verification."})
-    if not _present("TARIFF_DATA_PROVIDER"):
-        requirements.append({"area": "classification", "action": "Connect an authoritative tariff/HTS classification provider."})
-    if not _present("LOGISTICS_DATA_PROVIDER"):
-        requirements.append({"area": "logistics", "action": "Connect the production carrier/freight tracking provider and verify E2E milestones."})
-    if not (_present("FX_EXECUTION_PROVIDER") or _present("FX_DATA_PROVIDER")):
-        requirements.append({"area": "settlement", "action": "Connect the production bank/settlement FX provider."})
+        requirements.append({"area": "translation", "action": "Add Azure Translator endpoint/key/region and run multilingual E2E verification for server-side document/message translation."})
+    # USITC tariff research is built in and health-checked dynamically; no duplicate
+    # environment variable is required merely to declare the provider.
+    if not _present("LOGISTICS_DATA_PROVIDER") and not _present("MAERSK_CLIENT_ID"):
+        requirements.append({"area": "logistics", "action": "Connect an approved production carrier/freight tracking account and verify E2E milestones."})
+    # Customer settlement is USD-only. Do not require an FX execution account unless
+    # product policy is deliberately changed to allow non-USD settlement.
+    if not USD_ONLY_TRANSACTIONS and not (_present("FX_EXECUTION_PROVIDER") or _present("FX_DATA_PROVIDER")):
+        requirements.append({"area": "settlement", "action": "Connect the production bank/settlement FX provider before enabling non-USD customer settlement."})
     if not _true("BACKUP_RESTORE_TESTED"):
         requirements.append({"area": "resilience", "action": "Complete and record a database/storage restore drill."})
     if not _true("FIRST_LIVE_TRADE_CERTIFIED"):
@@ -107,6 +115,8 @@ async def activation_health():
             "fail_closed": True,
             "no_fake_100_percent": True,
             "first_live_trade_required": True,
+            "canonical_transaction_currency": CANONICAL_TRANSACTION_CURRENCY,
+            "usd_only_transactions": USD_ONLY_TRANSACTIONS,
             "ai_has_release_authority": False,
         },
     }
