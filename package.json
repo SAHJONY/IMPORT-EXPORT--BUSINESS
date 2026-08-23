@@ -1,13 +1,14 @@
 {
   "name": "sahjony-global-trade-os",
   "private": true,
-  "version": "1.2.0",
+  "version": "1.2.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "doctor": "node tools/deployment-guard.mjs",
+    "doctor:locale": "node tools/locale-doctor.mjs",
     "doctor:live": "node tools/deployment-guard.mjs --url=https://import-export-business.vercel.app",
-    "prebuild": "node tools/deployment-guard.mjs",
+    "prebuild": "node tools/locale-doctor.mjs && node tools/deployment-guard.mjs",
     "build": "vite build",
     "preview": "vite preview"
   },
