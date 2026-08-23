@@ -18,6 +18,7 @@ if(catchAllIndex<0)failures.push('Missing SPA catch-all route');
 verifyApiRoute('/trade-agent(.*)','Trade Agent');
 verifyApiRoute('/trade-certification(.*)','Trade Certification');
 verifyApiRoute('/country-crm(.*)','Country CRM');
+verifyApiRoute('/lead-search(.*)','Global Lead Search');
 
 if(failures.length){for(const f of failures)console.error('FAIL ',f);process.exit(1)}
-console.log('PASS  Trade Agent, Trade Certification, and Country CRM routes reach unified_api.py before SPA fallback');
+console.log('PASS  Trade Agent, Trade Certification, Country CRM, and Global Lead Search routes reach unified_api.py before SPA fallback');
