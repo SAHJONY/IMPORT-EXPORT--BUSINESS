@@ -5,7 +5,7 @@ from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from auth import decode_neon_jwt, neon_auth_jwks_url, neon_auth_url, verify_employee_neon_token
-from insforge_backend import InsForgeConfigurationError
+from insforge_backend import PersistentBackendConfigurationError, get_backend, persistent_backend_status
 from activation_api import app as activation_app, activation_health
 from telegram_api import app as telegram_app
 from business_email_registry import app as business_email_app
@@ -34,13 +34,10 @@ from ai_brain_api import app as ai_brain_app
 from customer_crm_api import app as customer_crm_app
 from fastapi_server import app as core_app
 
-# Existing domain APIs historically validate an EMPLOYEE_TOKEN. A private,
-# process-local bridge credential lets Neon-authenticated employees enter those
-# modules without exposing or weakening their existing authorization contracts.
 _RUNTIME_EMPLOYEE_BRIDGE_TOKEN = os.getenv("EMPLOYEE_TOKEN", "").strip() or secrets.token_urlsafe(48)
 os.environ.setdefault("EMPLOYEE_TOKEN", _RUNTIME_EMPLOYEE_BRIDGE_TOKEN)
 
-app = FastAPI(title="SAHJONY Global Trade Unified API", version="3.5.0", docs_url=None, redoc_url=None)
+app = FastAPI(title="SAHJONY Global Trade Unified API", version="3.6.0", docs_url=None, redoc_url=None)
 
 
 @app.middleware("http")
@@ -59,13 +56,22 @@ async def neon_identity_bridge(request: Request, call_next):
     return await call_next(request)
 
 
-@app.exception_handler(InsForgeConfigurationError)
-async def insforge_configuration_error(_request: Request, exc: InsForgeConfigurationError):
+@app.exception_handler(PersistentBackendConfigurationError)
+async def persistent_backend_configuration_error(_request: Request, exc: PersistentBackendConfigurationError):
+    status = persistent_backend_status()
     return JSONResponse(status_code=503, content={
-        "detail": "Persistent trade backend is not configured for this deployment.",
-        "code": "INSFORGE_NOT_CONFIGURED",
-        "service": "insforge",
-        "required": ["INSFORGE_BASE_URL", "INSFORGE_API_KEY"],
+        "detail": "Durable trade persistence is not configured for this deployment.",
+        "code": "PERSISTENT_BACKEND_NOT_CONFIGURED",
+        "service": "trade-persistence",
+        "provider": status["provider"],
+        "accepted_backends": ["neon_postgres", "insforge"],
+        "required_any_of": [
+            ["DATABASE_URL"],
+            ["POSTGRES_URL"],
+            ["NEON_DATABASE_URL"],
+            ["INSFORGE_BASE_URL", "INSFORGE_API_KEY"],
+        ],
+        "fail_closed": True,
     })
 
 
@@ -104,21 +110,31 @@ async def identity_session(x_role: str | None = Header(None, alias="X-Role"), au
     }
 
 
+@app.get("/backend/health")
+async def backend_health():
+    status = persistent_backend_status()
+    if not status["configured"]:
+        return {"status": "configuration_required", "service": "trade-persistence", **status}
+    try:
+        metadata = await get_backend().metadata()
+        return {"status": "ok", "service": "trade-persistence", **status, "reachable": True, "metadata": metadata}
+    except Exception as exc:
+        return {"status": "degraded", "service": "trade-persistence", **status, "reachable": False, "error": type(exc).__name__}
+
+
 @app.get("/crm/health")
 async def crm_runtime_health():
-    base_url = bool(os.getenv("INSFORGE_BASE_URL", "").strip())
-    api_key = bool(os.getenv("INSFORGE_API_KEY", "").strip())
-    configured = base_url and api_key
+    status = persistent_backend_status()
     return {
-        "status": "ok" if configured else "configuration_required",
+        "status": "ok" if status["configured"] else "configuration_required",
         "service": "customer-crm",
         "public_intake": True,
         "fail_closed_promotion": True,
-        "persistence": "insforge",
-        "backend_configured": configured,
-        "insforge_base_url_configured": base_url,
-        "insforge_api_key_configured": api_key,
-        "operational": configured,
+        "persistence": status["provider"],
+        "backend_configured": status["configured"],
+        "operational": status["configured"],
+        "database_url_configured": status["database_url_configured"],
+        "insforge_configured": status["insforge_configured"],
     }
 
 
@@ -128,7 +144,7 @@ async def platform_health():
     return {
         "status": "ok",
         "service": "global-trade-intelligence-os",
-        "version": "3.5.0",
+        "version": "3.6.0",
         "release_policy": "fail-closed",
         "production_ready": activation["production_ready"],
         "readiness_score": activation["readiness_score"],
@@ -137,6 +153,7 @@ async def platform_health():
         "blocker_count": activation["blocker_count"],
         "release_gate": activation["release_gate"],
         "identity_provider": activation["providers"]["identity"]["provider"],
+        "persistence_provider": activation["providers"]["persistence"]["provider"],
         "persistence_configured": activation["providers"]["persistence"]["configured"],
         "openai_configured": activation["providers"]["ai"]["openai_configured"],
         "anthropic_configured": activation["providers"]["ai"]["anthropic_configured"],
