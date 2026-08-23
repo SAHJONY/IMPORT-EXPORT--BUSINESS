@@ -9,9 +9,9 @@ from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
 
 from auth import verify_owner_token
-from insforge_backend import get_backend
+from physical_postgres import insert_row, select_rows, update_rows
 
-app = FastAPI(title='SAHJONY Cuba Partner Program', version='1.0.0', docs_url=None, redoc_url=None)
+app = FastAPI(title='SAHJONY Cuba Partner Program', version='1.1.0', docs_url=None, redoc_url=None)
 
 PartnerStatus = Literal['APPLIED','UNDER_REVIEW','APPROVED','HOLD','REJECTED','SUSPENDED']
 ReferralStatus = Literal['SUBMITTED','QUALIFYING','ACTIVE','CLOSED_WON','CLOSED_LOST','HOLD']
@@ -78,6 +78,7 @@ async def health():
     return {
         'status':'ok',
         'service':'sahjony-cuba-partner-program',
+        'storage':'physical_neon_postgres',
         'currency':'USD',
         'automatic_commission_payout':False,
         'owner_approval_required':True,
@@ -114,7 +115,7 @@ async def apply(p: PartnerApplicationIn):
         'created_at':ts,
         'updated_at':ts,
     }
-    await get_backend().insert('cuba_partner_accounts', row)
+    await insert_row('cuba_partner_accounts', row)
     return {
         'partner_id':partner_id,
         'referral_token':referral_token,
@@ -126,7 +127,7 @@ async def apply(p: PartnerApplicationIn):
 
 @app.post('/cuba-partners-api/referrals')
 async def submit_referral(p: ReferralIn):
-    partners = await get_backend().select('cuba_partner_accounts', params={'partner_id':f'eq.{p.partner_id}','limit':'1'}) or []
+    partners = await select_rows('cuba_partner_accounts', filters={'partner_id':p.partner_id}, limit=1)
     if not partners:
         raise HTTPException(404, 'Partner not found')
     partner = partners[0]
@@ -155,7 +156,7 @@ async def submit_referral(p: ReferralIn):
         'created_at':ts,
         'updated_at':ts,
     }
-    await get_backend().insert('cuba_partner_referrals', row)
+    await insert_row('cuba_partner_referrals', row)
     return {'referral_id':referral_id,'status':'SUBMITTED','commission_status':'NOT_EARNED','currency':'USD'}
 
 
@@ -163,10 +164,10 @@ async def submit_referral(p: ReferralIn):
 async def partner_status(partner_id: str, x_partner_token: str | None = Header(None, alias='X-Partner-Token')):
     if not x_partner_token:
         raise HTTPException(401, 'Partner token required')
-    rows = await get_backend().select('cuba_partner_accounts', params={'partner_id':f'eq.{partner_id}','limit':'1'}) or []
+    rows = await select_rows('cuba_partner_accounts', filters={'partner_id':partner_id}, limit=1)
     if not rows or not secrets.compare_digest(str(rows[0].get('referral_token_hash') or ''), token_hash(x_partner_token)):
         raise HTTPException(404, 'Partner not found')
-    referrals = await get_backend().select('cuba_partner_referrals', params={'partner_id':f'eq.{partner_id}','order':'created_at.desc','limit':'100'}) or []
+    referrals = await select_rows('cuba_partner_referrals', filters={'partner_id':partner_id}, order_by='created_at', descending=True, limit=100)
     safe_referrals=[]
     for r in referrals:
         safe_referrals.append({
@@ -184,7 +185,7 @@ async def partner_status(partner_id: str, x_partner_token: str | None = Header(N
 @app.get('/cuba-partners-api/owner/partners')
 async def owner_partners(authorization: str | None = Header(None, alias='Authorization'), x_role: str | None = Header(None, alias='X-Role')):
     require_owner(authorization, x_role)
-    rows = await get_backend().select('cuba_partner_accounts', params={'order':'created_at.desc','limit':'300'}) or []
+    rows = await select_rows('cuba_partner_accounts', order_by='created_at', descending=True, limit=300)
     for r in rows:
         r.pop('referral_token_hash', None)
     return {'partners':rows}
@@ -193,14 +194,16 @@ async def owner_partners(authorization: str | None = Header(None, alias='Authori
 @app.patch('/cuba-partners-api/owner/partners/{partner_id}')
 async def owner_review_partner(partner_id: str, p: OwnerPartnerReviewIn, authorization: str | None = Header(None, alias='Authorization'), x_role: str | None = Header(None, alias='X-Role')):
     require_owner(authorization, x_role)
-    await get_backend().patch('cuba_partner_accounts', {'status':p.status,'owner_note':p.owner_note,'updated_at':now()}, params={'partner_id':f'eq.{partner_id}'})
+    updated = await update_rows('cuba_partner_accounts', {'status':p.status,'owner_note':p.owner_note,'updated_at':now()}, filters={'partner_id':partner_id})
+    if not updated:
+        raise HTTPException(404, 'Partner not found')
     return {'partner_id':partner_id,'status':p.status}
 
 
 @app.get('/cuba-partners-api/owner/referrals')
 async def owner_referrals(authorization: str | None = Header(None, alias='Authorization'), x_role: str | None = Header(None, alias='X-Role')):
     require_owner(authorization, x_role)
-    rows = await get_backend().select('cuba_partner_referrals', params={'order':'created_at.desc','limit':'500'}) or []
+    rows = await select_rows('cuba_partner_referrals', order_by='created_at', descending=True, limit=500)
     return {'referrals':rows}
 
 
@@ -218,5 +221,7 @@ async def owner_review_referral(referral_id: str, p: OwnerReferralReviewIn, auth
         'owner_note':p.owner_note,
         'updated_at':now(),
     }
-    await get_backend().patch('cuba_partner_referrals', patch, params={'referral_id':f'eq.{referral_id}'})
+    updated = await update_rows('cuba_partner_referrals', patch, filters={'referral_id':referral_id})
+    if not updated:
+        raise HTTPException(404, 'Referral not found')
     return {'referral_id':referral_id,'referral_status':p.referral_status,'commission_status':p.commission_status,'currency':'USD'}

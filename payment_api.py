@@ -8,10 +8,10 @@ from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
 
 from auth import verify_owner_token
-from insforge_backend import get_backend
 from payment_engine import PaymentError, payment_plan, policy_snapshot, reconcile
+from physical_postgres import insert_row, select_rows, update_rows
 
-app = FastAPI(title='SAHJONY Owner Payment Control API', version='1.0.0', docs_url=None, redoc_url=None)
+app = FastAPI(title='SAHJONY Owner Payment Control API', version='1.2.0', docs_url=None, redoc_url=None)
 
 
 def now() -> str:
@@ -25,6 +25,26 @@ def require_owner(authorization: str | None, x_role: str | None):
         raise HTTPException(401, 'Missing Authorization')
     if not verify_owner_token(authorization.removeprefix('Bearer ').strip()):
         raise HTTPException(403, 'Invalid owner credential')
+
+
+async def append_event(case_id: str, event_type: str, *, amount: float | None = None, external_reference: str | None = None, owner_note: str | None = None):
+    return await insert_row('trade_payment_events', {
+        'event_id':f'pev_{secrets.token_urlsafe(10)}',
+        'payment_case_id':case_id,
+        'event_type':event_type,
+        'amount':amount,
+        'currency':'USD',
+        'external_reference':external_reference,
+        'owner_note':owner_note,
+        'created_at':now(),
+    })
+
+
+async def get_case(case_id: str) -> dict:
+    rows = await select_rows('trade_payment_ledger', filters={'payment_case_id':case_id}, limit=1)
+    if not rows:
+        raise HTTPException(404, 'Payment case not found')
+    return rows[0]
 
 
 class PaymentCaseIn(BaseModel):
@@ -58,9 +78,12 @@ async def health():
     return {
         'status':'ok',
         'service':'sahjony-owner-payment-control',
+        'storage':'physical_neon_postgres',
+        'audit_events':'append_only',
         'currency':'USD',
         'automatic_supplier_payout':False,
         'automatic_shipment_release':False,
+        'supplier_and_shipment_release_separated':True,
         'owner_release_required':True,
     }
 
@@ -101,24 +124,30 @@ async def create_case(p: PaymentCaseIn, authorization: str | None = Header(None,
         'created_at':ts,
         'updated_at':ts,
     }
-    await get_backend().insert('trade_payment_ledger', row)
+    await insert_row('trade_payment_ledger', row)
+    await append_event(case_id, 'CASE_CREATED', amount=p.total_amount, owner_note=p.notes)
     return {'payment_case_id':case_id, **plan}
 
 
 @app.get('/owner-payments/cases')
 async def list_cases(authorization: str | None = Header(None, alias='Authorization'), x_role: str | None = Header(None, alias='X-Role')):
     require_owner(authorization, x_role)
-    rows = await get_backend().select('trade_payment_ledger', params={'order':'created_at.desc','limit':'300'}) or []
+    rows = await select_rows('trade_payment_ledger', order_by='created_at', descending=True, limit=300)
     return {'cases':rows}
+
+
+@app.get('/owner-payments/cases/{case_id}/events')
+async def list_case_events(case_id: str, authorization: str | None = Header(None, alias='Authorization'), x_role: str | None = Header(None, alias='X-Role')):
+    require_owner(authorization, x_role)
+    await get_case(case_id)
+    rows = await select_rows('trade_payment_events', filters={'payment_case_id':case_id}, order_by='created_at', descending=True, limit=500)
+    return {'payment_case_id':case_id,'events':rows}
 
 
 @app.post('/owner-payments/cases/{case_id}/confirm-funds')
 async def confirm_funds(case_id: str, p: FundsIn, authorization: str | None = Header(None, alias='Authorization'), x_role: str | None = Header(None, alias='X-Role')):
     require_owner(authorization, x_role)
-    rows = await get_backend().select('trade_payment_ledger', params={'payment_case_id':f'eq.{case_id}','limit':'1'}) or []
-    if not rows:
-        raise HTTPException(404, 'Payment case not found')
-    r = rows[0]
+    r = await get_case(case_id)
     if not r.get('payment_allowed'):
         raise HTTPException(409, 'Payment cannot be confirmed before quote and compliance clearance')
     paid = float(r.get('customer_paid') or 0) + p.amount
@@ -126,7 +155,7 @@ async def confirm_funds(case_id: str, p: FundsIn, authorization: str | None = He
     if paid > total:
         raise HTTPException(409, 'Confirmed customer funds exceed case total')
     status = 'PAID' if paid >= total else 'PARTIALLY_PAID'
-    await get_backend().patch('trade_payment_ledger', {
+    await update_rows('trade_payment_ledger', {
         'customer_paid':paid,
         'outstanding_balance':max(total-paid,0),
         'payment_status':status,
@@ -135,29 +164,54 @@ async def confirm_funds(case_id: str, p: FundsIn, authorization: str | None = He
         'supplier_payout_allowed':False,
         'shipment_release_allowed':False,
         'updated_at':now(),
-    }, params={'payment_case_id':f'eq.{case_id}'})
+    }, filters={'payment_case_id':case_id})
+    await append_event(case_id, 'FUNDS_CONFIRMED', amount=p.amount, external_reference=p.external_reference, owner_note=p.notes)
     return {'payment_case_id':case_id,'currency':'USD','customer_paid':paid,'outstanding_balance':max(total-paid,0),'status':status,'supplier_payout_allowed':False,'shipment_release_allowed':False}
 
 
-@app.post('/owner-payments/cases/{case_id}/authorize-release')
-async def authorize_release(case_id: str, p: ReleaseIn, authorization: str | None = Header(None, alias='Authorization'), x_role: str | None = Header(None, alias='X-Role')):
-    require_owner(authorization, x_role)
-    rows = await get_backend().select('trade_payment_ledger', params={'payment_case_id':f'eq.{case_id}','limit':'1'}) or []
-    if not rows:
-        raise HTTPException(404, 'Payment case not found')
-    r = rows[0]
+def validate_release(r: dict, p: ReleaseIn):
     if not p.compliance_still_cleared or not r.get('compliance_cleared'):
         raise HTTPException(409, 'Compliance clearance is required for release')
     if not p.customer_funds_confirmed or float(r.get('outstanding_balance') or 0) > 0:
         raise HTTPException(409, 'Full customer funds confirmation is required for release')
-    await get_backend().patch('trade_payment_ledger', {
+
+
+@app.post('/owner-payments/cases/{case_id}/authorize-supplier-payout')
+async def authorize_supplier_payout(case_id: str, p: ReleaseIn, authorization: str | None = Header(None, alias='Authorization'), x_role: str | None = Header(None, alias='X-Role')):
+    require_owner(authorization, x_role)
+    r = await get_case(case_id)
+    validate_release(r, p)
+    ts = now()
+    await update_rows('trade_payment_ledger', {
         'supplier_payout_allowed':True,
+        'supplier_payout_authorized_at':ts,
+        'supplier_payout_owner_note':p.owner_note,
+        'updated_at':ts,
+    }, filters={'payment_case_id':case_id})
+    await append_event(case_id, 'SUPPLIER_PAYOUT_AUTHORIZED', owner_note=p.owner_note)
+    return {'payment_case_id':case_id,'currency':'USD','supplier_payout_allowed':True,'shipment_release_allowed':bool(r.get('shipment_release_allowed')),'owner_authorized':True}
+
+
+@app.post('/owner-payments/cases/{case_id}/authorize-shipment-release')
+async def authorize_shipment_release(case_id: str, p: ReleaseIn, authorization: str | None = Header(None, alias='Authorization'), x_role: str | None = Header(None, alias='X-Role')):
+    require_owner(authorization, x_role)
+    r = await get_case(case_id)
+    validate_release(r, p)
+    ts = now()
+    await update_rows('trade_payment_ledger', {
         'shipment_release_allowed':True,
-        'release_authorized_at':now(),
-        'release_owner_note':p.owner_note,
-        'updated_at':now(),
-    }, params={'payment_case_id':f'eq.{case_id}'})
-    return {'payment_case_id':case_id,'currency':'USD','supplier_payout_allowed':True,'shipment_release_allowed':True,'owner_authorized':True}
+        'shipment_release_authorized_at':ts,
+        'shipment_release_owner_note':p.owner_note,
+        'updated_at':ts,
+    }, filters={'payment_case_id':case_id})
+    await append_event(case_id, 'SHIPMENT_RELEASE_AUTHORIZED', owner_note=p.owner_note)
+    return {'payment_case_id':case_id,'currency':'USD','supplier_payout_allowed':bool(r.get('supplier_payout_allowed')),'shipment_release_allowed':True,'owner_authorized':True}
+
+
+@app.post('/owner-payments/cases/{case_id}/authorize-release')
+async def deprecated_combined_release(case_id: str, p: ReleaseIn, authorization: str | None = Header(None, alias='Authorization'), x_role: str | None = Header(None, alias='X-Role')):
+    require_owner(authorization, x_role)
+    raise HTTPException(409, 'Combined release is disabled. Authorize supplier payout and shipment release separately.')
 
 
 @app.post('/owner-payments/reconcile')
@@ -165,6 +219,7 @@ async def reconciliation(payload: dict, authorization: str | None = Header(None,
     require_owner(authorization, x_role)
     payload['currency'] = 'USD'
     try:
-        return reconcile(**payload)
+        result = reconcile(**payload)
     except (PaymentError, TypeError) as exc:
         raise HTTPException(409, str(exc)) from exc
+    return result

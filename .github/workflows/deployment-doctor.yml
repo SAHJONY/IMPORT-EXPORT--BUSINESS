@@ -30,6 +30,9 @@ jobs:
       - name: Deployment Doctor
         run: npm run doctor
 
+      - name: Live Business Doctor
+        run: npm run doctor:live-business
+
       - name: Production frontend build
         run: npm run build
 
@@ -42,10 +45,16 @@ jobs:
           test -f dist/private-sector-cuba.html
           test -f dist/cuba-partners.html
           test -f public/cuba-partners.html
+          test -f public/owner-cuba-partners.html
+          test -f public/owner-payments.html
           test -f cuba_partner_api.py
-          grep -q '"/cuba-partners"' vercel.json
-          grep -q '"/cuba-partner(.*)"' vercel.json
-          echo "Build artifacts and Cuba Partner Program routes verified."
+          test -f payment_api.py
+          test -f physical_postgres.py
+          grep -Fq '"/cuba-partners"' vercel.json
+          grep -Fq '"/cuba-partners-api(.*)"' vercel.json
+          grep -Fq '"/owner/cuba-partners"' vercel.json
+          grep -Fq '"/owner-payments(.*)"' vercel.json
+          echo "Build artifacts, physical ledgers, and governed routes verified."
 
   production-smoke:
     if: github.ref == 'refs/heads/main'
@@ -63,5 +72,5 @@ jobs:
           node-version: 22
       - name: Smoke current production
         run: |
-          node tools/deployment-guard.mjs --url=https://import-export-business.vercel.app || true
-          curl -fsS --max-time 15 https://www.sahjony.com/cuba-partners >/dev/null || true
+          node tools/live-business-doctor.mjs --url=https://www.sahjony.com || true
+          node tools/deployment-guard.mjs --url=https://www.sahjony.com || true

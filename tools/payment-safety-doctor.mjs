@@ -5,6 +5,7 @@ const failures=[];
 const read=p=>fs.readFileSync(p,'utf8');
 const engine=read('payment_engine.py');
 const api=read('payment_api.py');
+const physical=read('physical_postgres.py');
 const ownerPage=read('public/owner-payments.html');
 const consumer=read('public/cuba-individual-consumers.html').toLowerCase();
 const business=read('public/landing.html').toLowerCase();
@@ -25,13 +26,20 @@ for(const token of requiredEngine) if(!engine.includes(token)) failures.push(`Pa
 const requiredApi=[
   "x_role != 'owner'",
   "verify_owner_token",
+  "from physical_postgres import",
   "currency: Literal['USD'] = 'USD'",
-  "supplier_payout_allowed':False",
-  "shipment_release_allowed':False",
+  "trade_payment_events",
+  "SUPPLIER_PAYOUT_AUTHORIZED",
+  "SHIPMENT_RELEASE_AUTHORIZED",
+  "authorize-supplier-payout",
+  "authorize-shipment-release",
+  "Combined release is disabled",
   "Full customer funds confirmation is required for release",
   "Compliance clearance is required for release"
 ];
 for(const token of requiredApi) if(!api.includes(token)) failures.push(`Payment API missing guard: ${token}`);
+
+for(const token of ['trade_payment_ledger','trade_payment_events']) if(!physical.includes(token)) failures.push(`Physical Postgres adapter missing allow-list: ${token}`);
 
 const requiredOwnerPage=[
   "sessionStorage.getItem('sahjony.owner.token')",
@@ -39,10 +47,14 @@ const requiredOwnerPage=[
   "Authorization':'Bearer '+token",
   "X-Role':'owner",
   "/owner-payments/cases",
-  "currency='USD'"
+  "authorize-supplier-payout",
+  "authorize-shipment-release",
+  "/events",
+  "p.currency='USD'"
 ];
-for(const token of requiredOwnerPage) if(!ownerPage.includes(token)) failures.push(`Owner payments page missing protection: ${token}`);
+for(const token of requiredOwnerPage) if(!ownerPage.includes(token)) failures.push(`Owner payments page missing protection/control: ${token}`);
 if(!ownerPage.includes('/global-language.js')) failures.push('Owner payments page missing global language runtime');
+if(ownerPage.includes("/authorize-release'")) failures.push('Owner payments UI still calls deprecated combined release endpoint');
 
 for(const token of ['/owner/payments','/owner-payments']){
   if(consumer.includes(token)) failures.push(`Consumer UI exposes private payment control: ${token}`);
@@ -58,4 +70,4 @@ const build=(cfg.builds||[]).find(b=>b.src==='payment_api.py');
 if(!build) failures.push('Payment API missing from Vercel builds');
 
 if(failures.length){for(const f of failures)console.error('FAIL ',f);process.exit(1)}
-console.log('PASS  USD-only payments are Owner-governed; supplier payout and shipment release remain fail-closed');
+console.log('PASS  Physical USD ledger, append-only events, and independent Owner payout/shipment release controls are fail-closed');
