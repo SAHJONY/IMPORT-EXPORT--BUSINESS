@@ -1,4 +1,4 @@
-import {Component,StrictMode,type ErrorInfo,type PropsWithChildren} from 'react';
+import {Component,StrictMode,type ErrorInfo,type PropsWithChildren,type ReactNode} from 'react';
 import {createRoot} from 'react-dom/client';
 import {I18nextProvider} from 'react-i18next';
 import App from './App';
@@ -38,7 +38,7 @@ window.addEventListener('error',e=>{console.error('SAHJONY_WINDOW_ERROR',e.error
 window.addEventListener('unhandledrejection',e=>{console.error('SAHJONY_UNHANDLED_REJECTION',e.reason);setTimeout(()=>{if(rootElement&&!rootElement.textContent?.trim())hardFallback(i18n.t('emergency.operationError'))},0)});
 
 function protectedRoleFromPath(){const first=location.pathname.split('/').filter(Boolean)[0];return first==='customer'||first==='employee'?first:null}
-function withI18n(node:React.ReactNode){return <I18nextProvider i18n={i18n}>{node}</I18nextProvider>}
+function withI18n(node:ReactNode){return <I18nextProvider i18n={i18n}>{node}</I18nextProvider>}
 function boot(){
  if(!rootElement)return;
  const path=location.pathname;
