@@ -35,6 +35,9 @@
     { "src": "/owner/cuba-fuels", "dest": "/owner-cuba-fuels.html" },
     { "src": "/owner/cuba/fuels", "dest": "/owner-cuba-fuels.html" },
     { "src": "/owner/energy/cuba-fuels", "dest": "/owner-cuba-fuels.html" },
+    { "src": "/owner/cuba-consumers", "dest": "/owner-cuba-consumers.html" },
+    { "src": "/owner/cuba/consumers", "dest": "/owner-cuba-consumers.html" },
+    { "src": "/owner/cuba-individual-consumers", "dest": "/owner-cuba-consumers.html" },
     { "src": "/owner/cuba-us-desk", "dest": "/cuba-us-desk.html" },
     { "src": "/cuba-private-sector", "dest": "/cuba-es.html" },
 
