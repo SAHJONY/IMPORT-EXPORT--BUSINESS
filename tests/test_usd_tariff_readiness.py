@@ -44,6 +44,44 @@ def test_usd_settlement_does_not_require_fx_execution_provider(monkeypatch):
     assert result["usd_only_transactions"] is True
 
 
+def test_measured_schema_evidence_closes_schema_gate(monkeypatch):
+    monkeypatch.delenv("PERSISTENCE_SCHEMA_VERIFIED", raising=False)
+    monkeypatch.delenv("INSFORGE_SCHEMAS_APPLIED", raising=False)
+    evidence = {
+        "verified": True,
+        "provider": "neon_postgres",
+        "required_tables": [
+            "cuba_partner_accounts",
+            "cuba_partner_referrals",
+            "trade_payment_events",
+            "trade_payment_ledger",
+        ],
+        "payment_event_index_count": 2,
+    }
+    result = evaluate_production_readiness(
+        runtime_ok=True,
+        connector_health=_connector_health(),
+        persistence_schema_evidence=evidence,
+    )
+    gate = next(g for g in result["gates"] if g["name"] == "persistence_schema_verified")
+    assert gate["passed"] is True
+    assert "verified directly" in gate["evidence"]
+    assert result["persistence_schema_evidence"] == evidence
+
+
+def test_failed_schema_evidence_does_not_fake_schema_gate(monkeypatch):
+    monkeypatch.delenv("PERSISTENCE_SCHEMA_VERIFIED", raising=False)
+    monkeypatch.delenv("INSFORGE_SCHEMAS_APPLIED", raising=False)
+    result = evaluate_production_readiness(
+        runtime_ok=True,
+        connector_health=_connector_health(),
+        persistence_schema_evidence={"verified": False, "reason": "missing required column"},
+    )
+    gate = next(g for g in result["gates"] if g["name"] == "persistence_schema_verified")
+    assert gate["passed"] is False
+    assert "missing required column" in gate["evidence"]
+
+
 def test_tariff_gate_still_requires_authoritative_source_reachability():
     result = evaluate_production_readiness(
         runtime_ok=True,
