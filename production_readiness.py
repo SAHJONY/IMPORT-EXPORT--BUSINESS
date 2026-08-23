@@ -89,6 +89,7 @@ def evaluate_production_readiness(*, runtime_ok: bool = True, e2e_ok: bool | Non
     persistent_backend_ok, persistent_backend_evidence = _persistent_backend_status()
     persistence_isolation_ok = _true('PERSISTENCE_ISOLATION_VERIFIED') or _true('INSFORGE_RLS_VERIFIED')
     persistence_schema_ok = _true('PERSISTENCE_SCHEMA_VERIFIED') or _true('INSFORGE_SCHEMAS_APPLIED')
+    owner_mfa_ok = _true('OWNER_MFA_REQUIRED') and _present('OWNER_TOTP_SECRET')
     ai_provider_configured = _present('OPENAI_API_KEY') and _present('ANTHROPIC_API_KEY')
 
     gates = [
@@ -97,7 +98,7 @@ def evaluate_production_readiness(*, runtime_ok: bool = True, e2e_ok: bool | Non
         ReadinessGate('production_identity', production_identity, True, identity_evidence, identity_remediation),
         ReadinessGate('persistence_isolation_verified', persistence_isolation_ok, True, 'Live tenant/role persistence isolation verification recorded', 'Run owner/staff/customer isolation tests and set PERSISTENCE_ISOLATION_VERIFIED=true only after evidence is recorded.'),
         ReadinessGate('persistence_schema_verified', persistence_schema_ok, True, 'Production persistence schema/bootstrap verification recorded', 'Verify the active durable backend schema and set PERSISTENCE_SCHEMA_VERIFIED=true only after the test passes.'),
-        ReadinessGate('owner_mfa', _true('OWNER_MFA_REQUIRED'), True, 'Owner MFA policy enabled', 'Require MFA for owner/admin access.'),
+        ReadinessGate('owner_mfa', owner_mfa_ok, True, 'Owner TOTP MFA policy enabled and a server-side TOTP secret is configured', 'Set OWNER_MFA_REQUIRED=true and configure OWNER_TOTP_SECRET through the production secret manager; never commit the secret to Git.'),
         ReadinessGate('ai_brain_providers', ai_provider_configured and _true('AI_BRAIN_E2E_VERIFIED'), True, 'OpenAI + Anthropic credentials and AI Brain E2E verification; model routing uses application defaults or explicit overrides', 'Configure ANTHROPIC_API_KEY, verify GPT/Claude routing and consensus, and prove ADVISORY_ONLY cannot cross transaction authority boundaries.'),
         ReadinessGate('restricted_party_screening', screening_ok, True, screening_evidence, 'Restore/configure authoritative sanctions screening connectivity.'),
         ReadinessGate('tariff_classification', tariff_ok, True, tariff_evidence, 'Configure authoritative tariff/HTS data provider.'),
