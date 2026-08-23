@@ -30,6 +30,7 @@ verifyOwnerRoute('/owner/energy/origination','/owner-energy-origination.html','E
 verifyOwnerRoute('/owner/energy/deal-flow','/owner-energy-deal-flow.html','Energy Deal Flow');
 verifyOwnerRoute('/owner/energy/revenue','/owner-energy-revenue.html','Energy Revenue');
 verifyOwnerRoute('/owner/energy/operations','/owner-energy-operations.html','Energy Operations');
+verifyOwnerRoute('/owner/energy/closing','/owner-energy-closing.html','Energy Transaction Room');
 verifyOwnerRoute('/owner/energy/intelligence','/owner-energy-intelligence.html','Energy Intelligence');
 verifyOwnerRoute('/owner/energy/providers','/owner-energy-providers.html','Energy Data Providers');
 verifyOwnerRoute('/owner/energy/compliance','/owner-energy-compliance.html','Energy Compliance');
