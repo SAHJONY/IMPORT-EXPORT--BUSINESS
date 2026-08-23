@@ -10,7 +10,7 @@
   const originalAttrs=new WeakMap();
   const originalText=new WeakMap();
 
-  const css=`.sahjony-language{position:fixed;right:18px;bottom:18px;z-index:2147483000;display:flex;gap:8px;align-items:center;padding:8px 10px;border:1px solid rgba(255,255,255,.16);border-radius:999px;background:rgba(5,14,24,.94);box-shadow:0 12px 40px rgba(0,0,0,.28);backdrop-filter:blur(14px);font:600 12px Inter,system-ui,sans-serif;color:#eef6ff}.sahjony-language select{max-width:180px;background:#0a1b2a;color:#eef6ff;border:1px solid rgba(255,255,255,.14);border-radius:999px;padding:7px 10px;font:inherit}.sahjony-language button{border:0;border-radius:999px;padding:7px 10px;background:#e9f3fb;color:#07111d;font:800 11px Inter,system-ui,sans-serif;cursor:pointer}.sahjony-language small{opacity:.76}.sahjony-language[data-state=error] small{color:#ffb8bd;opacity:1}@media(max-width:600px){.sahjony-language{left:12px;right:12px;bottom:12px;justify-content:center}.sahjony-language select{max-width:54vw}}`;
+  const css=`.sahjony-language{position:fixed;right:18px;bottom:18px;z-index:2147483000;display:flex;gap:8px;align-items:center;padding:8px 10px;border:1px solid rgba(255,255,255,.16);border-radius:999px;background:rgba(5,14,24,.94);box-shadow:0 12px 40px rgba(0,0,0,.28);backdrop-filter:blur(14px);font:600 12px Inter,system-ui,sans-serif;color:#eef6ff}.sahjony-language select{max-width:180px;background:#0a1b2a;color:#eef6ff;border:1px solid rgba(255,255,255,.14);border-radius:999px;padding:7px 10px;font:inherit}.sahjony-language button{border:0;border-radius:999px;padding:7px 10px;background:#e9f3fb;color:#07111d;font:800 11px Inter,system-ui,sans-serif;cursor:pointer}.sahjony-language small{opacity:.76}.sahjony-language[data-state=error] small{color:#ffb8bd;opacity:1}.sahjony-usdesk-card{margin:30px 0;border:1px solid rgba(255,255,255,.14);border-radius:22px;background:linear-gradient(145deg,#10283e,#081522);padding:22px;box-shadow:0 24px 70px rgba(0,0,0,.24);color:#f4f8fc}.sahjony-usdesk-card .flag{height:5px;border-radius:999px;background:linear-gradient(90deg,#1d70d6 0 33%,#fff 33% 66%,#d23d47 66%);margin-bottom:18px}.sahjony-usdesk-card .ey{font-size:10px;font-weight:900;letter-spacing:.17em;color:#e1bd73}.sahjony-usdesk-card h2{font-size:clamp(26px,5vw,44px);line-height:1;margin:10px 0 12px}.sahjony-usdesk-card p{color:#b8cad8;line-height:1.6;max-width:780px}.sahjony-usdesk-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}.sahjony-usdesk-actions a,.sahjony-usdesk-actions button{border:0;border-radius:11px;padding:12px 15px;font:850 12px Inter,system-ui,sans-serif;cursor:pointer;text-decoration:none}.sahjony-usdesk-actions a{background:linear-gradient(135deg,#64d9ff,#7ce8bd);color:#03121c}.sahjony-usdesk-actions button{background:#142b40;color:#eef6ff;border:1px solid rgba(255,255,255,.13)}.sahjony-usdesk-status{font-size:11px;color:#8fa7ba;margin-top:9px}@media(max-width:600px){.sahjony-language{left:12px;right:12px;bottom:12px;justify-content:center}.sahjony-language select{max-width:54vw}.sahjony-usdesk-card{padding:18px}}`;
   const style=document.createElement('style');style.textContent=css;document.head.appendChild(style);
 
   const meaningful=t=>{const s=(t||'').trim();return s.length>=2&&!/^[-+–—•·|/\\\s\d.,:$%()]+$/.test(s)};
@@ -89,6 +89,22 @@
     finally{busy=false;}
   }
 
+  function mountUsDeskShareCard(){
+    if(!location.pathname.toLowerCase().startsWith('/cuba-private-sector')||document.querySelector('.sahjony-usdesk-card'))return;
+    const card=document.createElement('section');
+    card.className='sahjony-usdesk-card';card.setAttribute('data-no-translate','true');
+    card.innerHTML='<div class="flag"></div><div class="ey">TARJETA DIGITAL · SAHJONY U.S. DESK</div><h2>Comparta nuestra Mesa de Estados Unidos.</h2><p>Envíe esta tarjeta por WhatsApp, mensaje o correo a otra empresa privada cubana que necesite proveedores, equipos, maquinaria, materias primas, compradores internacionales o coordinación comercial.</p><div class="sahjony-usdesk-actions"><a href="/cuba-us-desk-card">Abrir tarjeta de presentación</a><button type="button" data-share-card>Compartir enlace</button></div><div class="sahjony-usdesk-status" data-share-status></div>';
+    const anchor=document.querySelector('#solicitud');
+    if(anchor?.parentNode)anchor.parentNode.insertBefore(card,anchor);else document.body.appendChild(card);
+    const button=card.querySelector('[data-share-card]'),status=card.querySelector('[data-share-status]');
+    button?.addEventListener('click',async()=>{
+      const url=new URL('/cuba-us-desk-card',location.origin).href;
+      const data={title:'SAHJONY U.S. Desk',text:'Mesa de Estados Unidos para empresas privadas cubanas — sourcing global y comercio gestionado.',url};
+      try{if(navigator.share){await navigator.share(data);status.textContent='Tarjeta compartida.';}else{await navigator.clipboard.writeText(url);status.textContent='Enlace copiado para compartir.';}}
+      catch(e){if(e?.name!=='AbortError')status.textContent='Enlace: '+url;}
+    });
+  }
+
   async function mount(){
     const wrap=document.createElement('div');wrap.className='sahjony-language';wrap.setAttribute('data-no-translate','true');wrap.innerHTML='<small>Idioma</small><select aria-label="Idioma"></select><button type="button">Original</button>';
     document.body.appendChild(wrap);const select=wrap.querySelector('select');
@@ -98,6 +114,7 @@
     for(const loc of list){const o=document.createElement('option');o.value=loc;const base=loc.split('-')[0];let label=loc;try{label=names.of(base)||loc}catch{}o.textContent=label+' · '+loc;select.appendChild(o);}
     if(!list.includes(active))active=defaultLocale;select.value=active;
     select.addEventListener('change',()=>translate(select.value,{persist:true}));wrap.querySelector('button').addEventListener('click',()=>{select.value=defaultLocale;translate(defaultLocale,{persist:true});});
+    mountUsDeskShareCard();
     if(active!==defaultLocale)translate(active,{persist:Boolean(explicitLocale)});else setState('ok','Original');
   }
 
