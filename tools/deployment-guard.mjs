@@ -63,10 +63,34 @@ function checkRequiredFiles() {
     'public/cuba-private-sector.html',
     'public/cuba-es.html',
     'public/cuba-us-desk-card.html',
+    'public/global-language.js',
     'vercel.json',
     'unified_api.py'
   ];
   for (const f of required) exists(f) ? pass(`Required file present: ${f}`) : fail(`Required file missing: ${f}`);
+}
+
+function checkLanguageCoverage() {
+  const htmlFiles = [];
+  const rootIndex = path.join(root, 'index.html');
+  if (fs.existsSync(rootIndex)) htmlFiles.push(rootIndex);
+  const publicDir = path.join(root, 'public');
+  if (fs.existsSync(publicDir)) {
+    for (const entry of fs.readdirSync(publicDir, { withFileTypes: true })) {
+      if (entry.isFile() && entry.name.toLowerCase().endsWith('.html')) htmlFiles.push(path.join(publicDir, entry.name));
+    }
+  }
+  const missing = [];
+  for (const abs of htmlFiles) {
+    const rel = path.relative(root, abs);
+    const text = fs.readFileSync(abs, 'utf8');
+    if (!/src=["']\/global-language\.js["']/i.test(text)) missing.push(rel);
+  }
+  if (missing.length) {
+    for (const file of missing) fail(`Spanish localization layer missing: ${file}`);
+  } else {
+    pass(`Spanish localization layer present across ${htmlFiles.length} HTML entry pages`);
+  }
 }
 
 function checkVercelRoutes() {
@@ -160,6 +184,7 @@ function report() {
 
 checkRequiredFiles();
 scanRelativeImports();
+checkLanguageCoverage();
 checkVercelRoutes();
 if (!args.has('--bootstrap')) checkPackageGuard();
 if (smokeBase) await smokeTest(smokeBase);
