@@ -1,12 +1,10 @@
 import os
+import secrets
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
 
-# Import each existing FastAPI application and aggregate its routes into one
-# serverless entrypoint. This keeps the domain modules independent while
-# avoiding Vercel Hobby's per-deployment Serverless Function count limit.
-# Production routing is intentionally consolidated here.
+from auth import decode_neon_jwt, neon_auth_jwks_url, neon_auth_url, verify_employee_neon_token
 from insforge_backend import InsForgeConfigurationError
 from telegram_api import app as telegram_app
 from business_email_registry import app as business_email_app
@@ -35,26 +33,74 @@ from ai_brain_api import app as ai_brain_app
 from customer_crm_api import app as customer_crm_app
 from fastapi_server import app as core_app
 
-app = FastAPI(
-    title="SAHJONY Global Trade Unified API",
-    version="3.3.1",
-    docs_url=None,
-    redoc_url=None,
-)
+# Existing domain APIs historically validate an EMPLOYEE_TOKEN.  A private,
+# process-local bridge credential lets Neon-authenticated employees enter those
+# modules without exposing or weakening their existing authorization contracts.
+_RUNTIME_EMPLOYEE_BRIDGE_TOKEN = os.getenv("EMPLOYEE_TOKEN", "").strip() or secrets.token_urlsafe(48)
+os.environ.setdefault("EMPLOYEE_TOKEN", _RUNTIME_EMPLOYEE_BRIDGE_TOKEN)
+
+app = FastAPI(title="SAHJONY Global Trade Unified API", version="3.4.0", docs_url=None, redoc_url=None)
+
+
+@app.middleware("http")
+async def neon_identity_bridge(request: Request, call_next):
+    role = request.headers.get("X-Role", "").strip().lower()
+    authorization = request.headers.get("Authorization", "")
+    if role == "employee" and authorization.startswith("Bearer "):
+        supplied = authorization.removeprefix("Bearer ").strip()
+        claims = verify_employee_neon_token(supplied)
+        if claims:
+            headers = [(k, v) for k, v in request.scope.get("headers", []) if k.lower() not in {b"authorization", b"x-employee-id"}]
+            headers.append((b"authorization", f"Bearer {_RUNTIME_EMPLOYEE_BRIDGE_TOKEN}".encode()))
+            employee_id = str(claims.get("sub") or claims.get("email") or "staff")[:160]
+            headers.append((b"x-employee-id", employee_id.encode()))
+            request.scope["headers"] = headers
+    return await call_next(request)
 
 
 @app.exception_handler(InsForgeConfigurationError)
 async def insforge_configuration_error(_request: Request, exc: InsForgeConfigurationError):
-    """Convert missing backend configuration into an explicit fail-closed API response."""
-    return JSONResponse(
-        status_code=503,
-        content={
-            "detail": "Persistent trade backend is not configured for this deployment.",
-            "code": "INSFORGE_NOT_CONFIGURED",
-            "service": "insforge",
-            "required": ["INSFORGE_BASE_URL", "INSFORGE_API_KEY"],
-        },
-    )
+    return JSONResponse(status_code=503, content={
+        "detail": "Persistent trade backend is not configured for this deployment.",
+        "code": "INSFORGE_NOT_CONFIGURED",
+        "service": "insforge",
+        "required": ["INSFORGE_BASE_URL", "INSFORGE_API_KEY"],
+    })
+
+
+@app.get("/identity/health")
+async def identity_health():
+    return {
+        "status": "ok",
+        "service": "sahjony-identity",
+        "provider": "neon_auth",
+        "auth_url_configured": bool(neon_auth_url()),
+        "jwks_url_configured": bool(neon_auth_jwks_url()),
+        "customer_self_signup": True,
+        "employee_requires_approved_role": True,
+        "owner_uses_separate_restricted_gate": True,
+        "fail_closed": True,
+    }
+
+
+@app.get("/identity/session")
+async def identity_session(x_role: str | None = Header(None, alias="X-Role"), authorization: str | None = Header(None, alias="Authorization")):
+    if x_role not in {"customer", "employee"}:
+        raise HTTPException(400, "X-Role must be customer or employee")
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(401, "Missing Authorization")
+    token = authorization.removeprefix("Bearer ").strip()
+    claims = verify_employee_neon_token(token) if x_role == "employee" else decode_neon_jwt(token)
+    if not claims:
+        raise HTTPException(403, "Neon identity is invalid or this account is not approved for the requested role")
+    return {
+        "status": "authenticated",
+        "role": x_role,
+        "user_id": claims.get("sub"),
+        "email": claims.get("email"),
+        "name": claims.get("name"),
+        "identity_provider": "neon_auth",
+    }
 
 
 @app.get("/crm/health")
@@ -75,33 +121,13 @@ async def crm_runtime_health():
     }
 
 
-# Preserve every existing route path exactly as defined by the domain apps.
 for subapp in (
-    telegram_app,
-    business_email_app,
-    owner_auth_app,
-    core_app,
-    customer_crm_app,
-    communications_app,
-    documents_app,
-    document_storage_app,
-    shipments_app,
-    compliance_app,
-    commercial_app,
-    language_app,
-    collaboration_app,
-    finance_app,
-    countries_app,
-    cuba_current_app,
-    cuba_transition_app,
-    cuba_trade_desk_app,
-    cuba_private_business_app,
-    cuba_private_sector_lead_app,
-    managed_trade_app,
-    intermediary_app,
-    global_sourcing_app,
-    business_readiness_app,
-    us_import_app,
+    telegram_app, business_email_app, owner_auth_app, core_app, customer_crm_app,
+    communications_app, documents_app, document_storage_app, shipments_app,
+    compliance_app, commercial_app, language_app, collaboration_app, finance_app,
+    countries_app, cuba_current_app, cuba_transition_app, cuba_trade_desk_app,
+    cuba_private_business_app, cuba_private_sector_lead_app, managed_trade_app,
+    intermediary_app, global_sourcing_app, business_readiness_app, us_import_app,
     ai_brain_app,
 ):
     app.include_router(subapp.router)
