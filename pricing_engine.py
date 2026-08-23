@@ -5,6 +5,7 @@ from decimal import Decimal, ROUND_HALF_UP
 from typing import Literal
 
 Audience = Literal['INDIVIDUAL_CONSUMER', 'BUSINESS_CUSTOMER']
+TRANSACTION_CURRENCY = 'USD'
 
 
 def money(v: float | int | str | Decimal) -> Decimal:
@@ -19,6 +20,7 @@ class PricingPolicy:
     fx_buffer_pct: Decimal
     quote_valid_hours: int
     volume_pricing: bool
+    transaction_currency: str = TRANSACTION_CURRENCY
     customer_can_see_cost_basis: bool = False
 
 
@@ -81,14 +83,13 @@ def _quote(*, policy: PricingPolicy, supplier_cost: float, international_freight
     gross_profit = money(customer_price - landed)
     realized_margin = money((gross_profit / customer_price) * Decimal('100')) if customer_price else Decimal('0')
 
-    # Volume discount may never break the audience-specific minimum margin floor.
     if realized_margin < policy.minimum_margin_pct:
         raise PricingError('Discount would breach minimum margin floor')
 
     return {
         'audience': policy.audience,
         'customer_price': float(customer_price),
-        'currency': 'USD',
+        'currency': TRANSACTION_CURRENCY,
         'quote_valid_hours': policy.quote_valid_hours,
         'pricing_release': 'OWNER_REVIEW_REQUIRED',
         'margin_floor_passed': True,
@@ -100,6 +101,7 @@ def _quote(*, policy: PricingPolicy, supplier_cost: float, international_freight
             'realized_margin_pct': float(realized_margin),
             'requested_margin_pct': float(margin),
             'volume_discount_pct': float(volume_discount),
+            'cost_basis_currency': TRANSACTION_CURRENCY,
         },
     }
 
@@ -122,7 +124,9 @@ def public_quote_view(quote: dict) -> dict:
 
 def policy_snapshot() -> dict:
     return {
+        'transaction_currency': TRANSACTION_CURRENCY,
         'consumer': {k: (float(v) if isinstance(v, Decimal) else v) for k, v in asdict(CONSUMER_POLICY).items()},
         'business': {k: (float(v) if isinstance(v, Decimal) else v) for k, v in asdict(BUSINESS_POLICY).items()},
-        'hard_rule': 'INDIVIDUAL_CONSUMER_PRICE_NEVER_EQUALS_BUSINESS_PRICE_BY_SHARED_PRICE_RECORD',
+        'hard_rule': 'ALL_CUSTOMER_TRANSACTIONS_QUOTES_INVOICES_DEPOSITS_AND_BALANCES_ARE_USD',
+        'audience_rule': 'INDIVIDUAL_CONSUMER_PRICE_NEVER_EQUALS_BUSINESS_PRICE_BY_SHARED_PRICE_RECORD',
     }
