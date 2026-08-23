@@ -15,7 +15,7 @@
     { "src": "/owner-login", "dest": "/owner-login.html" },
     { "src": "/owner/telegram", "dest": "/owner-telegram.html" },
     { "src": "/owner/cuba-us-desk", "dest": "/cuba-us-desk.html" },
-    { "src": "/cuba-private-sector", "dest": "/cuba-private-sector.html" },
+    { "src": "/cuba-private-sector", "dest": "/cuba-es.html" },
 
     { "src": "/cuba-language(.*)", "dest": "cuba_language_api.py" },
     { "src": "/lead-scout/(health|leads.*)", "dest": "unified_api.py" },
