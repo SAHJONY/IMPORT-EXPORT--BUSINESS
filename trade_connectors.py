@@ -9,12 +9,12 @@ import xml.etree.ElementTree as ET
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from typing import Any
-from urllib.parse import quote_plus
 
 import httpx
 
 from credentialed_providers import airwallex_provider, fx_execution_provider, maersk_provider
 from market_intelligence import census_trade_feed, un_comtrade_preview_feed
+from usitc_tariff_provider import usitc_tariff_provider
 
 
 @dataclass(frozen=True)
@@ -34,10 +34,9 @@ class TradeConnectorRegistry:
     OFAC_NON_SDN_URL = "https://sanctionslistservice.ofac.treas.gov/api/PublicationPreview/exports/CONSOLIDATED.CSV"
     CSL_INFO_URL = "https://www.trade.gov/consolidated-screening-list"
     ITA_API_CATALOG_URL = "https://developer.trade.gov/apis"
-    USITC_HTS_SEARCH = "https://hts.usitc.gov/reststop/search"
     ECB_FX_URL = "https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml"
     FED_H10_URL = "https://www.federalreserve.gov/datadownload/choose.aspx?rel=h10"
-    USER_AGENT = "SAHJONY-Global-Trade-OS/2.5 (+https://import-export-business.vercel.app)"
+    USER_AGENT = "SAHJONY-Global-Trade-OS/3.0 (+https://www.sahjony.com)"
 
     def __init__(self) -> None:
         self._cache: dict[str, tuple[float, Any]] = {}
@@ -105,18 +104,7 @@ class TradeConnectorRegistry:
         }
 
     async def usitc_hts_search(self, keyword: str) -> dict[str, Any]:
-        keyword = keyword.strip()
-        if len(keyword) < 2:
-            raise ValueError("HTS keyword must contain at least two characters")
-        response = await self._get(f"{self.USITC_HTS_SEARCH}?keyword={quote_plus(keyword)}", timeout=20)
-        return {
-            "query": keyword,
-            "results": response.json(),
-            "source": "United States International Trade Commission Harmonized Tariff Schedule REST API",
-            "scope": "US_IMPORTS",
-            "checked_at": self._stamp(),
-            "notice": "Search results assist classification research; final classification and applicable duty treatment must be verified against the current HTS and trade-specific legal facts.",
-        }
+        return await usitc_tariff_provider.search(keyword)
 
     async def ecb_reference_rates(self) -> dict[str, Any]:
         xml_text, fetched_at = await self._cached_text("ecb_fx", self.ECB_FX_URL, 60 * 60)
@@ -168,8 +156,17 @@ class TradeConnectorRegistry:
         trade_key = os.getenv("TRADE_GOV_API_KEY", "").strip()
         checks.append(ConnectorHealth("trade_gov_authenticated_api", bool(trade_key), bool(trade_key) and await self._reachable(self.ITA_API_CATALOG_URL), True, "Optional authenticated ITA API access for CSL/FTA tariff APIs.", "U.S. International Trade Administration Data Services Platform", checked_at))
 
-        usitc_health_url = f"{self.USITC_HTS_SEARCH}?keyword=cotton"
-        checks.append(ConnectorHealth("tariff_classification", True, await self._reachable(usitc_health_url), True, "Official USITC HTS REST API. U.S. imports only; other jurisdictions remain corridor-specific and fail-closed.", "United States International Trade Commission", checked_at, "US_IMPORTS"))
+        usitc = await usitc_tariff_provider.health()
+        checks.append(ConnectorHealth(
+            "tariff_classification",
+            True,
+            bool(usitc.get("reachable")),
+            True,
+            f"Official USITC HTS source with resilient mode {usitc.get('mode', 'UNKNOWN')}. U.S. imports only; other jurisdictions remain corridor-specific and fail-closed.",
+            "United States International Trade Commission",
+            checked_at,
+            "US_IMPORTS",
+        ))
 
         checks.append(ConnectorHealth("ecb_fx_reference", True, await self._reachable(self.ECB_FX_URL), True, "Daily official reference rates for planning; not transaction execution rates.", "European Central Bank", checked_at))
         checks.append(ConnectorHealth("federal_reserve_h10", True, await self._reachable(self.FED_H10_URL), True, "Official Federal Reserve H.10 FX reference dataset discovery source.", "Board of Governors of the Federal Reserve System", checked_at))
