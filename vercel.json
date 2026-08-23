@@ -19,6 +19,7 @@
     { "src": "/owner/lead-search", "dest": "/owner-lead-search.html" },
     { "src": "/owner/energy", "dest": "/owner-energy-crude.html" },
     { "src": "/owner/energy/crude-oil", "dest": "/owner-energy-crude.html" },
+    { "src": "/owner/energy/origination", "dest": "/owner-energy-origination.html" },
     { "src": "/owner/cuba-us-desk", "dest": "/cuba-us-desk.html" },
     { "src": "/cuba-private-sector", "dest": "/cuba-es.html" },
 
