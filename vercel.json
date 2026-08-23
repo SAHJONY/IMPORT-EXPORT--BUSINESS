@@ -13,6 +13,7 @@
     { "src": "/owner/cuba-us-desk", "dest": "/cuba-us-desk.html" },
     { "src": "/cuba-private-sector", "dest": "/cuba-private-sector.html" },
 
+    { "src": "/activation(.*)", "dest": "unified_api.py" },
     { "src": "/identity(.*)", "dest": "unified_api.py" },
     { "src": "/telegram(.*)", "dest": "unified_api.py" },
     { "src": "/business-email(.*)", "dest": "unified_api.py" },
