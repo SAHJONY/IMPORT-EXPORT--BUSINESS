@@ -13,6 +13,11 @@ function verifyApiRoute(src,label){
   if(catchAllIndex>=0&&apiIndex>=0&&apiIndex>catchAllIndex)failures.push(`${label} route is shadowed by SPA catch-all`);
   if(fsIndex>=0&&apiIndex>=0&&apiIndex>fsIndex)failures.push(`${label} API route must be declared before filesystem/SPA fallback`);
 }
+function verifyOwnerRoute(src,dest,label){
+  const i=routes.findIndex(r=>r.src===src&&r.dest===dest);
+  if(i<0)failures.push(`Missing ${label} owner route`);
+  if(catchAllIndex>=0&&i>=0&&i>catchAllIndex)failures.push(`${label} owner route is shadowed by SPA catch-all`);
+}
 
 if(catchAllIndex<0)failures.push('Missing SPA catch-all route');
 verifyApiRoute('/trade-agent(.*)','Trade Agent');
@@ -20,9 +25,9 @@ verifyApiRoute('/trade-certification(.*)','Trade Certification');
 verifyApiRoute('/country-crm(.*)','Country CRM');
 verifyApiRoute('/lead-search(.*)','Global Lead Search');
 verifyApiRoute('/energy(.*)','SAHJONY Energy');
-
-const energyOwner=routes.findIndex(r=>r.src==='/owner/energy/crude-oil'&&r.dest==='/owner-energy-crude.html');
-if(energyOwner<0)failures.push('Missing Owner Crude Oil Command Center route');
+verifyOwnerRoute('/owner/energy/crude-oil','/owner-energy-crude.html','Crude Oil Command Center');
+verifyOwnerRoute('/owner/energy/origination','/owner-energy-origination.html','Energy Origination');
+verifyOwnerRoute('/owner/energy/intelligence','/owner-energy-intelligence.html','Energy Intelligence');
 
 if(failures.length){for(const f of failures)console.error('FAIL ',f);process.exit(1)}
-console.log('PASS  Trade Agent, Trade Certification, Country CRM, Global Lead Search, and Energy routes reach production safely');
+console.log('PASS  Trade, CRM, Lead Search, and all SAHJONY Energy routes reach production safely');
