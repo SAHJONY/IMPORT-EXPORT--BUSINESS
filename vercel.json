@@ -23,6 +23,7 @@
     { "src": "/owner/energy/intelligence", "dest": "/owner-energy-intelligence.html" },
     { "src": "/owner/energy/providers", "dest": "/owner-energy-providers.html" },
     { "src": "/owner/energy/compliance", "dest": "/owner-energy-compliance.html" },
+    { "src": "/owner/energy/deal-flow", "dest": "/owner-energy-deal-flow.html" },
     { "src": "/owner/cuba-us-desk", "dest": "/cuba-us-desk.html" },
     { "src": "/cuba-private-sector", "dest": "/cuba-es.html" },
 
