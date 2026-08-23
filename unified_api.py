@@ -31,6 +31,7 @@ from energy_provider_ingestion_api import app as energy_provider_ingestion_app
 from energy_provider_catalog_api import app as energy_provider_catalog_app
 from energy_ofac_screening_api import app as energy_ofac_screening_app
 from energy_eia_api import app as energy_eia_app
+from energy_deal_flow_api import app as energy_deal_flow_app
 from cuba_current_api import app as cuba_current_app
 from cuba_transition_api import app as cuba_transition_app
 from cuba_trade_desk_api import app as cuba_trade_desk_app
@@ -51,7 +52,7 @@ from fastapi_server import app as core_app
 _RUNTIME_EMPLOYEE_BRIDGE_TOKEN = os.getenv("EMPLOYEE_TOKEN", "").strip() or secrets.token_urlsafe(48)
 os.environ.setdefault("EMPLOYEE_TOKEN", _RUNTIME_EMPLOYEE_BRIDGE_TOKEN)
 
-app = FastAPI(title="SAHJONY Global Trade Unified API", version="5.6.0", docs_url=None, redoc_url=None)
+app = FastAPI(title="SAHJONY Global Trade Unified API", version="5.7.0", docs_url=None, redoc_url=None)
 
 
 @app.middleware("http")
@@ -136,7 +137,7 @@ async def crm_runtime_health():
 async def platform_health():
     activation = await activation_health()
     return {
-        "status": "ok", "service": "global-trade-intelligence-os", "version": "5.6.0",
+        "status": "ok", "service": "global-trade-intelligence-os", "version": "5.7.0",
         "release_policy": "fail-closed", "production_ready": activation["production_ready"],
         "readiness_score": activation["readiness_score"], "passed_gates": activation["passed_gates"],
         "total_gates": activation["total_gates"], "blocker_count": activation["blocker_count"],
@@ -151,13 +152,16 @@ async def platform_health():
         "energy_provider_normalization": True, "energy_authoritative_provider_catalog": True,
         "energy_ofac_authoritative_screening": True, "energy_ofac_complete_legacy_series": True,
         "energy_eia_native_adapter": True, "energy_eia_profile_driven": True,
+        "energy_buyer_requirement_ingestion": True, "energy_seller_offer_ingestion": True,
+        "energy_autonomous_matching_v2": True, "energy_deal_room_agent": True,
         "energy_fail_closed_release": True, "blockers": activation["blockers"],
     }
 
 
 for subapp in (
     activation_app, telegram_app, business_email_app, email_agent_app, owner_auth_app, core_app, customer_crm_app, country_crm_app, global_lead_search_app,
-    energy_app, energy_origination_app, energy_intelligence_app, energy_provider_hub_app, energy_provider_ingestion_app, energy_provider_catalog_app, energy_ofac_screening_app, energy_eia_app,
+    energy_app, energy_origination_app, energy_intelligence_app, energy_provider_hub_app, energy_provider_ingestion_app, energy_provider_catalog_app,
+    energy_ofac_screening_app, energy_eia_app, energy_deal_flow_app,
     communications_app, documents_app, document_storage_app, shipments_app, compliance_app, commercial_app, language_app, collaboration_app, finance_app,
     countries_app, cuba_current_app, cuba_transition_app, cuba_trade_desk_app, cuba_private_business_app, cuba_private_sector_lead_app,
     lead_scout_app, managed_trade_app, intermediary_app, global_sourcing_app, business_readiness_app, us_import_app,
