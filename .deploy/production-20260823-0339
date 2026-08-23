@@ -1,0 +1,2 @@
+Production deployment retry after DATABASE_URL was configured in Vercel.
+Target: production
