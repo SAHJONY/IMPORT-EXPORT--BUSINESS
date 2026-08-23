@@ -35,7 +35,7 @@ verifyApiRoute('/cuba-private(.*)','Cuba Private Sector API');
 verifyApiRoute('/cuba-desk(.*)','Cuba Authorized Trade Desk');
 verifyApiRoute('/cuba-transition(.*)','Cuba Transition API');
 verifyApiRoute('/consumer-marketplace(.*)','Consumer Marketplace','cuba_consumer_marketplace_api.py');
-verifyApiRoute('/cuba-partner-api(.*)','Cuba Partner Program','cuba_partner_api.py');
+verifyApiRoute('/cuba-partners-api(.*)','Cuba Partner Program','cuba_partner_api.py');
 
 if(routes.some(r=>r.src==='/cuba(.*)')) failures.push('Broad /cuba(.*) API route is forbidden because it can shadow public Cuba pages');
 verifyStaticRoute('/cuba-consumers','/cuba-individual-consumers.html','Public Cuba Individual Consumers');
@@ -56,6 +56,7 @@ verifyOwnerRoute('/owner/energy/compliance','/owner-energy-compliance.html','Ene
 verifyOwnerRoute('/owner/cuba-energy','/owner-cuba-energy.html','Cuba Energy Desk');
 verifyOwnerRoute('/owner/cuba-fuels','/owner-cuba-fuels.html','Cuba Private Sector Fuels Desk');
 verifyOwnerRoute('/owner/cuba-consumers','/owner-cuba-consumers.html','Cuba Individual Consumers CRM');
+verifyOwnerRoute('/owner/cuba-partners','/owner-cuba-partners.html','Cuba Partner Command Center');
 
 if(failures.length){for(const f of failures)console.error('FAIL ',f);process.exit(1)}
 console.log('PASS  Trade, Energy, Cuba, consumer marketplace, partner program, and Owner routes reach production safely without broad Cuba collisions');
