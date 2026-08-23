@@ -11,10 +11,11 @@ from pydantic import BaseModel, Field
 from auth import verify_owner_token
 from insforge_backend import get_backend
 
-app = FastAPI(title='SAHJONY Cuba Consumer Marketplace', version='1.0.1', docs_url=None, redoc_url=None)
+app = FastAPI(title='SAHJONY Cuba Consumer Marketplace', version='1.0.2', docs_url=None, redoc_url=None)
 
 Category = Literal['ENERGY_FUELS','SOLAR_BACKUP','HOME_APPLIANCES','HOUSEHOLD_GOODS','ELECTRONICS_COMMUNICATIONS','FOOD_AGRICULTURE','HEALTH_MEDICAL','OTHER']
 Status = Literal['RECEIVED','ELIGIBILITY_REVIEW','SOURCING','QUOTE_REVIEW','COMPLIANCE_REVIEW','PAYMENT_REVIEW','LOGISTICS_REVIEW','READY_FOR_CUSTOMER_DECISION','HOLD','CLOSED']
+Currency = Literal['USD']
 
 
 def now() -> str:
@@ -49,7 +50,7 @@ class ConsumerRequestIn(BaseModel):
     intended_use: str = Field(min_length=3, max_length=1200)
     personal_or_family_use: bool = True
     budget_amount: float | None = Field(default=None, ge=0)
-    budget_currency: str = Field(default='USD', min_length=3, max_length=3)
+    budget_currency: Currency = 'USD'
     notes: str | None = Field(default=None, max_length=2000)
     website: str | None = None
 
@@ -59,7 +60,7 @@ class OwnerReviewIn(BaseModel):
     owner_note: str = Field(min_length=2, max_length=2000)
     eligibility_route: Literal['SCP_CANDIDATE','CCD_CANDIDATE','AGR_CANDIDATE','BIS_LICENSE_REVIEW','OTHER_REVIEW','NOT_YET_CLASSIFIED','INELIGIBLE'] = 'NOT_YET_CLASSIFIED'
     quote_amount: float | None = Field(default=None, ge=0)
-    quote_currency: str = Field(default='USD', min_length=3, max_length=3)
+    quote_currency: Currency = 'USD'
     customer_message: str | None = Field(default=None, max_length=2000)
 
 
@@ -68,8 +69,9 @@ async def health():
     return {
         'status':'ok',
         'service':'sahjony-cuba-consumer-marketplace',
-        'version':'1.0.1',
+        'version':'1.0.2',
         'audience':'INDIVIDUAL_CONSUMER_ONLY',
+        'transaction_currency':'USD',
         'public_intake':True,
         'public_status_requires_secret_token':True,
         'automatic_legal_clearance':False,
@@ -110,7 +112,7 @@ async def create_request(p: ConsumerRequestIn):
         'intended_use':p.intended_use,
         'personal_or_family_use':True,
         'budget_amount':p.budget_amount,
-        'budget_currency':p.budget_currency.upper(),
+        'budget_currency':'USD',
         'notes':p.notes,
         'status':'RECEIVED',
         'eligibility_route':'NOT_YET_CLASSIFIED',
@@ -126,7 +128,8 @@ async def create_request(p: ConsumerRequestIn):
         'request_id':rid,
         'status_token':status_token,
         'status':'RECEIVED',
-        'message':'Solicitud recibida. SAHJONY revisará elegibilidad, abastecimiento, precio, cumplimiento, pago y logística antes de cualquier venta o envío.'
+        'currency':'USD',
+        'message':'Solicitud recibida. Todas las cotizaciones y transacciones de SAHJONY se realizan en dólares estadounidenses (USD).'
     }
 
 
@@ -145,7 +148,7 @@ async def public_status(request_id: str, x_request_token: str | None = Header(No
         'product_description':r.get('product_description'),
         'eligibility_route':r.get('eligibility_route'),
         'quote_amount':r.get('quote_amount'),
-        'quote_currency':r.get('quote_currency'),
+        'quote_currency':'USD',
         'customer_message':r.get('customer_message'),
         'updated_at':r.get('updated_at'),
         'payment_allowed':bool(r.get('payment_allowed')),
@@ -159,7 +162,10 @@ async def list_owner_requests(authorization: str | None = Header(None, alias='Au
     rows = await get_backend().select('cuba_consumer_marketplace_requests', params={'order':'created_at.desc','limit':'300'}) or []
     for r in rows:
         r.pop('status_token_hash', None)
-    return {'requests':rows}
+        r['budget_currency'] = 'USD'
+        if r.get('quote_amount') is not None:
+            r['quote_currency'] = 'USD'
+    return {'requests':rows, 'transaction_currency':'USD'}
 
 
 @app.patch('/consumer-marketplace/owner/requests/{request_id}')
@@ -176,7 +182,7 @@ async def review_request(request_id: str, p: OwnerReviewIn, authorization: str |
         'owner_note':p.owner_note,
         'eligibility_route':p.eligibility_route,
         'quote_amount':p.quote_amount,
-        'quote_currency':p.quote_currency.upper(),
+        'quote_currency':'USD',
         'customer_message':p.customer_message,
         'release_allowed':False,
         'payment_allowed':False,
@@ -184,4 +190,4 @@ async def review_request(request_id: str, p: OwnerReviewIn, authorization: str |
         'updated_at':ts,
     }
     await get_backend().patch('cuba_consumer_marketplace_requests', patch, params={'request_id':f'eq.{request_id}'})
-    return {'request_id':request_id, 'status':p.status, 'eligibility_route':p.eligibility_route, 'payment_allowed':False, 'shipment_allowed':False}
+    return {'request_id':request_id, 'status':p.status, 'eligibility_route':p.eligibility_route, 'quote_currency':'USD', 'payment_allowed':False, 'shipment_allowed':False}
