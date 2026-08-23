@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 from auth import verify_owner_token
 from insforge_backend import get_backend, persistent_backend_status
 
-app = FastAPI(title='SAHJONY Energy Provider Hub', version='1.1.0', docs_url=None, redoc_url=None)
+app = FastAPI(title='SAHJONY Energy Provider Hub', version='1.2.0', docs_url=None, redoc_url=None)
 
 ProviderKind = Literal['PRICE','AIS','SANCTIONS','REFINERY']
 
@@ -39,6 +39,10 @@ PROVIDERS = {
         'auth_env': 'ENERGY_SANCTIONS_AUTH_MODE', 'header_env': 'ENERGY_SANCTIONS_AUTH_HEADER', 'query_env': 'ENERGY_SANCTIONS_AUTH_QUERY',
         'path_env': 'ENERGY_SANCTIONS_SYNC_PATH', 'sync_query_env': 'ENERGY_SANCTIONS_SYNC_QUERY_JSON',
         'required_for': ['counterparty screening','vessel screening','transaction holds'],
+        'default_provider': 'OFAC SLS',
+        'default_url': 'https://sanctionslistservice.ofac.treas.gov/api/PublicationPreview/exports/',
+        'default_auth_mode': 'none',
+        'default_sync_path': 'SDN.CSV',
     },
     'REFINERY': {
         'label': 'Refinery / terminal intelligence',
@@ -79,17 +83,20 @@ def provider_config(kind: str) -> dict:
     k = kind.strip().upper()
     if k not in PROVIDERS: raise HTTPException(404, 'Unknown Energy provider kind')
     spec = PROVIDERS[k]
-    name = os.getenv(spec['provider_env'], '').strip(); url = os.getenv(spec['url_env'], '').strip(); key = os.getenv(spec['key_env'], '').strip()
-    auth_mode = os.getenv(spec['auth_env'], 'bearer').strip().lower() or 'bearer'
+    name = os.getenv(spec['provider_env'], '').strip() or str(spec.get('default_provider') or '').strip()
+    url = os.getenv(spec['url_env'], '').strip() or str(spec.get('default_url') or '').strip()
+    key = os.getenv(spec['key_env'], '').strip()
+    auth_mode = os.getenv(spec['auth_env'], str(spec.get('default_auth_mode') or 'bearer')).strip().lower() or 'bearer'
     auth_header = os.getenv(spec['header_env'], 'Authorization').strip() or 'Authorization'
     auth_query = os.getenv(spec['query_env'], 'api_key').strip() or 'api_key'
-    sync_path = os.getenv(spec['path_env'], '').strip()
+    sync_path = os.getenv(spec['path_env'], '').strip() or str(spec.get('default_sync_path') or '').strip()
     sync_query = json_env(spec['sync_query_env'])
     configured = bool(name and url); credential_configured = bool(key) or auth_mode == 'none'
     return {
         'kind': k, 'label': spec['label'], 'provider': name or None, 'configured': configured,
         'credential_configured': credential_configured, 'ready_for_test': configured and credential_configured,
         'auth_mode': auth_mode, 'required_for': spec['required_for'], 'scheduled_sync_path_configured': bool(sync_path),
+        'built_in_default': bool(spec.get('default_provider')) and not bool(os.getenv(spec['provider_env'], '').strip()),
         '_url': url, '_key': key, '_auth_header': auth_header, '_auth_query': auth_query,
         '_sync_path': sync_path, '_sync_query': sync_query,
     }
@@ -99,7 +106,7 @@ def public_config(c: dict) -> dict: return {k: v for k, v in c.items() if not k.
 
 
 def request_parts(c: dict) -> tuple[dict, dict]:
-    headers = {'User-Agent': 'SAHJONY-Energy-Provider-Hub/1.1', 'Accept': 'application/json,text/plain,*/*'}; params = {}; mode = c['auth_mode']; key = c['_key']
+    headers = {'User-Agent': 'SAHJONY-Energy-Provider-Hub/1.2 (+https://www.sahjony.com)', 'Accept': 'application/json,text/csv,text/plain,application/xml,*/*'}; params = {}; mode = c['auth_mode']; key = c['_key']
     if mode == 'bearer' and key: headers[c['_auth_header']] = f'Bearer {key}' if c['_auth_header'].lower() == 'authorization' else key
     elif mode == 'header' and key: headers[c['_auth_header']] = key
     elif mode == 'query' and key: params[c['_auth_query']] = key
@@ -142,7 +149,7 @@ async def perform_sync(kind: str, payload: SyncIn, trigger: str) -> dict:
                 except Exception: sample={'text':text}
     except Exception as exc: error=type(exc).__name__
     latency_ms=round((datetime.now(timezone.utc)-started).total_seconds()*1000)
-    row={'run_id':run_id,'provider_kind':kind,'provider_name':c['provider'],'status':status,'trigger':trigger,'http_status':http_status,'content_type':content_type,'content_sha256':content_hash,'content_bytes':content_bytes,'latency_ms':latency_ms,'sample':sample,'error':error,'created_at':now()}
+    row={'run_id':run_id,'provider_kind':kind,'provider_name':c['provider'],'status':status,'trigger':trigger,'source_url':url,'http_status':http_status,'content_type':content_type,'content_sha256':content_hash,'content_bytes':content_bytes,'latency_ms':latency_ms,'sample':sample,'error':error,'created_at':now()}
     await get_backend().insert('energy_provider_sync_runs',row)
     return row
 
@@ -150,7 +157,9 @@ async def perform_sync(kind: str, payload: SyncIn, trigger: str) -> dict:
 @app.get('/energy-providers/health')
 async def health():
     p=persistent_backend_status(); configs=[provider_config(k) for k in PROVIDERS]; configured=sum(1 for c in configs if c['ready_for_test'])
-    return {'status':'ok' if p['configured'] else 'configuration_required','service':'sahjony-energy-provider-hub','provider_slots':4,'configured_slots':configured,'all_feeds_connected':configured==4,'pricing_connected':provider_config('PRICE')['ready_for_test'],'ais_connected':provider_config('AIS')['ready_for_test'],'sanctions_connected':provider_config('SANCTIONS')['ready_for_test'],'refinery_connected':provider_config('REFINERY')['ready_for_test'],'cron_secret_configured':bool(os.getenv('CRON_SECRET','').strip()),'secrets_exposed':False,'automatic_trade_authority':False,'fail_closed':True,'persistence_provider':p['provider']}
+    latest=await latest_runs() if p['configured'] else {}
+    sanctions_run=latest.get('SANCTIONS') or {}
+    return {'status':'ok' if p['configured'] else 'configuration_required','service':'sahjony-energy-provider-hub','provider_slots':4,'configured_slots':configured,'all_feeds_connected':configured==4,'pricing_connected':provider_config('PRICE')['ready_for_test'],'ais_connected':provider_config('AIS')['ready_for_test'],'sanctions_connected':provider_config('SANCTIONS')['ready_for_test'],'sanctions_provider':provider_config('SANCTIONS')['provider'],'sanctions_last_sync_status':sanctions_run.get('status'),'refinery_connected':provider_config('REFINERY')['ready_for_test'],'cron_secret_configured':bool(os.getenv('CRON_SECRET','').strip()),'secrets_exposed':False,'automatic_trade_authority':False,'fail_closed':True,'persistence_provider':p['provider']}
 
 
 @app.get('/energy-providers')
