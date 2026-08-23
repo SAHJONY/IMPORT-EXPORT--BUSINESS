@@ -1,9 +1,13 @@
-from fastapi import FastAPI
+import os
+
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 
 # Import each existing FastAPI application and aggregate its routes into one
 # serverless entrypoint. This keeps the domain modules independent while
 # avoiding Vercel Hobby's per-deployment Serverless Function count limit.
 # Production routing is intentionally consolidated here.
+from insforge_backend import InsForgeConfigurationError
 from telegram_api import app as telegram_app
 from business_email_registry import app as business_email_app
 from owner_auth_api import app as owner_auth_app
@@ -33,10 +37,43 @@ from fastapi_server import app as core_app
 
 app = FastAPI(
     title="SAHJONY Global Trade Unified API",
-    version="3.3.0",
+    version="3.3.1",
     docs_url=None,
     redoc_url=None,
 )
+
+
+@app.exception_handler(InsForgeConfigurationError)
+async def insforge_configuration_error(_request: Request, exc: InsForgeConfigurationError):
+    """Convert missing backend configuration into an explicit fail-closed API response."""
+    return JSONResponse(
+        status_code=503,
+        content={
+            "detail": "Persistent trade backend is not configured for this deployment.",
+            "code": "INSFORGE_NOT_CONFIGURED",
+            "service": "insforge",
+            "required": ["INSFORGE_BASE_URL", "INSFORGE_API_KEY"],
+        },
+    )
+
+
+@app.get("/crm/health")
+async def crm_runtime_health():
+    base_url = bool(os.getenv("INSFORGE_BASE_URL", "").strip())
+    api_key = bool(os.getenv("INSFORGE_API_KEY", "").strip())
+    configured = base_url and api_key
+    return {
+        "status": "ok" if configured else "configuration_required",
+        "service": "customer-crm",
+        "public_intake": True,
+        "fail_closed_promotion": True,
+        "persistence": "insforge",
+        "backend_configured": configured,
+        "insforge_base_url_configured": base_url,
+        "insforge_api_key_configured": api_key,
+        "operational": configured,
+    }
+
 
 # Preserve every existing route path exactly as defined by the domain apps.
 for subapp in (
