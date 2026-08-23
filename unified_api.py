@@ -21,6 +21,7 @@ from translation_api import app as language_app
 from collaboration_api import app as collaboration_app
 from finance_api import app as finance_app
 from country_activation_api import app as countries_app
+from country_crm_api import app as country_crm_app
 from cuba_current_api import app as cuba_current_app
 from cuba_transition_api import app as cuba_transition_app
 from cuba_trade_desk_api import app as cuba_trade_desk_app
@@ -41,7 +42,7 @@ from fastapi_server import app as core_app
 _RUNTIME_EMPLOYEE_BRIDGE_TOKEN = os.getenv("EMPLOYEE_TOKEN", "").strip() or secrets.token_urlsafe(48)
 os.environ.setdefault("EMPLOYEE_TOKEN", _RUNTIME_EMPLOYEE_BRIDGE_TOKEN)
 
-app = FastAPI(title="SAHJONY Global Trade Unified API", version="3.9.0", docs_url=None, redoc_url=None)
+app = FastAPI(title="SAHJONY Global Trade Unified API", version="4.0.0", docs_url=None, redoc_url=None)
 
 
 @app.middleware("http")
@@ -70,10 +71,7 @@ async def persistent_backend_configuration_error(_request: Request, exc: Persist
         "provider": status["provider"],
         "accepted_backends": ["neon_postgres", "insforge"],
         "required_any_of": [
-            ["DATABASE_URL"],
-            ["POSTGRES_URL"],
-            ["NEON_DATABASE_URL"],
-            ["INSFORGE_BASE_URL", "INSFORGE_API_KEY"],
+            ["DATABASE_URL"], ["POSTGRES_URL"], ["NEON_DATABASE_URL"], ["INSFORGE_BASE_URL", "INSFORGE_API_KEY"],
         ],
         "fail_closed": True,
     })
@@ -82,15 +80,10 @@ async def persistent_backend_configuration_error(_request: Request, exc: Persist
 @app.get("/identity/health")
 async def identity_health():
     return {
-        "status": "ok",
-        "service": "sahjony-identity",
-        "provider": "neon_auth",
-        "auth_url_configured": bool(neon_auth_url()),
-        "jwks_url_configured": bool(neon_auth_jwks_url()),
-        "customer_self_signup": True,
-        "employee_requires_approved_role": True,
-        "owner_uses_separate_restricted_gate": True,
-        "fail_closed": True,
+        "status": "ok", "service": "sahjony-identity", "provider": "neon_auth",
+        "auth_url_configured": bool(neon_auth_url()), "jwks_url_configured": bool(neon_auth_jwks_url()),
+        "customer_self_signup": True, "employee_requires_approved_role": True,
+        "owner_uses_separate_restricted_gate": True, "fail_closed": True,
     }
 
 
@@ -104,14 +97,7 @@ async def identity_session(x_role: str | None = Header(None, alias="X-Role"), au
     claims = verify_employee_neon_token(token) if x_role == "employee" else decode_neon_jwt(token)
     if not claims:
         raise HTTPException(403, "Neon identity is invalid or this account is not approved for the requested role")
-    return {
-        "status": "authenticated",
-        "role": x_role,
-        "user_id": claims.get("sub"),
-        "email": claims.get("email"),
-        "name": claims.get("name"),
-        "identity_provider": "neon_auth",
-    }
+    return {"status": "authenticated", "role": x_role, "user_id": claims.get("sub"), "email": claims.get("email"), "name": claims.get("name"), "identity_provider": "neon_auth"}
 
 
 @app.get("/backend/health")
@@ -131,14 +117,10 @@ async def crm_runtime_health():
     status = persistent_backend_status()
     return {
         "status": "ok" if status["configured"] else "configuration_required",
-        "service": "customer-crm",
-        "public_intake": True,
-        "fail_closed_promotion": True,
-        "persistence": status["provider"],
-        "backend_configured": status["configured"],
-        "operational": status["configured"],
-        "database_url_configured": status["database_url_configured"],
-        "insforge_configured": status["insforge_configured"],
+        "service": "customer-crm", "public_intake": True, "fail_closed_promotion": True,
+        "country_segmentation": True, "cuba_department_permanent": True,
+        "persistence": status["provider"], "backend_configured": status["configured"], "operational": status["configured"],
+        "database_url_configured": status["database_url_configured"], "insforge_configured": status["insforge_configured"],
     }
 
 
@@ -146,37 +128,24 @@ async def crm_runtime_health():
 async def platform_health():
     activation = await activation_health()
     return {
-        "status": "ok",
-        "service": "global-trade-intelligence-os",
-        "version": "3.9.0",
-        "release_policy": "fail-closed",
-        "production_ready": activation["production_ready"],
-        "readiness_score": activation["readiness_score"],
-        "passed_gates": activation["passed_gates"],
-        "total_gates": activation["total_gates"],
-        "blocker_count": activation["blocker_count"],
-        "release_gate": activation["release_gate"],
-        "identity_provider": activation["providers"]["identity"]["provider"],
-        "persistence_provider": activation["providers"]["persistence"]["provider"],
-        "persistence_configured": activation["providers"]["persistence"]["configured"],
-        "openai_configured": activation["providers"]["ai"]["openai_configured"],
-        "anthropic_configured": activation["providers"]["ai"]["anthropic_configured"],
-        "translation_configured": activation["providers"]["translation"]["configured"],
-        "email_agent_control_plane": True,
-        "trade_agent_control_plane": True,
-        "trade_workflow_certification_monitor": True,
-        "blockers": activation["blockers"],
+        "status": "ok", "service": "global-trade-intelligence-os", "version": "4.0.0",
+        "release_policy": "fail-closed", "production_ready": activation["production_ready"],
+        "readiness_score": activation["readiness_score"], "passed_gates": activation["passed_gates"],
+        "total_gates": activation["total_gates"], "blocker_count": activation["blocker_count"],
+        "release_gate": activation["release_gate"], "identity_provider": activation["providers"]["identity"]["provider"],
+        "persistence_provider": activation["providers"]["persistence"]["provider"], "persistence_configured": activation["providers"]["persistence"]["configured"],
+        "openai_configured": activation["providers"]["ai"]["openai_configured"], "anthropic_configured": activation["providers"]["ai"]["anthropic_configured"],
+        "translation_configured": activation["providers"]["translation"]["configured"], "email_agent_control_plane": True,
+        "trade_agent_control_plane": True, "trade_workflow_certification_monitor": True,
+        "country_segmented_crm": True, "cuba_crm_department": True, "blockers": activation["blockers"],
     }
 
 
 for subapp in (
-    activation_app,
-    telegram_app, business_email_app, email_agent_app, owner_auth_app, core_app, customer_crm_app,
-    communications_app, documents_app, document_storage_app, shipments_app,
-    compliance_app, commercial_app, language_app, collaboration_app, finance_app,
-    countries_app, cuba_current_app, cuba_transition_app, cuba_trade_desk_app,
-    cuba_private_business_app, cuba_private_sector_lead_app, lead_scout_app, managed_trade_app,
-    intermediary_app, global_sourcing_app, business_readiness_app, us_import_app,
+    activation_app, telegram_app, business_email_app, email_agent_app, owner_auth_app, core_app, customer_crm_app, country_crm_app,
+    communications_app, documents_app, document_storage_app, shipments_app, compliance_app, commercial_app, language_app, collaboration_app, finance_app,
+    countries_app, cuba_current_app, cuba_transition_app, cuba_trade_desk_app, cuba_private_business_app, cuba_private_sector_lead_app,
+    lead_scout_app, managed_trade_app, intermediary_app, global_sourcing_app, business_readiness_app, us_import_app,
     ai_brain_app, ai_trade_agent_app, trade_certification_app,
 ):
     app.include_router(subapp.router)
