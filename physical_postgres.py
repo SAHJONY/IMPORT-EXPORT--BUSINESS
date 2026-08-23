@@ -14,6 +14,11 @@ _ALLOWED_TABLES = {
     "cuba_partner_accounts",
     "cuba_partner_referrals",
     "trade_payment_events",
+    "ledger_accounts",
+    "ledger_journals",
+    "ledger_entries",
+    "payment_reconciliations",
+    "beneficiary_change_requests",
 }
 
 
