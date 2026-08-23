@@ -33,13 +33,14 @@ from global_supplier_sourcing_api import app as global_sourcing_app
 from business_readiness_api import app as business_readiness_app
 from us_import_desk_api import app as us_import_app
 from ai_brain_api import app as ai_brain_app
+from ai_trade_agent_api import app as ai_trade_agent_app
 from customer_crm_api import app as customer_crm_app
 from fastapi_server import app as core_app
 
 _RUNTIME_EMPLOYEE_BRIDGE_TOKEN = os.getenv("EMPLOYEE_TOKEN", "").strip() or secrets.token_urlsafe(48)
 os.environ.setdefault("EMPLOYEE_TOKEN", _RUNTIME_EMPLOYEE_BRIDGE_TOKEN)
 
-app = FastAPI(title="SAHJONY Global Trade Unified API", version="3.7.0", docs_url=None, redoc_url=None)
+app = FastAPI(title="SAHJONY Global Trade Unified API", version="3.8.0", docs_url=None, redoc_url=None)
 
 
 @app.middleware("http")
@@ -146,7 +147,7 @@ async def platform_health():
     return {
         "status": "ok",
         "service": "global-trade-intelligence-os",
-        "version": "3.7.0",
+        "version": "3.8.0",
         "release_policy": "fail-closed",
         "production_ready": activation["production_ready"],
         "readiness_score": activation["readiness_score"],
@@ -161,6 +162,7 @@ async def platform_health():
         "anthropic_configured": activation["providers"]["ai"]["anthropic_configured"],
         "translation_configured": activation["providers"]["translation"]["configured"],
         "email_agent_control_plane": True,
+        "trade_agent_control_plane": True,
         "blockers": activation["blockers"],
     }
 
@@ -173,6 +175,6 @@ for subapp in (
     countries_app, cuba_current_app, cuba_transition_app, cuba_trade_desk_app,
     cuba_private_business_app, cuba_private_sector_lead_app, lead_scout_app, managed_trade_app,
     intermediary_app, global_sourcing_app, business_readiness_app, us_import_app,
-    ai_brain_app,
+    ai_brain_app, ai_trade_agent_app,
 ):
     app.include_router(subapp.router)
