@@ -1,11 +1,20 @@
 (()=>{
   const STORAGE='sahjony.locale';
+  const normalizeLocale=value=>{
+    const raw=String(value||'').trim().replace('_','-');
+    if(!raw)return '';
+    const lower=raw.toLowerCase();
+    if(lower==='en'||lower.startsWith('en-'))return 'en-US';
+    if(lower==='es'||lower.startsWith('es-'))return 'es';
+    return raw;
+  };
+  const baseLocale=value=>normalizeLocale(value).split('-')[0].toLowerCase();
+  const sameLanguage=(a,b)=>baseLocale(a)===baseLocale(b);
   const params=new URLSearchParams(location.search);
-  const requested=(params.get('lang')||params.get('locale')||'').trim();
-  const defaultLocale=document.documentElement.lang||'en-US';
-  const stored=localStorage.getItem(STORAGE);
-  const requestedLocale=requested.toLowerCase().startsWith('es')?'es':requested;
-  let active=requestedLocale||stored||defaultLocale;
+  const requestedLocale=normalizeLocale(params.get('lang')||params.get('locale')||'');
+  const sourceLocale=normalizeLocale(document.documentElement.dataset.sourceLocale||document.documentElement.lang||'en-US')||'en-US';
+  const storedLocale=normalizeLocale(localStorage.getItem(STORAGE)||'');
+  let active=requestedLocale||storedLocale||sourceLocale;
   let busy=false,cubaAuto=false;
   const skipTags=new Set(['SCRIPT','STYLE','NOSCRIPT','CODE','PRE']);
   const cache=new Map(),originalAttrs=new WeakMap(),originalText=new WeakMap();
@@ -17,21 +26,58 @@
   function textItems(root=document.body){const out=[];const w=document.createTreeWalker(root,NodeFilter.SHOW_TEXT,{acceptNode(n){const p=n.parentElement;if(!p||skipTags.has(p.tagName)||p.closest('[data-no-translate],.sahjony-language'))return NodeFilter.FILTER_REJECT;return meaningful(n.nodeValue)?NodeFilter.FILTER_ACCEPT:NodeFilter.FILTER_REJECT;}});let n;while((n=w.nextNode()))out.push({kind:'text',node:n,text:(n.nodeValue||'').trim()});return out;}
   function attributeItems(root=document.body){const out=[];const attrs=['placeholder','title','aria-label'];root.querySelectorAll('*').forEach(el=>{if(el.closest('[data-no-translate],.sahjony-language')||skipTags.has(el.tagName))return;for(const attr of attrs){const v=el.getAttribute(attr);if(meaningful(v))out.push({kind:'attr',el,attr,text:v.trim()});}if(el.tagName==='INPUT'&&['button','submit','reset'].includes((el.getAttribute('type')||'').toLowerCase())){const v=el.getAttribute('value');if(meaningful(v))out.push({kind:'attr',el,attr:'value',text:v.trim()});}if(el.tagName==='OPTION'){const v=(el.textContent||'').trim();if(meaningful(v))out.push({kind:'option',el,text:v});}});return out;}
   function remember(items){for(const item of items){if(item.kind==='text'&&!originalText.has(item.node))originalText.set(item.node,item.node.nodeValue||'');else if(item.kind==='attr'){let map=originalAttrs.get(item.el);if(!map){map={};originalAttrs.set(item.el,map)}if(!(item.attr in map))map[item.attr]=item.el.getAttribute(item.attr)||'';}else if(item.kind==='option'&&!originalText.has(item.el))originalText.set(item.el,item.el.textContent||'');}}
-  function restore(){const w=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT);let n;while((n=w.nextNode()))if(originalText.has(n))n.nodeValue=originalText.get(n);document.querySelectorAll('*').forEach(el=>{const map=originalAttrs.get(el);if(map)Object.entries(map).forEach(([k,v])=>el.setAttribute(k,v));if(el.tagName==='OPTION'&&originalText.has(el))el.textContent=originalText.get(el)});document.documentElement.lang=defaultLocale;document.documentElement.dir='ltr';}
+  function restore(){const w=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT);let n;while((n=w.nextNode()))if(originalText.has(n))n.nodeValue=originalText.get(n);document.querySelectorAll('*').forEach(el=>{const map=originalAttrs.get(el);if(map)Object.entries(map).forEach(([k,v])=>el.setAttribute(k,v));if(el.tagName==='OPTION'&&originalText.has(el))el.textContent=originalText.get(el)});document.documentElement.lang=sourceLocale;document.documentElement.dir='ltr';}
   function setState(state,msg){const w=document.querySelector('.sahjony-language');if(!w)return;w.dataset.state=state;const s=w.querySelector('small');if(s)s.textContent=msg||'';}
   async function geoDefault(){try{const r=await fetch('/cuba-language/geo',{cache:'no-store'});if(!r.ok)return null;const j=await r.json();cubaAuto=j.country==='CU'&&j.auto_translate===true;return j}catch{return null}}
   async function locales(){try{const r=await fetch('/language/locales',{cache:'no-store'});if(!r.ok)throw 0;const j=await r.json();return j.locales||[]}catch{return ['en-US','es','fr','pt-BR','de','it','nl','pl','ru','uk','tr','ar','he','fa','ur','hi','bn','zh-Hans','zh-Hant','ja','ko','vi','th','id','ms','fil','sw','am','ha','yo','ig','zu','af','el','cs','ro','hu','sv','no','da','fi']}}
 
-  function persistLocale(locale){active=locale;localStorage.setItem(STORAGE,locale);propagateLocale(locale);}
-  function propagateLocale(locale=active){const isSpanish=locale.toLowerCase().startsWith('es');document.querySelectorAll('a[href]').forEach(a=>{const raw=a.getAttribute('href');if(!raw||raw.startsWith('#')||raw.startsWith('mailto:')||raw.startsWith('tel:')||raw.startsWith('javascript:'))return;try{const u=new URL(raw,location.origin);if(u.origin!==location.origin)return;if(isSpanish)u.searchParams.set('lang','es');else u.searchParams.delete('lang');a.setAttribute('href',u.pathname+u.search+u.hash)}catch{}});}
+  function urlLocale(locale){return baseLocale(locale)==='en'?'en':baseLocale(locale)==='es'?'es':normalizeLocale(locale);}
+  function updateCurrentUrl(locale){try{const u=new URL(location.href);u.searchParams.delete('locale');u.searchParams.set('lang',urlLocale(locale));history.replaceState(history.state,'',u.pathname+u.search+u.hash)}catch{}}
+  function persistLocale(locale){const normalized=normalizeLocale(locale)||sourceLocale;active=normalized;localStorage.setItem(STORAGE,normalized);updateCurrentUrl(normalized);propagateLocale(normalized);}
+  function propagateLocale(locale=active){const marker=urlLocale(locale);document.querySelectorAll('a[href]').forEach(a=>{const raw=a.getAttribute('href');if(!raw||raw.startsWith('#')||raw.startsWith('mailto:')||raw.startsWith('tel:')||raw.startsWith('javascript:'))return;try{const u=new URL(raw,location.origin);if(u.origin!==location.origin)return;u.searchParams.delete('locale');u.searchParams.set('lang',marker);a.setAttribute('href',u.pathname+u.search+u.hash)}catch{}});}
 
-  async function translate(locale,{persist=true}={}){if(busy)return;active=locale;if(persist)persistLocale(locale);if(locale===defaultLocale){restore();setState('ok','Original');propagateLocale(locale);return}busy=true;const spanish=locale.toLowerCase().startsWith('es');setState('busy',spanish?'Traduciendo al español…':'Translating…');try{restore();const items=[...textItems(),...attributeItems()];remember(items);for(let i=0;i<items.length;i+=50){const chunk=items.slice(i,i+50),texts=chunk.map(x=>x.text),key=(spanish?'ES|':'')+locale+'|'+texts.join('\u241e');let result=cache.get(key);if(!result){const endpoint=spanish?'/cuba-language/translate-batch':'/language/ui-translate-batch';const body=spanish?{texts,target_locale:'es'}:{texts,target_locale:locale,source_type:'ui'};const r=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.detail||'Translation unavailable');result=j;cache.set(key,result)}(result.translations||[]).forEach((x,idx)=>{const item=chunk[idx];if(!item)return;const translated=x.text||item.text;if(item.kind==='text'){const raw=item.node.nodeValue||'';item.node.nodeValue=raw.replace(item.text,translated)}else if(item.kind==='attr')item.el.setAttribute(item.attr,translated);else if(item.kind==='option')item.el.textContent=translated});if(result.direction)document.documentElement.dir=result.direction;}document.documentElement.lang=locale;setState('ok',spanish?(cubaAuto?'Español · Cuba':'Español') : locale);propagateLocale(locale)}catch(e){restore();setState('error',spanish?'No se pudo traducir':'Translation unavailable');console.warn('SAHJONY language layer:',e)}finally{busy=false}}
+  async function translate(locale,{persist=true}={}){
+    if(busy)return;
+    const target=normalizeLocale(locale)||sourceLocale;
+    active=target;
+    if(persist)persistLocale(target);
+    if(sameLanguage(target,sourceLocale)){
+      restore();document.documentElement.lang=target;setState('ok',baseLocale(target)==='en'?'English':'Original');propagateLocale(target);return;
+    }
+    busy=true;
+    const spanish=baseLocale(target)==='es';
+    setState('busy',spanish?'Traduciendo al español…':'Translating…');
+    try{
+      restore();
+      const items=[...textItems(),...attributeItems()];remember(items);
+      for(let i=0;i<items.length;i+=50){
+        const chunk=items.slice(i,i+50),texts=chunk.map(x=>x.text),key=sourceLocale+'>'+target+'|'+texts.join('\u241e');let result=cache.get(key);
+        if(!result){
+          const endpoint=spanish?'/cuba-language/translate-batch':'/language/ui-translate-batch';
+          const body=spanish?{texts,target_locale:'es'}:{texts,target_locale:target,source_type:'ui'};
+          const r=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+          const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.detail||'Translation unavailable');result=j;cache.set(key,result);
+        }
+        (result.translations||[]).forEach((x,idx)=>{const item=chunk[idx];if(!item)return;const translated=x.text||item.text;if(item.kind==='text'){const raw=item.node.nodeValue||'';item.node.nodeValue=raw.replace(item.text,translated)}else if(item.kind==='attr')item.el.setAttribute(item.attr,translated);else if(item.kind==='option')item.el.textContent=translated});if(result.direction)document.documentElement.dir=result.direction;
+      }
+      document.documentElement.lang=target;setState('ok',spanish?(cubaAuto?'Español · Cuba':'Español'):target);propagateLocale(target);
+    }catch(e){restore();setState('error',spanish?'No se pudo traducir':'Translation unavailable');console.warn('SAHJONY language layer:',e)}finally{busy=false}
+  }
 
   function mountUsDeskShareCard(){if(!location.pathname.toLowerCase().startsWith('/cuba-private-sector')||document.querySelector('.sahjony-usdesk-card'))return;const card=document.createElement('section');card.className='sahjony-usdesk-card';card.setAttribute('data-no-translate','true');card.innerHTML='<div class="flag"></div><div class="ey">TARJETA DIGITAL · SAHJONY U.S. DESK</div><h2>Comparta nuestra Mesa de Estados Unidos.</h2><p>Envíe esta tarjeta por WhatsApp, mensaje o correo a otra empresa privada cubana que necesite proveedores, equipos, maquinaria, materias primas, compradores internacionales o coordinación comercial.</p><div class="sahjony-usdesk-actions"><a href="/us-desk-card?lang=es">Abrir tarjeta de presentación</a><button type="button" data-share-card>Compartir enlace</button></div><div class="sahjony-usdesk-status" data-share-status></div>';const anchor=document.querySelector('#solicitud');if(anchor?.parentNode)anchor.parentNode.insertBefore(card,anchor);else document.body.appendChild(card);const button=card.querySelector('[data-share-card]'),status=card.querySelector('[data-share-status]');button?.addEventListener('click',async()=>{const url=new URL('/us-desk-card?lang=es',location.origin).href;const data={title:'SAHJONY U.S. Desk',text:'Mesa de Estados Unidos para empresas privadas cubanas — abastecimiento global y comercio gestionado.',url};try{if(navigator.share){await navigator.share(data);status.textContent='Tarjeta compartida.'}else{await navigator.clipboard.writeText(url);status.textContent='Enlace copiado para compartir.'}}catch(e){if(e?.name!=='AbortError')status.textContent='Enlace: '+url}})}
 
-  async function mount(){const wrap=document.createElement('div');wrap.className='sahjony-language';wrap.setAttribute('data-no-translate','true');wrap.innerHTML='<small>Idioma</small><select aria-label="Idioma"></select><button type="button">Original</button>';document.body.appendChild(wrap);const select=wrap.querySelector('select');const geo=await geoDefault();if(!requestedLocale&&!stored&&geo?.locale)active=geo.locale;const list=await locales();if(!list.includes('es'))list.unshift('es');const names=new Intl.DisplayNames([navigator.language||'es'],{type:'language'});for(const loc of list){const o=document.createElement('option');o.value=loc;const base=loc.split('-')[0];let label=loc;try{label=names.of(base)||loc}catch{}o.textContent=label+' · '+loc;select.appendChild(o)}if(!list.includes(active))active=defaultLocale;select.value=active;select.addEventListener('change',()=>translate(select.value,{persist:true}));wrap.querySelector('button').addEventListener('click',()=>{select.value=defaultLocale;translate(defaultLocale,{persist:true})});mountUsDeskShareCard();propagateLocale(active);if(active!==defaultLocale)translate(active,{persist:Boolean(requestedLocale||stored)});else setState('ok','Original')}
+  async function mount(){
+    const wrap=document.createElement('div');wrap.className='sahjony-language';wrap.setAttribute('data-no-translate','true');wrap.innerHTML='<small>Idioma</small><select aria-label="Idioma"></select><button type="button">Original</button>';document.body.appendChild(wrap);
+    const select=wrap.querySelector('select');const geo=await geoDefault();if(!requestedLocale&&!storedLocale&&geo?.locale)active=normalizeLocale(geo.locale)||active;
+    const rawList=await locales();const list=[];for(const value of ['en-US','es',...rawList]){const normalized=normalizeLocale(value);if(normalized&&!list.includes(normalized))list.push(normalized)}
+    const names=new Intl.DisplayNames([navigator.language||'es'],{type:'language'});for(const loc of list){const o=document.createElement('option');o.value=loc;const base=baseLocale(loc);let label=loc;try{label=names.of(base)||loc}catch{}o.textContent=label+' · '+loc;select.appendChild(o)}
+    if(!list.includes(active))active=sourceLocale;select.value=active;
+    select.addEventListener('change',()=>translate(select.value,{persist:true}));
+    wrap.querySelector('button').addEventListener('click',()=>{select.value=sourceLocale;translate(sourceLocale,{persist:true})});
+    mountUsDeskShareCard();propagateLocale(active);if(!sameLanguage(active,sourceLocale))translate(active,{persist:Boolean(requestedLocale||storedLocale)});else{restore();document.documentElement.lang=active;setState('ok',baseLocale(active)==='en'?'English':'Original')}
+  }
 
-  const observer=new MutationObserver(()=>{propagateLocale(active);if(active!==defaultLocale&&!busy){clearTimeout(observer._t);observer._t=setTimeout(()=>translate(active,{persist:false}),180)}});
+  const observer=new MutationObserver(()=>{propagateLocale(active);if(!sameLanguage(active,sourceLocale)&&!busy){clearTimeout(observer._t);observer._t=setTimeout(()=>translate(active,{persist:false}),180)}});
   const boot=()=>{mount();observer.observe(document.body,{childList:true,subtree:true})};
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot);else boot();
 })();
