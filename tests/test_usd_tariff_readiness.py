@@ -1,5 +1,6 @@
 import asyncio
 
+import httpx
 import pytest
 
 from payment_engine import PaymentError, payment_plan
@@ -83,7 +84,7 @@ def test_usitc_provider_falls_back_to_official_web(monkeypatch):
     async def fake_get(url, *, timeout=20):
         calls.append(url)
         if "reststop/search" in url:
-            raise RuntimeError("simulated REST network failure")
+            raise httpx.ConnectError("simulated REST network failure")
         return _FakeResponse(
             text="<html><title>Harmonized Tariff Schedule</title><body>Search Results cotton 5201.00.00</body></html>",
             content_type="text/html",
