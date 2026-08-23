@@ -7,9 +7,9 @@ const fsIndex=routes.findIndex(r=>r.handle==='filesystem');
 const catchAllIndex=routes.findIndex(r=>r.src==='/(.*)'&&r.dest==='/index.html');
 const failures=[];
 
-function verifyApiRoute(src,label){
-  const apiIndex=routes.findIndex(r=>r.src===src&&r.dest==='unified_api.py');
-  if(apiIndex<0)failures.push(`Missing ${src} -> unified_api.py production route`);
+function verifyApiRoute(src,label,dest='unified_api.py'){
+  const apiIndex=routes.findIndex(r=>r.src===src&&r.dest===dest);
+  if(apiIndex<0)failures.push(`Missing ${src} -> ${dest} production route`);
   if(catchAllIndex>=0&&apiIndex>=0&&apiIndex>catchAllIndex)failures.push(`${label} route is shadowed by SPA catch-all`);
   if(fsIndex>=0&&apiIndex>=0&&apiIndex>fsIndex)failures.push(`${label} API route must be declared before filesystem/SPA fallback`);
 }
@@ -25,6 +25,7 @@ verifyApiRoute('/trade-certification(.*)','Trade Certification');
 verifyApiRoute('/country-crm(.*)','Country CRM');
 verifyApiRoute('/lead-search(.*)','Global Lead Search');
 verifyApiRoute('/energy(.*)','SAHJONY Energy');
+verifyApiRoute('/cuba-energy(.*)','Cuba Energy Desk','cuba_energy_desk_api.py');
 verifyOwnerRoute('/owner/energy/crude-oil','/owner-energy-crude.html','Crude Oil Command Center');
 verifyOwnerRoute('/owner/energy/origination','/owner-energy-origination.html','Energy Origination');
 verifyOwnerRoute('/owner/energy/deal-flow','/owner-energy-deal-flow.html','Energy Deal Flow');
@@ -34,6 +35,7 @@ verifyOwnerRoute('/owner/energy/closing','/owner-energy-closing.html','Energy Tr
 verifyOwnerRoute('/owner/energy/intelligence','/owner-energy-intelligence.html','Energy Intelligence');
 verifyOwnerRoute('/owner/energy/providers','/owner-energy-providers.html','Energy Data Providers');
 verifyOwnerRoute('/owner/energy/compliance','/owner-energy-compliance.html','Energy Compliance');
+verifyOwnerRoute('/owner/cuba-energy','/owner-cuba-energy.html','Cuba Energy Desk');
 
 if(failures.length){for(const f of failures)console.error('FAIL ',f);process.exit(1)}
-console.log('PASS  Trade, CRM, Lead Search, and all SAHJONY Energy routes reach production safely');
+console.log('PASS  Trade, CRM, Lead Search, SAHJONY Energy, and Cuba Energy routes reach production safely');
