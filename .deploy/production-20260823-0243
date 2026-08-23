@@ -1,0 +1,3 @@
+Production deployment trigger for latest main after governed 24/7 email agent routing.
+Target: Vercel production
+Expected head: b04bb4e70e7036d89eb20f8ab195a702e1f80fc9
