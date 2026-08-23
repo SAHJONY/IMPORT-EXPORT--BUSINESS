@@ -40,7 +40,12 @@ jobs:
           test -f dist/start.html
           test -f dist/cuba-private-sector.html
           test -f dist/private-sector-cuba.html
-          echo "Build artifacts verified."
+          test -f dist/cuba-partners.html
+          test -f public/cuba-partners.html
+          test -f cuba_partner_api.py
+          grep -q '"/cuba-partners"' vercel.json
+          grep -q '"/cuba-partner(.*)"' vercel.json
+          echo "Build artifacts and Cuba Partner Program routes verified."
 
   production-smoke:
     if: github.ref == 'refs/heads/main'
@@ -57,4 +62,6 @@ jobs:
         with:
           node-version: 22
       - name: Smoke current production
-        run: node tools/deployment-guard.mjs --url=https://import-export-business.vercel.app || true
+        run: |
+          node tools/deployment-guard.mjs --url=https://import-export-business.vercel.app || true
+          curl -fsS --max-time 15 https://www.sahjony.com/cuba-partners >/dev/null || true
