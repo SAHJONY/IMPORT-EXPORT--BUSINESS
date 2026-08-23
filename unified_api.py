@@ -22,6 +22,7 @@ from collaboration_api import app as collaboration_app
 from finance_api import app as finance_app
 from country_activation_api import app as countries_app
 from country_crm_api import app as country_crm_app
+from global_lead_search_api import app as global_lead_search_app
 from cuba_current_api import app as cuba_current_app
 from cuba_transition_api import app as cuba_transition_app
 from cuba_trade_desk_api import app as cuba_trade_desk_app
@@ -42,7 +43,7 @@ from fastapi_server import app as core_app
 _RUNTIME_EMPLOYEE_BRIDGE_TOKEN = os.getenv("EMPLOYEE_TOKEN", "").strip() or secrets.token_urlsafe(48)
 os.environ.setdefault("EMPLOYEE_TOKEN", _RUNTIME_EMPLOYEE_BRIDGE_TOKEN)
 
-app = FastAPI(title="SAHJONY Global Trade Unified API", version="4.0.0", docs_url=None, redoc_url=None)
+app = FastAPI(title="SAHJONY Global Trade Unified API", version="4.1.0", docs_url=None, redoc_url=None)
 
 
 @app.middleware("http")
@@ -119,6 +120,7 @@ async def crm_runtime_health():
         "status": "ok" if status["configured"] else "configuration_required",
         "service": "customer-crm", "public_intake": True, "fail_closed_promotion": True,
         "country_segmentation": True, "cuba_department_permanent": True,
+        "global_lead_search_control_plane": True,
         "persistence": status["provider"], "backend_configured": status["configured"], "operational": status["configured"],
         "database_url_configured": status["database_url_configured"], "insforge_configured": status["insforge_configured"],
     }
@@ -128,7 +130,7 @@ async def crm_runtime_health():
 async def platform_health():
     activation = await activation_health()
     return {
-        "status": "ok", "service": "global-trade-intelligence-os", "version": "4.0.0",
+        "status": "ok", "service": "global-trade-intelligence-os", "version": "4.1.0",
         "release_policy": "fail-closed", "production_ready": activation["production_ready"],
         "readiness_score": activation["readiness_score"], "passed_gates": activation["passed_gates"],
         "total_gates": activation["total_gates"], "blocker_count": activation["blocker_count"],
@@ -137,12 +139,13 @@ async def platform_health():
         "openai_configured": activation["providers"]["ai"]["openai_configured"], "anthropic_configured": activation["providers"]["ai"]["anthropic_configured"],
         "translation_configured": activation["providers"]["translation"]["configured"], "email_agent_control_plane": True,
         "trade_agent_control_plane": True, "trade_workflow_certification_monitor": True,
-        "country_segmented_crm": True, "cuba_crm_department": True, "blockers": activation["blockers"],
+        "country_segmented_crm": True, "cuba_crm_department": True, "global_lead_search_control_plane": True,
+        "blockers": activation["blockers"],
     }
 
 
 for subapp in (
-    activation_app, telegram_app, business_email_app, email_agent_app, owner_auth_app, core_app, customer_crm_app, country_crm_app,
+    activation_app, telegram_app, business_email_app, email_agent_app, owner_auth_app, core_app, customer_crm_app, country_crm_app, global_lead_search_app,
     communications_app, documents_app, document_storage_app, shipments_app, compliance_app, commercial_app, language_app, collaboration_app, finance_app,
     countries_app, cuba_current_app, cuba_transition_app, cuba_trade_desk_app, cuba_private_business_app, cuba_private_sector_lead_app,
     lead_scout_app, managed_trade_app, intermediary_app, global_sourcing_app, business_readiness_app, us_import_app,
