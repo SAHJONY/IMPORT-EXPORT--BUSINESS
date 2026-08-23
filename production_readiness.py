@@ -4,6 +4,8 @@ import os
 from dataclasses import asdict, dataclass
 from typing import Any
 
+from payment_engine import CANONICAL_TRANSACTION_CURRENCY, USD_ONLY_TRANSACTIONS
+
 
 @dataclass(frozen=True)
 class ReadinessGate:
@@ -68,20 +70,32 @@ def evaluate_production_readiness(*, runtime_ok: bool = True, e2e_ok: bool | Non
         screening_ok = _connector_pass(connector_health, 'ofac_sanctions_data')
         tariff_ok = _connector_pass(connector_health, 'tariff_classification')
         logistics_ok = _connector_pass(connector_health, 'logistics_tracking')
-        fx_ok = _connector_pass(connector_health, 'fx_execution')
+        external_fx_ok = _connector_pass(connector_health, 'fx_execution')
         screening_evidence = 'Live authoritative OFAC SLS connector reachable'
         tariff_evidence = 'Authoritative tariff/classification provider reachable'
         logistics_evidence = 'Live logistics provider reachable'
-        fx_evidence = 'Executable/settlement FX provider reachable'
     else:
         screening_ok = _present('TRADE_GOV_API_KEY') or _true('OFAC_DIRECT_SCREENING')
         tariff_ok = _present('TARIFF_DATA_PROVIDER')
         logistics_ok = _present('LOGISTICS_DATA_PROVIDER')
-        fx_ok = _present('FX_EXECUTION_PROVIDER') or _present('FX_DATA_PROVIDER')
+        external_fx_ok = _present('FX_EXECUTION_PROVIDER') or _present('FX_DATA_PROVIDER')
         screening_evidence = 'Government screening connector configured'
         tariff_evidence = 'Tariff/classification provider configured'
         logistics_evidence = 'Logistics provider configured'
-        fx_evidence = 'FX provider configured'
+
+    # Customer settlement is a hard USD-only application policy. An executable FX
+    # provider is therefore not a release dependency for customer transactions.
+    # Reference FX feeds remain useful for internal landed-cost planning where a
+    # supplier originates a non-USD price, but they must never mutate settlement
+    # currency or bypass the canonical USD payment engine.
+    if USD_ONLY_TRANSACTIONS and CANONICAL_TRANSACTION_CURRENCY == 'USD':
+        settlement_ok = True
+        settlement_evidence = 'Canonical customer transaction currency is USD-only; executable FX is not required for customer settlement. External FX remains optional for internal supplier-cost conversion/planning.'
+        settlement_remediation = 'No executable FX provider is required while the hard USD-only settlement policy remains enforced. If non-USD settlement is introduced, configure and verify an approved execution provider first.'
+    else:
+        settlement_ok = external_fx_ok
+        settlement_evidence = 'Executable/settlement FX provider reachable'
+        settlement_remediation = 'Configure bank/settlement FX provider.'
 
     translation_provider_ok = os.getenv('TRANSLATION_PROVIDER', '').strip().lower() == 'azure' and _present('AZURE_TRANSLATOR_ENDPOINT') and _present('AZURE_TRANSLATOR_KEY')
     secure_storage_configured = all(_present(x) for x in ['INSFORGE_S3_ENDPOINT', 'INSFORGE_S3_ACCESS_KEY_ID', 'INSFORGE_S3_SECRET_ACCESS_KEY', 'INSFORGE_STORAGE_BUCKET'])
@@ -101,9 +115,9 @@ def evaluate_production_readiness(*, runtime_ok: bool = True, e2e_ok: bool | Non
         ReadinessGate('owner_mfa', owner_mfa_ok, True, 'Owner TOTP MFA policy enabled and a server-side TOTP secret is configured', 'Set OWNER_MFA_REQUIRED=true and configure OWNER_TOTP_SECRET through the production secret manager; never commit the secret to Git.'),
         ReadinessGate('ai_brain_providers', ai_provider_configured and _true('AI_BRAIN_E2E_VERIFIED'), True, 'OpenAI + Anthropic credentials and AI Brain E2E verification; model routing uses application defaults or explicit overrides', 'Configure ANTHROPIC_API_KEY, verify GPT/Claude routing and consensus, and prove ADVISORY_ONLY cannot cross transaction authority boundaries.'),
         ReadinessGate('restricted_party_screening', screening_ok, True, screening_evidence, 'Restore/configure authoritative sanctions screening connectivity.'),
-        ReadinessGate('tariff_classification', tariff_ok, True, tariff_evidence, 'Configure authoritative tariff/HTS data provider.'),
+        ReadinessGate('tariff_classification', tariff_ok, True, tariff_evidence, 'Restore the authoritative USITC HTS source or another approved corridor-specific tariff provider.'),
         ReadinessGate('logistics_provider', logistics_ok and _true('CARRIER_E2E_VERIFIED'), True, logistics_evidence + '; carrier E2E verified', 'Verify real milestone normalization/ETA/exception flow.'),
-        ReadinessGate('fx_execution_provider', fx_ok, True, fx_evidence, 'Configure bank/settlement FX provider.'),
+        ReadinessGate('fx_execution_provider', settlement_ok, True, settlement_evidence, settlement_remediation),
         ReadinessGate('secure_document_storage', _true('INSFORGE_STORAGE_ENABLED') and secure_storage_configured and _true('SIGNED_DOCUMENT_STORAGE_VERIFIED'), True, 'Private signed document storage verified', 'Verify signed upload/download, malware gate, retention and legal hold.'),
         ReadinessGate('global_translation', translation_provider_ok and _true('MULTILINGUAL_E2E_VERIFIED'), True, 'Translation provider plus multilingual E2E verified', 'Verify language persistence, RTL and source preservation.'),
         ReadinessGate('country_activation_governance', _true('COUNTRY_ACTIVATION_E2E_VERIFIED'), True, 'Country/corridor activation governance verified', 'Verify READY/LIMITED/BLOCKED derivation and hypothetical/live isolation.'),
@@ -134,6 +148,8 @@ def evaluate_production_readiness(*, runtime_ok: bool = True, e2e_ok: bool | Non
         'production_ready': not blockers,
         'release_gate': 'READY' if not blockers else 'HOLD',
         'identity_provider': auth_provider,
+        'canonical_transaction_currency': CANONICAL_TRANSACTION_CURRENCY,
+        'usd_only_transactions': USD_ONLY_TRANSACTIONS,
         'gates': [asdict(g) for g in gates],
         'blockers': blockers,
     }
