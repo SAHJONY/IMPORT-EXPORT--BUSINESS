@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 from auth import verify_owner_token
 from insforge_backend import get_backend
 
-app=FastAPI(title='SAHJONY Cuba Authorized Trade Desk',version='1.1.0',docs_url=None,redoc_url=None)
+app=FastAPI(title='SAHJONY Cuba Authorized Trade Desk',version='1.2.0',docs_url=None,redoc_url=None)
 Role=Literal['owner','employee']
 REQUIRED_GATES=[
  ('private_business_eligibility','Cuban private business / independent private sector eligibility'),
@@ -87,7 +87,7 @@ async def audit(case_id,actor,event,summary,payload=None):
  await get_backend().insert('cuba_trade_audit',{'event_id':f'cta_{secrets.token_urlsafe(10)}','trade_case_id':case_id,'actor_role':actor['role'],'actor_id':actor['id'],'event_type':event,'summary':summary,'payload':payload or {},'created_at':now()})
 
 @app.get('/cuba-desk/health')
-async def health(): return {'status':'ok','service':'cuba-authorized-trade-desk','country':'CU','fail_closed':True,'required_gates':len(REQUIRED_GATES),'employee_release_authority':False,'private_business_eligibility_required_when_linked':True}
+async def health(): return {'status':'ok','service':'cuba-authorized-trade-desk','country':'CU','fail_closed':True,'required_gates':len(REQUIRED_GATES),'employee_release_authority':False,'private_business_eligibility_required_when_linked':True,'cuba_energy_desk_mounted':True,'cuba_private_fuels_desk_mounted':True}
 
 @app.get('/cuba-desk/employees')
 async def employees(x_role:str|None=Header(None,alias='X-Role'),authorization:str|None=Header(None,alias='Authorization'),x_employee_id:str|None=Header(None,alias='X-Employee-Id')):
@@ -182,3 +182,9 @@ async def hold(case_id:str,x_role:str|None=Header(None,alias='X-Role'),authoriza
  await get_backend().patch('cuba_trade_cases',{'status':'HOLD','release_allowed':False,'release_reason':'Manual compliance hold','owner_approved':False,'updated_at':ts},params={'trade_case_id':f'eq.{case_id}'})
  await audit(case_id,actor,'case_held','Transaction placed on compliance hold')
  return {'trade_case_id':case_id,'status':'HOLD','release_allowed':False}
+
+from cuba_energy_desk_api import app as cuba_energy_desk_app
+from cuba_private_fuels_desk_api import app as cuba_private_fuels_desk_app
+
+app.include_router(cuba_energy_desk_app.router)
+app.include_router(cuba_private_fuels_desk_app.router)
