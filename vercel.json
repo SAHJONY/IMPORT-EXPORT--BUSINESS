@@ -11,6 +11,7 @@
     { "src": "/start", "dest": "/start.html" },
     { "src": "/lead-scout", "dest": "/lead-scout.html" },
     { "src": "/scout", "dest": "/lead-scout.html" },
+    { "src": "/us-desk-card", "dest": "/cuba-us-desk-card.html" },
     { "src": "/cuba-us-desk-card", "dest": "/cuba-us-desk-card.html" },
     { "src": "/owner-login", "dest": "/owner-login.html" },
     { "src": "/owner/telegram", "dest": "/owner-telegram.html" },
