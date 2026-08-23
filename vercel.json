@@ -6,6 +6,7 @@
     { "src": "cuba_language_api.py", "use": "@vercel/python" },
     { "src": "cuba_energy_desk_api.py", "use": "@vercel/python" },
     { "src": "cuba_consumer_marketplace_api.py", "use": "@vercel/python" },
+    { "src": "cuba_partner_api.py", "use": "@vercel/python" },
     { "src": "pricing_api.py", "use": "@vercel/python" },
     { "src": "payment_api.py", "use": "@vercel/python" }
   ],
@@ -23,6 +24,8 @@
     { "src": "/cuba-consumers", "dest": "/cuba-individual-consumers.html" },
     { "src": "/individual-consumers", "dest": "/cuba-individual-consumers.html" },
     { "src": "/cuba-individual-consumers", "dest": "/cuba-individual-consumers.html" },
+    { "src": "/cuba-partners", "dest": "/cuba-partners.html" },
+    { "src": "/partners/cuba", "dest": "/cuba-partners.html" },
     { "src": "/owner-login", "dest": "/owner-login.html" },
     { "src": "/owner/pricing", "dest": "/owner-pricing.html" },
     { "src": "/owner/payments", "dest": "/owner-payments.html" },
@@ -54,6 +57,7 @@
 
     { "src": "/owner-payments(.*)", "dest": "payment_api.py" },
     { "src": "/owner-pricing(.*)", "dest": "pricing_api.py" },
+    { "src": "/cuba-partners-api(.*)", "dest": "cuba_partner_api.py" },
     { "src": "/consumer-marketplace(.*)", "dest": "cuba_consumer_marketplace_api.py" },
     { "src": "/cuba-energy(.*)", "dest": "cuba_energy_desk_api.py" },
     { "src": "/cuba-language(.*)", "dest": "cuba_language_api.py" },
