@@ -29,6 +29,8 @@
     { "src": "/owner-login", "dest": "/owner-login.html" },
     { "src": "/owner/pricing", "dest": "/owner-pricing.html" },
     { "src": "/owner/payments", "dest": "/owner-payments.html" },
+    { "src": "/owner/cuba-partners", "dest": "/owner-cuba-partners.html" },
+    { "src": "/owner/partners/cuba", "dest": "/owner-cuba-partners.html" },
     { "src": "/owner/telegram", "dest": "/owner-telegram.html" },
     { "src": "/owner/crm-countries", "dest": "/owner-crm-countries.html" },
     { "src": "/owner/lead-search", "dest": "/owner-lead-search.html" },
