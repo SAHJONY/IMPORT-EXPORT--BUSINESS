@@ -6,6 +6,7 @@ from fastapi.responses import JSONResponse
 
 from auth import decode_neon_jwt, neon_auth_jwks_url, neon_auth_url, verify_employee_neon_token
 from insforge_backend import InsForgeConfigurationError
+from activation_api import app as activation_app
 from telegram_api import app as telegram_app
 from business_email_registry import app as business_email_app
 from owner_auth_api import app as owner_auth_app
@@ -33,13 +34,13 @@ from ai_brain_api import app as ai_brain_app
 from customer_crm_api import app as customer_crm_app
 from fastapi_server import app as core_app
 
-# Existing domain APIs historically validate an EMPLOYEE_TOKEN.  A private,
+# Existing domain APIs historically validate an EMPLOYEE_TOKEN. A private,
 # process-local bridge credential lets Neon-authenticated employees enter those
 # modules without exposing or weakening their existing authorization contracts.
 _RUNTIME_EMPLOYEE_BRIDGE_TOKEN = os.getenv("EMPLOYEE_TOKEN", "").strip() or secrets.token_urlsafe(48)
 os.environ.setdefault("EMPLOYEE_TOKEN", _RUNTIME_EMPLOYEE_BRIDGE_TOKEN)
 
-app = FastAPI(title="SAHJONY Global Trade Unified API", version="3.4.0", docs_url=None, redoc_url=None)
+app = FastAPI(title="SAHJONY Global Trade Unified API", version="3.5.0", docs_url=None, redoc_url=None)
 
 
 @app.middleware("http")
@@ -122,6 +123,7 @@ async def crm_runtime_health():
 
 
 for subapp in (
+    activation_app,
     telegram_app, business_email_app, owner_auth_app, core_app, customer_crm_app,
     communications_app, documents_app, document_storage_app, shipments_app,
     compliance_app, commercial_app, language_app, collaboration_app, finance_app,
