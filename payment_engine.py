@@ -10,6 +10,8 @@ PaymentStatus = Literal[
     'PARTIALLY_PAID', 'PAID', 'ON_HOLD', 'REFUND_REVIEW', 'REFUNDED', 'CLOSED'
 ]
 PaymentRail = Literal['ACH', 'BANK_WIRE', 'CARD_PROCESSOR', 'OTHER_APPROVED_USD_RAIL']
+CANONICAL_TRANSACTION_CURRENCY = 'USD'
+USD_ONLY_TRANSACTIONS = True
 
 
 class PaymentError(ValueError):
@@ -23,7 +25,7 @@ def usd(value: float | int | str | Decimal) -> Decimal:
 @dataclass(frozen=True)
 class PaymentPolicy:
     audience: Audience
-    currency: str = 'USD'
+    currency: str = CANONICAL_TRANSACTION_CURRENCY
     automatic_supplier_payout: bool = False
     automatic_shipment_release: bool = False
     compliance_required_before_payment: bool = True
@@ -35,13 +37,13 @@ BUSINESS_PAYMENT_POLICY = PaymentPolicy(audience='BUSINESS_CUSTOMER')
 
 
 def validate_currency(currency: str) -> str:
-    if str(currency).upper() != 'USD':
+    if str(currency).upper() != CANONICAL_TRANSACTION_CURRENCY:
         raise PaymentError('All SAHJONY transactions must be denominated in USD')
-    return 'USD'
+    return CANONICAL_TRANSACTION_CURRENCY
 
 
 def payment_plan(*, audience: Audience, total_amount: float, deposit_amount: float = 0,
-                 currency: str = 'USD', compliance_cleared: bool = False,
+                 currency: str = CANONICAL_TRANSACTION_CURRENCY, compliance_cleared: bool = False,
                  quote_approved: bool = False) -> dict:
     validate_currency(currency)
     total = usd(total_amount)
@@ -62,7 +64,7 @@ def payment_plan(*, audience: Audience, total_amount: float, deposit_amount: flo
     balance_after_initial = total - amount_due_now
     return {
         'audience': audience,
-        'currency': 'USD',
+        'currency': CANONICAL_TRANSACTION_CURRENCY,
         'total_amount': float(total),
         'amount_due_now': float(amount_due_now),
         'balance_after_initial_payment': float(balance_after_initial),
@@ -76,7 +78,7 @@ def payment_plan(*, audience: Audience, total_amount: float, deposit_amount: flo
 
 def reconcile(*, total_amount: float, customer_paid: float, supplier_cost: float,
               freight_cost: float = 0, duties_fees: float = 0, payment_fees: float = 0,
-              other_costs: float = 0, currency: str = 'USD') -> dict:
+              other_costs: float = 0, currency: str = CANONICAL_TRANSACTION_CURRENCY) -> dict:
     validate_currency(currency)
     total = usd(total_amount)
     paid = usd(customer_paid)
@@ -87,7 +89,7 @@ def reconcile(*, total_amount: float, customer_paid: float, supplier_cost: float
     gross_profit = paid - total_cost
     outstanding = max(total - paid, Decimal('0.00'))
     return {
-        'currency': 'USD',
+        'currency': CANONICAL_TRANSACTION_CURRENCY,
         'customer_total': float(total),
         'customer_paid': float(paid),
         'outstanding_balance': float(outstanding),
@@ -102,6 +104,8 @@ def reconcile(*, total_amount: float, customer_paid: float, supplier_cost: float
 
 def policy_snapshot() -> dict:
     return {
+        'canonical_transaction_currency': CANONICAL_TRANSACTION_CURRENCY,
+        'usd_only_transactions': USD_ONLY_TRANSACTIONS,
         'consumer': asdict(CONSUMER_PAYMENT_POLICY),
         'business': asdict(BUSINESS_PAYMENT_POLICY),
         'hard_rules': [

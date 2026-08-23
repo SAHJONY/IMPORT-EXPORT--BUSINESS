@@ -12,7 +12,8 @@ const business=read('public/landing.html').toLowerCase();
 const cfg=JSON.parse(read('vercel.json'));
 
 const requiredEngine=[
-  "currency: str = 'USD'",
+  "CANONICAL_TRANSACTION_CURRENCY = 'USD'",
+  "USD_ONLY_TRANSACTIONS = True",
   "All SAHJONY transactions must be denominated in USD",
   "automatic_supplier_payout: bool = False",
   "automatic_shipment_release: bool = False",
@@ -22,6 +23,8 @@ const requiredEngine=[
   "NO_AUTOMATIC_SHIPMENT_RELEASE"
 ];
 for(const token of requiredEngine) if(!engine.includes(token)) failures.push(`Payment engine missing hard rule: ${token}`);
+if(!engine.includes("currency: str = CANONICAL_TRANSACTION_CURRENCY")) failures.push('Payment engine does not default policy currency to canonical transaction currency');
+if(!engine.includes("str(currency).upper() != CANONICAL_TRANSACTION_CURRENCY")) failures.push('Payment engine does not reject non-canonical transaction currencies');
 
 const requiredApi=[
   "x_role != 'owner'",
@@ -70,4 +73,4 @@ const build=(cfg.builds||[]).find(b=>b.src==='payment_api.py');
 if(!build) failures.push('Payment API missing from Vercel builds');
 
 if(failures.length){for(const f of failures)console.error('FAIL ',f);process.exit(1)}
-console.log('PASS  Physical USD ledger, append-only events, and independent Owner payout/shipment release controls are fail-closed');
+console.log('PASS  Physical canonical-USD ledger, append-only events, and independent Owner payout/shipment release controls are fail-closed');

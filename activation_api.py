@@ -5,10 +5,12 @@ from fastapi import FastAPI
 
 from auth import neon_auth_jwks_url, neon_auth_url
 from insforge_backend import persistent_backend_status
+from payment_engine import CANONICAL_TRANSACTION_CURRENCY, USD_ONLY_TRANSACTIONS
 from production_readiness import evaluate_production_readiness
+from production_schema_evidence import production_schema_evidence
 from trade_connectors import trade_connectors
 
-app = FastAPI(title="SAHJONY Production Activation Control", version="1.1.0", docs_url=None, redoc_url=None)
+app = FastAPI(title="SAHJONY Production Activation Control", version="1.3.0", docs_url=None, redoc_url=None)
 
 
 def _present(name: str) -> bool:
@@ -19,8 +21,9 @@ def _true(name: str) -> bool:
     return os.getenv(name, "false").strip().lower() == "true"
 
 
-def _provider_state() -> dict:
+def _provider_state(schema_evidence: dict | None = None) -> dict:
     persistence = persistent_backend_status()
+    schema_verified = bool((schema_evidence or {}).get("verified"))
     return {
         "identity": {
             "provider": "neon_auth",
@@ -31,7 +34,13 @@ def _provider_state() -> dict:
         "persistence": {
             **persistence,
             "rls_verified": _true("PERSISTENCE_ISOLATION_VERIFIED") or _true("INSFORGE_RLS_VERIFIED"),
-            "schemas_applied": _true("PERSISTENCE_SCHEMA_VERIFIED") or _true("INSFORGE_SCHEMAS_APPLIED"),
+            "schemas_applied": schema_verified or _true("PERSISTENCE_SCHEMA_VERIFIED") or _true("INSFORGE_SCHEMAS_APPLIED"),
+            "runtime_schema_evidence": schema_evidence,
+        },
+        "payments": {
+            "canonical_transaction_currency": CANONICAL_TRANSACTION_CURRENCY,
+            "usd_only_transactions": USD_ONLY_TRANSACTIONS,
+            "fx_execution_required_for_customer_settlement": not USD_ONLY_TRANSACTIONS,
         },
         "ai": {
             "openai_configured": _present("OPENAI_API_KEY"),
@@ -64,15 +73,13 @@ def _external_requirements() -> list[dict]:
     if not persistence["configured"]:
         requirements.append({"area": "persistence", "action": "Attach Neon/Postgres to Vercel so DATABASE_URL/POSTGRES_URL exists, or configure InsForge server credentials."})
     if not _present("ANTHROPIC_API_KEY"):
-        requirements.append({"area": "ai", "action": "Add ANTHROPIC_API_KEY in Vercel and run AI Brain E2E verification."})
+        requirements.append({"area": "ai", "action": "Add ANTHROPIC_API_KEY in Vercel and run AI Brain E2E verification for governed dual-model high-stakes consensus."})
     if not (_present("AZURE_TRANSLATOR_ENDPOINT") and _present("AZURE_TRANSLATOR_KEY")):
-        requirements.append({"area": "translation", "action": "Add Azure Translator endpoint/key/region and run multilingual E2E verification."})
-    if not _present("TARIFF_DATA_PROVIDER"):
-        requirements.append({"area": "classification", "action": "Connect an authoritative tariff/HTS classification provider."})
-    if not _present("LOGISTICS_DATA_PROVIDER"):
-        requirements.append({"area": "logistics", "action": "Connect the production carrier/freight tracking provider and verify E2E milestones."})
-    if not (_present("FX_EXECUTION_PROVIDER") or _present("FX_DATA_PROVIDER")):
-        requirements.append({"area": "settlement", "action": "Connect the production bank/settlement FX provider."})
+        requirements.append({"area": "translation", "action": "Add Azure Translator endpoint/key/region and run multilingual E2E verification for server-side document/message translation."})
+    if not _present("LOGISTICS_DATA_PROVIDER") and not _present("MAERSK_CLIENT_ID"):
+        requirements.append({"area": "logistics", "action": "Connect an approved production carrier/freight tracking account and verify E2E milestones."})
+    if not USD_ONLY_TRANSACTIONS and not (_present("FX_EXECUTION_PROVIDER") or _present("FX_DATA_PROVIDER")):
+        requirements.append({"area": "settlement", "action": "Connect the production bank/settlement FX provider before enabling non-USD customer settlement."})
     if not _true("BACKUP_RESTORE_TESTED"):
         requirements.append({"area": "resilience", "action": "Complete and record a database/storage restore drill."})
     if not _true("FIRST_LIVE_TRADE_CERTIFIED"):
@@ -83,10 +90,15 @@ def _external_requirements() -> list[dict]:
 @app.get("/activation/health")
 async def activation_health():
     connector_health = await trade_connectors.health()
-    readiness = evaluate_production_readiness(runtime_ok=True, connector_health=connector_health)
-    providers = _provider_state()
+    schema_evidence = await production_schema_evidence()
+    readiness = evaluate_production_readiness(
+        runtime_ok=True,
+        connector_health=connector_health,
+        persistence_schema_evidence=schema_evidence,
+    )
+    providers = _provider_state(schema_evidence)
     external = _external_requirements()
-    persistence_ready = providers["persistence"]["configured"]
+    persistence_ready = providers["persistence"]["configured"] and providers["persistence"]["schemas_applied"]
     return {
         "status": "ready" if readiness["production_ready"] else "activation_required",
         "service": "production-activation-control",
@@ -107,6 +119,8 @@ async def activation_health():
             "fail_closed": True,
             "no_fake_100_percent": True,
             "first_live_trade_required": True,
+            "canonical_transaction_currency": CANONICAL_TRANSACTION_CURRENCY,
+            "usd_only_transactions": USD_ONLY_TRANSACTIONS,
             "ai_has_release_authority": False,
         },
     }

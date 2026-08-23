@@ -2,6 +2,7 @@ import asyncio
 
 from credentialed_providers import ExecutableFXProvider, MaerskProvider
 from trade_connectors import TradeConnectorRegistry
+from usitc_tariff_provider import usitc_tariff_provider
 
 
 def test_maersk_requires_complete_server_credentials(monkeypatch):
@@ -31,14 +32,17 @@ def test_usitc_search_is_scoped_to_us_imports(monkeypatch):
     registry = TradeConnectorRegistry()
 
     class Response:
+        headers = {"content-type": "application/json"}
+
         def json(self):
             return [{"htsno": "0101.21.00", "description": "Purebred breeding animals"}]
 
-    async def fake_get(url, timeout=15):
+    async def fake_get(url, *, timeout=20):
         assert "hts.usitc.gov/reststop/search" in url
         return Response()
 
-    monkeypatch.setattr(registry, "_get", fake_get)
+    monkeypatch.setattr(usitc_tariff_provider, "_get", fake_get)
     result = asyncio.run(registry.usitc_hts_search("horses"))
     assert result["scope"] == "US_IMPORTS"
+    assert result["source_mode"] == "REST"
     assert result["results"][0]["htsno"] == "0101.21.00"
