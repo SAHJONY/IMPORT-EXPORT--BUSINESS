@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 from auth import verify_owner_token
 from insforge_backend import get_backend
 
-app = FastAPI(title='SAHJONY Cuba Consumer Marketplace', version='1.0.0', docs_url=None, redoc_url=None)
+app = FastAPI(title='SAHJONY Cuba Consumer Marketplace', version='1.0.1', docs_url=None, redoc_url=None)
 
 Category = Literal['ENERGY_FUELS','SOLAR_BACKUP','HOME_APPLIANCES','HOUSEHOLD_GOODS','ELECTRONICS_COMMUNICATIONS','FOOD_AGRICULTURE','HEALTH_MEDICAL','OTHER']
 Status = Literal['RECEIVED','ELIGIBILITY_REVIEW','SOURCING','QUOTE_REVIEW','COMPLIANCE_REVIEW','PAYMENT_REVIEW','LOGISTICS_REVIEW','READY_FOR_CUSTOMER_DECISION','HOLD','CLOSED']
@@ -51,7 +51,7 @@ class ConsumerRequestIn(BaseModel):
     budget_amount: float | None = Field(default=None, ge=0)
     budget_currency: str = Field(default='USD', min_length=3, max_length=3)
     notes: str | None = Field(default=None, max_length=2000)
-    website: str | None = None  # honeypot; legitimate clients leave blank
+    website: str | None = None
 
 
 class OwnerReviewIn(BaseModel):
@@ -68,7 +68,8 @@ async def health():
     return {
         'status':'ok',
         'service':'sahjony-cuba-consumer-marketplace',
-        'version':'1.0.0',
+        'version':'1.0.1',
+        'audience':'INDIVIDUAL_CONSUMER_ONLY',
         'public_intake':True,
         'public_status_requires_secret_token':True,
         'automatic_legal_clearance':False,
@@ -86,7 +87,7 @@ async def create_request(p: ConsumerRequestIn):
     if not p.phone and not p.email:
         raise HTTPException(422, 'Phone or email is required')
     if not p.personal_or_family_use:
-        raise HTTPException(409, 'This marketplace is for personal or immediate-family use. Business requests must use the Business section.')
+        raise HTTPException(409, 'This platform accepts only personal or immediate-family use requests.')
 
     rid = f'cir_{secrets.token_urlsafe(9)}'
     status_token = secrets.token_urlsafe(24)
