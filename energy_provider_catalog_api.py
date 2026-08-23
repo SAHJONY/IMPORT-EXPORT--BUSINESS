@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from fastapi import FastAPI
 
-app = FastAPI(title='SAHJONY Energy Provider Catalog', version='1.0.0', docs_url=None, redoc_url=None)
+from energy_operations_api import app as energy_operations_app
+
+app = FastAPI(title='SAHJONY Energy Provider Catalog', version='1.1.0', docs_url=None, redoc_url=None)
 
 CATALOG = [
     {
@@ -57,7 +59,8 @@ CATALOG = [
 async def health():
     return {
         'status':'ok','service':'sahjony-energy-provider-catalog','provider_presets':len(CATALOG),
-        'first_party_sources':3,'commercial_slots':2,'automatic_credentials':False,'fail_closed':True
+        'first_party_sources':3,'commercial_slots':2,'automatic_credentials':False,
+        'energy_deal_operations_mounted':True,'fail_closed':True
     }
 
 @app.get('/energy-provider-catalog')
@@ -67,3 +70,5 @@ async def catalog():
         'recommended_sequence':['ofac_sls','eia_open_data_price','eia_refinery','premium_ais','premium_global_prices'],
         'authority':'DISCOVERY_AND_CONFIGURATION_GUIDANCE_ONLY'
     }
+
+app.include_router(energy_operations_app.router)
