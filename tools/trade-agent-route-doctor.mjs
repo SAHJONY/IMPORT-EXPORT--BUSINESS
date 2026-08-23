@@ -34,12 +34,15 @@ verifyApiRoute('/cuba-energy(.*)','Cuba Energy Desk','cuba_energy_desk_api.py');
 verifyApiRoute('/cuba-private(.*)','Cuba Private Sector API');
 verifyApiRoute('/cuba-desk(.*)','Cuba Authorized Trade Desk');
 verifyApiRoute('/cuba-transition(.*)','Cuba Transition API');
-verifyApiRoute('/consumer-marketplace(.*)','Consumer Marketplace','consumer_marketplace_api.py');
+verifyApiRoute('/consumer-marketplace(.*)','Consumer Marketplace','cuba_consumer_marketplace_api.py');
+verifyApiRoute('/cuba-partner-api(.*)','Cuba Partner Program','cuba_partner_api.py');
 
 if(routes.some(r=>r.src==='/cuba(.*)')) failures.push('Broad /cuba(.*) API route is forbidden because it can shadow public Cuba pages');
 verifyStaticRoute('/cuba-consumers','/cuba-individual-consumers.html','Public Cuba Individual Consumers');
 verifyStaticRoute('/individual-consumers','/cuba-individual-consumers.html','Public Individual Consumers alias');
 verifyStaticRoute('/cuba-individual-consumers','/cuba-individual-consumers.html','Public Cuba Individual Consumers alias');
+verifyStaticRoute('/cuba-partners','/cuba-partners.html','Public Cuba Partner Program');
+verifyStaticRoute('/partners/cuba','/cuba-partners.html','Public Cuba Partner Program alias');
 
 verifyOwnerRoute('/owner/energy/crude-oil','/owner-energy-crude.html','Crude Oil Command Center');
 verifyOwnerRoute('/owner/energy/origination','/owner-energy-origination.html','Energy Origination');
@@ -55,4 +58,4 @@ verifyOwnerRoute('/owner/cuba-fuels','/owner-cuba-fuels.html','Cuba Private Sect
 verifyOwnerRoute('/owner/cuba-consumers','/owner-cuba-consumers.html','Cuba Individual Consumers CRM');
 
 if(failures.length){for(const f of failures)console.error('FAIL ',f);process.exit(1)}
-console.log('PASS  Trade, Energy, Cuba, consumer marketplace, and Owner routes reach production safely without broad Cuba collisions');
+console.log('PASS  Trade, Energy, Cuba, consumer marketplace, partner program, and Owner routes reach production safely without broad Cuba collisions');
