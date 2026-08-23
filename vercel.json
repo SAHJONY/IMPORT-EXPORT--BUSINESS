@@ -21,6 +21,7 @@
 
     { "src": "/cuba-language(.*)", "dest": "cuba_language_api.py" },
     { "src": "/lead-scout/(health|leads.*)", "dest": "unified_api.py" },
+    { "src": "/lead-search(.*)", "dest": "unified_api.py" },
     { "src": "/activation(.*)", "dest": "unified_api.py" },
     { "src": "/backend(.*)", "dest": "unified_api.py" },
     { "src": "/identity(.*)", "dest": "unified_api.py" },
