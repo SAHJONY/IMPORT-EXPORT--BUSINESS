@@ -9,7 +9,7 @@ import httpx
 from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel, Field
 
-app = FastAPI(title="SAHJONY Cuba Spanish Gateway", version="1.0.0", docs_url=None, redoc_url=None)
+app = FastAPI(title="SAHJONY Spanish UI Gateway", version="1.1.0", docs_url=None, redoc_url=None)
 
 WINDOW: dict[str, list[float]] = {}
 
@@ -33,9 +33,9 @@ def _enforce_limit(request: Request) -> None:
     now = time.time()
     window = WINDOW.setdefault(key, [])
     window[:] = [item for item in window if now - item < 60]
-    limit = int(os.getenv("CUBA_UI_TRANSLATION_RPM", "20"))
+    limit = int(os.getenv("SPANISH_UI_TRANSLATION_RPM", os.getenv("CUBA_UI_TRANSLATION_RPM", "30")))
     if len(window) >= limit:
-        raise HTTPException(429, "Cuba UI translation rate limit exceeded")
+        raise HTTPException(429, "Spanish UI translation rate limit exceeded")
     window.append(now)
 
 
@@ -48,9 +48,10 @@ async def health(request: Request) -> dict[str, Any]:
     country = _country(request)
     return {
         "status": "ok",
-        "service": "cuba-spanish-gateway",
+        "service": "spanish-ui-gateway",
         "country": country or None,
         "cuba_spanish_default": country == "CU",
+        "manual_spanish_available_worldwide": True,
         "openai_configured": _openai_configured(),
         "manual_language_override_preserved": True,
         "legal_regulatory_translation": "not_handled_here",
@@ -73,18 +74,20 @@ async def _translate_with_openai(texts: list[str]) -> list[str]:
         raise HTTPException(503, "Spanish UI translation provider is not configured")
     model = os.getenv("OPENAI_FAST_MODEL", "gpt-5.6-terra").strip() or "gpt-5.6-terra"
     prompt = (
-        "Translate each item in the JSON array below from its current language into clear, natural Spanish for a Cuban business audience. "
-        "Preserve company names, product codes, URLs, email addresses, currencies, numbers, Incoterms, legal names, and acronyms. "
-        "Do not add explanations. Return ONLY a valid JSON array of strings in the same order and with exactly the same number of items.\n\n"
+        "Translate every item in the JSON array into clear, professional, natural Spanish suitable for Cuban business users. "
+        "Translate UI navigation, buttons, labels, form prompts, placeholders, help text, statuses and descriptions. "
+        "Preserve company names, product codes, URLs, email addresses, currencies, numbers, Incoterms, legal entity names and acronyms. "
+        "Keep the wording concise for application interfaces. Do not add explanations. "
+        "Return ONLY a valid JSON array of strings in the same order with exactly the same number of items.\n\n"
         + json.dumps(texts, ensure_ascii=False)
     )
     payload = {
         "model": model,
         "input": [
-            {"role": "system", "content": [{"type": "input_text", "text": "You are a precise UI localization engine. Output only the requested JSON."}]},
+            {"role": "system", "content": [{"type": "input_text", "text": "You are a precise Spanish UI localization engine. Output only the requested JSON array."}]},
             {"role": "user", "content": [{"type": "input_text", "text": prompt}]},
         ],
-        "max_output_tokens": 5000,
+        "max_output_tokens": 6000,
     }
     async with httpx.AsyncClient(timeout=60) as client:
         response = await client.post(
@@ -118,10 +121,8 @@ async def _translate_with_openai(texts: list[str]) -> list[str]:
 
 @app.post("/cuba-language/translate-batch")
 async def translate_batch(payload: BatchTranslateRequest, request: Request) -> dict[str, Any]:
-    if _country(request) != "CU":
-        raise HTTPException(403, "Automatic Cuba Spanish translation is only available to Cuban IP traffic")
     if payload.target_locale.lower().split("-", 1)[0] != "es":
-        raise HTTPException(400, "Cuba automatic locale must be Spanish")
+        raise HTTPException(400, "This gateway only serves Spanish UI localization")
     if sum(len(text) for text in payload.texts) > 12000:
         raise HTTPException(413, "Translation batch too large")
     _enforce_limit(request)
@@ -130,6 +131,7 @@ async def translate_batch(payload: BatchTranslateRequest, request: Request) -> d
         "translations": [{"text": text, "to": "es"} for text in translated],
         "target_locale": "es",
         "direction": "ltr",
-        "country": "CU",
+        "country": _country(request) or None,
         "provider": "openai",
+        "automatic": _country(request) == "CU",
     }
