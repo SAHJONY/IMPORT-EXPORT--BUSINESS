@@ -2,7 +2,8 @@
   "version": 2,
   "builds": [
     { "src": "package.json", "use": "@vercel/static-build", "config": { "distDir": "dist" } },
-    { "src": "unified_api.py", "use": "@vercel/python" }
+    { "src": "unified_api.py", "use": "@vercel/python" },
+    { "src": "cuba_language_api.py", "use": "@vercel/python" }
   ],
   "routes": [
     { "src": "/", "dest": "/landing.html" },
@@ -13,6 +14,7 @@
     { "src": "/owner/cuba-us-desk", "dest": "/cuba-us-desk.html" },
     { "src": "/cuba-private-sector", "dest": "/cuba-private-sector.html" },
 
+    { "src": "/cuba-language(.*)", "dest": "cuba_language_api.py" },
     { "src": "/activation(.*)", "dest": "unified_api.py" },
     { "src": "/backend(.*)", "dest": "unified_api.py" },
     { "src": "/identity(.*)", "dest": "unified_api.py" },
