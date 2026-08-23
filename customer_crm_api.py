@@ -9,7 +9,7 @@ from auth import verify_owner_token
 from insforge_backend import get_backend
 from crm_campaign_bootstrap import CAMPAIGN, bootstrap_cuba_mipyme_outreach, load_seed
 
-app=FastAPI(title='SAHJONY Customer CRM',version='1.3.0',docs_url=None,redoc_url=None)
+app=FastAPI(title='SAHJONY Customer CRM',version='1.4.0',docs_url=None,redoc_url=None)
 Role=Literal['owner','employee']
 _BOOTSTRAP_STATUS={'campaign':CAMPAIGN,'seed_count':len(load_seed()),'status':'PENDING','result':None}
 
@@ -70,6 +70,22 @@ class IntakeIn(BaseModel):
             raise ValueError('Valid email required')
         return value
 
+class ProspectIntakeIn(BaseModel):
+    product_need:str=Field(min_length=2,max_length=1000)
+    specifications:str|None=None
+    quantity:float|None=None
+    target_budget:float|None=None
+    currency:str='USD'
+    destination_country:str=Field(min_length=2,max_length=3)
+    target_delivery_date:str|None=None
+    preferred_incoterm:str|None=None
+    notes:str|None=None
+
+class ProspectStatusIn(BaseModel):
+    status:Literal['NEW','CONTACTED','FOLLOW_UP_DUE','REPLIED','QUALIFIED_LEAD','DO_NOT_CONTACT']
+    next_follow_up_at:str|None=None
+    notes:str|None=None
+
 class QualifyIn(BaseModel):
     status:Literal['QUALIFIED','NEEDS_INFO','DISQUALIFIED']
     assigned_employee_id:str|None=None
@@ -110,16 +126,66 @@ async def data_health():
         'pii_exposed':False,
     }
 
+@app.get('/crm/growth-summary')
+async def growth_summary(x_role:str|None=Header(None,alias='X-Role'),authorization:str|None=Header(None,alias='Authorization'),x_employee_id:str|None=Header(None,alias='X-Employee-Id')):
+    actor=identity(x_role,authorization,x_employee_id)
+    await ensure_campaign_bootstrap()
+    backend=get_backend()
+    account_params={'limit':'5000'}
+    intake_params={'limit':'5000'}
+    if actor['role']=='employee':
+        account_params['assigned_employee_id']=f'eq.{actor["id"]}'
+        intake_params['assigned_employee_id']=f'eq.{actor["id"]}'
+    accounts=await backend.select('customer_accounts',params=account_params) or []
+    intakes=await backend.select('customer_trade_intakes',params=intake_params) or []
+    audits=await backend.select('customer_crm_audit',params={'limit':'5000'}) or []
+    intake_customer_ids={row.get('customer_id') for row in intakes}
+    prospects=[row for row in accounts if row.get('customer_id') not in intake_customer_ids]
+    qualified=[row for row in intakes if row.get('qualification_status')=='QUALIFIED']
+    promoted=[row for row in intakes if row.get('managed_trade_request_id') or row.get('status')=='PROMOTED']
+    replied=[row for row in accounts if row.get('sales_status') in {'REPLIED','QUALIFIED_LEAD'}]
+    follow_up=[row for row in accounts if row.get('sales_status')=='FOLLOW_UP_DUE']
+    do_not_contact=[row for row in accounts if row.get('sales_status')=='DO_NOT_CONTACT']
+    outreach_events=[row for row in audits if row.get('event_type')=='outreach_sent']
+    total_accounts=len(accounts)
+    real_intakes=len(intakes)
+    def rate(numerator:int,denominator:int)->float:
+        return round((numerator/denominator)*100,1) if denominator else 0.0
+    return {
+        'status':'ok',
+        'scope':actor['role'],
+        'total_accounts':total_accounts,
+        'prospects':len(prospects),
+        'outreach_events':len(outreach_events),
+        'replied':len(replied),
+        'follow_up_due':len(follow_up),
+        'do_not_contact':len(do_not_contact),
+        'real_intakes':real_intakes,
+        'qualified_intakes':len(qualified),
+        'promoted_intakes':len(promoted),
+        'conversion':{
+            'account_to_intake_pct':rate(real_intakes,total_accounts),
+            'intake_to_qualified_pct':rate(len(qualified),real_intakes),
+            'qualified_to_promoted_pct':rate(len(promoted),len(qualified)),
+            'account_to_promoted_pct':rate(len(promoted),total_accounts),
+        },
+        'next_actions':[
+            'Work follow-up-due prospects' if follow_up else 'Capture replies and new trade requirements',
+            'Qualify new intakes' if real_intakes>len(qualified) else 'Generate more qualified demand',
+            'Promote qualified intakes into sourcing' if len(qualified)>len(promoted) else 'Build sourcing pipeline from promoted demand',
+        ],
+    }
+
 @app.post('/crm/intake')
 async def public_intake(p:IntakeIn):
     backend=get_backend(); ts=now(); email=p.email
     existing=await backend.select('customer_accounts',params={'email':f'eq.{email}','limit':'1'}) or []
     if existing:
         customer_id=existing[0]['customer_id']
-        await backend.patch('customer_accounts',{'legal_name':p.legal_name,'trade_name':p.trade_name,'contact_name':p.contact_name,'phone':p.phone,'country_code':(p.country_code or '').upper() or None,'website':p.website,'updated_at':ts},params={'customer_id':f'eq.{customer_id}'})
+        await backend.patch('customer_accounts',{'legal_name':p.legal_name,'trade_name':p.trade_name,'contact_name':p.contact_name,'phone':p.phone,'country_code':(p.country_code or '').upper() or None,'website':p.website,'sales_status':'REPLIED','updated_at':ts},params={'customer_id':f'eq.{customer_id}'})
     else:
         customer_id=f'cus_{secrets.token_urlsafe(10)}'
-        await backend.insert('customer_accounts',{'customer_id':customer_id,'legal_name':p.legal_name,'trade_name':p.trade_name,'contact_name':p.contact_name,'email':email,'phone':p.phone,'country_code':(p.country_code or '').upper() or None,'website':p.website,'status':'PROSPECT','source':'WEB','created_at':ts,'updated_at':ts})
+        await backend.insert('customer_accounts',{'customer_id':customer_id,'legal_name':p.legal_name,'trade_name':p.trade_name,'contact_name':p.contact_name,'email':email,'phone':p.phone,'country_code':(p.country_code or '').upper() or None,'website':p.website,'status':'PROSPECT','sales_status':'REPLIED','source':'WEB','created_at':ts,'updated_at':ts})
     intake_id=f'int_{secrets.token_urlsafe(10)}'
     row={'intake_id':intake_id,'customer_id':customer_id,'product_need':p.product_need,'specifications':p.specifications,'quantity':p.quantity,'target_budget':p.target_budget,'currency':p.currency.upper(),'destination_country':p.destination_country.upper(),'target_delivery_date':p.target_delivery_date,'preferred_incoterm':p.preferred_incoterm,'notes':p.notes,'status':'NEW','qualification_status':'PENDING','created_at':ts,'updated_at':ts}
     await backend.insert('customer_trade_intakes',row)
@@ -133,6 +199,32 @@ async def list_customers(x_role:str|None=Header(None,alias='X-Role'),authorizati
     params={'order':'updated_at.desc','limit':'250'}
     if actor['role']=='employee': params['assigned_employee_id']=f'eq.{actor["id"]}'
     return {'customers':await get_backend().select('customer_accounts',params=params) or []}
+
+@app.patch('/crm/prospects/{customer_id}/status')
+async def update_prospect_status(customer_id:str,p:ProspectStatusIn,x_role:str|None=Header(None,alias='X-Role'),authorization:str|None=Header(None,alias='Authorization'),x_employee_id:str|None=Header(None,alias='X-Employee-Id')):
+    actor=identity(x_role,authorization,x_employee_id)
+    backend=get_backend()
+    rows=await backend.select('customer_accounts',params={'customer_id':f'eq.{customer_id}','limit':'1'}) or []
+    if not rows: raise HTTPException(404,'Prospect not found')
+    values={'sales_status':p.status,'next_follow_up_at':p.next_follow_up_at,'updated_at':now()}
+    if actor['role']=='employee' and not rows[0].get('assigned_employee_id'):
+        values['assigned_employee_id']=actor['id']
+    await backend.patch('customer_accounts',values,params={'customer_id':f'eq.{customer_id}'})
+    await audit(actor,'prospect_status_changed',f'Prospect sales status -> {p.status}',customer_id,payload={'status':p.status,'next_follow_up_at':p.next_follow_up_at,'notes':p.notes})
+    return {'customer_id':customer_id,'sales_status':p.status,'next_follow_up_at':p.next_follow_up_at}
+
+@app.post('/crm/prospects/{customer_id}/intake')
+async def create_intake_from_prospect(customer_id:str,p:ProspectIntakeIn,x_role:str|None=Header(None,alias='X-Role'),authorization:str|None=Header(None,alias='Authorization'),x_employee_id:str|None=Header(None,alias='X-Employee-Id')):
+    actor=identity(x_role,authorization,x_employee_id)
+    backend=get_backend(); ts=now()
+    accounts=await backend.select('customer_accounts',params={'customer_id':f'eq.{customer_id}','limit':'1'}) or []
+    if not accounts: raise HTTPException(404,'Prospect not found')
+    intake_id=f'int_{secrets.token_urlsafe(10)}'
+    row={'intake_id':intake_id,'customer_id':customer_id,'product_need':p.product_need,'specifications':p.specifications,'quantity':p.quantity,'target_budget':p.target_budget,'currency':p.currency.upper(),'destination_country':p.destination_country.upper(),'target_delivery_date':p.target_delivery_date,'preferred_incoterm':p.preferred_incoterm,'notes':p.notes,'status':'NEW','qualification_status':'PENDING','assigned_employee_id':actor['id'] if actor['role']=='employee' else accounts[0].get('assigned_employee_id'),'created_at':ts,'updated_at':ts}
+    await backend.insert('customer_trade_intakes',row)
+    await backend.patch('customer_accounts',{'sales_status':'QUALIFIED_LEAD','updated_at':ts},params={'customer_id':f'eq.{customer_id}'})
+    await audit(actor,'intake_created_from_prospect','Trade requirement captured from prospect reply',customer_id,intake_id,{'source':'staff_capture'})
+    return {'intake':row,'customer_id':customer_id}
 
 @app.get('/crm/intakes')
 async def list_intakes(x_role:str|None=Header(None,alias='X-Role'),authorization:str|None=Header(None,alias='Authorization'),x_employee_id:str|None=Header(None,alias='X-Employee-Id')):
@@ -160,9 +252,10 @@ async def list_intakes(x_role:str|None=Header(None,alias='X-Role'),authorization
             'website':account.get('website'),
             'product_need':'Outreach prospect — awaiting trade requirement',
             'destination_country':account.get('country_code') or 'CU',
-            'status':account.get('status') or 'PROSPECT',
+            'status':account.get('sales_status') or account.get('status') or 'PROSPECT',
             'qualification_status':'PENDING',
             'source':account.get('source'),
+            'next_follow_up_at':account.get('next_follow_up_at'),
             'created_at':account.get('created_at'),
             'updated_at':account.get('updated_at'),
             'prospect_only':True,
