@@ -23,6 +23,21 @@ def _connector_pass(connector_health: dict[str, Any] | None, name: str) -> bool:
     item=connector_health.get('by_name',{}).get(name,{})
     return bool(item.get('configured') and item.get('reachable'))
 
+def _production_identity_status(auth_provider: str) -> tuple[bool, str, str]:
+    legacy_disabled=not _true('ALLOW_LEGACY_LOCAL_AUTH')
+    if auth_provider in {'neon','neon_auth'}:
+        # auth.py has safe production defaults for the provisioned branch, but explicit
+        # env values remain preferred for portability and branch changes.
+        neon_url=_present('NEON_AUTH_URL') or _present('NEON_AUTH_JWKS_URL')
+        # The live SAHJONY deployment has a provisioned Neon Auth service; AUTH_PROVIDER
+        # is the authoritative activation switch and JWT verification fails closed.
+        ok=legacy_disabled and (neon_url or _true('NEON_AUTH_PROVISIONED'))
+        return ok, 'Neon Auth JWT/JWKS identity selected; legacy local participant auth disabled', 'Set AUTH_PROVIDER=neon, configure NEON_AUTH_URL/NEON_AUTH_JWKS_URL (or NEON_AUTH_PROVISIONED=true), and keep ALLOW_LEGACY_LOCAL_AUTH=false.'
+    if auth_provider=='insforge':
+        ok=legacy_disabled and _present('INSFORGE_ANON_KEY')
+        return ok, 'InsForge JWT identity selected; legacy local participant auth disabled', 'Configure INSFORGE_ANON_KEY and keep ALLOW_LEGACY_LOCAL_AUTH=false.'
+    return False, 'No approved production identity provider selected', 'Set AUTH_PROVIDER=neon (preferred for the current deployment) or AUTH_PROVIDER=insforge and configure the matching identity settings.'
+
 def evaluate_production_readiness(*, runtime_ok: bool = True, e2e_ok: bool | None = None, connector_health: dict[str, Any] | None = None) -> dict[str, Any]:
     auth_provider=os.getenv('AUTH_PROVIDER','').strip().lower()
     if e2e_ok is None: e2e_ok=_true('E2E_TRADE_WORKFLOW_VERIFIED')
@@ -34,13 +49,13 @@ def evaluate_production_readiness(*, runtime_ok: bool = True, e2e_ok: bool | Non
         screening_evidence='Government screening connector configured'; tariff_evidence='Tariff/classification provider configured'; logistics_evidence='Logistics provider configured'; fx_evidence='FX provider configured'
     translation_provider_ok=os.getenv('TRANSLATION_PROVIDER','').strip().lower()=='azure' and _present('AZURE_TRANSLATOR_ENDPOINT') and _present('AZURE_TRANSLATOR_KEY')
     secure_storage_configured=all(_present(x) for x in ['INSFORGE_S3_ENDPOINT','INSFORGE_S3_ACCESS_KEY_ID','INSFORGE_S3_SECRET_ACCESS_KEY','INSFORGE_STORAGE_BUCKET'])
-    production_identity=auth_provider=='insforge' and _present('INSFORGE_ANON_KEY') and not _true('ALLOW_LEGACY_LOCAL_AUTH')
+    production_identity, identity_evidence, identity_remediation=_production_identity_status(auth_provider)
     ai_provider_configured=_present('OPENAI_API_KEY') and _present('ANTHROPIC_API_KEY')
     ai_models_configured=_present('OPENAI_EXECUTIVE_MODEL') and _present('ANTHROPIC_FRONTIER_MODEL') and _present('ANTHROPIC_AGENT_MODEL')
     gates=[
         ReadinessGate('production_runtime',runtime_ok,True,'HTTP runtime health','Deploy a healthy production revision.'),
-        ReadinessGate('insforge_backend',_present('INSFORGE_BASE_URL') and _present('INSFORGE_API_KEY'),True,'InsForge server credentials present','Configure InsForge production project credentials.'),
-        ReadinessGate('production_identity',production_identity,True,'InsForge JWT identity selected and legacy local participant auth disabled','Use verified InsForge Auth/JWT identity and keep ALLOW_LEGACY_LOCAL_AUTH=false.'),
+        ReadinessGate('insforge_backend',_present('INSFORGE_BASE_URL') and _present('INSFORGE_API_KEY'),True,'InsForge server credentials present','Configure InsForge production project credentials for durable trade/CRM persistence.'),
+        ReadinessGate('production_identity',production_identity,True,identity_evidence,identity_remediation),
         ReadinessGate('tenant_rls_verified',_true('INSFORGE_RLS_VERIFIED'),True,'Live tenant/role RLS verification recorded','Run cross-tenant owner/staff/customer isolation tests.'),
         ReadinessGate('all_schemas_applied',_true('INSFORGE_SCHEMAS_APPLIED'),True,'All production schemas applied and checked','Apply every current InsForge schema, including global_supplier_sourcing.sql, managed_trade_gateway.sql, managed_trade_intermediary.sql, business_operational_readiness.sql, cuba_private_sector_leads.sql and ai_brain.sql.'),
         ReadinessGate('owner_mfa',_true('OWNER_MFA_REQUIRED'),True,'Owner MFA policy enabled','Require MFA for owner/admin access.'),
@@ -67,4 +82,14 @@ def evaluate_production_readiness(*, runtime_ok: bool = True, e2e_ok: bool | Non
         ReadinessGate('first_live_trade_certified',_true('FIRST_LIVE_TRADE_CERTIFIED'),True,'Real customer-to-supplier transaction delivered, paid, reconciled, SAHJONY fee collected and audit closed','Complete First Live Trade Certification in the Owner OS; do not set this flag from a dry run.'),
         ReadinessGate('e2e_trade_workflow',bool(e2e_ok),True,'Verified end-to-end trade workflow','Run a production-safe supplier-to-profit E2E workflow.')]
     critical=[g for g in gates if g.critical]; passed=sum(1 for g in critical if g.passed); blockers=[g.name for g in critical if not g.passed]
-    return {'score':round(passed/len(critical)*100),'production_ready':not blockers,'release_gate':'READY' if not blockers else 'HOLD','gates':[asdict(g) for g in gates],'blockers':blockers}
+    return {
+        'score':round(passed/len(critical)*100),
+        'passed_gates':passed,
+        'total_gates':len(critical),
+        'blocker_count':len(blockers),
+        'production_ready':not blockers,
+        'release_gate':'READY' if not blockers else 'HOLD',
+        'identity_provider':auth_provider or 'unconfigured',
+        'gates':[asdict(g) for g in gates],
+        'blockers':blockers,
+    }
