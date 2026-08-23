@@ -5,6 +5,9 @@ const failures=[];
 const read=p=>fs.readFileSync(p,'utf8');
 const engine=read('payment_engine.py');
 const api=read('payment_api.py');
+const ownerPage=read('public/owner-payments.html');
+const consumer=read('public/cuba-individual-consumers.html').toLowerCase();
+const business=read('public/landing.html').toLowerCase();
 const cfg=JSON.parse(read('vercel.json'));
 
 const requiredEngine=[
@@ -30,11 +33,29 @@ const requiredApi=[
 ];
 for(const token of requiredApi) if(!api.includes(token)) failures.push(`Payment API missing guard: ${token}`);
 
+const requiredOwnerPage=[
+  "sessionStorage.getItem('sahjony.owner.token')",
+  "location.replace('/owner-login')",
+  "Authorization':'Bearer '+token",
+  "X-Role':'owner",
+  "/owner-payments/cases",
+  "currency='USD'"
+];
+for(const token of requiredOwnerPage) if(!ownerPage.includes(token)) failures.push(`Owner payments page missing protection: ${token}`);
+if(!ownerPage.includes('/global-language.js')) failures.push('Owner payments page missing global language runtime');
+
+for(const token of ['/owner/payments','/owner-payments']){
+  if(consumer.includes(token)) failures.push(`Consumer UI exposes private payment control: ${token}`);
+  if(business.includes(token)) failures.push(`Business UI exposes private payment control: ${token}`);
+}
+
 const routes=cfg.routes||[];
 const route=routes.find(r=>r.src==='/owner-payments(.*)');
 if(!route||route.dest!=='payment_api.py') failures.push('Owner payments API route missing or incorrect');
+const pageRoute=routes.find(r=>r.src==='/owner/payments');
+if(!pageRoute||pageRoute.dest!=='/owner-payments.html') failures.push('Private Owner payments page route missing or incorrect');
 const build=(cfg.builds||[]).find(b=>b.src==='payment_api.py');
 if(!build) failures.push('Payment API missing from Vercel builds');
 
 if(failures.length){for(const f of failures)console.error('FAIL ',f);process.exit(1)}
-console.log('PASS  USD-only payments are owner-governed; supplier payout and shipment release remain fail-closed');
+console.log('PASS  USD-only payments are Owner-governed; supplier payout and shipment release remain fail-closed');
