@@ -1,0 +1,1 @@
+Production redeploy trigger after correcting @neondatabase/auth to the published 0.5.0-beta release.
