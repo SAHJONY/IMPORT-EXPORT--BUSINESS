@@ -36,12 +36,13 @@ async def bootstrap_cuba_mipyme_outreach() -> dict:
     prospect submits an actual need or staff records one from a reply.
     """
     backend = get_backend()
+    leads = load_seed()
     created = 0
     updated = 0
     unchanged = 0
     ts = _now()
 
-    for lead in load_seed():
+    for lead in leads:
         email = lead["email"].strip().lower()
         sales_status = _sales_status(lead)
         existing = await backend.select(
@@ -94,12 +95,13 @@ async def bootstrap_cuba_mipyme_outreach() -> dict:
         audit_marker = f"{CAMPAIGN}:{lead['gmail_message_id']}"
         prior_audit = await backend.select(
             "customer_crm_audit",
-            params={"customer_id": f"eq.{customer_id}", "event_type": "eq.outreach_sent", "limit": "100"},
+            params={"customer_id": f"eq.{customer_id}", "limit": "100"},
         ) or []
         if any((row.get("payload") or {}).get("marker") == audit_marker for row in prior_audit):
             unchanged += 1
             continue
 
+        bounced = sales_status == "DO_NOT_CONTACT"
         await backend.insert(
             "customer_crm_audit",
             {
@@ -108,8 +110,12 @@ async def bootstrap_cuba_mipyme_outreach() -> dict:
                 "intake_id": None,
                 "actor_role": "owner",
                 "actor_id": "owner",
-                "event_type": "outreach_sent" if sales_status != "DO_NOT_CONTACT" else "outreach_bounced",
-                "summary": "Spanish Cuba MIPYME sourcing outreach sent" if sales_status != "DO_NOT_CONTACT" else "Spanish Cuba MIPYME outreach bounced; address removed from follow-up",
+                "event_type": "outreach_bounced" if bounced else "outreach_sent",
+                "summary": (
+                    "Spanish Cuba MIPYME outreach bounced; address removed from follow-up"
+                    if bounced
+                    else "Spanish Cuba MIPYME sourcing outreach sent"
+                ),
                 "payload": {
                     "marker": audit_marker,
                     "campaign": lead["campaign"],
@@ -124,10 +130,10 @@ async def bootstrap_cuba_mipyme_outreach() -> dict:
 
     return {
         "campaign": CAMPAIGN,
-        "seed_count": len(load_seed()),
+        "seed_count": len(leads),
         "created": created,
         "updated": updated,
         "audit_already_present": unchanged,
-        "contactable_count": sum(1 for lead in load_seed() if _sales_status(lead) != "DO_NOT_CONTACT"),
-        "do_not_contact_count": sum(1 for lead in load_seed() if _sales_status(lead) == "DO_NOT_CONTACT"),
+        "contactable_count": sum(1 for lead in leads if _sales_status(lead) != "DO_NOT_CONTACT"),
+        "do_not_contact_count": sum(1 for lead in leads if _sales_status(lead) == "DO_NOT_CONTACT"),
     }
