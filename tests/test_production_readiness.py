@@ -10,6 +10,7 @@ REQUIRED_ENV = {
     "INSFORGE_RLS_VERIFIED": "true",
     "INSFORGE_SCHEMAS_APPLIED": "true",
     "OWNER_MFA_REQUIRED": "true",
+    "OWNER_TOTP_SECRET": "JBSWY3DPEHPK3PXP",
     "OPENAI_API_KEY": "openai_test",
     "ANTHROPIC_API_KEY": "anthropic_test",
     "AI_BRAIN_E2E_VERIFIED": "true",
@@ -97,3 +98,15 @@ def test_neon_database_url_satisfies_persistent_backend_gate(monkeypatch):
     gate = next(g for g in result["gates"] if g["name"] == "persistent_backend")
     assert gate["passed"] is True
     assert "Neon/Postgres" in gate["evidence"]
+
+
+def test_owner_mfa_gate_requires_real_totp_secret(monkeypatch):
+    monkeypatch.setenv("OWNER_MFA_REQUIRED", "true")
+    monkeypatch.delenv("OWNER_TOTP_SECRET", raising=False)
+    result = evaluate_production_readiness(runtime_ok=True)
+    gate = next(g for g in result["gates"] if g["name"] == "owner_mfa")
+    assert gate["passed"] is False
+    monkeypatch.setenv("OWNER_TOTP_SECRET", "JBSWY3DPEHPK3PXP")
+    result = evaluate_production_readiness(runtime_ok=True)
+    gate = next(g for g in result["gates"] if g["name"] == "owner_mfa")
+    assert gate["passed"] is True
