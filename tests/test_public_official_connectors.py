@@ -13,6 +13,7 @@ FULL_READY_ENV = {
     "INSFORGE_RLS_VERIFIED": "true",
     "INSFORGE_SCHEMAS_APPLIED": "true",
     "OWNER_MFA_REQUIRED": "true",
+    "OWNER_TOTP_SECRET": "JBSWY3DPEHPK3PXP",
     "OPENAI_API_KEY": "openai_test",
     "ANTHROPIC_API_KEY": "anthropic_test",
     "OPENAI_EXECUTIVE_MODEL": "openai-test-model",
