@@ -6,7 +6,8 @@
     { "src": "cuba_language_api.py", "use": "@vercel/python" },
     { "src": "cuba_energy_desk_api.py", "use": "@vercel/python" },
     { "src": "cuba_consumer_marketplace_api.py", "use": "@vercel/python" },
-    { "src": "pricing_api.py", "use": "@vercel/python" }
+    { "src": "pricing_api.py", "use": "@vercel/python" },
+    { "src": "payment_api.py", "use": "@vercel/python" }
   ],
   "routes": [
     { "src": "/", "dest": "/landing.html" },
@@ -50,6 +51,7 @@
     { "src": "/owner/cuba-us-desk", "dest": "/cuba-us-desk.html" },
     { "src": "/cuba-private-sector", "dest": "/cuba-es.html" },
 
+    { "src": "/owner-payments(.*)", "dest": "payment_api.py" },
     { "src": "/owner-pricing(.*)", "dest": "pricing_api.py" },
     { "src": "/consumer-marketplace(.*)", "dest": "cuba_consumer_marketplace_api.py" },
     { "src": "/cuba-energy(.*)", "dest": "cuba_energy_desk_api.py" },
