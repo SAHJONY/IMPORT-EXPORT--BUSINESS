@@ -4,6 +4,7 @@ import hmac
 import json
 import os
 import secrets
+import struct
 import time
 from functools import lru_cache
 
@@ -110,6 +111,44 @@ def verify_owner_password(provided: str) -> bool:
     return bool(plain) and hmac.compare_digest(provided, plain)
 
 
+def owner_mfa_required() -> bool:
+    return _true("OWNER_MFA_REQUIRED")
+
+
+def owner_totp_configured() -> bool:
+    return bool(os.getenv("OWNER_TOTP_SECRET", "").strip())
+
+
+def _totp_secret_bytes() -> bytes:
+    raw = os.getenv("OWNER_TOTP_SECRET", "").strip().replace(" ", "").upper()
+    if not raw:
+        raise RuntimeError("OWNER_TOTP_SECRET must be configured when owner MFA is required")
+    try:
+        return base64.b32decode(raw + "=" * (-len(raw) % 8), casefold=True)
+    except Exception as exc:
+        raise RuntimeError("OWNER_TOTP_SECRET is not valid base32") from exc
+
+
+def _totp_at(counter: int) -> str:
+    digest = hmac.new(_totp_secret_bytes(), struct.pack(">Q", counter), hashlib.sha1).digest()
+    offset = digest[-1] & 0x0F
+    value = struct.unpack(">I", digest[offset:offset + 4])[0] & 0x7FFFFFFF
+    return f"{value % 1_000_000:06d}"
+
+
+def verify_owner_totp(provided: str, *, at_time: int | None = None, window: int = 1) -> bool:
+    if not provided or len(provided) != 6 or not provided.isdigit():
+        return False
+    if not owner_totp_configured():
+        return False
+    now = int(time.time()) if at_time is None else int(at_time)
+    counter = now // 30
+    try:
+        return any(hmac.compare_digest(provided, _totp_at(counter + drift)) for drift in range(-window, window + 1))
+    except RuntimeError:
+        return False
+
+
 def hash_token(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
@@ -122,12 +161,21 @@ def _b64url_decode(value: str) -> bytes:
     return base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
 
 
-def issue_owner_session(email: str, ttl_seconds: int = OWNER_SESSION_TTL_SECONDS) -> str:
+def issue_owner_session(email: str, ttl_seconds: int = OWNER_SESSION_TTL_SECONDS, *, mfa_verified: bool = False) -> str:
     normalized = email.strip().lower()
     if normalized != owner_email():
         raise ValueError("Owner identity mismatch")
+    if owner_mfa_required() and not mfa_verified:
+        raise RuntimeError("Owner MFA verification is required before issuing a privileged session")
     now = int(time.time())
-    payload = {"role": "owner", "email": normalized, "iat": now, "exp": now + ttl_seconds, "scope": "owner:full"}
+    payload = {
+        "role": "owner",
+        "email": normalized,
+        "iat": now,
+        "exp": now + ttl_seconds,
+        "scope": "owner:full",
+        "mfa_verified": bool(mfa_verified),
+    }
     encoded = _b64url_encode(json.dumps(payload, separators=(",", ":"), sort_keys=True).encode())
     signature = hmac.new(_session_secret().encode(), encoded.encode("ascii"), hashlib.sha256).digest()
     return f"sahjony_owner.{encoded}.{_b64url_encode(signature)}"
@@ -148,6 +196,8 @@ def decode_owner_session(token: str) -> dict | None:
             return None
         if int(payload.get("exp", 0)) <= int(time.time()):
             return None
+        if owner_mfa_required() and payload.get("mfa_verified") is not True:
+            return None
         return payload
     except (ValueError, TypeError, json.JSONDecodeError, RuntimeError):
         return None
@@ -155,7 +205,7 @@ def decode_owner_session(token: str) -> dict | None:
 
 def verify_owner_token(provided: str) -> bool:
     legacy = _owner_token_optional()
-    if legacy and hmac.compare_digest(provided, legacy):
+    if legacy and not owner_mfa_required() and hmac.compare_digest(provided, legacy):
         return True
     return decode_owner_session(provided) is not None
 
