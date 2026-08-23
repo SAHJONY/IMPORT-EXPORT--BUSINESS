@@ -10,6 +10,7 @@
     { "src": "/start", "dest": "/start.html" },
     { "src": "/owner-login", "dest": "/owner-login.html" },
     { "src": "/owner/telegram", "dest": "/owner-telegram.html" },
+    { "src": "/owner/cuba-us-desk", "dest": "/cuba-us-desk.html" },
     { "src": "/cuba-private-sector", "dest": "/cuba-private-sector.html" },
 
     { "src": "/telegram(.*)", "dest": "unified_api.py" },
