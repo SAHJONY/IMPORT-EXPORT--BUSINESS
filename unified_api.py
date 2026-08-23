@@ -9,6 +9,7 @@ from insforge_backend import PersistentBackendConfigurationError, get_backend, p
 from activation_api import app as activation_app, activation_health
 from telegram_api import app as telegram_app
 from business_email_registry import app as business_email_app
+from email_agent_api import app as email_agent_app
 from owner_auth_api import app as owner_auth_app
 from communication_api import app as communications_app
 from document_api import app as documents_app
@@ -37,7 +38,7 @@ from fastapi_server import app as core_app
 _RUNTIME_EMPLOYEE_BRIDGE_TOKEN = os.getenv("EMPLOYEE_TOKEN", "").strip() or secrets.token_urlsafe(48)
 os.environ.setdefault("EMPLOYEE_TOKEN", _RUNTIME_EMPLOYEE_BRIDGE_TOKEN)
 
-app = FastAPI(title="SAHJONY Global Trade Unified API", version="3.6.0", docs_url=None, redoc_url=None)
+app = FastAPI(title="SAHJONY Global Trade Unified API", version="3.7.0", docs_url=None, redoc_url=None)
 
 
 @app.middleware("http")
@@ -144,7 +145,7 @@ async def platform_health():
     return {
         "status": "ok",
         "service": "global-trade-intelligence-os",
-        "version": "3.6.0",
+        "version": "3.7.0",
         "release_policy": "fail-closed",
         "production_ready": activation["production_ready"],
         "readiness_score": activation["readiness_score"],
@@ -158,13 +159,14 @@ async def platform_health():
         "openai_configured": activation["providers"]["ai"]["openai_configured"],
         "anthropic_configured": activation["providers"]["ai"]["anthropic_configured"],
         "translation_configured": activation["providers"]["translation"]["configured"],
+        "email_agent_control_plane": True,
         "blockers": activation["blockers"],
     }
 
 
 for subapp in (
     activation_app,
-    telegram_app, business_email_app, owner_auth_app, core_app, customer_crm_app,
+    telegram_app, business_email_app, email_agent_app, owner_auth_app, core_app, customer_crm_app,
     communications_app, documents_app, document_storage_app, shipments_app,
     compliance_app, commercial_app, language_app, collaboration_app, finance_app,
     countries_app, cuba_current_app, cuba_transition_app, cuba_trade_desk_app,
