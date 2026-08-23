@@ -1,0 +1,118 @@
+from __future__ import annotations
+
+import os
+from fastapi import FastAPI
+
+from auth import neon_auth_jwks_url, neon_auth_url
+from production_readiness import evaluate_production_readiness
+from trade_connectors import trade_connectors
+
+app = FastAPI(
+    title="SAHJONY Production Activation Control",
+    version="1.0.0",
+    docs_url=None,
+    redoc_url=None,
+)
+
+
+def _present(name: str) -> bool:
+    return bool(os.getenv(name, "").strip())
+
+
+def _true(name: str) -> bool:
+    return os.getenv(name, "false").strip().lower() == "true"
+
+
+def _provider_state() -> dict:
+    return {
+        "identity": {
+            "provider": "neon_auth",
+            "auth_url_configured": bool(neon_auth_url()),
+            "jwks_url_configured": bool(neon_auth_jwks_url()),
+            "legacy_local_auth_disabled": not _true("ALLOW_LEGACY_LOCAL_AUTH"),
+        },
+        "persistence": {
+            "provider": "insforge",
+            "configured": _present("INSFORGE_BASE_URL") and _present("INSFORGE_API_KEY"),
+            "rls_verified": _true("INSFORGE_RLS_VERIFIED"),
+            "schemas_applied": _true("INSFORGE_SCHEMAS_APPLIED"),
+        },
+        "ai": {
+            "openai_configured": _present("OPENAI_API_KEY"),
+            "anthropic_configured": _present("ANTHROPIC_API_KEY"),
+            "e2e_verified": _true("AI_BRAIN_E2E_VERIFIED"),
+            "release_authority": False,
+        },
+        "translation": {
+            "provider": "azure-translator",
+            "configured": _present("AZURE_TRANSLATOR_ENDPOINT") and _present("AZURE_TRANSLATOR_KEY"),
+            "e2e_verified": _true("MULTILINGUAL_E2E_VERIFIED"),
+        },
+        "document_storage": {
+            "provider": "insforge-s3",
+            "configured": all(_present(k) for k in (
+                "INSFORGE_S3_ENDPOINT",
+                "INSFORGE_S3_ACCESS_KEY_ID",
+                "INSFORGE_S3_SECRET_ACCESS_KEY",
+                "INSFORGE_STORAGE_BUCKET",
+            )),
+            "signed_storage_verified": _true("SIGNED_DOCUMENT_STORAGE_VERIFIED"),
+        },
+        "monitoring": {
+            "vercel_monitoring_enabled": _true("VERCEL_MONITORING_ENABLED"),
+            "alert_webhook_configured": _present("ALERT_WEBHOOK_URL"),
+        },
+    }
+
+
+def _external_requirements() -> list[dict]:
+    requirements: list[dict] = []
+    if not (_present("INSFORGE_BASE_URL") and _present("INSFORGE_API_KEY")):
+        requirements.append({"area": "persistence", "action": "Configure INSFORGE_BASE_URL and INSFORGE_API_KEY in Vercel."})
+    if not _present("ANTHROPIC_API_KEY"):
+        requirements.append({"area": "ai", "action": "Add ANTHROPIC_API_KEY in Vercel and run AI Brain E2E verification."})
+    if not (_present("AZURE_TRANSLATOR_ENDPOINT") and _present("AZURE_TRANSLATOR_KEY")):
+        requirements.append({"area": "translation", "action": "Add Azure Translator endpoint/key/region and run multilingual E2E verification."})
+    if not _present("TARIFF_DATA_PROVIDER"):
+        requirements.append({"area": "classification", "action": "Connect an authoritative tariff/HTS classification provider."})
+    if not _present("LOGISTICS_DATA_PROVIDER"):
+        requirements.append({"area": "logistics", "action": "Connect the production carrier/freight tracking provider and verify E2E milestones."})
+    if not (_present("FX_EXECUTION_PROVIDER") or _present("FX_DATA_PROVIDER")):
+        requirements.append({"area": "settlement", "action": "Connect the production bank/settlement FX provider."})
+    if not _true("BACKUP_RESTORE_TESTED"):
+        requirements.append({"area": "resilience", "action": "Complete and record a database/storage restore drill."})
+    if not _true("FIRST_LIVE_TRADE_CERTIFIED"):
+        requirements.append({"area": "live_business", "action": "Complete one real customer-to-supplier transaction, delivery, reconciliation, fee collection and Owner certification."})
+    return requirements
+
+
+@app.get("/activation/health")
+async def activation_health():
+    connector_health = await trade_connectors.health()
+    readiness = evaluate_production_readiness(runtime_ok=True, connector_health=connector_health)
+    providers = _provider_state()
+    external = _external_requirements()
+    persistence_ready = providers["persistence"]["configured"]
+    return {
+        "status": "ready" if readiness["production_ready"] else "activation_required",
+        "service": "production-activation-control",
+        "business": "SAHJONY Global Trade",
+        "readiness_score": readiness["score"],
+        "passed_gates": readiness["passed_gates"],
+        "total_gates": readiness["total_gates"],
+        "blocker_count": readiness["blocker_count"],
+        "release_gate": readiness["release_gate"],
+        "production_ready": readiness["production_ready"],
+        "safe_to_accept_persisted_trade_requests": persistence_ready,
+        "safe_to_release_transactions": readiness["production_ready"],
+        "providers": providers,
+        "connectors": connector_health,
+        "blockers": readiness["blockers"],
+        "external_actions_required": external,
+        "policy": {
+            "fail_closed": True,
+            "no_fake_100_percent": True,
+            "first_live_trade_required": True,
+            "ai_has_release_authority": False,
+        },
+    }
