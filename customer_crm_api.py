@@ -9,7 +9,7 @@ from auth import verify_owner_token
 from insforge_backend import get_backend
 from crm_campaign_bootstrap import CAMPAIGN, bootstrap_cuba_mipyme_outreach, load_seed
 
-app=FastAPI(title='SAHJONY Customer CRM',version='1.2.0',docs_url=None,redoc_url=None)
+app=FastAPI(title='SAHJONY Customer CRM',version='1.3.0',docs_url=None,redoc_url=None)
 Role=Literal['owner','employee']
 _BOOTSTRAP_STATUS={'campaign':CAMPAIGN,'seed_count':len(load_seed()),'status':'PENDING','result':None}
 
@@ -86,6 +86,29 @@ async def audit(actor,event,summary,customer_id=None,intake_id=None,payload=None
 async def health():
     bootstrap=await ensure_campaign_bootstrap()
     return {'status':'ok','service':'customer-crm','public_intake':True,'fail_closed_promotion':True,'campaign_bootstrap':bootstrap}
+
+@app.get('/crm/data-health')
+async def data_health():
+    bootstrap=await ensure_campaign_bootstrap()
+    backend=get_backend()
+    accounts=await backend.select('customer_accounts',params={'limit':'5000'}) or []
+    intakes=await backend.select('customer_trade_intakes',params={'limit':'5000'}) or []
+    audits=await backend.select('customer_crm_audit',params={'limit':'5000'}) or []
+    campaign_accounts=[row for row in accounts if row.get('source')==CAMPAIGN]
+    campaign_audits=[row for row in audits if (row.get('payload') or {}).get('campaign')==CAMPAIGN]
+    return {
+        'status':'ok',
+        'service':'customer-crm-data',
+        'bootstrap_status':bootstrap.get('status'),
+        'bootstrap_result':bootstrap.get('result'),
+        'seed_count':len(load_seed()),
+        'customer_account_count':len(accounts),
+        'trade_intake_count':len(intakes),
+        'crm_audit_count':len(audits),
+        'campaign_account_count':len(campaign_accounts),
+        'campaign_audit_count':len(campaign_audits),
+        'pii_exposed':False,
+    }
 
 @app.post('/crm/intake')
 async def public_intake(p:IntakeIn):
