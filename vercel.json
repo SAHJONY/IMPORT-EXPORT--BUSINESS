@@ -25,6 +25,7 @@
     { "src": "/owner/energy/compliance", "dest": "/owner-energy-compliance.html" },
     { "src": "/owner/energy/deal-flow", "dest": "/owner-energy-deal-flow.html" },
     { "src": "/owner/energy/revenue", "dest": "/owner-energy-revenue.html" },
+    { "src": "/owner/energy/operations", "dest": "/owner-energy-operations.html" },
     { "src": "/owner/cuba-us-desk", "dest": "/cuba-us-desk.html" },
     { "src": "/cuba-private-sector", "dest": "/cuba-es.html" },
 
