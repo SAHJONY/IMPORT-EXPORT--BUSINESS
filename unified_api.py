@@ -26,6 +26,7 @@ from cuba_transition_api import app as cuba_transition_app
 from cuba_trade_desk_api import app as cuba_trade_desk_app
 from cuba_private_business_api import app as cuba_private_business_app
 from cuba_private_sector_lead_api import app as cuba_private_sector_lead_app
+from lead_scout_api import app as lead_scout_app
 from managed_trade_gateway_api import app as managed_trade_app
 from managed_trade_intermediary_api import app as intermediary_app
 from global_supplier_sourcing_api import app as global_sourcing_app
@@ -170,7 +171,7 @@ for subapp in (
     communications_app, documents_app, document_storage_app, shipments_app,
     compliance_app, commercial_app, language_app, collaboration_app, finance_app,
     countries_app, cuba_current_app, cuba_transition_app, cuba_trade_desk_app,
-    cuba_private_business_app, cuba_private_sector_lead_app, managed_trade_app,
+    cuba_private_business_app, cuba_private_sector_lead_app, lead_scout_app, managed_trade_app,
     intermediary_app, global_sourcing_app, business_readiness_app, us_import_app,
     ai_brain_app,
 ):
