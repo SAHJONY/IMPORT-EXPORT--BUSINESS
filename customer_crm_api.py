@@ -7,9 +7,11 @@ from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field, field_validator
 from auth import verify_owner_token
 from insforge_backend import get_backend
+from crm_campaign_bootstrap import CAMPAIGN, bootstrap_cuba_mipyme_outreach, load_seed
 
-app=FastAPI(title='SAHJONY Customer CRM',version='1.0.0',docs_url=None,redoc_url=None)
+app=FastAPI(title='SAHJONY Customer CRM',version='1.1.0',docs_url=None,redoc_url=None)
 Role=Literal['owner','employee']
+_BOOTSTRAP_STATUS={'campaign':CAMPAIGN,'seed_count':len(load_seed()),'status':'PENDING','result':None}
 
 def now(): return datetime.now(timezone.utc).isoformat()
 def employee_token():
@@ -26,6 +28,15 @@ def identity(role,authorization,employee_id):
         return {'role':'owner','id':'owner'}
     if not secrets.compare_digest(token,employee_token()): raise HTTPException(403,'Invalid employee credential')
     return {'role':'employee','id':(employee_id or 'staff')[:160]}
+
+@app.on_event('startup')
+async def bootstrap_campaign_leads():
+    global _BOOTSTRAP_STATUS
+    try:
+        result=await bootstrap_cuba_mipyme_outreach()
+        _BOOTSTRAP_STATUS={'campaign':CAMPAIGN,'seed_count':len(load_seed()),'status':'IMPORTED','result':result}
+    except Exception as exc:
+        _BOOTSTRAP_STATUS={'campaign':CAMPAIGN,'seed_count':len(load_seed()),'status':'WAITING_FOR_DURABLE_BACKEND','result':{'error_type':type(exc).__name__}}
 
 class IntakeIn(BaseModel):
     legal_name:str=Field(min_length=2,max_length=240)
@@ -66,7 +77,7 @@ async def audit(actor,event,summary,customer_id=None,intake_id=None,payload=None
     })
 
 @app.get('/crm/health')
-async def health(): return {'status':'ok','service':'customer-crm','public_intake':True,'fail_closed_promotion':True}
+async def health(): return {'status':'ok','service':'customer-crm','public_intake':True,'fail_closed_promotion':True,'campaign_bootstrap':_BOOTSTRAP_STATUS}
 
 @app.post('/crm/intake')
 async def public_intake(p:IntakeIn):
