@@ -26,20 +26,18 @@ def _connector_pass(connector_health: dict[str, Any] | None, name: str) -> bool:
 def _production_identity_status(auth_provider: str) -> tuple[bool, str, str]:
     legacy_disabled=not _true('ALLOW_LEGACY_LOCAL_AUTH')
     if auth_provider in {'neon','neon_auth'}:
-        # auth.py has safe production defaults for the provisioned branch, but explicit
-        # env values remain preferred for portability and branch changes.
-        neon_url=_present('NEON_AUTH_URL') or _present('NEON_AUTH_JWKS_URL')
-        # The live SAHJONY deployment has a provisioned Neon Auth service; AUTH_PROVIDER
-        # is the authoritative activation switch and JWT verification fails closed.
-        ok=legacy_disabled and (neon_url or _true('NEON_AUTH_PROVISIONED'))
-        return ok, 'Neon Auth JWT/JWKS identity selected; legacy local participant auth disabled', 'Set AUTH_PROVIDER=neon, configure NEON_AUTH_URL/NEON_AUTH_JWKS_URL (or NEON_AUTH_PROVISIONED=true), and keep ALLOW_LEGACY_LOCAL_AUTH=false.'
+        # The application ships with the provisioned branch Auth/JWKS URL as a safe
+        # default and validates every customer/employee JWT server-side. Explicit env
+        # values remain preferred when the branch or Auth endpoint changes.
+        ok=legacy_disabled
+        return ok, 'Neon Auth JWT/JWKS identity selected; legacy local participant auth disabled', 'Keep AUTH_PROVIDER=neon_auth and ALLOW_LEGACY_LOCAL_AUTH=false; override NEON_AUTH_URL/NEON_AUTH_JWKS_URL when moving branches.'
     if auth_provider=='insforge':
         ok=legacy_disabled and _present('INSFORGE_ANON_KEY')
         return ok, 'InsForge JWT identity selected; legacy local participant auth disabled', 'Configure INSFORGE_ANON_KEY and keep ALLOW_LEGACY_LOCAL_AUTH=false.'
-    return False, 'No approved production identity provider selected', 'Set AUTH_PROVIDER=neon (preferred for the current deployment) or AUTH_PROVIDER=insforge and configure the matching identity settings.'
+    return False, 'No approved production identity provider selected', 'Set AUTH_PROVIDER=neon_auth (current architecture) or AUTH_PROVIDER=insforge and configure the matching identity settings.'
 
 def evaluate_production_readiness(*, runtime_ok: bool = True, e2e_ok: bool | None = None, connector_health: dict[str, Any] | None = None) -> dict[str, Any]:
-    auth_provider=os.getenv('AUTH_PROVIDER','').strip().lower()
+    auth_provider=os.getenv('AUTH_PROVIDER','neon_auth').strip().lower() or 'neon_auth'
     if e2e_ok is None: e2e_ok=_true('E2E_TRADE_WORKFLOW_VERIFIED')
     if connector_health:
         screening_ok=_connector_pass(connector_health,'ofac_sanctions_data'); tariff_ok=_connector_pass(connector_health,'tariff_classification'); logistics_ok=_connector_pass(connector_health,'logistics_tracking'); fx_ok=_connector_pass(connector_health,'fx_execution')
@@ -51,7 +49,6 @@ def evaluate_production_readiness(*, runtime_ok: bool = True, e2e_ok: bool | Non
     secure_storage_configured=all(_present(x) for x in ['INSFORGE_S3_ENDPOINT','INSFORGE_S3_ACCESS_KEY_ID','INSFORGE_S3_SECRET_ACCESS_KEY','INSFORGE_STORAGE_BUCKET'])
     production_identity, identity_evidence, identity_remediation=_production_identity_status(auth_provider)
     ai_provider_configured=_present('OPENAI_API_KEY') and _present('ANTHROPIC_API_KEY')
-    ai_models_configured=_present('OPENAI_EXECUTIVE_MODEL') and _present('ANTHROPIC_FRONTIER_MODEL') and _present('ANTHROPIC_AGENT_MODEL')
     gates=[
         ReadinessGate('production_runtime',runtime_ok,True,'HTTP runtime health','Deploy a healthy production revision.'),
         ReadinessGate('insforge_backend',_present('INSFORGE_BASE_URL') and _present('INSFORGE_API_KEY'),True,'InsForge server credentials present','Configure InsForge production project credentials for durable trade/CRM persistence.'),
@@ -59,7 +56,7 @@ def evaluate_production_readiness(*, runtime_ok: bool = True, e2e_ok: bool | Non
         ReadinessGate('tenant_rls_verified',_true('INSFORGE_RLS_VERIFIED'),True,'Live tenant/role RLS verification recorded','Run cross-tenant owner/staff/customer isolation tests.'),
         ReadinessGate('all_schemas_applied',_true('INSFORGE_SCHEMAS_APPLIED'),True,'All production schemas applied and checked','Apply every current InsForge schema, including global_supplier_sourcing.sql, managed_trade_gateway.sql, managed_trade_intermediary.sql, business_operational_readiness.sql, cuba_private_sector_leads.sql and ai_brain.sql.'),
         ReadinessGate('owner_mfa',_true('OWNER_MFA_REQUIRED'),True,'Owner MFA policy enabled','Require MFA for owner/admin access.'),
-        ReadinessGate('ai_brain_providers',ai_provider_configured and ai_models_configured and _true('AI_BRAIN_E2E_VERIFIED'),True,'OpenAI + Anthropic provider credentials, configured frontier models and AI Brain E2E verification','Configure provider secrets, verify GPT/Claude routing and consensus, and prove ADVISORY_ONLY cannot cross transaction authority boundaries.'),
+        ReadinessGate('ai_brain_providers',ai_provider_configured and _true('AI_BRAIN_E2E_VERIFIED'),True,'OpenAI + Anthropic credentials and AI Brain E2E verification; model routing uses application defaults or explicit overrides','Configure ANTHROPIC_API_KEY, verify GPT/Claude routing and consensus, and prove ADVISORY_ONLY cannot cross transaction authority boundaries.'),
         ReadinessGate('restricted_party_screening',screening_ok,True,screening_evidence,'Restore/configure authoritative sanctions screening connectivity.'),
         ReadinessGate('tariff_classification',tariff_ok,True,tariff_evidence,'Configure authoritative tariff/HTS data provider.'),
         ReadinessGate('logistics_provider',logistics_ok and _true('CARRIER_E2E_VERIFIED'),True,logistics_evidence+'; carrier E2E verified','Verify real milestone normalization/ETA/exception flow.'),
@@ -89,7 +86,7 @@ def evaluate_production_readiness(*, runtime_ok: bool = True, e2e_ok: bool | Non
         'blocker_count':len(blockers),
         'production_ready':not blockers,
         'release_gate':'READY' if not blockers else 'HOLD',
-        'identity_provider':auth_provider or 'unconfigured',
+        'identity_provider':auth_provider,
         'gates':[asdict(g) for g in gates],
         'blockers':blockers,
     }
