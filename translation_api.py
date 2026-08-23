@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 from auth import verify_customer_token, verify_owner_token
 from insforge_backend import get_backend
 
-app = FastAPI(title='SAHJONY Global Language & Translation', version='1.1.0', docs_url=None, redoc_url=None)
+app = FastAPI(title='SAHJONY Global Language & Translation', version='1.2.0', docs_url=None, redoc_url=None)
 Role = Literal['owner','employee','customer']
 
 RTL_LANGS = {'ar','fa','he','ur','ps','sd','ug','yi'}
@@ -83,7 +83,7 @@ def locale_direction(locale: str):
     return 'rtl' if locale.lower().split('-')[0] in RTL_LANGS else 'ltr'
 
 def public_ui_enabled():
-    return os.getenv('PUBLIC_UI_TRANSLATION_ENABLED','false').lower()=='true'
+    return os.getenv('PUBLIC_UI_TRANSLATION_ENABLED','true').lower()=='true'
 
 def enforce_public_limit(request: Request):
     ip=request.client.host if request.client else 'unknown'; ts=time.time(); window=PUBLIC_WINDOW.setdefault(ip,[])
@@ -114,7 +114,7 @@ async def audit(translation_id,actor,action,detail=None):
 
 @app.get('/language/health')
 async def health():
-    return {'status':'ok','service':'global-language','provider':'azure-translator','provider_configured':azure_configured(),'public_ui_translation':public_ui_enabled(),'original_text_preserved':True,'legal_translation_requires_review':True,'rtl_supported':True,'bcp47':True}
+    return {'status':'ok','service':'global-language','version':'1.2.0','provider':'azure-translator','provider_configured':azure_configured(),'public_ui_translation':public_ui_enabled(),'original_text_preserved':True,'legal_translation_requires_review':True,'rtl_supported':True,'bcp47':True,'core_locales':len(CORE_LOCALES)}
 
 @app.get('/language/locales')
 async def locales():
