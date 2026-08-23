@@ -61,7 +61,13 @@ def _production_identity_status(auth_provider: str) -> tuple[bool, str, str]:
     return False, 'No approved production identity provider selected', 'Set AUTH_PROVIDER=neon_auth (current architecture) or AUTH_PROVIDER=insforge and configure the matching identity settings.'
 
 
-def evaluate_production_readiness(*, runtime_ok: bool = True, e2e_ok: bool | None = None, connector_health: dict[str, Any] | None = None) -> dict[str, Any]:
+def evaluate_production_readiness(
+    *,
+    runtime_ok: bool = True,
+    e2e_ok: bool | None = None,
+    connector_health: dict[str, Any] | None = None,
+    persistence_schema_evidence: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     auth_provider = os.getenv('AUTH_PROVIDER', 'neon_auth').strip().lower() or 'neon_auth'
     if e2e_ok is None:
         e2e_ok = _true('E2E_TRADE_WORKFLOW_VERIFIED')
@@ -83,11 +89,6 @@ def evaluate_production_readiness(*, runtime_ok: bool = True, e2e_ok: bool | Non
         tariff_evidence = 'Tariff/classification provider configured'
         logistics_evidence = 'Logistics provider configured'
 
-    # Customer settlement is a hard USD-only application policy. An executable FX
-    # provider is therefore not a release dependency for customer transactions.
-    # Reference FX feeds remain useful for internal landed-cost planning where a
-    # supplier originates a non-USD price, but they must never mutate settlement
-    # currency or bypass the canonical USD payment engine.
     if USD_ONLY_TRANSACTIONS and CANONICAL_TRANSACTION_CURRENCY == 'USD':
         settlement_ok = True
         settlement_evidence = 'Canonical customer transaction currency is USD-only; executable FX is not required for customer settlement. External FX remains optional for internal supplier-cost conversion/planning.'
@@ -102,7 +103,16 @@ def evaluate_production_readiness(*, runtime_ok: bool = True, e2e_ok: bool | Non
     production_identity, identity_evidence, identity_remediation = _production_identity_status(auth_provider)
     persistent_backend_ok, persistent_backend_evidence = _persistent_backend_status()
     persistence_isolation_ok = _true('PERSISTENCE_ISOLATION_VERIFIED') or _true('INSFORGE_RLS_VERIFIED')
-    persistence_schema_ok = _true('PERSISTENCE_SCHEMA_VERIFIED') or _true('INSFORGE_SCHEMAS_APPLIED')
+
+    schema_runtime_verified = bool((persistence_schema_evidence or {}).get('verified'))
+    persistence_schema_ok = schema_runtime_verified or _true('PERSISTENCE_SCHEMA_VERIFIED') or _true('INSFORGE_SCHEMAS_APPLIED')
+    if schema_runtime_verified:
+        schema_evidence = 'Active production database schema verified directly through information_schema/pg_indexes'
+    elif persistence_schema_evidence:
+        schema_evidence = f"Production schema evidence failed: {(persistence_schema_evidence or {}).get('reason') or 'required tables/columns/indexes are incomplete'}"
+    else:
+        schema_evidence = 'Production persistence schema/bootstrap verification recorded'
+
     owner_mfa_ok = _true('OWNER_MFA_REQUIRED') and _present('OWNER_TOTP_SECRET')
     ai_provider_configured = _present('OPENAI_API_KEY') and _present('ANTHROPIC_API_KEY')
 
@@ -111,7 +121,7 @@ def evaluate_production_readiness(*, runtime_ok: bool = True, e2e_ok: bool | Non
         ReadinessGate('persistent_backend', persistent_backend_ok, True, persistent_backend_evidence, 'Attach Neon/Postgres to Vercel (DATABASE_URL/POSTGRES_URL) or configure InsForge server credentials.'),
         ReadinessGate('production_identity', production_identity, True, identity_evidence, identity_remediation),
         ReadinessGate('persistence_isolation_verified', persistence_isolation_ok, True, 'Live tenant/role persistence isolation verification recorded', 'Run owner/staff/customer isolation tests and set PERSISTENCE_ISOLATION_VERIFIED=true only after evidence is recorded.'),
-        ReadinessGate('persistence_schema_verified', persistence_schema_ok, True, 'Production persistence schema/bootstrap verification recorded', 'Verify the active durable backend schema and set PERSISTENCE_SCHEMA_VERIFIED=true only after the test passes.'),
+        ReadinessGate('persistence_schema_verified', persistence_schema_ok, True, schema_evidence, 'Verify the active durable backend schema against required physical tables, columns and indexes.'),
         ReadinessGate('owner_mfa', owner_mfa_ok, True, 'Owner TOTP MFA policy enabled and a server-side TOTP secret is configured', 'Set OWNER_MFA_REQUIRED=true and configure OWNER_TOTP_SECRET through the production secret manager; never commit the secret to Git.'),
         ReadinessGate('ai_brain_providers', ai_provider_configured and _true('AI_BRAIN_E2E_VERIFIED'), True, 'OpenAI + Anthropic credentials and AI Brain E2E verification; model routing uses application defaults or explicit overrides', 'Configure ANTHROPIC_API_KEY, verify GPT/Claude routing and consensus, and prove ADVISORY_ONLY cannot cross transaction authority boundaries.'),
         ReadinessGate('restricted_party_screening', screening_ok, True, screening_evidence, 'Restore/configure authoritative sanctions screening connectivity.'),
@@ -150,6 +160,7 @@ def evaluate_production_readiness(*, runtime_ok: bool = True, e2e_ok: bool | Non
         'identity_provider': auth_provider,
         'canonical_transaction_currency': CANONICAL_TRANSACTION_CURRENCY,
         'usd_only_transactions': USD_ONLY_TRANSACTIONS,
+        'persistence_schema_evidence': persistence_schema_evidence,
         'gates': [asdict(g) for g in gates],
         'blockers': blockers,
     }
