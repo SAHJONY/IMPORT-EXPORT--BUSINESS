@@ -29,6 +29,7 @@ verifyOwnerRoute('/owner/energy/crude-oil','/owner-energy-crude.html','Crude Oil
 verifyOwnerRoute('/owner/energy/origination','/owner-energy-origination.html','Energy Origination');
 verifyOwnerRoute('/owner/energy/intelligence','/owner-energy-intelligence.html','Energy Intelligence');
 verifyOwnerRoute('/owner/energy/providers','/owner-energy-providers.html','Energy Data Providers');
+verifyOwnerRoute('/owner/energy/compliance','/owner-energy-compliance.html','Energy Compliance');
 
 if(failures.length){for(const f of failures)console.error('FAIL ',f);process.exit(1)}
 console.log('PASS  Trade, CRM, Lead Search, and all SAHJONY Energy routes reach production safely');
