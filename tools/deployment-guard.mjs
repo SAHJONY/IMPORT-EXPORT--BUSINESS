@@ -61,6 +61,7 @@ function checkRequiredFiles() {
     'public/landing.html',
     'public/start.html',
     'public/cuba-private-sector.html',
+    'public/cuba-private-sector-es.html',
     'vercel.json',
     'unified_api.py'
   ];
@@ -91,7 +92,7 @@ function checkVercelRoutes() {
     '/': '/landing.html',
     '/business': '/landing.html',
     '/start': '/start.html',
-    '/cuba-private-sector': '/cuba-private-sector.html'
+    '/cuba-private-sector': '/cuba-private-sector-es.html'
   };
   for (const [src, dest] of Object.entries(criticalStatic)) {
     const idx = routes.findIndex((r) => r.src === src && r.dest === dest);
