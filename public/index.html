@@ -12,8 +12,8 @@
     .content{text-align:center;z-index:1;}
     .content h1{font-size:4rem;margin:0;letter-spacing:2px;}
     .content p{font-size:1.5rem;margin:20px 0;}
-    .cta{display:inline-block;padding:15px 30px;background:#ff6200;border-radius:5px;color:#fff;text-decoration:none;font-size:1.2rem;transition:background .3s;}
-    .cta:hover{background:#e55300;}
+    .actions{display:flex;gap:10px;justify-content:center;flex-wrap:wrap}.cta{display:inline-block;padding:15px 30px;background:#ff6200;border-radius:5px;color:#fff;text-decoration:none;font-size:1.2rem;transition:background .3s;}.cta.secondary{background:rgba(0,0,0,.45);border:1px solid rgba(255,255,255,.5)}
+    .cta:hover{background:#e55300;}.cta.secondary:hover{background:rgba(0,0,0,.7)}
     @media(max-width:768px){.content h1{font-size:2.5rem;} .content p{font-size:1rem;}}
   </style>
 </head>
@@ -26,7 +26,7 @@
     <div class="content">
       <h1>Powering Global Trade</h1>
       <p>Seamless import‑export solutions for any product, any country.</p>
-      <a href="/dashboard" class="cta">Enter Dashboard</a>
+      <div class="actions"><a href="/dashboard" class="cta">Enter Dashboard</a><a href="/?lang=es" class="cta secondary" data-no-translate="true">Español</a></div>
     </div>
   </section>
   <script src="/global-language.js" defer></script>
