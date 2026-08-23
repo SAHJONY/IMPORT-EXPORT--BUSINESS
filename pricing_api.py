@@ -6,9 +6,9 @@ from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
 
 from auth import verify_owner_token
-from pricing_engine import PricingError, business_quote, consumer_quote, policy_snapshot
+from pricing_engine import PricingError, TRANSACTION_CURRENCY, business_quote, consumer_quote, policy_snapshot
 
-app = FastAPI(title='SAHJONY Owner Pricing Command API', version='1.0.0', docs_url=None, redoc_url=None)
+app = FastAPI(title='SAHJONY Owner Pricing Command API', version='1.0.1', docs_url=None, redoc_url=None)
 
 
 def require_owner(authorization: str | None, x_role: str | None):
@@ -39,6 +39,7 @@ async def health():
     return {
         'status': 'ok',
         'service': 'sahjony-owner-pricing-command',
+        'transaction_currency': TRANSACTION_CURRENCY,
         'customer_price_isolation': True,
         'cost_basis_private': True,
         'owner_approval_required': True,
@@ -67,12 +68,12 @@ async def preview(audience: Literal['consumer','business'], p: PricingPreviewIn,
     return {
         'audience': quote['audience'],
         'customer_price': quote['customer_price'],
-        'currency': quote['currency'],
+        'currency': TRANSACTION_CURRENCY,
         'quote_valid_hours': quote['quote_valid_hours'],
         'pricing_release': quote['pricing_release'],
         'margin_floor_passed': quote['margin_floor_passed'],
         'volume_pricing': quote['volume_pricing'],
         'internal': quote['internal'],
         'customer_safe_fields': ['customer_price','currency','quote_valid_hours'],
-        'warning': 'Internal cost and margin fields are Owner-only and must never be exposed to customers.'
+        'warning': 'Internal cost and margin fields are Owner-only. All customer transactions are denominated in USD.'
     }
