@@ -6,7 +6,7 @@ from fastapi.responses import JSONResponse
 
 from auth import decode_neon_jwt, neon_auth_jwks_url, neon_auth_url, verify_employee_neon_token
 from insforge_backend import InsForgeConfigurationError
-from activation_api import app as activation_app
+from activation_api import app as activation_app, activation_health
 from telegram_api import app as telegram_app
 from business_email_registry import app as business_email_app
 from owner_auth_api import app as owner_auth_app
@@ -119,6 +119,29 @@ async def crm_runtime_health():
         "insforge_base_url_configured": base_url,
         "insforge_api_key_configured": api_key,
         "operational": configured,
+    }
+
+
+@app.get("/health")
+async def platform_health():
+    activation = await activation_health()
+    return {
+        "status": "ok",
+        "service": "global-trade-intelligence-os",
+        "version": "3.5.0",
+        "release_policy": "fail-closed",
+        "production_ready": activation["production_ready"],
+        "readiness_score": activation["readiness_score"],
+        "passed_gates": activation["passed_gates"],
+        "total_gates": activation["total_gates"],
+        "blocker_count": activation["blocker_count"],
+        "release_gate": activation["release_gate"],
+        "identity_provider": activation["providers"]["identity"]["provider"],
+        "persistence_configured": activation["providers"]["persistence"]["configured"],
+        "openai_configured": activation["providers"]["ai"]["openai_configured"],
+        "anthropic_configured": activation["providers"]["ai"]["anthropic_configured"],
+        "translation_configured": activation["providers"]["translation"]["configured"],
+        "blockers": activation["blockers"],
     }
 
 
