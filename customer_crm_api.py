@@ -9,7 +9,7 @@ from auth import verify_owner_token
 from insforge_backend import get_backend
 from crm_campaign_bootstrap import CAMPAIGN, bootstrap_cuba_mipyme_outreach, load_seed
 
-app=FastAPI(title='SAHJONY Customer CRM',version='1.1.0',docs_url=None,redoc_url=None)
+app=FastAPI(title='SAHJONY Customer CRM',version='1.2.0',docs_url=None,redoc_url=None)
 Role=Literal['owner','employee']
 _BOOTSTRAP_STATUS={'campaign':CAMPAIGN,'seed_count':len(load_seed()),'status':'PENDING','result':None}
 
@@ -29,14 +29,20 @@ def identity(role,authorization,employee_id):
     if not secrets.compare_digest(token,employee_token()): raise HTTPException(403,'Invalid employee credential')
     return {'role':'employee','id':(employee_id or 'staff')[:160]}
 
-@app.on_event('startup')
-async def bootstrap_campaign_leads():
+async def ensure_campaign_bootstrap():
     global _BOOTSTRAP_STATUS
+    if _BOOTSTRAP_STATUS.get('status')=='IMPORTED':
+        return _BOOTSTRAP_STATUS
     try:
         result=await bootstrap_cuba_mipyme_outreach()
         _BOOTSTRAP_STATUS={'campaign':CAMPAIGN,'seed_count':len(load_seed()),'status':'IMPORTED','result':result}
     except Exception as exc:
         _BOOTSTRAP_STATUS={'campaign':CAMPAIGN,'seed_count':len(load_seed()),'status':'WAITING_FOR_DURABLE_BACKEND','result':{'error_type':type(exc).__name__}}
+    return _BOOTSTRAP_STATUS
+
+@app.on_event('startup')
+async def bootstrap_campaign_leads():
+    await ensure_campaign_bootstrap()
 
 class IntakeIn(BaseModel):
     legal_name:str=Field(min_length=2,max_length=240)
@@ -77,7 +83,9 @@ async def audit(actor,event,summary,customer_id=None,intake_id=None,payload=None
     })
 
 @app.get('/crm/health')
-async def health(): return {'status':'ok','service':'customer-crm','public_intake':True,'fail_closed_promotion':True,'campaign_bootstrap':_BOOTSTRAP_STATUS}
+async def health():
+    bootstrap=await ensure_campaign_bootstrap()
+    return {'status':'ok','service':'customer-crm','public_intake':True,'fail_closed_promotion':True,'campaign_bootstrap':bootstrap}
 
 @app.post('/crm/intake')
 async def public_intake(p:IntakeIn):
@@ -97,19 +105,54 @@ async def public_intake(p:IntakeIn):
 
 @app.get('/crm/customers')
 async def list_customers(x_role:str|None=Header(None,alias='X-Role'),authorization:str|None=Header(None,alias='Authorization'),x_employee_id:str|None=Header(None,alias='X-Employee-Id')):
-    actor=identity(x_role,authorization,x_employee_id); params={'order':'updated_at.desc','limit':'250'}
+    actor=identity(x_role,authorization,x_employee_id)
+    await ensure_campaign_bootstrap()
+    params={'order':'updated_at.desc','limit':'250'}
     if actor['role']=='employee': params['assigned_employee_id']=f'eq.{actor["id"]}'
     return {'customers':await get_backend().select('customer_accounts',params=params) or []}
 
 @app.get('/crm/intakes')
 async def list_intakes(x_role:str|None=Header(None,alias='X-Role'),authorization:str|None=Header(None,alias='Authorization'),x_employee_id:str|None=Header(None,alias='X-Employee-Id')):
-    actor=identity(x_role,authorization,x_employee_id); params={'order':'updated_at.desc','limit':'250'}
+    actor=identity(x_role,authorization,x_employee_id)
+    await ensure_campaign_bootstrap()
+    backend=get_backend()
+    params={'order':'updated_at.desc','limit':'250'}
     if actor['role']=='employee': params['assigned_employee_id']=f'eq.{actor["id"]}'
-    return {'intakes':await get_backend().select('customer_trade_intakes',params=params) or []}
+    intakes=await backend.select('customer_trade_intakes',params=params) or []
+    accounts=await backend.select('customer_accounts',params=params) or []
+    intake_customer_ids={row.get('customer_id') for row in intakes}
+    prospects=[]
+    for account in accounts:
+        if account.get('customer_id') in intake_customer_ids:
+            continue
+        prospects.append({
+            'intake_id':f"prospect:{account.get('customer_id')}",
+            'customer_id':account.get('customer_id'),
+            'legal_name':account.get('legal_name'),
+            'trade_name':account.get('trade_name'),
+            'contact_name':account.get('contact_name'),
+            'email':account.get('email'),
+            'phone':account.get('phone'),
+            'country_code':account.get('country_code'),
+            'website':account.get('website'),
+            'product_need':'Outreach prospect — awaiting trade requirement',
+            'destination_country':account.get('country_code') or 'CU',
+            'status':account.get('status') or 'PROSPECT',
+            'qualification_status':'PENDING',
+            'source':account.get('source'),
+            'created_at':account.get('created_at'),
+            'updated_at':account.get('updated_at'),
+            'prospect_only':True,
+        })
+    combined=intakes+prospects
+    combined.sort(key=lambda row: row.get('updated_at') or '',reverse=True)
+    return {'intakes':combined[:250],'real_intake_count':len(intakes),'prospect_count':len(prospects)}
 
 @app.patch('/crm/intakes/{intake_id}/qualify')
 async def qualify(intake_id:str,p:QualifyIn,x_role:str|None=Header(None,alias='X-Role'),authorization:str|None=Header(None,alias='Authorization'),x_employee_id:str|None=Header(None,alias='X-Employee-Id')):
-    actor=identity(x_role,authorization,x_employee_id); rows=await get_backend().select('customer_trade_intakes',params={'intake_id':f'eq.{intake_id}','limit':'1'}) or []
+    actor=identity(x_role,authorization,x_employee_id)
+    if intake_id.startswith('prospect:'): raise HTTPException(409,'Prospect has not submitted a trade intake yet')
+    rows=await get_backend().select('customer_trade_intakes',params={'intake_id':f'eq.{intake_id}','limit':'1'}) or []
     if not rows: raise HTTPException(404,'Intake not found')
     assigned=p.assigned_employee_id or (actor['id'] if actor['role']=='employee' else rows[0].get('assigned_employee_id'))
     values={'qualification_status':p.status,'status':'QUALIFIED' if p.status=='QUALIFIED' else ('NEEDS_INFO' if p.status=='NEEDS_INFO' else 'CLOSED'),'assigned_employee_id':assigned,'updated_at':now()}
@@ -120,7 +163,9 @@ async def qualify(intake_id:str,p:QualifyIn,x_role:str|None=Header(None,alias='X
 
 @app.post('/crm/intakes/{intake_id}/promote')
 async def promote(intake_id:str,x_role:str|None=Header(None,alias='X-Role'),authorization:str|None=Header(None,alias='Authorization'),x_employee_id:str|None=Header(None,alias='X-Employee-Id')):
-    actor=identity(x_role,authorization,x_employee_id); backend=get_backend(); rows=await backend.select('customer_trade_intakes',params={'intake_id':f'eq.{intake_id}','limit':'1'}) or []
+    actor=identity(x_role,authorization,x_employee_id)
+    if intake_id.startswith('prospect:'): raise HTTPException(409,'Prospect has not submitted a trade intake yet')
+    backend=get_backend(); rows=await backend.select('customer_trade_intakes',params={'intake_id':f'eq.{intake_id}','limit':'1'}) or []
     if not rows: raise HTTPException(404,'Intake not found')
     row=rows[0]
     if row.get('qualification_status')!='QUALIFIED': raise HTTPException(409,'Only QUALIFIED customer intakes may enter managed trade')
