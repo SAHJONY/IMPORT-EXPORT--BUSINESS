@@ -4,15 +4,11 @@ import os
 from fastapi import FastAPI
 
 from auth import neon_auth_jwks_url, neon_auth_url
+from insforge_backend import persistent_backend_status
 from production_readiness import evaluate_production_readiness
 from trade_connectors import trade_connectors
 
-app = FastAPI(
-    title="SAHJONY Production Activation Control",
-    version="1.0.0",
-    docs_url=None,
-    redoc_url=None,
-)
+app = FastAPI(title="SAHJONY Production Activation Control", version="1.1.0", docs_url=None, redoc_url=None)
 
 
 def _present(name: str) -> bool:
@@ -24,6 +20,7 @@ def _true(name: str) -> bool:
 
 
 def _provider_state() -> dict:
+    persistence = persistent_backend_status()
     return {
         "identity": {
             "provider": "neon_auth",
@@ -32,10 +29,9 @@ def _provider_state() -> dict:
             "legacy_local_auth_disabled": not _true("ALLOW_LEGACY_LOCAL_AUTH"),
         },
         "persistence": {
-            "provider": "insforge",
-            "configured": _present("INSFORGE_BASE_URL") and _present("INSFORGE_API_KEY"),
-            "rls_verified": _true("INSFORGE_RLS_VERIFIED"),
-            "schemas_applied": _true("INSFORGE_SCHEMAS_APPLIED"),
+            **persistence,
+            "rls_verified": _true("PERSISTENCE_ISOLATION_VERIFIED") or _true("INSFORGE_RLS_VERIFIED"),
+            "schemas_applied": _true("PERSISTENCE_SCHEMA_VERIFIED") or _true("INSFORGE_SCHEMAS_APPLIED"),
         },
         "ai": {
             "openai_configured": _present("OPENAI_API_KEY"),
@@ -49,12 +45,9 @@ def _provider_state() -> dict:
             "e2e_verified": _true("MULTILINGUAL_E2E_VERIFIED"),
         },
         "document_storage": {
-            "provider": "insforge-s3",
+            "provider": "insforge-s3-or-compatible",
             "configured": all(_present(k) for k in (
-                "INSFORGE_S3_ENDPOINT",
-                "INSFORGE_S3_ACCESS_KEY_ID",
-                "INSFORGE_S3_SECRET_ACCESS_KEY",
-                "INSFORGE_STORAGE_BUCKET",
+                "INSFORGE_S3_ENDPOINT", "INSFORGE_S3_ACCESS_KEY_ID", "INSFORGE_S3_SECRET_ACCESS_KEY", "INSFORGE_STORAGE_BUCKET",
             )),
             "signed_storage_verified": _true("SIGNED_DOCUMENT_STORAGE_VERIFIED"),
         },
@@ -67,8 +60,9 @@ def _provider_state() -> dict:
 
 def _external_requirements() -> list[dict]:
     requirements: list[dict] = []
-    if not (_present("INSFORGE_BASE_URL") and _present("INSFORGE_API_KEY")):
-        requirements.append({"area": "persistence", "action": "Configure INSFORGE_BASE_URL and INSFORGE_API_KEY in Vercel."})
+    persistence = persistent_backend_status()
+    if not persistence["configured"]:
+        requirements.append({"area": "persistence", "action": "Attach Neon/Postgres to Vercel so DATABASE_URL/POSTGRES_URL exists, or configure InsForge server credentials."})
     if not _present("ANTHROPIC_API_KEY"):
         requirements.append({"area": "ai", "action": "Add ANTHROPIC_API_KEY in Vercel and run AI Brain E2E verification."})
     if not (_present("AZURE_TRANSLATOR_ENDPOINT") and _present("AZURE_TRANSLATOR_KEY")):
