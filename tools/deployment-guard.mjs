@@ -129,6 +129,29 @@ function checkVercelRoutes() {
     }
   }
 
+  const ownerStatic = {
+    '/owner/energy/crude-oil': '/owner-energy-crude.html',
+    '/owner/energy/origination': '/owner-energy-origination.html',
+    '/owner/energy/intelligence': '/owner-energy-intelligence.html',
+    '/owner/energy/providers': '/owner-energy-providers.html',
+    '/owner/energy/compliance': '/owner-energy-compliance.html',
+    '/owner/energy/deal-flow': '/owner-energy-deal-flow.html',
+    '/owner/energy/revenue': '/owner-energy-revenue.html',
+    '/owner/energy/operations': '/owner-energy-operations.html',
+    '/owner/energy/closing': '/owner-energy-closing.html',
+    '/owner/cuba-energy': '/owner-cuba-energy.html',
+    '/owner/cuba-fuels': '/owner-cuba-fuels.html',
+    '/owner/cuba-us-desk': '/cuba-us-desk.html'
+  };
+  for (const [src, dest] of Object.entries(ownerStatic)) {
+    const idx = routes.findIndex((r) => r.src === src && r.dest === dest);
+    if (idx < 0) fail(`Owner workspace route missing or wrong: ${src} -> ${dest}`);
+    else {
+      const disk = `public${dest}`;
+      exists(disk) ? pass(`Owner workspace route verified: ${src} -> ${dest}`) : fail(`Owner route ${src} points to missing static file ${disk}`);
+    }
+  }
+
   const fsHandle = routes.findIndex((r) => r.handle === 'filesystem');
   const catchAll = routes.findIndex((r) => r.src === '/(.*)' && r.dest === '/index.html');
   if (fsHandle < 0) fail('Missing filesystem route handle');
@@ -152,18 +175,23 @@ async function smokeTest(base) {
     ['/start', 'html'],
     ['/cuba-private-sector', 'html'],
     ['/us-desk-card', 'html'],
+    ['/owner/cuba-energy', 'html'],
+    ['/owner/cuba-fuels', 'html'],
     ['/crm/health', 'json'],
-    ['/cuba-private-sector/health', 'json']
+    ['/cuba-private-sector/health', 'json'],
+    ['/cuba-energy/health', 'json'],
+    ['/cuba-fuels/health', 'json']
   ];
   for (const [route, kind] of checks) {
     try {
-      const res = await fetch(`${base}${route}`, { redirect: 'follow', headers: { 'user-agent': 'SAHJONY-Deployment-Doctor/1.0' } });
+      const res = await fetch(`${base}${route}`, { redirect: 'follow', headers: { 'user-agent': 'SAHJONY-Deployment-Doctor/2.0' } });
       const text = await res.text();
       if (!res.ok) { fail(`Smoke ${route}: HTTP ${res.status}`); continue; }
       if (/\{\s*"detail"\s*:\s*"Not Found"\s*\}/i.test(text)) { fail(`Smoke ${route}: backend Not Found route collision`); continue; }
       if (kind === 'html') {
         if (!/<(?:html|main|section|div)[\s>]/i.test(text) || text.trim().length < 200) fail(`Smoke ${route}: blank or invalid HTML response`);
-        else pass(`Smoke ${route}: visible HTML returned`);
+        else if (/Workspace not found|requested SAHJONY workspace does not exist/i.test(text)) fail(`Smoke ${route}: generic workspace-not-found fallback returned`);
+        else pass(`Smoke ${route}: visible workspace HTML returned`);
       } else {
         try { JSON.parse(text); pass(`Smoke ${route}: JSON service responded`); }
         catch { fail(`Smoke ${route}: expected JSON service response`); }
