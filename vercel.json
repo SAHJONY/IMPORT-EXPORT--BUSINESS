@@ -18,6 +18,7 @@
     { "src": "/identity(.*)", "dest": "unified_api.py" },
     { "src": "/telegram(.*)", "dest": "unified_api.py" },
     { "src": "/business-email(.*)", "dest": "unified_api.py" },
+    { "src": "/email-agent(.*)", "dest": "unified_api.py" },
     { "src": "/owner-auth(.*)", "dest": "unified_api.py" },
     { "src": "/crm(.*)", "dest": "unified_api.py" },
     { "src": "/communications/(.*)", "dest": "unified_api.py" },
