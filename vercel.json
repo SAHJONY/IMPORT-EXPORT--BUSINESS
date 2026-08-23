@@ -25,6 +25,7 @@
     { "src": "/cuba-individual-consumers", "dest": "/cuba-individual-consumers.html" },
     { "src": "/owner-login", "dest": "/owner-login.html" },
     { "src": "/owner/pricing", "dest": "/owner-pricing.html" },
+    { "src": "/owner/payments", "dest": "/owner-payments.html" },
     { "src": "/owner/telegram", "dest": "/owner-telegram.html" },
     { "src": "/owner/crm-countries", "dest": "/owner-crm-countries.html" },
     { "src": "/owner/lead-search", "dest": "/owner-lead-search.html" },
