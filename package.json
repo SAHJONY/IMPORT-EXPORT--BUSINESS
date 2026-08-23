@@ -1,7 +1,7 @@
 {
   "name": "sahjony-global-trade-os",
   "private": true,
-  "version": "1.2.3",
+  "version": "1.2.4",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -9,8 +9,9 @@
     "doctor:locale": "node tools/locale-doctor.mjs",
     "doctor:trade-agent": "node tools/trade-agent-route-doctor.mjs",
     "doctor:routes": "node tools/route-sentinel.mjs",
-    "doctor:live": "node tools/route-sentinel.mjs --url=https://www.sahjony.com && node tools/deployment-guard.mjs --url=https://www.sahjony.com",
-    "prebuild": "node tools/locale-doctor.mjs && node tools/trade-agent-route-doctor.mjs && node tools/route-sentinel.mjs && node tools/deployment-guard.mjs",
+    "doctor:isolation": "node tools/audience-isolation-doctor.mjs",
+    "doctor:live": "node tools/audience-isolation-doctor.mjs && node tools/route-sentinel.mjs --url=https://www.sahjony.com && node tools/deployment-guard.mjs --url=https://www.sahjony.com",
+    "prebuild": "node tools/locale-doctor.mjs && node tools/trade-agent-route-doctor.mjs && node tools/route-sentinel.mjs && node tools/audience-isolation-doctor.mjs && node tools/deployment-guard.mjs",
     "build": "vite build",
     "preview": "vite preview"
   },
