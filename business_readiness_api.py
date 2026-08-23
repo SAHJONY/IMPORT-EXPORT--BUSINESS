@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 from auth import verify_owner_token
 from insforge_backend import get_backend
 
-app=FastAPI(title='SAHJONY Business Operational Readiness',version='1.0.0',docs_url=None,redoc_url=None)
+app=FastAPI(title='SAHJONY Business Operational Readiness',version='1.1.0',docs_url=None,redoc_url=None)
 Role=Literal['owner','employee']
 
 def now(): return datetime.now(timezone.utc).isoformat()
@@ -37,6 +37,12 @@ class PartnerIn(BaseModel):
  license_or_registration:str|None=None
  coverage_scope:dict={}
  evidence_document_ids:list[str]=[]
+
+class PartnerReviewIn(BaseModel):
+ due_diligence_status:Literal['PENDING','PASS','FAIL']|None=None
+ contract_status:Literal['NONE','PENDING','SIGNED','EXPIRED','TERMINATED']|None=None
+ active:bool|None=None
+ owner_approved:bool|None=None
 
 class DossierIn(BaseModel):
  counterparty_type:Literal['CUSTOMER','PRIVATE_BUSINESS','SUPPLIER','PARTNER']
@@ -81,8 +87,13 @@ class CertificationIn(BaseModel):
  customer_ref:str|None=None
  supplier_ref:str|None=None
 
+REQUIRED_PARTNER_TYPES={'CUSTOMS_BROKER','FREIGHT_FORWARDER','CARGO_INSURER','PAYMENT_PROVIDER','ACCOUNTING_TAX'}
+
+def partner_is_production_usable(p:dict)->bool:
+ return bool(p.get('active') and p.get('owner_approved') and p.get('due_diligence_status')=='PASS' and p.get('contract_status')=='SIGNED')
+
 @app.get('/business-readiness/health')
-async def health(): return {'status':'ok','service':'business-operational-readiness','fail_closed':True,'definition_of_done':'first-controlled-live-trade'}
+async def health(): return {'status':'ok','service':'business-operational-readiness','version':'1.1.0','fail_closed':True,'definition_of_done':'first-controlled-live-trade'}
 
 @app.get('/business-readiness/summary')
 async def summary(x_role:str|None=Header(None,alias='X-Role'),authorization:str|None=Header(None,alias='Authorization'),x_employee_id:str|None=Header(None,alias='X-Employee-Id')):
@@ -92,15 +103,45 @@ async def summary(x_role:str|None=Header(None,alias='X-Role'),authorization:str|
  dd=await b.select('counterparty_due_diligence',params={'limit':'500'}) or []
  products=await b.select('trade_product_dossiers',params={'limit':'500'}) or []
  certs=await b.select('first_live_trade_certification',params={'order':'created_at.desc','limit':'20'}) or []
- required_partner_types={'CUSTOMS_BROKER','FREIGHT_FORWARDER','CARGO_INSURER','PAYMENT_PROVIDER','ACCOUNTING_TAX'}
- active_types={p.get('partner_type') for p in partners if p.get('active') and p.get('owner_approved') and p.get('due_diligence_status')=='PASS' and p.get('contract_status')=='SIGNED'}
- return {'required_partner_types':sorted(required_partner_types),'missing_partner_types':sorted(required_partner_types-active_types),'active_partner_types':sorted(active_types),'kyb_pass_count':sum(1 for r in dd if r.get('kyb_status')=='PASS' and r.get('sanctions_screening_status')=='CLEAR'),'product_dossiers_passed':sum(1 for r in products if r.get('status')=='PASS' and r.get('owner_approved')),'first_live_trade_passed':any(r.get('e2e_status')=='PASSED' and r.get('owner_certified') for r in certs)}
+ active_types={p.get('partner_type') for p in partners if partner_is_production_usable(p)}
+ return {'required_partner_types':sorted(REQUIRED_PARTNER_TYPES),'missing_partner_types':sorted(REQUIRED_PARTNER_TYPES-active_types),'active_partner_types':sorted(active_types),'partner_count':len(partners),'production_usable_partner_count':sum(1 for p in partners if partner_is_production_usable(p)),'kyb_pass_count':sum(1 for r in dd if r.get('kyb_status')=='PASS' and r.get('sanctions_screening_status')=='CLEAR'),'product_dossiers_passed':sum(1 for r in products if r.get('status')=='PASS' and r.get('owner_approved')),'first_live_trade_passed':any(r.get('e2e_status')=='PASSED' and r.get('owner_certified') for r in certs)}
+
+@app.get('/business-readiness/partners')
+async def list_partners(x_role:str|None=Header(None,alias='X-Role'),authorization:str|None=Header(None,alias='Authorization'),x_employee_id:str|None=Header(None,alias='X-Employee-Id')):
+ actor(x_role,authorization,x_employee_id)
+ partners=await get_backend().select('operating_partners',params={'order':'updated_at.desc','limit':'500'}) or []
+ active_types={p.get('partner_type') for p in partners if partner_is_production_usable(p)}
+ return {
+  'partners':partners,
+  'required_partner_types':sorted(REQUIRED_PARTNER_TYPES),
+  'missing_partner_types':sorted(REQUIRED_PARTNER_TYPES-active_types),
+  'production_usable_count':sum(1 for p in partners if partner_is_production_usable(p)),
+ }
 
 @app.post('/business-readiness/partners')
 async def add_partner(p:PartnerIn,x_role:str|None=Header(None,alias='X-Role'),authorization:str|None=Header(None,alias='Authorization'),x_employee_id:str|None=Header(None,alias='X-Employee-Id')):
  a=actor(x_role,authorization,x_employee_id); pid=f'op_{secrets.token_urlsafe(10)}'; ts=now()
  row={'partner_id':pid,**p.model_dump(),'due_diligence_status':'PENDING','contract_status':'NONE','active':False,'owner_approved':False,'created_at':ts,'updated_at':ts}
  await get_backend().insert('operating_partners',row); return {'partner':row,'created_by':a}
+
+@app.patch('/business-readiness/partners/{partner_id}')
+async def review_partner(partner_id:str,p:PartnerReviewIn,x_role:str|None=Header(None,alias='X-Role'),authorization:str|None=Header(None,alias='Authorization'),x_employee_id:str|None=Header(None,alias='X-Employee-Id')):
+ a=actor(x_role,authorization,x_employee_id)
+ rows=await get_backend().select('operating_partners',params={'partner_id':f'eq.{partner_id}','limit':'1'}) or []
+ if not rows: raise HTTPException(404,'Operating partner not found')
+ current=rows[0]
+ values={k:v for k,v in p.model_dump().items() if v is not None}
+ if ('owner_approved' in values or 'active' in values) and a['role']!='owner':
+  raise HTTPException(403,'Only owner may approve or activate an operating partner')
+ candidate={**current,**values}
+ if values.get('owner_approved') is True and (candidate.get('due_diligence_status')!='PASS' or candidate.get('contract_status')!='SIGNED'):
+  raise HTTPException(409,'Owner approval requires due diligence PASS and contract SIGNED')
+ if values.get('active') is True and not (candidate.get('owner_approved') and candidate.get('due_diligence_status')=='PASS' and candidate.get('contract_status')=='SIGNED'):
+  raise HTTPException(409,'Activation requires owner approval, due diligence PASS, and contract SIGNED')
+ values['updated_at']=now()
+ await get_backend().patch('operating_partners',values,params={'partner_id':f'eq.{partner_id}'})
+ updated={**current,**values}
+ return {'partner':updated,'production_usable':partner_is_production_usable(updated),'reviewed_by':a}
 
 @app.post('/business-readiness/dossiers')
 async def add_dossier(p:DossierIn,x_role:str|None=Header(None,alias='X-Role'),authorization:str|None=Header(None,alias='Authorization'),x_employee_id:str|None=Header(None,alias='X-Employee-Id')):
