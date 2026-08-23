@@ -12,9 +12,6 @@ REQUIRED_ENV = {
     "OWNER_MFA_REQUIRED": "true",
     "OPENAI_API_KEY": "openai_test",
     "ANTHROPIC_API_KEY": "anthropic_test",
-    "OPENAI_EXECUTIVE_MODEL": "openai-test-model",
-    "ANTHROPIC_FRONTIER_MODEL": "anthropic-test-model",
-    "ANTHROPIC_AGENT_MODEL": "anthropic-agent-test-model",
     "AI_BRAIN_E2E_VERIFIED": "true",
     "OFAC_DIRECT_SCREENING": "true",
     "TARIFF_DATA_PROVIDER": "authoritative-test-provider",
@@ -54,10 +51,12 @@ REQUIRED_ENV = {
 def test_readiness_fails_closed_without_external_dependencies(monkeypatch):
     for key in REQUIRED_ENV:
         monkeypatch.delenv(key, raising=False)
+    for key in ["DATABASE_URL", "POSTGRES_URL", "NEON_DATABASE_URL", "NEON_POSTGRES_URL", "POSTGRES_PRISMA_URL"]:
+        monkeypatch.delenv(key, raising=False)
     result = evaluate_production_readiness(runtime_ok=True)
     assert result["production_ready"] is False
     assert result["release_gate"] == "HOLD"
-    assert "insforge_backend" in result["blockers"]
+    assert "persistent_backend" in result["blockers"]
     assert "e2e_trade_workflow" in result["blockers"]
 
 
@@ -83,9 +82,18 @@ def test_neon_auth_is_accepted_as_production_identity(monkeypatch):
     for key in REQUIRED_ENV:
         monkeypatch.delenv(key, raising=False)
     monkeypatch.setenv("AUTH_PROVIDER", "neon_auth")
-    monkeypatch.setenv("NEON_AUTH_PROVISIONED", "true")
     monkeypatch.setenv("ALLOW_LEGACY_LOCAL_AUTH", "false")
     result = evaluate_production_readiness(runtime_ok=True)
     gate = next(g for g in result["gates"] if g["name"] == "production_identity")
     assert gate["passed"] is True
     assert result["identity_provider"] == "neon_auth"
+
+
+def test_neon_database_url_satisfies_persistent_backend_gate(monkeypatch):
+    monkeypatch.delenv("INSFORGE_BASE_URL", raising=False)
+    monkeypatch.delenv("INSFORGE_API_KEY", raising=False)
+    monkeypatch.setenv("DATABASE_URL", "postgresql://user:pass@example.neon.tech/neondb?sslmode=require")
+    result = evaluate_production_readiness(runtime_ok=True)
+    gate = next(g for g in result["gates"] if g["name"] == "persistent_backend")
+    assert gate["passed"] is True
+    assert "Neon/Postgres" in gate["evidence"]

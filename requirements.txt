@@ -6,4 +6,5 @@ jinja2>=3.1,<4
 httpx>=0.28,<1
 boto3>=1.40,<2
 PyJWT[crypto]>=2.10,<3
+psycopg[binary]>=3.2,<4
 pytest>=8.4,<9
