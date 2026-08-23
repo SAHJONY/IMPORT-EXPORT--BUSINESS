@@ -1,0 +1,3 @@
+Production redeploy trigger after DATABASE_URL configuration.
+Target: Vercel production
+Purpose: load durable Neon trade persistence into runtime.
