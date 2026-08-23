@@ -19,7 +19,9 @@ const requiredPricing=[
   "minimum_margin_pct",
   "quote_valid_hours",
   "customer_can_see_cost_basis: bool = False",
-  "Discount would breach minimum margin floor"
+  "Discount would breach minimum margin floor",
+  "TRANSACTION_CURRENCY = 'USD'",
+  "ALL_CUSTOMER_TRANSACTIONS_QUOTES_INVOICES_DEPOSITS_AND_BALANCES_ARE_USD"
 ];
 for(const token of requiredPricing) if(!pricing.includes(token)) failures.push(`Pricing engine missing protection: ${token}`);
 
@@ -35,8 +37,14 @@ for(const token of forbiddenPublicPricing){
 }
 
 if(consumer.includes('business_quote(')) failures.push('Consumer marketplace backend must not call business pricing');
+if(!consumer.includes("Currency = Literal['USD']")) failures.push('Consumer marketplace must reject non-USD transaction currencies');
+if(!consumer.includes("'transaction_currency':'USD'")) failures.push('Consumer marketplace health must declare USD transaction currency');
+if(publicConsumer.includes('<option>eur</option>')||publicConsumer.includes('value="eur"')) failures.push('Consumer public UI must not offer EUR');
+if(!publicConsumer.includes('name="budget_currency" value="usd" readonly')) failures.push('Consumer public UI must lock budget currency to USD');
+
 if(!pricingApi.includes("x_role != 'owner'")) failures.push('Pricing API must enforce Owner role');
 if(!pricingApi.includes('verify_owner_token')) failures.push('Pricing API must verify Owner credential');
+if(!pricingApi.includes('TRANSACTION_CURRENCY')) failures.push('Owner pricing API must use canonical USD transaction currency');
 
 const routes=cfg.routes||[];
 const ownerPage=routes.find(r=>r.src==='/owner/pricing');
@@ -47,4 +55,4 @@ const pricingBuild=(cfg.builds||[]).find(b=>b.src==='pricing_api.py');
 if(!pricingBuild) failures.push('Owner pricing API is not included in Vercel builds');
 
 if(failures.length){for(const f of failures)console.error('FAIL ',f);process.exit(1)}
-console.log('PASS  Consumer and business pricing are isolated; pricing internals remain Owner-only');
+console.log('PASS  Consumer and business pricing are isolated, Owner-only, and all transactions are USD');
