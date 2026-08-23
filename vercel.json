@@ -15,6 +15,7 @@
     { "src": "/cuba-us-desk-card", "dest": "/cuba-us-desk-card.html" },
     { "src": "/owner-login", "dest": "/owner-login.html" },
     { "src": "/owner/telegram", "dest": "/owner-telegram.html" },
+    { "src": "/owner/crm-countries", "dest": "/owner-crm-countries.html" },
     { "src": "/owner/cuba-us-desk", "dest": "/cuba-us-desk.html" },
     { "src": "/cuba-private-sector", "dest": "/cuba-es.html" },
 
@@ -28,6 +29,7 @@
     { "src": "/email-agent(.*)", "dest": "unified_api.py" },
     { "src": "/owner-auth(.*)", "dest": "unified_api.py" },
     { "src": "/crm(.*)", "dest": "unified_api.py" },
+    { "src": "/country-crm(.*)", "dest": "unified_api.py" },
     { "src": "/trade-agent(.*)", "dest": "unified_api.py" },
     { "src": "/trade-certification(.*)", "dest": "unified_api.py" },
     { "src": "/communications/(.*)", "dest": "unified_api.py" },
