@@ -4,7 +4,8 @@
     { "src": "package.json", "use": "@vercel/static-build", "config": { "distDir": "dist" } },
     { "src": "unified_api.py", "use": "@vercel/python" },
     { "src": "cuba_language_api.py", "use": "@vercel/python" },
-    { "src": "cuba_energy_desk_api.py", "use": "@vercel/python" }
+    { "src": "cuba_energy_desk_api.py", "use": "@vercel/python" },
+    { "src": "cuba_consumer_marketplace_api.py", "use": "@vercel/python" }
   ],
   "routes": [
     { "src": "/", "dest": "/landing.html" },
@@ -47,6 +48,7 @@
     { "src": "/owner/cuba-us-desk", "dest": "/cuba-us-desk.html" },
     { "src": "/cuba-private-sector", "dest": "/cuba-es.html" },
 
+    { "src": "/consumer-marketplace(.*)", "dest": "cuba_consumer_marketplace_api.py" },
     { "src": "/cuba-energy(.*)", "dest": "cuba_energy_desk_api.py" },
     { "src": "/cuba-language(.*)", "dest": "cuba_language_api.py" },
     { "src": "/lead-scout/(health|leads.*)", "dest": "unified_api.py" },
