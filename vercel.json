@@ -29,6 +29,7 @@
     { "src": "/owner/energy/operations", "dest": "/owner-energy-operations.html" },
     { "src": "/owner/energy/closing", "dest": "/owner-energy-closing.html" },
     { "src": "/owner/cuba-energy", "dest": "/owner-cuba-energy.html" },
+    { "src": "/owner/cuba-fuels", "dest": "/owner-cuba-fuels.html" },
     { "src": "/owner/cuba-us-desk", "dest": "/cuba-us-desk.html" },
     { "src": "/cuba-private-sector", "dest": "/cuba-es.html" },
 
