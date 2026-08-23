@@ -5,14 +5,18 @@ import json
 import os
 import secrets
 import time
+from functools import lru_cache
 
+import jwt
 from fastapi import Header, HTTPException
+from jwt import PyJWKClient
 
 from database import get_connection
 
-
 OWNER_EMAIL_DEFAULT = "sahjonycapitalllc@outlook.com"
 OWNER_SESSION_TTL_SECONDS = 8 * 60 * 60
+NEON_AUTH_URL_DEFAULT = "https://ep-empty-shadow-ayfporoz.neonauth.c-5.us-east-2.aws.neon.tech/neondb/auth"
+NEON_AUTH_JWKS_URL_DEFAULT = NEON_AUTH_URL_DEFAULT + "/.well-known/jwks.json"
 
 
 def _true(name: str) -> bool:
@@ -20,7 +24,55 @@ def _true(name: str) -> bool:
 
 
 def _production_identity_required() -> bool:
-    return _true("PRODUCTION_MODE") and os.getenv("AUTH_PROVIDER", "").strip().lower() == "insforge" and not _true("ALLOW_LEGACY_LOCAL_AUTH")
+    provider = os.getenv("AUTH_PROVIDER", "").strip().lower()
+    return _true("PRODUCTION_MODE") and provider in {"insforge", "neon", "neon_auth"} and not _true("ALLOW_LEGACY_LOCAL_AUTH")
+
+
+def neon_auth_url() -> str:
+    return os.getenv("NEON_AUTH_URL", NEON_AUTH_URL_DEFAULT).strip().rstrip("/")
+
+
+def neon_auth_jwks_url() -> str:
+    return os.getenv("NEON_AUTH_JWKS_URL", NEON_AUTH_JWKS_URL_DEFAULT).strip()
+
+
+@lru_cache(maxsize=1)
+def _neon_jwk_client() -> PyJWKClient:
+    return PyJWKClient(neon_auth_jwks_url(), cache_keys=True, lifespan=300)
+
+
+def decode_neon_jwt(token: str) -> dict | None:
+    if token.count(".") != 2:
+        return None
+    try:
+        header = jwt.get_unverified_header(token)
+        alg = str(header.get("alg", ""))
+        if alg not in {"RS256", "ES256", "EdDSA"}:
+            return None
+        signing_key = _neon_jwk_client().get_signing_key_from_jwt(token)
+        options = {"require": ["exp", "sub"], "verify_aud": False}
+        claims = jwt.decode(token, signing_key.key, algorithms=[alg], options=options)
+        if claims.get("banned") is True:
+            return None
+        return claims
+    except Exception:
+        return None
+
+
+def _allowed_employee_emails() -> set[str]:
+    raw = os.getenv("NEON_EMPLOYEE_EMAILS", "")
+    return {x.strip().lower() for x in raw.split(",") if x.strip()}
+
+
+def verify_employee_neon_token(token: str) -> dict | None:
+    claims = decode_neon_jwt(token)
+    if not claims:
+        return None
+    role = str(claims.get("role", "")).strip().lower()
+    email = str(claims.get("email", "")).strip().lower()
+    if role in {"employee", "staff", "admin"} or email in _allowed_employee_emails():
+        return claims
+    return None
 
 
 def owner_email() -> str:
@@ -50,12 +102,7 @@ def verify_owner_password(provided: str) -> bool:
             algorithm, iterations, salt, expected = stored_hash.split("$", 3)
             if algorithm != "pbkdf2_sha256":
                 return False
-            derived = hashlib.pbkdf2_hmac(
-                "sha256",
-                provided.encode("utf-8"),
-                salt.encode("utf-8"),
-                int(iterations),
-            ).hex()
+            derived = hashlib.pbkdf2_hmac("sha256", provided.encode(), salt.encode(), int(iterations)).hex()
             return hmac.compare_digest(derived, expected)
         except (ValueError, TypeError):
             return False
@@ -80,15 +127,9 @@ def issue_owner_session(email: str, ttl_seconds: int = OWNER_SESSION_TTL_SECONDS
     if normalized != owner_email():
         raise ValueError("Owner identity mismatch")
     now = int(time.time())
-    payload = {
-        "role": "owner",
-        "email": normalized,
-        "iat": now,
-        "exp": now + ttl_seconds,
-        "scope": "owner:full",
-    }
-    encoded = _b64url_encode(json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8"))
-    signature = hmac.new(_session_secret().encode("utf-8"), encoded.encode("ascii"), hashlib.sha256).digest()
+    payload = {"role": "owner", "email": normalized, "iat": now, "exp": now + ttl_seconds, "scope": "owner:full"}
+    encoded = _b64url_encode(json.dumps(payload, separators=(",", ":"), sort_keys=True).encode())
+    signature = hmac.new(_session_secret().encode(), encoded.encode("ascii"), hashlib.sha256).digest()
     return f"sahjony_owner.{encoded}.{_b64url_encode(signature)}"
 
 
@@ -97,12 +138,10 @@ def decode_owner_session(token: str) -> dict | None:
         return None
     try:
         _, encoded, supplied_signature = token.split(".", 2)
-        expected_signature = hmac.new(
-            _session_secret().encode("utf-8"), encoded.encode("ascii"), hashlib.sha256
-        ).digest()
+        expected_signature = hmac.new(_session_secret().encode(), encoded.encode("ascii"), hashlib.sha256).digest()
         if not hmac.compare_digest(_b64url_decode(supplied_signature), expected_signature):
             return None
-        payload = json.loads(_b64url_decode(encoded).decode("utf-8"))
+        payload = json.loads(_b64url_decode(encoded).decode())
         if payload.get("role") != "owner" or payload.get("scope") != "owner:full":
             return None
         if str(payload.get("email", "")).lower() != owner_email():
@@ -122,42 +161,42 @@ def verify_owner_token(provided: str) -> bool:
 
 
 def verify_customer_token(provided: str):
-    # The SQLite participant-token path is transitional only. Production InsForge mode must
-    # use verified JWT identities + app_memberships/RLS; it fails closed until that client flow is wired.
+    claims = decode_neon_jwt(provided)
+    if claims:
+        return {
+            "participant_id": str(claims.get("sub")),
+            "business_id": claims.get("activeOrganizationId") or claims.get("organizationId"),
+            "email": claims.get("email"),
+            "name": claims.get("name"),
+            "identity_provider": "neon_auth",
+        }
     if _production_identity_required():
         return None
     token_hash = hash_token(provided)
     conn = get_connection()
     try:
-        row = conn.execute(
-            "SELECT participant_id, business_id FROM participants WHERE token_hash = ?",
-            (token_hash,),
-        ).fetchone()
+        row = conn.execute("SELECT participant_id, business_id FROM participants WHERE token_hash = ?", (token_hash,)).fetchone()
     finally:
         conn.close()
     if not row:
         return None
-    return {"participant_id": row["participant_id"], "business_id": row["business_id"]}
+    return {"participant_id": row["participant_id"], "business_id": row["business_id"], "identity_provider": "legacy"}
 
 
 def verify_owner(token: str | None = Header(None, alias="Authorization")):
     if not token or not token.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Missing or malformed Authorization header")
-    provided = token.removeprefix("Bearer ").strip()
-    if not verify_owner_token(provided):
-        raise HTTPException(status_code=403, detail="Invalid or expired owner session")
+        raise HTTPException(401, "Missing or malformed Authorization header")
+    if not verify_owner_token(token.removeprefix("Bearer ").strip()):
+        raise HTTPException(403, "Invalid or expired owner session")
     return True
 
 
 def verify_participant(token: str | None = Header(None, alias="Authorization")):
-    if _production_identity_required():
-        raise HTTPException(status_code=503, detail="Legacy participant tokens are disabled in production; use verified InsForge Auth identity")
     if not token or not token.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Missing or malformed Authorization header")
-    provided = token.removeprefix("Bearer ").strip()
-    info = verify_customer_token(provided)
+        raise HTTPException(401, "Missing or malformed Authorization header")
+    info = verify_customer_token(token.removeprefix("Bearer ").strip())
     if not info:
-        raise HTTPException(status_code=403, detail="Invalid participant token")
+        raise HTTPException(403, "Invalid or expired customer identity")
     return info
 
 
