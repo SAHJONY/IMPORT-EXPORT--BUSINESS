@@ -27,6 +27,8 @@ from energy_crude_oil_api import app as energy_app
 from energy_origination_api import app as energy_origination_app
 from energy_market_intelligence_api import app as energy_intelligence_app
 from energy_provider_hub_api import app as energy_provider_hub_app
+from energy_provider_ingestion_api import app as energy_provider_ingestion_app
+from energy_provider_catalog_api import app as energy_provider_catalog_app
 from cuba_current_api import app as cuba_current_app
 from cuba_transition_api import app as cuba_transition_app
 from cuba_trade_desk_api import app as cuba_trade_desk_app
@@ -47,7 +49,7 @@ from fastapi_server import app as core_app
 _RUNTIME_EMPLOYEE_BRIDGE_TOKEN = os.getenv("EMPLOYEE_TOKEN", "").strip() or secrets.token_urlsafe(48)
 os.environ.setdefault("EMPLOYEE_TOKEN", _RUNTIME_EMPLOYEE_BRIDGE_TOKEN)
 
-app = FastAPI(title="SAHJONY Global Trade Unified API", version="5.3.0", docs_url=None, redoc_url=None)
+app = FastAPI(title="SAHJONY Global Trade Unified API", version="5.4.0", docs_url=None, redoc_url=None)
 
 
 @app.middleware("http")
@@ -75,9 +77,7 @@ async def persistent_backend_configuration_error(_request: Request, exc: Persist
         "service": "trade-persistence",
         "provider": status["provider"],
         "accepted_backends": ["neon_postgres", "insforge"],
-        "required_any_of": [
-            ["DATABASE_URL"], ["POSTGRES_URL"], ["NEON_DATABASE_URL"], ["INSFORGE_BASE_URL", "INSFORGE_API_KEY"],
-        ],
+        "required_any_of": [["DATABASE_URL"], ["POSTGRES_URL"], ["NEON_DATABASE_URL"], ["INSFORGE_BASE_URL", "INSFORGE_API_KEY"]],
         "fail_closed": True,
     })
 
@@ -134,7 +134,7 @@ async def crm_runtime_health():
 async def platform_health():
     activation = await activation_health()
     return {
-        "status": "ok", "service": "global-trade-intelligence-os", "version": "5.3.0",
+        "status": "ok", "service": "global-trade-intelligence-os", "version": "5.4.0",
         "release_policy": "fail-closed", "production_ready": activation["production_ready"],
         "readiness_score": activation["readiness_score"], "passed_gates": activation["passed_gates"],
         "total_gates": activation["total_gates"], "blocker_count": activation["blocker_count"],
@@ -146,13 +146,14 @@ async def platform_health():
         "country_segmented_crm": True, "cuba_crm_department": True, "global_lead_search_control_plane": True,
         "energy_crude_oil_os": True, "energy_autonomous_origination": True, "energy_origination_markets": 21,
         "energy_market_intelligence": True, "energy_autonomous_matching": True, "energy_provider_hub": True,
+        "energy_provider_normalization": True, "energy_authoritative_provider_catalog": True,
         "energy_fail_closed_release": True, "blockers": activation["blockers"],
     }
 
 
 for subapp in (
     activation_app, telegram_app, business_email_app, email_agent_app, owner_auth_app, core_app, customer_crm_app, country_crm_app, global_lead_search_app,
-    energy_app, energy_origination_app, energy_intelligence_app, energy_provider_hub_app,
+    energy_app, energy_origination_app, energy_intelligence_app, energy_provider_hub_app, energy_provider_ingestion_app, energy_provider_catalog_app,
     communications_app, documents_app, document_storage_app, shipments_app, compliance_app, commercial_app, language_app, collaboration_app, finance_app,
     countries_app, cuba_current_app, cuba_transition_app, cuba_trade_desk_app, cuba_private_business_app, cuba_private_sector_lead_app,
     lead_scout_app, managed_trade_app, intermediary_app, global_sourcing_app, business_readiness_app, us_import_app,
