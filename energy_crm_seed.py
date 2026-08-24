@@ -23,7 +23,7 @@ ENERGY_CRM_LEADS = [
         "source_url": "https://www.reuters.com/business/energy/us-fuel-sales-cuban-business-bring-glimpse-capitalism-havana-2026-08-11/",
         "source_description": "Reuters coverage of U.S.-origin fuel sales to Cuba private sector",
         "evidence_urls": ["https://www.reuters.com/business/energy/us-fuel-sales-cuban-business-bring-glimpse-capitalism-havana-2026-08-11/"],
-        "notes": "Cuba fuels only. Verify private ownership, end use, BIS/OFAC eligibility, payment rail and logistics before any transaction.",
+        "notes": "CUBA_ENERGY; CUBA_FUELS; GASOLINE_DIESEL. Verify private ownership, end use, BIS/OFAC eligibility, payment rail and logistics before any transaction.",
     },
     {
         "scout_name": "SAHJONY CEO Energy Origination",
@@ -36,7 +36,7 @@ ENERGY_CRM_LEADS = [
         "source_url": "https://oncubanews.com/publirreportaje/katapulk-ofrece-combustible-a-las-mipymes-cubanas-canales-seguros-para-nuestros-clientes/",
         "source_description": "Public commercial coverage of Katapulk Cuba fuel offering",
         "evidence_urls": ["https://oncubanews.com/publirreportaje/katapulk-ofrece-combustible-a-las-mipymes-cubanas-canales-seguros-para-nuestros-clientes/"],
-        "notes": "Outreach sent. Awaiting wholesale pricing, capacity, delivery points, KYC/KYB and partner economics.",
+        "notes": "CUBA_ENERGY; CUBA_FUELS; DISTRIBUTION_CHANNEL. Outreach sent. Awaiting wholesale pricing, capacity, delivery points, KYC/KYB and partner economics.",
     },
     {
         "scout_name": "SAHJONY CEO Energy Origination",
@@ -49,7 +49,7 @@ ENERGY_CRM_LEADS = [
         "source_url": "https://mipymecombustible.com/",
         "source_description": "Company public website; claims require independent verification",
         "evidence_urls": ["https://mipymecombustible.com/"],
-        "notes": "Enhanced KYB required. Do not rely on website claims alone. Outreach sent for wholesale terms and compliance path.",
+        "notes": "CUBA_ENERGY; CUBA_FUELS; DISTRIBUTION_CHANNEL; ENHANCED_KYB_REQUIRED. Outreach sent for wholesale terms and compliance path.",
     },
     {
         "scout_name": "SAHJONY CEO Energy Origination",
@@ -62,7 +62,7 @@ ENERGY_CRM_LEADS = [
         "source_url": "https://isladiesel.com/",
         "source_description": "Public company website",
         "evidence_urls": ["https://isladiesel.com/"],
-        "notes": "Outreach sent. Verify entity, capacity, U.S.-origin supply, payment rail, delivery model and partner economics.",
+        "notes": "CUBA_ENERGY; CUBA_FUELS; DISTRIBUTION_CHANNEL. Outreach sent. Verify entity, capacity, U.S.-origin supply, payment rail, delivery model and partner economics.",
     },
     {
         "scout_name": "SAHJONY CEO Energy Origination",
@@ -77,7 +77,7 @@ ENERGY_CRM_LEADS = [
         "source_url": "https://www.renovacuba.com/",
         "source_description": "Official company website and email acknowledgment",
         "evidence_urls": ["https://www.renovacuba.com/"],
-        "notes": "Human response pending. Keep separate from crude pipeline and from Cuba fuels unless direct gasoline/diesel demand is established.",
+        "notes": "CUBA_ENERGY; CUBA_RENEWABLES; SOLAR_STORAGE. Human response pending. Keep separate from Cuba fuels unless direct gasoline/diesel demand is established.",
     },
     {
         "scout_name": "SAHJONY CEO Energy Origination",
@@ -90,7 +90,7 @@ ENERGY_CRM_LEADS = [
         "source_url": "https://xproyecto.cu/",
         "source_description": "Direct business response and company website",
         "evidence_urls": ["https://xproyecto.cu/"],
-        "notes": "Qualified strategic/investment opportunity. Request full investor package before committing resources. Not a crude-oil opportunity.",
+        "notes": "CUBA_ENERGY; CUBA_AGRO_ENERGY; ENERGY_INVESTMENT. Qualified strategic/investment opportunity. Request full investor package before committing resources.",
     },
     {
         "scout_name": "SAHJONY CEO Energy Origination",
@@ -103,7 +103,7 @@ ENERGY_CRM_LEADS = [
         "source_url": "https://suncarsrl.com/contacto",
         "source_description": "Official company website",
         "evidence_urls": ["https://suncarsrl.com/contacto"],
-        "notes": "Ownership/KYB verification required. Keep separate from Cuba gasoline/diesel unless direct fuel demand is established.",
+        "notes": "CUBA_ENERGY; CUBA_RENEWABLES; SOLAR_STORAGE. Ownership/KYB verification required. Keep separate from Cuba gasoline/diesel unless direct fuel demand is established.",
     },
     {
         "scout_name": "SAHJONY CEO Energy Origination",
@@ -118,7 +118,7 @@ ENERGY_CRM_LEADS = [
         "source_url": "https://maxteccuba.com/",
         "source_description": "Official company website",
         "evidence_urls": ["https://maxteccuba.com/"],
-        "notes": "Energy-adjacent lead; not automatically a fuel buyer. KYB and specific demand required.",
+        "notes": "CUBA_ENERGY; CUBA_ENERGY_INFRASTRUCTURE; BACKUP_POWER. KYB and specific demand required.",
     },
     {
         "scout_name": "SAHJONY CEO Energy Origination",
@@ -132,7 +132,34 @@ ENERGY_CRM_LEADS = [
         "source_url": "https://www.granma.cu/cuba/2026-06-15/holguin-cuenta-con-su-primera-electrolinera-fotovoltaica-15-06-2026-23-06-19",
         "source_description": "Public reporting on private photovoltaic charging station",
         "evidence_urls": ["https://www.granma.cu/cuba/2026-06-15/holguin-cuenta-con-su-primera-electrolinera-fotovoltaica-15-06-2026-23-06-19"],
-        "notes": "No validated direct contact yet. Verify corporate registration and current demand.",
+        "notes": "CUBA_ENERGY; CUBA_RENEWABLES; EV_CHARGING. No validated direct contact yet. Verify corporate registration and current demand.",
+    },
+    {
+        "scout_name": "SAHJONY CEO Cuba Energy Origination",
+        "business_name": "Grupo Nueva Vision",
+        "phone": "+53 54421417",
+        "country": "CU",
+        "city_region": "Diez de Octubre, Havana",
+        "deal_side": "BUYER",
+        "lead_type": "BUYER",
+        "product_need_or_offer": "Cuban private MIPYME publicly advertising photovoltaic panels, inverters, EcoFlow systems, refrigeration and electrical services for households and businesses in Havana; prospect for energy equipment sourcing and commercial partnerships.",
+        "source_url": "https://itencel.com/anuncio/instalacion-paneles-solares-y-servicios-de-clima-y-refrigeracion/",
+        "source_description": "Public commercial listing identifying Grupo Nueva Vision as a MIPYME providing solar and refrigeration services in Havana.",
+        "evidence_urls": ["https://itencel.com/anuncio/instalacion-paneles-solares-y-servicios-de-clima-y-refrigeracion/", "https://www.revolico.com/item/instalacion-paneles-inversor-ecoflow-54746988"],
+        "notes": "CUBA_ENERGY; CUBA_RENEWABLES; SOLAR_STORAGE; ENERGY_INFRASTRUCTURE. Verify corporate registration, ownership, current demand and export-control eligibility before commitment.",
+    },
+    {
+        "scout_name": "SAHJONY CEO Cuba Energy Origination",
+        "business_name": "Fujian Trebor Trading Company",
+        "country": "CN",
+        "city_region": "Representation reported in Miramar, Havana, Cuba",
+        "deal_side": "SELLER",
+        "lead_type": "SUPPLIER",
+        "product_need_or_offer": "Foreign fuel supply channel publicly reported offering gasoline and diesel to Cuban MIPYMES in 25,000-liter lots, with commercial activity in Havana. Candidate Cuba-energy supplier lead subject to enhanced KYB, origin verification and sanctions/export-control review.",
+        "source_url": "https://www.14ymedio.com/cuba/pese-cerco-energetico-impuesto-ee_1_1123892.html",
+        "source_description": "Public reporting identifies Fujian Trebor Trading Company as offering gasoline and diesel to Cuban private businesses in 25,000-liter lots.",
+        "evidence_urls": ["https://www.14ymedio.com/cuba/pese-cerco-energetico-impuesto-ee_1_1123892.html", "https://www.cibercuba.com/noticias/2026-02-23-u1-e129488-s27061-nid321483-empresa-china-cuba-importa-combustible-venta-dolares"],
+        "notes": "CUBA_ENERGY; CUBA_FUELS; FUEL_SUPPLY_CHANNEL; ENHANCED_KYB_REQUIRED. Do not infer U.S.-law eligibility or product origin from media claims.",
     },
     {
         "scout_name": "SAHJONY CEO Crude Origination",
@@ -145,7 +172,7 @@ ENERGY_CRM_LEADS = [
         "source_url": "https://www.reuters.com/business/energy/indias-hpcl-mrpl-seek-up-six-million-barrels-crude-documents-show-2026-08-12/",
         "source_description": "Reuters current crude procurement report",
         "evidence_urls": ["https://www.reuters.com/business/energy/indias-hpcl-mrpl-seek-up-six-million-barrels-crude-documents-show-2026-08-12/", "https://www.hindustanpetroleum.com/hp-international-trade"],
-        "notes": "Outside Cuba. Tender status/deadline and approved counterparty registration must be confirmed.",
+        "notes": "GLOBAL_CRUDE; BUYER. Outside Cuba. Tender status/deadline and approved counterparty registration must be confirmed.",
     },
     {
         "scout_name": "SAHJONY CEO Crude Origination",
@@ -159,7 +186,7 @@ ENERGY_CRM_LEADS = [
         "source_url": "https://www.reuters.com/business/energy/indias-hpcl-mrpl-seek-up-six-million-barrels-crude-documents-show-2026-08-12/",
         "source_description": "Reuters current crude procurement report and MRPL procurement channel",
         "evidence_urls": ["https://www.reuters.com/business/energy/indias-hpcl-mrpl-seek-up-six-million-barrels-crude-documents-show-2026-08-12/"],
-        "notes": "Outside Cuba. Buyer registration and tender access pending.",
+        "notes": "GLOBAL_CRUDE; BUYER. Outside Cuba. Buyer registration and tender access pending.",
     },
     {
         "scout_name": "SAHJONY CEO Crude Origination",
@@ -171,7 +198,7 @@ ENERGY_CRM_LEADS = [
         "source_url": "https://iocl.com/import-export",
         "source_description": "IndianOil official import/export and registration information",
         "evidence_urls": ["https://iocl.com/import-export", "https://www.iocletenders.nic.in/"],
-        "notes": "Outside Cuba. Strategic recurring buyer; approved counterparty status required before tender participation.",
+        "notes": "GLOBAL_CRUDE; BUYER. Outside Cuba. Strategic recurring buyer; approved counterparty status required before tender participation.",
     },
     {
         "scout_name": "SAHJONY CEO Crude Origination",
@@ -183,7 +210,7 @@ ENERGY_CRM_LEADS = [
         "source_url": "https://www.reuters.com/business/energy/adnoc-unbound-war-opec-exit-launch-emirates-oil-giant-quest-growth-2026-08-13/",
         "source_description": "Reuters reporting on ADNOC expanded spot crude sales",
         "evidence_urls": ["https://www.reuters.com/business/energy/adnoc-unbound-war-opec-exit-launch-emirates-oil-giant-quest-growth-2026-08-13/"],
-        "notes": "Outside Cuba. Do not treat as available allocation unless tender access and seller authority are independently verified.",
+        "notes": "GLOBAL_CRUDE; SELLER_SUPPLIER. Outside Cuba. Do not treat as available allocation unless tender access and seller authority are independently verified.",
     },
     {
         "scout_name": "SAHJONY CEO Crude Origination",
@@ -191,11 +218,11 @@ ENERGY_CRM_LEADS = [
         "country": "TW",
         "deal_side": "BUYER",
         "lead_type": "BUYER",
-        "product_need_or_offer": "Recurring crude buyer that procures spot cargoes from approved counterparties and recently purchased U.S. and West African crude; direct-counterparty requirements make this suitable only if SAHJONY qualifies as an approved trader.",
+        "product_need_or_offer": "Recurring crude buyer that procures spot cargoes from approved counterparties and recently purchased U.S. and West African crude; suitable only if SAHJONY qualifies as an approved trader.",
         "source_url": "https://www.cpc.com.tw/",
         "source_description": "CPC procurement information and recent market purchases",
         "evidence_urls": ["https://www.cpc.com.tw/", "https://www.reuters.com/business/energy/asian-refiners-buy-more-us-crude-hormuz-remains-blocked-traders-say-2026-08-14/"],
-        "notes": "Outside Cuba. Approved counterparty status required; pure intermediary route is a poor fit.",
+        "notes": "GLOBAL_CRUDE; BUYER. Outside Cuba. Approved counterparty status required; pure intermediary route is a poor fit.",
     },
     {
         "scout_name": "SAHJONY CEO Crude Origination",
@@ -208,7 +235,7 @@ ENERGY_CRM_LEADS = [
         "source_url": "https://www.reuters.com/business/energy/asian-refiners-buy-more-us-crude-hormuz-remains-blocked-traders-say-2026-08-14/",
         "source_description": "Reuters report on Asian refinery crude purchases",
         "evidence_urls": ["https://www.reuters.com/business/energy/asian-refiners-buy-more-us-crude-hormuz-remains-blocked-traders-say-2026-08-14/"],
-        "notes": "Outside Cuba. Recent purchase is market intelligence, not a current open RFQ unless confirmed.",
+        "notes": "GLOBAL_CRUDE; BUYER. Outside Cuba. Recent purchase is market intelligence, not a current open RFQ unless confirmed.",
     },
     {
         "scout_name": "SAHJONY CEO Crude Origination",
@@ -220,7 +247,7 @@ ENERGY_CRM_LEADS = [
         "source_url": "https://www.reuters.com/business/energy/asian-refiners-buy-more-us-crude-hormuz-remains-blocked-traders-say-2026-08-14/",
         "source_description": "Reuters report on Asian refinery crude purchases",
         "evidence_urls": ["https://www.reuters.com/business/energy/asian-refiners-buy-more-us-crude-hormuz-remains-blocked-traders-say-2026-08-14/"],
-        "notes": "Outside Cuba. Current open procurement requirement must be confirmed before supplier outreach.",
+        "notes": "GLOBAL_CRUDE; BUYER. Outside Cuba. Current open procurement requirement must be confirmed before supplier outreach.",
     },
     {
         "scout_name": "SAHJONY CEO Crude Origination",
@@ -232,7 +259,7 @@ ENERGY_CRM_LEADS = [
         "source_url": "https://www.reuters.com/business/energy/asian-refiners-buy-more-us-crude-hormuz-remains-blocked-traders-say-2026-08-14/",
         "source_description": "Reuters report on Asian refinery crude purchases",
         "evidence_urls": ["https://www.reuters.com/business/energy/asian-refiners-buy-more-us-crude-hormuz-remains-blocked-traders-say-2026-08-14/"],
-        "notes": "Outside Cuba. Current open procurement requirement must be confirmed.",
+        "notes": "GLOBAL_CRUDE; BUYER. Outside Cuba. Current open procurement requirement must be confirmed.",
     },
     {
         "scout_name": "SAHJONY CEO Crude Origination",
@@ -247,7 +274,7 @@ ENERGY_CRM_LEADS = [
         "source_url": "https://www.go4worldbusiness.com/",
         "source_description": "go4WorldBusiness buyer alert dated August 24, 2026",
         "evidence_urls": ["https://www.go4worldbusiness.com/"],
-        "notes": "Qualification request sent. Require buyer legal entity, authority, destination, grade, LOI/ICPO and reasonable RWA evidence before sourcing cargo.",
+        "notes": "GLOBAL_CRUDE; REFINED_PRODUCTS; JET_A1; BUYER_AUTHORITY_UNVERIFIED. Require buyer legal entity, authority, destination, grade, LOI/ICPO and reasonable RWA evidence before sourcing cargo.",
     },
     {
         "scout_name": "SAHJONY CEO Crude Origination",
@@ -259,7 +286,7 @@ ENERGY_CRM_LEADS = [
         "source_url": "https://www.bharatpetroleum.in/",
         "source_description": "Official BPCL corporate source and current Indian energy procurement context",
         "evidence_urls": ["https://www.bharatpetroleum.in/", "https://www.reuters.com/business/energy/indian-oil-close-signing-lpg-import-deal-with-algerias-sonatrach-2027-sources-2026-08-20/"],
-        "notes": "Outside Cuba. Specific crude procurement/tender must be independently confirmed before presenting supply.",
+        "notes": "GLOBAL_CRUDE; BUYER. Outside Cuba. Specific crude procurement/tender must be independently confirmed before presenting supply.",
     },
     {
         "scout_name": "SAHJONY CEO Crude Origination",
@@ -271,7 +298,7 @@ ENERGY_CRM_LEADS = [
         "source_url": "https://www.reuters.com/business/energy/saudi-aramco-offers-crude-outside-hormuz-some-asian-refiners-sources-say-2026-08-17/",
         "source_description": "Reuters report on current crude supply offers",
         "evidence_urls": ["https://www.reuters.com/business/energy/saudi-aramco-offers-crude-outside-hormuz-some-asian-refiners-sources-say-2026-08-17/"],
-        "notes": "Outside Cuba. Market/supply signal only; not an open broker allocation without direct verified access.",
+        "notes": "GLOBAL_CRUDE; SELLER_SUPPLIER. Outside Cuba. Market/supply signal only; not an open broker allocation without direct verified access.",
     },
     {
         "scout_name": "SAHJONY CEO Crude Origination",
@@ -283,7 +310,7 @@ ENERGY_CRM_LEADS = [
         "source_url": "https://www.reuters.com/business/energy/glencore-wins-processing-contract-germanys-wilhelmshaven-oil-refinery-2026-07-30/",
         "source_description": "Reuters reporting on Glencore crude/refining activity",
         "evidence_urls": ["https://www.reuters.com/business/energy/glencore-wins-processing-contract-germanys-wilhelmshaven-oil-refinery-2026-07-30/"],
-        "notes": "Outside Cuba. Institutional supply/trader lead; require direct authorized commercial channel for any deal.",
+        "notes": "GLOBAL_CRUDE; SELLER_SUPPLIER. Outside Cuba. Institutional supply/trader lead; require direct authorized commercial channel for any deal.",
     },
 ]
 
