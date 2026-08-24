@@ -10,7 +10,16 @@ from production_readiness import evaluate_production_readiness
 from production_schema_evidence import production_schema_evidence
 from trade_connectors import trade_connectors
 
-app = FastAPI(title="SAHJONY Production Activation Control", version="1.3.0", docs_url=None, redoc_url=None)
+app = FastAPI(title="SAHJONY Production Activation Control", version="1.3.1", docs_url=None, redoc_url=None)
+
+
+_DATABASE_ENV_ORDER = (
+    "DATABASE_URL",
+    "POSTGRES_URL",
+    "NEON_DATABASE_URL",
+    "NEON_POSTGRES_URL",
+    "POSTGRES_PRISMA_URL",
+)
 
 
 def _present(name: str) -> bool:
@@ -19,6 +28,17 @@ def _present(name: str) -> bool:
 
 def _true(name: str) -> bool:
     return os.getenv(name, "false").strip().lower() == "true"
+
+
+def _database_env_diagnostics() -> dict:
+    present = [name for name in _DATABASE_ENV_ORDER if _present(name)]
+    selected = present[0] if present else None
+    return {
+        "selected_variable": selected,
+        "present_variables": present,
+        "multiple_database_variables_present": len(present) > 1,
+        "values_exposed": False,
+    }
 
 
 def _provider_state(schema_evidence: dict | None = None) -> dict:
@@ -33,6 +53,7 @@ def _provider_state(schema_evidence: dict | None = None) -> dict:
         },
         "persistence": {
             **persistence,
+            "database_env_diagnostics": _database_env_diagnostics(),
             "rls_verified": _true("PERSISTENCE_ISOLATION_VERIFIED") or _true("INSFORGE_RLS_VERIFIED"),
             "schemas_applied": schema_verified or _true("PERSISTENCE_SCHEMA_VERIFIED") or _true("INSFORGE_SCHEMAS_APPLIED"),
             "runtime_schema_evidence": schema_evidence,
