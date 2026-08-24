@@ -1,18 +1,21 @@
 from __future__ import annotations
 
 import hashlib
+import json
+import os
 import secrets
 from datetime import datetime, timezone
 from typing import Literal
 
+import httpx
 from fastapi import FastAPI, Header, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from auth import verify_owner_token
 from country_crm_api import COUNTRIES, DEFAULT_DEPARTMENTS, country_code
 from insforge_backend import get_backend, persistent_backend_status
 
-app = FastAPI(title='SAHJONY Global Lead Search', version='1.0.0', docs_url=None, redoc_url=None)
+app = FastAPI(title='SAHJONY Global Lead Search', version='1.1.0', docs_url=None, redoc_url=None)
 
 LeadType = Literal['IMPORT_NEED','EXPORT_OFFER','SUPPLIER','BUYER','DISTRIBUTOR','PARTNER','OTHER']
 
@@ -153,75 +156,7 @@ def priority(value: int) -> str:
     return 'STANDARD'
 
 
-@app.get('/lead-search/health')
-async def health():
-    persistence = persistent_backend_status()
-    return {
-        'status': 'ok' if persistence['configured'] else 'configuration_required',
-        'service': 'global-country-lead-search',
-        'country_routing': True,
-        'country_ai_briefs': True,
-        'deduplication': True,
-        'automatic_scoring': True,
-        'cuba_department_preserved': True,
-        'default_country_departments': DEFAULT_DEPARTMENTS,
-        'persistence_provider': persistence['provider'],
-        'autonomous_binding_outreach': False,
-    }
-
-
-@app.get('/lead-search/countries')
-async def countries(authorization: str | None = Header(None, alias='Authorization')):
-    owner(authorization)
-    return {'countries': [department_config(c) for c in DEFAULT_DEPARTMENTS]}
-
-
-@app.get('/lead-search/countries/{code}')
-async def country_brief(code: str, authorization: str | None = Header(None, alias='Authorization')):
-    owner(authorization)
-    return department_config(code)
-
-
-@app.post('/lead-search/jobs')
-async def create_job(p: SearchJobIn, authorization: str | None = Header(None, alias='Authorization')):
-    owner(authorization)
-    backend = get_backend()
-    config = department_config(p.country)
-    job_id = f'gls_{secrets.token_urlsafe(10)}'
-    sectors = [x.strip() for x in p.sectors if x.strip()] or config['sector_priorities']
-    lead_types = p.lead_types or config['target_lead_types']
-    row = {
-        'job_id': job_id,
-        'country_code': config['country_code'],
-        'country_name': config['country_name'],
-        'primary_language': config['primary_language'],
-        'sectors': sectors,
-        'lead_types': lead_types,
-        'target_count': p.target_count,
-        'search_notes': p.search_notes,
-        'source_classes': config['source_classes'],
-        'status': 'RESEARCH_QUEUED',
-        'candidate_count': 0,
-        'accepted_count': 0,
-        'routing_department': config['routing'],
-        'authority': 'RESEARCH_AND_QUALIFICATION_ONLY',
-        'created_at': now(),
-        'updated_at': now(),
-    }
-    await backend.insert('global_lead_search_jobs', row)
-    return {'job': row, 'country_agent_brief': config}
-
-
-@app.get('/lead-search/jobs')
-async def list_jobs(authorization: str | None = Header(None, alias='Authorization')):
-    owner(authorization)
-    rows = await get_backend().select('global_lead_search_jobs', params={'order':'updated_at.desc','limit':'500'}) or []
-    return {'jobs': rows}
-
-
-@app.post('/lead-search/candidates')
-async def ingest_candidate(p: CandidateIn, authorization: str | None = Header(None, alias='Authorization')):
-    owner(authorization)
+async def _persist_candidate(p: CandidateIn) -> dict:
     backend = get_backend()
     code = department_config(p.country)['country_code']
     fp = fingerprint(p, code)
@@ -279,7 +214,7 @@ async def ingest_candidate(p: CandidateIn, authorization: str | None = Header(No
             await backend.patch('global_lead_search_jobs', {
                 'candidate_count': int(current.get('candidate_count') or 0) + 1,
                 'accepted_count': int(current.get('accepted_count') or 0) + (0 if duplicate_of else 1),
-                'status': 'CANDIDATES_FOUND',
+                'status': 'RESEARCH_RUNNING',
                 'updated_at': now(),
             }, params={'job_id': f'eq.{p.job_id}'})
     return {
@@ -291,3 +226,239 @@ async def ingest_candidate(p: CandidateIn, authorization: str | None = Header(No
         'duplicate_candidate': bool(duplicate_of),
         'routing': f'/owner/crm-countries?country={code}',
     }
+
+
+def _candidate_schema() -> dict:
+    nullable_string = {'type': ['string', 'null']}
+    nullable_number = {'type': ['number', 'null'], 'minimum': 0}
+    return {
+        'type': 'object',
+        'properties': {
+            'candidates': {
+                'type': 'array',
+                'items': {
+                    'type': 'object',
+                    'properties': {
+                        'business_name': {'type': 'string'},
+                        'contact_name': nullable_string,
+                        'email': nullable_string,
+                        'phone': nullable_string,
+                        'city_region': nullable_string,
+                        'website': nullable_string,
+                        'lead_type': {'type': 'string', 'enum': ['IMPORT_NEED','EXPORT_OFFER','SUPPLIER','BUYER','DISTRIBUTOR','PARTNER','OTHER']},
+                        'product_need_or_offer': {'type': 'string'},
+                        'estimated_deal_value': nullable_number,
+                        'currency': {'type': 'string'},
+                        'source_url': {'type': 'string'},
+                        'source_description': nullable_string,
+                        'evidence_urls': {'type': 'array', 'items': {'type': 'string'}},
+                        'confidence': {'type': 'integer', 'minimum': 0, 'maximum': 100},
+                    },
+                    'required': ['business_name','contact_name','email','phone','city_region','website','lead_type','product_need_or_offer','estimated_deal_value','currency','source_url','source_description','evidence_urls','confidence'],
+                    'additionalProperties': False,
+                },
+            }
+        },
+        'required': ['candidates'],
+        'additionalProperties': False,
+    }
+
+
+def _extract_output_text(payload: dict) -> str:
+    if isinstance(payload.get('output_text'), str):
+        return payload['output_text']
+    chunks: list[str] = []
+    for item in payload.get('output') or []:
+        if not isinstance(item, dict) or item.get('type') != 'message':
+            continue
+        for content in item.get('content') or []:
+            if isinstance(content, dict) and content.get('type') in {'output_text', 'text'} and isinstance(content.get('text'), str):
+                chunks.append(content['text'])
+    return '\n'.join(chunks).strip()
+
+
+async def _research_with_openai(job: dict, remaining: int) -> list[CandidateIn]:
+    api_key = os.getenv('OPENAI_API_KEY', '').strip()
+    if not api_key:
+        raise RuntimeError('OPENAI_API_KEY is not configured')
+    batch_size = max(1, min(remaining, 25))
+    code = str(job.get('country_code') or '')
+    cuba_rules = ''
+    if code == 'CU':
+        cuba_rules = (
+            'CUBA-SPECIFIC RULE: research only independently owned Cuban private-sector businesses/MIPYMES or self-employed commercial businesses. '
+            'Do not characterize state-owned enterprises, military-linked entities, sanctioned parties, or restricted parties as eligible leads. '
+            'Research is informational only; do not advise sanctions evasion or execute outreach/transactions. Use public evidence and flag uncertainty by lowering confidence.'
+        )
+    prompt = f'''You are the SAHJONY Global Trade lead-research agent. Use web search to find up to {batch_size} REAL, current commercial organizations in {job.get('country_name')} ({code}) that fit these sectors: {', '.join(job.get('sectors') or [])}. Target lead types: {', '.join(job.get('lead_types') or [])}. Search notes: {job.get('search_notes') or 'none'}.
+
+Rules:
+- Every candidate must be grounded in public web evidence. Never invent a business, URL, person, email, phone, need, product, or deal value.
+- Prefer primary sources (company website/contact page, chamber/registry, trade association, exhibitor directory, public procurement notice). Use directories only when they identify a real business.
+- source_url must be a URL actually supporting the candidate. evidence_urls should contain up to 5 additional supporting URLs.
+- Only include email/phone/contact_name if visible in the public evidence. Otherwise return null.
+- product_need_or_offer must state the evidence-backed commercial relevance and must not pretend a purchase intent exists unless the source establishes it.
+- estimated_deal_value must be null unless a public source supports a value.
+- confidence 80+ requires strong primary-source evidence; lower it for secondary/ambiguous evidence.
+- Exclude obvious duplicates and businesses without enough evidence to identify them.
+- This agent researches and qualifies only. It cannot make offers, promises, binding commitments, or send outreach.
+{cuba_rules}
+Return only the requested structured candidate data.'''
+    request_payload = {
+        'model': os.getenv('OPENAI_FAST_MODEL', '').strip() or os.getenv('OPENAI_PRIMARY_MODEL', '').strip() or 'gpt-5.6-sol',
+        'input': prompt,
+        'tools': [{'type': 'web_search'}],
+        'tool_choice': 'auto',
+        'include': ['web_search_call.action.sources'],
+        'text': {
+            'format': {
+                'type': 'json_schema',
+                'name': 'global_trade_lead_research',
+                'strict': True,
+                'schema': _candidate_schema(),
+            }
+        },
+        'max_output_tokens': 12000,
+        'store': False,
+    }
+    timeout = httpx.Timeout(90.0, connect=10.0)
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        response = await client.post(
+            'https://api.openai.com/v1/responses',
+            headers={'Authorization': f'Bearer {api_key}', 'Content-Type': 'application/json'},
+            json=request_payload,
+        )
+    if response.status_code >= 400:
+        detail = response.text[:1200]
+        raise RuntimeError(f'OpenAI research request failed ({response.status_code}): {detail}')
+    raw_text = _extract_output_text(response.json())
+    if not raw_text:
+        raise RuntimeError('OpenAI research returned no structured output')
+    try:
+        parsed = json.loads(raw_text)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError('OpenAI research returned invalid JSON') from exc
+    candidates: list[CandidateIn] = []
+    for raw in parsed.get('candidates') or []:
+        if len(candidates) >= batch_size:
+            break
+        raw['job_id'] = job.get('job_id')
+        raw['country'] = code
+        try:
+            candidates.append(CandidateIn.model_validate(raw))
+        except ValidationError:
+            continue
+    return candidates
+
+
+@app.get('/lead-search/health')
+async def health():
+    persistence = persistent_backend_status()
+    openai_configured = bool(os.getenv('OPENAI_API_KEY', '').strip())
+    return {
+        'status': 'ok' if persistence['configured'] and openai_configured else 'configuration_required',
+        'service': 'global-country-lead-search',
+        'country_routing': True,
+        'country_ai_briefs': True,
+        'deduplication': True,
+        'automatic_scoring': True,
+        'autonomous_research_runner': True,
+        'openai_web_research_configured': openai_configured,
+        'cuba_department_preserved': True,
+        'cuba_private_sector_research_guardrail': True,
+        'default_country_departments': DEFAULT_DEPARTMENTS,
+        'persistence_provider': persistence['provider'],
+        'autonomous_binding_outreach': False,
+    }
+
+
+@app.get('/lead-search/countries')
+async def countries(authorization: str | None = Header(None, alias='Authorization')):
+    owner(authorization)
+    return {'countries': [department_config(c) for c in DEFAULT_DEPARTMENTS]}
+
+
+@app.get('/lead-search/countries/{code}')
+async def country_brief(code: str, authorization: str | None = Header(None, alias='Authorization')):
+    owner(authorization)
+    return department_config(code)
+
+
+@app.post('/lead-search/jobs')
+async def create_job(p: SearchJobIn, authorization: str | None = Header(None, alias='Authorization')):
+    owner(authorization)
+    backend = get_backend()
+    config = department_config(p.country)
+    job_id = f'gls_{secrets.token_urlsafe(10)}'
+    sectors = [x.strip() for x in p.sectors if x.strip()] or config['sector_priorities']
+    lead_types = p.lead_types or config['target_lead_types']
+    row = {
+        'job_id': job_id,
+        'country_code': config['country_code'],
+        'country_name': config['country_name'],
+        'primary_language': config['primary_language'],
+        'sectors': sectors,
+        'lead_types': lead_types,
+        'target_count': p.target_count,
+        'search_notes': p.search_notes,
+        'source_classes': config['source_classes'],
+        'status': 'RESEARCH_QUEUED',
+        'candidate_count': 0,
+        'accepted_count': 0,
+        'routing_department': config['routing'],
+        'authority': 'RESEARCH_AND_QUALIFICATION_ONLY',
+        'created_at': now(),
+        'updated_at': now(),
+    }
+    await backend.insert('global_lead_search_jobs', row)
+    return {'job': row, 'country_agent_brief': config, 'next_action': f'/lead-search/jobs/{job_id}/run'}
+
+
+@app.get('/lead-search/jobs')
+async def list_jobs(authorization: str | None = Header(None, alias='Authorization')):
+    owner(authorization)
+    rows = await get_backend().select('global_lead_search_jobs', params={'order':'updated_at.desc','limit':'500'}) or []
+    return {'jobs': rows}
+
+
+@app.post('/lead-search/jobs/{job_id}/run')
+async def run_job(job_id: str, authorization: str | None = Header(None, alias='Authorization')):
+    owner(authorization)
+    backend = get_backend()
+    jobs = await backend.select('global_lead_search_jobs', params={'job_id': f'eq.{job_id}', 'limit':'1'}) or []
+    if not jobs:
+        raise HTTPException(404, 'Lead research job not found')
+    job = jobs[0]
+    target = int(job.get('target_count') or 0)
+    accepted_before = int(job.get('accepted_count') or 0)
+    remaining = max(0, target - accepted_before)
+    if remaining <= 0:
+        await backend.patch('global_lead_search_jobs', {'status':'RESEARCH_COMPLETED','updated_at':now()}, params={'job_id':f'eq.{job_id}'})
+        return {'job_id': job_id, 'status':'RESEARCH_COMPLETED', 'candidate_count':int(job.get('candidate_count') or 0), 'accepted_count':accepted_before, 'target_count':target, 'inserted':0, 'duplicates':0}
+    await backend.patch('global_lead_search_jobs', {'status':'RESEARCH_RUNNING','updated_at':now()}, params={'job_id':f'eq.{job_id}'})
+    try:
+        candidates = await _research_with_openai(job, remaining)
+        inserted = 0
+        duplicates = 0
+        for candidate in candidates:
+            result = await _persist_candidate(candidate)
+            if result['duplicate_candidate']:
+                duplicates += 1
+            else:
+                inserted += 1
+        refreshed_rows = await backend.select('global_lead_search_jobs', params={'job_id': f'eq.{job_id}', 'limit':'1'}) or []
+        refreshed = refreshed_rows[0] if refreshed_rows else job
+        accepted = int(refreshed.get('accepted_count') or 0)
+        candidates_total = int(refreshed.get('candidate_count') or 0)
+        final_status = 'RESEARCH_COMPLETED' if accepted >= target else ('RESEARCH_PARTIAL' if candidates else 'RESEARCH_NO_RESULTS')
+        await backend.patch('global_lead_search_jobs', {'status':final_status,'updated_at':now()}, params={'job_id':f'eq.{job_id}'})
+        return {'job_id': job_id, 'status':final_status, 'candidate_count':candidates_total, 'accepted_count':accepted, 'target_count':target, 'inserted':inserted, 'duplicates':duplicates}
+    except Exception as exc:
+        await backend.patch('global_lead_search_jobs', {'status':'RESEARCH_FAILED','updated_at':now()}, params={'job_id':f'eq.{job_id}'})
+        raise HTTPException(502, f'Lead research execution failed: {type(exc).__name__}: {str(exc)[:500]}') from exc
+
+
+@app.post('/lead-search/candidates')
+async def ingest_candidate(p: CandidateIn, authorization: str | None = Header(None, alias='Authorization')):
+    owner(authorization)
+    return await _persist_candidate(p)
