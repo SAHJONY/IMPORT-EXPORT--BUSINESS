@@ -13,6 +13,7 @@ _REQUIRED_TABLES = {
     "trade_payment_events",
     "cuba_partner_accounts",
     "cuba_partner_referrals",
+    "cuba_consumer_marketplace_requests",
     "ledger_accounts",
     "ledger_journals",
     "ledger_entries",
@@ -29,6 +30,8 @@ _REQUIRED_COLUMNS = {
     },
     "trade_payment_events": {"case_id", "event_type", "created_at"},
     "ledger_journals": {"journal_id", "currency", "status", "owner_approved"},
+    "ledger_entries": {"entry_id", "journal_id", "account_id", "debit", "credit"},
+    "payment_reconciliations": {"reconciliation_id", "currency", "status"},
     "beneficiary_change_requests": {
         "request_id",
         "requested_by_id",
@@ -102,7 +105,12 @@ def _probe() -> dict[str, Any]:
         for table, required in _REQUIRED_COLUMNS.items()
         if required - columns.get(table, set())
     }
-    verified = not missing_tables and not missing_columns and active_usd_accounts >= 1 and index_count >= 1
+    verified = (
+        not missing_tables
+        and not missing_columns
+        and active_usd_accounts >= 12
+        and index_count >= 1
+    )
     return {
         "verified": verified,
         "provider": "neon_postgres",
@@ -123,7 +131,8 @@ async def production_schema_evidence() -> dict[str, Any]:
         return {
             "verified": False,
             "provider": "neon_postgres",
-            "reason": type(exc).__name__,
+            "reason": f"{type(exc).__name__}: schema evidence probe failed",
             "missing_tables": [],
             "missing_columns": {},
+            "fail_closed": True,
         }
