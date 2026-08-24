@@ -31,16 +31,73 @@ class StoragePolicy:
     download_ttl_seconds: int
 
 
-def _required(name: str) -> str:
-    value = os.getenv(name, "").strip()
-    if not value:
-        raise HTTPException(status_code=503, detail=f"{name} is not configured")
-    return value
+_STORAGE_PROFILES = (
+    {
+        "provider": "insforge_s3",
+        "endpoint": "INSFORGE_S3_ENDPOINT",
+        "access_key": "INSFORGE_S3_ACCESS_KEY_ID",
+        "secret_key": "INSFORGE_S3_SECRET_ACCESS_KEY",
+        "bucket": "INSFORGE_STORAGE_BUCKET",
+        "region": "INSFORGE_S3_REGION",
+    },
+    {
+        "provider": "cloudflare_r2",
+        "endpoint": "CLOUDFLARE_R2_ENDPOINT",
+        "access_key": "CLOUDFLARE_R2_ACCESS_KEY_ID",
+        "secret_key": "CLOUDFLARE_R2_SECRET_ACCESS_KEY",
+        "bucket": "CLOUDFLARE_R2_BUCKET",
+        "region": "CLOUDFLARE_R2_REGION",
+    },
+    {
+        "provider": "s3_compatible",
+        "endpoint": "STORAGE_S3_ENDPOINT",
+        "access_key": "STORAGE_S3_ACCESS_KEY_ID",
+        "secret_key": "STORAGE_S3_SECRET_ACCESS_KEY",
+        "bucket": "STORAGE_S3_BUCKET",
+        "region": "STORAGE_S3_REGION",
+    },
+)
+
+
+def _value(name: str) -> str:
+    return os.getenv(name, "").strip()
+
+
+def _selected_profile() -> dict | None:
+    for profile in _STORAGE_PROFILES:
+        if all(_value(profile[key]) for key in ("endpoint", "access_key", "secret_key", "bucket")):
+            return profile
+    return None
+
+
+def storage_configuration_status() -> dict:
+    selected = _selected_profile()
+    partial_profiles: list[str] = []
+    for profile in _STORAGE_PROFILES:
+        values = [_value(profile[key]) for key in ("endpoint", "access_key", "secret_key", "bucket")]
+        if any(values) and not all(values):
+            partial_profiles.append(str(profile["provider"]))
+    return {
+        "configured": selected is not None,
+        "provider": selected["provider"] if selected else None,
+        "partial_profiles": partial_profiles,
+        "signed_urls": True,
+        "server_derived_keys": True,
+        "raw_storage_credentials_exposed": False,
+    }
+
+
+def _profile() -> dict:
+    selected = _selected_profile()
+    if not selected:
+        raise HTTPException(status_code=503, detail="Secure S3-compatible document storage is not configured")
+    return selected
 
 
 def policy() -> StoragePolicy:
+    profile = _profile()
     return StoragePolicy(
-        bucket=_required("INSFORGE_STORAGE_BUCKET"),
+        bucket=_value(profile["bucket"]),
         max_bytes=int(os.getenv("DOCUMENT_MAX_BYTES", str(25 * 1024 * 1024))),
         upload_ttl_seconds=int(os.getenv("DOCUMENT_UPLOAD_URL_TTL_SECONDS", "600")),
         download_ttl_seconds=int(os.getenv("DOCUMENT_DOWNLOAD_URL_TTL_SECONDS", "300")),
@@ -48,10 +105,11 @@ def policy() -> StoragePolicy:
 
 
 def _client():
-    endpoint = _required("INSFORGE_S3_ENDPOINT")
-    access_key = _required("INSFORGE_S3_ACCESS_KEY_ID")
-    secret_key = _required("INSFORGE_S3_SECRET_ACCESS_KEY")
-    region = os.getenv("INSFORGE_S3_REGION", "us-east-2").strip() or "us-east-2"
+    profile = _profile()
+    endpoint = _value(profile["endpoint"])
+    access_key = _value(profile["access_key"])
+    secret_key = _value(profile["secret_key"])
+    region = _value(profile["region"]) or ("auto" if profile["provider"] == "cloudflare_r2" else "us-east-2")
     return boto3.client(
         "s3",
         endpoint_url=endpoint,
@@ -94,7 +152,14 @@ def create_upload_url(*, key: str, content_type: str, size_bytes: int) -> dict:
         Params={"Bucket": p.bucket, "Key": key, "ContentType": content_type},
         ExpiresIn=p.upload_ttl_seconds,
     )
-    return {"url": url, "method": "PUT", "headers": {"Content-Type": content_type}, "expires_in": p.upload_ttl_seconds, "max_bytes": p.max_bytes, "expected_size": size_bytes}
+    return {
+        "url": url,
+        "method": "PUT",
+        "headers": {"Content-Type": content_type},
+        "expires_in": p.upload_ttl_seconds,
+        "max_bytes": p.max_bytes,
+        "expected_size": size_bytes,
+    }
 
 
 def create_download_url(*, key: str, download_name: str | None = None) -> dict:
