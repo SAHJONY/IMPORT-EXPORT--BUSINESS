@@ -9,9 +9,10 @@ from payment_engine import CANONICAL_TRANSACTION_CURRENCY, USD_ONLY_TRANSACTIONS
 from production_readiness import evaluate_production_readiness
 from production_schema_bootstrap import ensure_production_schema
 from production_schema_evidence import production_schema_evidence
+from secure_storage import storage_configuration_status
 from trade_connectors import trade_connectors
 
-app = FastAPI(title="SAHJONY Production Activation Control", version="1.4.0", docs_url=None, redoc_url=None)
+app = FastAPI(title="SAHJONY Production Activation Control", version="1.5.0", docs_url=None, redoc_url=None)
 
 
 _DATABASE_ENV_ORDER = (
@@ -46,6 +47,7 @@ def _database_env_diagnostics() -> dict:
 def _provider_state(schema_evidence: dict | None = None) -> dict:
     persistence = persistent_backend_status()
     schema_verified = bool((schema_evidence or {}).get("verified"))
+    storage = storage_configuration_status()
     return {
         "identity": {
             "provider": "neon_auth",
@@ -78,11 +80,10 @@ def _provider_state(schema_evidence: dict | None = None) -> dict:
             "e2e_verified": _true("MULTILINGUAL_E2E_VERIFIED"),
         },
         "document_storage": {
-            "provider": "insforge-s3-or-compatible",
-            "configured": all(_present(k) for k in (
-                "INSFORGE_S3_ENDPOINT", "INSFORGE_S3_ACCESS_KEY_ID", "INSFORGE_S3_SECRET_ACCESS_KEY", "INSFORGE_STORAGE_BUCKET",
-            )),
+            **storage,
             "signed_storage_verified": _true("SIGNED_DOCUMENT_STORAGE_VERIFIED"),
+            "malware_scan_required": os.getenv("DOCUMENT_MALWARE_SCAN_REQUIRED", "true").strip().lower() == "true",
+            "malware_scan_callback_configured": _present("MALWARE_SCAN_CALLBACK_SECRET"),
         },
         "monitoring": {
             "vercel_monitoring_enabled": _true("VERCEL_MONITORING_ENABLED"),
@@ -94,8 +95,11 @@ def _provider_state(schema_evidence: dict | None = None) -> dict:
 def _external_requirements() -> list[dict]:
     requirements: list[dict] = []
     persistence = persistent_backend_status()
+    storage = storage_configuration_status()
     if not persistence["configured"]:
         requirements.append({"area": "persistence", "action": "Attach the canonical production database to Vercel so DATABASE_URL/POSTGRES_URL exists."})
+    if not storage["configured"]:
+        requirements.append({"area": "document_storage", "action": "Configure one supported S3-compatible production storage profile (InsForge S3, Cloudflare R2, or generic S3-compatible) and verify signed upload/download plus malware quarantine."})
     if not _present("ANTHROPIC_API_KEY"):
         requirements.append({"area": "ai", "action": "Add ANTHROPIC_API_KEY in Vercel and run AI Brain E2E verification for governed dual-model high-stakes consensus."})
     if not (_present("AZURE_TRANSLATOR_ENDPOINT") and _present("AZURE_TRANSLATOR_KEY")):
