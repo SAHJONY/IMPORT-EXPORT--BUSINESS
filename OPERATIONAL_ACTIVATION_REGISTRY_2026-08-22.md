@@ -29,7 +29,7 @@ This registry separates software capability from real-world authority. Nothing m
 | Customs broker | CANDIDATE | Operating partner governance schema | Capability confirmation, license evidence, contract, owner approval |
 | Freight forwarder/carrier | CANDIDATE | Shipping workflow; carrier adapter | Cuba commercial-route confirmation, account/contract, E2E tracking |
 | Cargo insurance | CANDIDATE | Insurance cost/evidence controls | Broker/carrier approval, policy/binder, Cuba/corridor eligibility |
-| Banking/payment rails | CONFIG_REQUIRED | Airwallex adapter + beneficiary maker-checker | KYC-approved account/credentials; each Cuba payment route separately supported by provider/bank |
+| Banking/payment rails | DUE_DILIGENCE / CONFIG_REQUIRED | Airwallex adapter + beneficiary maker-checker; Airwallex ticket #1623728 confirms U.S. KYB document set, sandbox availability, production credential/webhook path, IP allowlisting guidance and secure onboarding channel | Human onboarding/compliance review of SAHJONY business model/fund flows; exact production approval criterion; transaction limits; technical-contact assignment; completed KYB/KYC; production credentials; E2E testing; each Cuba payment route separately supported by provider/bank |
 | Accounting/tax | CANDIDATE | Double-entry ledger/reconciliation workflow | Engagement letter, chart-of-accounts/tax policy review, monthly close procedure |
 | Customer/intermediary agreements | BUILT / CONTRACT_REQUIRED | Engagement/economics/role-assignment governance | Attorney/accountant review as appropriate, actual signatures |
 | Cuban private-sector customer acquisition | BUILT | Spanish lead funnel and controlled KYB promotion | Real prospect submission and eligibility review |
@@ -52,6 +52,17 @@ This registry separates software capability from real-world authority. Nothing m
 
 ### Accounting / tax
 - IM Tax Advisors — candidate international tax/accounting firm in South Miami with stated import/export and international-tax experience. Source: https://www.imtaxadvisors.com/ ; contact info@imtaxadvisors.com.
+
+## Institutional procurement counterparties — not qualified or approved
+
+### Indian Oil Corporation Ltd. — crude/petroleum tender registration
+- Status: DUE_DILIGENCE / REGISTRATION_EVIDENCE_RECEIVED.
+- Evidence received 2026-08-24 from IndianOil International Trade: official registration form plus three undertakings for approved mailing-list registration.
+- The form states IndianOil deals principal-to-principal only and not through intermediaries.
+- Registration requires complete supporting information, including notarized incorporation evidence; published/certified audited financial statements plus auditor reports for the previous three years; bank references; sufficient trade references to obtain at least three positive counterparty responses; physical crude/LPG/petroleum-product trade volumes and values for the previous three completed years; supplier/customer trade history; and signed undertakings.
+- Physical trade-volume certification must be from an international audit firm that also has an office in India and must exclude inter-company transactions.
+- Registration is not guaranteed by submission; IndianOil reserves approval/rejection authority.
+- SAHJONY asked IndianOil whether applicants lacking three completed years of physical petroleum trading history may qualify through alternative evidence and whether electronic preliminary review is permitted before originals/notarized documents are sent. No qualification claim is made pending their response.
 
 ## Non-negotiable Cuba controls
 
