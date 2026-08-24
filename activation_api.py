@@ -4,6 +4,7 @@ import os
 from fastapi import FastAPI
 
 from auth import neon_auth_jwks_url, neon_auth_url
+from energy_crm_seed import ensure_energy_crm_seed
 from insforge_backend import persistent_backend_status
 from payment_engine import CANONICAL_TRANSACTION_CURRENCY, USD_ONLY_TRANSACTIONS
 from production_readiness import evaluate_production_readiness
@@ -12,7 +13,7 @@ from production_schema_evidence import production_schema_evidence
 from secure_storage import storage_configuration_status
 from trade_connectors import trade_connectors
 
-app = FastAPI(title="SAHJONY Production Activation Control", version="1.5.0", docs_url=None, redoc_url=None)
+app = FastAPI(title="SAHJONY Production Activation Control", version="1.5.1", docs_url=None, redoc_url=None)
 
 
 _DATABASE_ENV_ORDER = (
@@ -118,6 +119,7 @@ def _external_requirements() -> list[dict]:
 @app.get("/activation/health")
 async def activation_health():
     bootstrap = None
+    energy_crm_seed = None
     if os.getenv("VERCEL_ENV", "").strip().lower() == "production" and persistent_backend_status()["database_url_configured"]:
         try:
             bootstrap = await ensure_production_schema()
@@ -127,6 +129,19 @@ async def activation_health():
                 "canonical_database": "active_vercel_database_url",
                 "reason": f"{type(exc).__name__}: {str(exc).strip().splitlines()[0][:240] if str(exc).strip() else 'unknown bootstrap error'}",
                 "fail_closed": True,
+            }
+        try:
+            energy_crm_seed = await ensure_energy_crm_seed()
+        except Exception as exc:
+            energy_crm_seed = {
+                "status": "failed",
+                "expected": 21,
+                "inserted": 0,
+                "already_present": 0,
+                "failed": 21,
+                "reason": f"{type(exc).__name__}: {str(exc).strip().splitlines()[0][:240] if str(exc).strip() else 'unknown CRM seed error'}",
+                "automatic_deal_promotion": False,
+                "automatic_outreach_authority": False,
             }
 
     connector_health = await trade_connectors.health()
@@ -145,6 +160,7 @@ async def activation_health():
         "business": "SAHJONY Global Trade",
         "canonical_database": "active_vercel_database_url",
         "schema_bootstrap": bootstrap,
+        "energy_crm_seed": energy_crm_seed,
         "readiness_score": readiness["score"],
         "passed_gates": readiness["passed_gates"],
         "total_gates": readiness["total_gates"],
