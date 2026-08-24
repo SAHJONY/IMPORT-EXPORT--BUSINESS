@@ -5,6 +5,7 @@ from dataclasses import asdict, dataclass
 from typing import Any
 
 from payment_engine import CANONICAL_TRANSACTION_CURRENCY, USD_ONLY_TRANSACTIONS
+from secure_storage import storage_configuration_status
 
 
 @dataclass(frozen=True)
@@ -99,7 +100,9 @@ def evaluate_production_readiness(
         settlement_remediation = 'Configure bank/settlement FX provider.'
 
     translation_provider_ok = os.getenv('TRANSLATION_PROVIDER', '').strip().lower() == 'azure' and _present('AZURE_TRANSLATOR_ENDPOINT') and _present('AZURE_TRANSLATOR_KEY')
-    secure_storage_configured = all(_present(x) for x in ['INSFORGE_S3_ENDPOINT', 'INSFORGE_S3_ACCESS_KEY_ID', 'INSFORGE_S3_SECRET_ACCESS_KEY', 'INSFORGE_STORAGE_BUCKET'])
+    storage_status = storage_configuration_status()
+    secure_storage_configured = bool(storage_status.get('configured'))
+    storage_provider = storage_status.get('provider') or 'none'
     production_identity, identity_evidence, identity_remediation = _production_identity_status(auth_provider)
     persistent_backend_ok, persistent_backend_evidence = _persistent_backend_status()
     persistence_isolation_ok = _true('PERSISTENCE_ISOLATION_VERIFIED') or _true('INSFORGE_RLS_VERIFIED')
@@ -128,7 +131,7 @@ def evaluate_production_readiness(
         ReadinessGate('tariff_classification', tariff_ok, True, tariff_evidence, 'Restore the authoritative USITC HTS source or another approved corridor-specific tariff provider.'),
         ReadinessGate('logistics_provider', logistics_ok and _true('CARRIER_E2E_VERIFIED'), True, logistics_evidence + '; carrier E2E verified', 'Verify real milestone normalization/ETA/exception flow.'),
         ReadinessGate('fx_execution_provider', settlement_ok, True, settlement_evidence, settlement_remediation),
-        ReadinessGate('secure_document_storage', _true('INSFORGE_STORAGE_ENABLED') and secure_storage_configured and _true('SIGNED_DOCUMENT_STORAGE_VERIFIED'), True, 'Private signed document storage verified', 'Verify signed upload/download, malware gate, retention and legal hold.'),
+        ReadinessGate('secure_document_storage', secure_storage_configured and _true('SIGNED_DOCUMENT_STORAGE_VERIFIED'), True, f'Provider-neutral private signed document storage configured via {storage_provider}; signed storage verification={_true("SIGNED_DOCUMENT_STORAGE_VERIFIED")}', 'Configure one supported S3-compatible storage profile (InsForge S3, Cloudflare R2, or generic S3-compatible), then verify signed upload/download, malware gate, retention and legal hold.'),
         ReadinessGate('global_translation', translation_provider_ok and _true('MULTILINGUAL_E2E_VERIFIED'), True, 'Translation provider plus multilingual E2E verified', 'Verify language persistence, RTL and source preservation.'),
         ReadinessGate('country_activation_governance', _true('COUNTRY_ACTIVATION_E2E_VERIFIED'), True, 'Country/corridor activation governance verified', 'Verify READY/LIMITED/BLOCKED derivation and hypothetical/live isolation.'),
         ReadinessGate('global_supplier_sourcing', _true('GLOBAL_SUPPLIER_SOURCING_E2E_VERIFIED'), True, 'Worldwide candidate sourcing, origin/destination corridor controls and owner supplier selection verified', 'Run a permitted corridor E2E and prove BLOCKED/LIMITED candidates cannot be selected.'),
