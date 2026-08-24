@@ -15,7 +15,7 @@ from auth import verify_owner_token
 from country_crm_api import COUNTRIES, DEFAULT_DEPARTMENTS, country_code
 from insforge_backend import get_backend, persistent_backend_status
 
-app = FastAPI(title='SAHJONY Global Lead Search', version='1.1.0', docs_url=None, redoc_url=None)
+app = FastAPI(title='SAHJONY Global Lead Search', version='1.1.1', docs_url=None, redoc_url=None)
 
 LeadType = Literal['IMPORT_NEED','EXPORT_OFFER','SUPPLIER','BUYER','DISTRIBUTOR','PARTNER','OTHER']
 
@@ -358,6 +358,7 @@ async def health():
     return {
         'status': 'ok' if persistence['configured'] and openai_configured else 'configuration_required',
         'service': 'global-country-lead-search',
+        'version': '1.1.1',
         'country_routing': True,
         'country_ai_briefs': True,
         'deduplication': True,
