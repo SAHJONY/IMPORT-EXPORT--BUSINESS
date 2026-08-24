@@ -23,12 +23,19 @@ _REQUIRED_TABLES = {
 
 _REQUIRED_COLUMNS = {
     "trade_payment_ledger": {
-        "case_id",
+        "payment_case_id",
         "currency",
-        "supplier_payout_authorized",
-        "shipment_release_authorized",
+        "payment_status",
+        "supplier_payout_allowed",
+        "shipment_release_allowed",
+        "supplier_payout_authorized_at",
+        "shipment_release_authorized_at",
     },
-    "trade_payment_events": {"case_id", "event_type", "created_at"},
+    "trade_payment_events": {"event_id", "payment_case_id", "event_type", "currency", "created_at"},
+    "cuba_partner_accounts": {"partner_id", "status", "referral_token_hash", "automatic_commission_payout"},
+    "cuba_partner_referrals": {"referral_id", "partner_id", "referral_status", "commission_status", "currency"},
+    "cuba_consumer_marketplace_requests": {"request_id", "status", "status_token_hash", "payment_allowed", "shipment_allowed"},
+    "ledger_accounts": {"account_id", "code", "account_type", "currency", "active"},
     "ledger_journals": {"journal_id", "currency", "status", "owner_approved"},
     "ledger_entries": {"entry_id", "journal_id", "account_id", "debit", "credit"},
     "payment_reconciliations": {"reconciliation_id", "currency", "status"},
@@ -91,18 +98,9 @@ def _probe() -> dict[str, Any]:
             active_usd_accounts = 0
             if "ledger_accounts" in present_tables:
                 cur.execute(
-                    """
-                    SELECT column_name
-                    FROM information_schema.columns
-                    WHERE table_schema = 'public' AND table_name = 'ledger_accounts'
-                    """
+                    "SELECT count(*) AS n FROM public.ledger_accounts WHERE active = true AND currency = 'USD'"
                 )
-                ledger_columns = {row["column_name"] for row in cur.fetchall()}
-                if {"active", "currency"}.issubset(ledger_columns):
-                    cur.execute(
-                        "SELECT count(*) AS n FROM public.ledger_accounts WHERE active = true AND currency = 'USD'"
-                    )
-                    active_usd_accounts = int(cur.fetchone()["n"])
+                active_usd_accounts = int(cur.fetchone()["n"])
 
     missing_tables = sorted(_REQUIRED_TABLES - present_tables)
     missing_columns = {
@@ -114,18 +112,19 @@ def _probe() -> dict[str, Any]:
         not missing_tables
         and not missing_columns
         and active_usd_accounts >= 12
-        and index_count >= 1
+        and index_count >= 10
     )
     return {
         "verified": verified,
         "provider": "neon_postgres",
+        "canonical_database": "active_vercel_database_url",
         "required_table_count": len(_REQUIRED_TABLES),
         "present_table_count": len(present_tables),
         "index_count": index_count,
         "active_usd_accounts": active_usd_accounts,
         "missing_tables": missing_tables,
         "missing_columns": missing_columns,
-        "reason": None if verified else "Required production schema evidence is incomplete",
+        "reason": None if verified else "Required canonical production schema evidence is incomplete",
     }
 
 
@@ -137,6 +136,7 @@ async def production_schema_evidence() -> dict[str, Any]:
         return {
             "verified": False,
             "provider": "neon_postgres",
+            "canonical_database": "active_vercel_database_url",
             "reason": f"{type(exc).__name__}: {detail}",
             "missing_tables": [],
             "missing_columns": {},
