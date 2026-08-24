@@ -10,6 +10,7 @@ from activation_api import app as activation_app, activation_health
 from telegram_api import app as telegram_app
 from business_email_registry import app as business_email_app
 from email_agent_api import app as email_agent_app
+from gmail_transport_api import app as gmail_transport_app
 from owner_auth_api import app as owner_auth_app
 from communication_api import app as communications_app
 from document_api import app as documents_app
@@ -54,7 +55,7 @@ from fastapi_server import app as core_app
 _RUNTIME_EMPLOYEE_BRIDGE_TOKEN = os.getenv("EMPLOYEE_TOKEN", "").strip() or secrets.token_urlsafe(48)
 os.environ.setdefault("EMPLOYEE_TOKEN", _RUNTIME_EMPLOYEE_BRIDGE_TOKEN)
 
-app = FastAPI(title="SAHJONY Global Trade Unified API", version="5.9.0", docs_url=None, redoc_url=None)
+app = FastAPI(title="SAHJONY Global Trade Unified API", version="6.0.0", docs_url=None, redoc_url=None)
 
 
 @app.middleware("http")
@@ -140,7 +141,7 @@ async def platform_health():
     activation = await activation_health()
     cloudflare_crawler_configured = bool(os.getenv("CLOUDFLARE_ACCOUNT_ID", "").strip()) and bool(os.getenv("CLOUDFLARE_API_TOKEN", "").strip())
     return {
-        "status": "ok", "service": "global-trade-intelligence-os", "version": "5.9.0",
+        "status": "ok", "service": "global-trade-intelligence-os", "version": "6.0.0",
         "release_policy": "fail-closed", "production_ready": activation["production_ready"],
         "readiness_score": activation["readiness_score"], "passed_gates": activation["passed_gates"],
         "total_gates": activation["total_gates"], "blocker_count": activation["blocker_count"],
@@ -148,6 +149,7 @@ async def platform_health():
         "persistence_provider": activation["providers"]["persistence"]["provider"], "persistence_configured": activation["providers"]["persistence"]["configured"],
         "openai_configured": activation["providers"]["ai"]["openai_configured"], "anthropic_configured": activation["providers"]["ai"]["anthropic_configured"],
         "translation_configured": activation["providers"]["translation"]["configured"], "email_agent_control_plane": True,
+        "native_gmail_transport_control_plane": True,
         "trade_agent_control_plane": True, "trade_workflow_certification_monitor": True,
         "country_segmented_crm": True, "cuba_crm_department": True, "global_lead_search_control_plane": True,
         "cloudflare_research_crawler": True, "cloudflare_research_crawler_configured": cloudflare_crawler_configured,
@@ -165,7 +167,7 @@ async def platform_health():
 
 
 for subapp in (
-    activation_app, telegram_app, business_email_app, email_agent_app, owner_auth_app, core_app, customer_crm_app, country_crm_app, global_lead_search_app, cloudflare_crawler_app,
+    activation_app, telegram_app, business_email_app, email_agent_app, gmail_transport_app, owner_auth_app, core_app, customer_crm_app, country_crm_app, global_lead_search_app, cloudflare_crawler_app,
     energy_app, energy_origination_app, energy_intelligence_app, energy_provider_hub_app, energy_provider_ingestion_app, energy_provider_catalog_app,
     energy_ofac_screening_app, energy_eia_app, energy_deal_flow_app, energy_revenue_intelligence_app,
     communications_app, documents_app, document_storage_app, shipments_app, compliance_app, commercial_app, language_app, collaboration_app, finance_app,
