@@ -6,7 +6,7 @@ from fastapi import FastAPI, Header, HTTPException
 from auth import verify_owner_token
 from insforge_backend import get_backend, persistent_backend_status
 
-app = FastAPI(title='SAHJONY Worldwide CRM', version='1.2.0', docs_url=None, redoc_url=None)
+app = FastAPI(title='SAHJONY Worldwide CRM', version='1.3.0', docs_url=None, redoc_url=None)
 
 COUNTRIES = {
     'CU':'Cuba','US':'United States','MX':'Mexico','DO':'Dominican Republic','PA':'Panama','CO':'Colombia','BR':'Brazil','CL':'Chile','PE':'Peru','CR':'Costa Rica','GT':'Guatemala','CA':'Canada',
@@ -90,7 +90,37 @@ def classify_lead(lead: dict) -> dict:
 
 
 def department(code: str) -> dict:
-    return {'country_code':code,'country_name':COUNTRIES.get(code,'Unassigned' if code=='UN' else code),'permanent_department':code=='CU','search_enabled':code in DEFAULT_DEPARTMENTS,'lead_count':0,'customer_count':0,'prospect_count':0,'trade_intake_count':0,'qualified_intake_count':0,'promoted_intake_count':0,'follow_up_due':0,'estimated_pipeline_value':0.0,'sector_counts':{},'product_family_counts':{},'commercial_role_counts':{}}
+    return {
+        'country_code':code,
+        'country_name':COUNTRIES.get(code,'Unassigned' if code=='UN' else code),
+        'permanent_department':code=='CU',
+        'search_enabled':code in DEFAULT_DEPARTMENTS,
+        'lead_count':0,
+        'customer_count':0,
+        'prospect_count':0,
+        'trade_intake_count':0,
+        'qualified_intake_count':0,
+        'promoted_intake_count':0,
+        'follow_up_due':0,
+        'gross_pipeline_value':0.0,
+        'qualified_pipeline_value':0.0,
+        'active_managed_trade_value':0.0,
+        'research_opportunity_value':0.0,
+        'non_usd_budget_count':0,
+        'sector_counts':{},
+        'product_family_counts':{},
+        'commercial_role_counts':{}
+    }
+
+
+def usd_budget(intake: dict) -> float:
+    if str(intake.get('currency') or 'USD').upper() != 'USD':
+        return 0.0
+    try:
+        value = float(intake.get('target_budget') or 0)
+    except (TypeError, ValueError):
+        return 0.0
+    return value if value > 0 else 0.0
 
 
 async def snapshot() -> tuple[list[dict], dict[str, list[dict]]]:
@@ -103,14 +133,19 @@ async def snapshot() -> tuple[list[dict], dict[str, list[dict]]]:
         detail[code].append({'kind':'customer',**account})
     for intake in intakes:
         account=by_customer.get(intake.get('customer_id')) or {}; code=country_code(account.get('country_code') or intake.get('destination_country')); buckets.setdefault(code,department(code)); b=buckets[code]; b['trade_intake_count']+=1
-        if intake.get('qualification_status')=='QUALIFIED': b['qualified_intake_count']+=1
-        if intake.get('managed_trade_request_id') or intake.get('status')=='PROMOTED': b['promoted_intake_count']+=1
-        try: b['estimated_pipeline_value']+=float(intake.get('target_budget') or 0)
-        except (TypeError,ValueError): pass
+        value=usd_budget(intake)
+        if str(intake.get('currency') or 'USD').upper()!='USD' and intake.get('target_budget'): b['non_usd_budget_count']+=1
+        if value: b['gross_pipeline_value']+=value
+        if intake.get('qualification_status')=='QUALIFIED':
+            b['qualified_intake_count']+=1
+            if value: b['qualified_pipeline_value']+=value
+        if intake.get('managed_trade_request_id') or intake.get('status')=='PROMOTED':
+            b['promoted_intake_count']+=1
+            if value: b['active_managed_trade_value']+=value
         detail[code].append({'kind':'intake',**intake})
     for lead in leads:
         code=country_code(lead.get('country')); buckets.setdefault(code,department(code)); b=buckets[code]; b['lead_count']+=1; classification=classify_lead(lead); sector_counters[code][classification['sector']]+=1; product_counters[code][classification['product_family']]+=1; role_counters[code][classification['commercial_role']]+=1
-        try: b['estimated_pipeline_value']+=float(lead.get('estimated_deal_value') or 0)
+        try: b['research_opportunity_value']+=max(0.0,float(lead.get('estimated_deal_value') or 0))
         except (TypeError,ValueError): pass
         detail[code].append({'kind':'lead',**classification,**lead})
     for code,bucket in buckets.items(): bucket['sector_counts']=dict(sector_counters[code].most_common()); bucket['product_family_counts']=dict(product_counters[code].most_common()); bucket['commercial_role_counts']=dict(role_counters[code].most_common())
@@ -119,15 +154,46 @@ async def snapshot() -> tuple[list[dict], dict[str, list[dict]]]:
 
 @app.get('/country-crm/health')
 async def health():
-    persistence=persistent_backend_status(); return {'status':'ok' if persistence['configured'] else 'configuration_required','service':'worldwide-segmented-crm','segmentation':['COUNTRY','SECTOR','PRODUCT_FAMILY','COMMERCIAL_ROLE'],'cuba_department_permanent':True,'dynamic_country_departments':True,'global_search_departments':DEFAULT_DEPARTMENTS,'persistence_provider':persistence['provider']}
+    persistence=persistent_backend_status(); return {'status':'ok' if persistence['configured'] else 'configuration_required','service':'worldwide-segmented-crm','segmentation':['COUNTRY','SECTOR','PRODUCT_FAMILY','COMMERCIAL_ROLE'],'cuba_department_permanent':True,'dynamic_country_departments':True,'global_search_departments':DEFAULT_DEPARTMENTS,'persistence_provider':persistence['provider'],'valuation_policy':'Research lead estimates are excluded from commercial pipeline. USD pipeline is sourced only from explicit target budgets on real trade intakes.'}
 
 
 @app.get('/country-crm/departments')
 async def departments(authorization: str | None = Header(None, alias='Authorization')):
     owner(authorization); rows,detail=await snapshot(); all_items=[item for items in detail.values() for item in items if item.get('kind')=='lead']; sector_totals=Counter(item.get('sector','GENERAL_TRADE') for item in all_items); product_totals=Counter(item.get('product_family','OTHER') for item in all_items); role_totals=Counter(item.get('commercial_role','OTHER') for item in all_items)
-    return {'status':'ok','department_count':len(rows),'cuba_department':'CU','departments':rows,'portfolio_segmentation':{'sectors':dict(sector_totals.most_common()),'product_families':dict(product_totals.most_common()),'commercial_roles':dict(role_totals.most_common())},'totals':{'leads':sum(r['lead_count'] for r in rows),'customers':sum(r['customer_count'] for r in rows),'trade_intakes':sum(r['trade_intake_count'] for r in rows),'qualified':sum(r['qualified_intake_count'] for r in rows),'promoted':sum(r['promoted_intake_count'] for r in rows),'pipeline_value':round(sum(r['estimated_pipeline_value'] for r in rows),2)}}
+    gross=round(sum(r['gross_pipeline_value'] for r in rows),2); qualified=round(sum(r['qualified_pipeline_value'] for r in rows),2); active=round(sum(r['active_managed_trade_value'] for r in rows),2); research=round(sum(r['research_opportunity_value'] for r in rows),2)
+    return {
+        'status':'ok',
+        'department_count':len(rows),
+        'cuba_department':'CU',
+        'departments':rows,
+        'portfolio_segmentation':{'sectors':dict(sector_totals.most_common()),'product_families':dict(product_totals.most_common()),'commercial_roles':dict(role_totals.most_common())},
+        'totals':{
+            'leads':sum(r['lead_count'] for r in rows),
+            'customers':sum(r['customer_count'] for r in rows),
+            'trade_intakes':sum(r['trade_intake_count'] for r in rows),
+            'qualified':sum(r['qualified_intake_count'] for r in rows),
+            'promoted':sum(r['promoted_intake_count'] for r in rows),
+            'pipeline_value':gross,
+            'gross_pipeline_value':gross,
+            'qualified_pipeline_value':qualified,
+            'active_managed_trade_value':active,
+            'research_opportunity_value':research,
+            'contracted_value':None,
+            'recognized_revenue':None,
+            'non_usd_budget_count':sum(r['non_usd_budget_count'] for r in rows)
+        },
+        'valuation_policy':{
+            'pipeline_value_definition':'Sum of explicit positive USD target_budget values on real customer_trade_intakes only.',
+            'qualified_pipeline_definition':'Gross pipeline restricted to qualification_status=QUALIFIED.',
+            'active_managed_trade_definition':'Gross pipeline restricted to PROMOTED intakes or intakes linked to managed trade.',
+            'research_opportunity_definition':'Estimated values on research leads; tracked separately and never presented as pipeline, revenue or contracted value.',
+            'contracted_value_definition':'Not calculated until executed-contract evidence is stored.',
+            'recognized_revenue_definition':'Not calculated here; revenue must come from the accounting ledger.',
+            'non_usd_policy':'Non-USD target budgets are excluded from USD totals until a governed FX conversion exists.'
+        }
+    }
 
 
 @app.get('/country-crm/departments/{code}')
 async def department_detail(code: str, authorization: str | None = Header(None, alias='Authorization')):
-    owner(authorization); normalized=country_code(code); rows,detail=await snapshot(); summary=next((r for r in rows if r['country_code']==normalized),department(normalized)); items=detail.get(normalized,[]); return {'status':'ok','department':summary,'items':items,'item_count':len(items)}
+    owner(authorization); normalized=country_code(code); rows,detail=await snapshot(); summary=next((r for r in rows if r['country_code']==normalized),department(normalized)); items=detail.get(normalized,[]); return {'status':'ok','department':summary,'items':items,'item_count':len(items),'valuation_policy':'Research lead estimates are separate from commercial pipeline.'}
