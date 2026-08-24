@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import os
-from fastapi import FastAPI
+from fastapi import FastAPI, Header, HTTPException, Request
 from postgres_runtime import install_neon_ipv4_preference
 
 install_neon_ipv4_preference()
@@ -20,7 +21,7 @@ from production_schema_evidence import production_schema_evidence
 from secure_storage import storage_configuration_status
 from trade_connectors import trade_connectors
 
-app = FastAPI(title="SAHJONY Production Activation Control", version="1.7.1", docs_url=None, redoc_url=None)
+app = FastAPI(title="SAHJONY Production Activation Control", version="1.8.0", docs_url=None, redoc_url=None)
 
 _DATABASE_ENV_ORDER=("DATABASE_URL","POSTGRES_URL","NEON_DATABASE_URL","NEON_POSTGRES_URL","POSTGRES_PRISMA_URL")
 
@@ -57,6 +58,95 @@ def _external_requirements()->list[dict]:
 def _seed_failure(expected:int, exc:Exception)->dict:
     reason=str(exc).strip().splitlines()[0][:240] if str(exc).strip() else "unknown CRM seed error"
     return {"status":"failed","expected":expected,"inserted":0,"already_present":0,"failed":expected,"reason":f"{type(exc).__name__}: {reason}","automatic_deal_promotion":False,"automatic_outreach_authority":False}
+
+
+def _prepared_crm_prospects()->list[dict]:
+    books=(
+        ("energy_core", ENERGY_CRM_LEADS),
+        ("global_energy", GLOBAL_ENERGY_CRM_LEADS),
+        ("worldwide_trade", WORLDWIDE_TRADE_COUNTERPARTIES),
+        ("midmarket_oil_dependent", MIDMARKET_OIL_DEPENDENT_LEADS),
+        ("cuba_mipyme_expansion", CUBA_MIPYME_EXPANSION_LEADS),
+    )
+    rows=[]; seen=set()
+    for book_name, leads in books:
+        for lead in leads:
+            business=str(lead.get("business_name") or lead.get("legal_name") or "Unnamed prospect").strip()
+            country=str(lead.get("country") or lead.get("country_code") or "UN").strip().upper()[:3]
+            dedupe=(business.lower(), country)
+            if dedupe in seen: continue
+            seen.add(dedupe)
+            digest=hashlib.sha256(f"{business}|{country}|{book_name}".encode()).hexdigest()[:18]
+            rows.append({
+                "intake_id":f"prepared:{digest}",
+                "customer_id":f"prepared:{digest}",
+                "legal_name":business,
+                "trade_name":business,
+                "contact_name":lead.get("contact_name"),
+                "email":lead.get("email"),
+                "phone":lead.get("phone"),
+                "country_code":country,
+                "website":lead.get("website") or lead.get("source_url"),
+                "product_need":lead.get("product_need_or_offer") or lead.get("product") or "Commercial prospect — qualification required",
+                "destination_country":country,
+                "status":"RESEARCH_PROSPECT",
+                "qualification_status":"PENDING",
+                "source":book_name,
+                "source_description":lead.get("source_description") or lead.get("evidence_summary"),
+                "source_url":lead.get("source_url") or lead.get("source_reference"),
+                "deal_side":lead.get("deal_side") or lead.get("lead_type"),
+                "notes":lead.get("notes"),
+                "prospect_only":True,
+                "prepared_record":True,
+                "persisted":False,
+                "read_only":True,
+            })
+    return rows
+
+
+@app.get("/crm/intakes")
+async def resilient_crm_intakes(
+    x_role:str|None=Header(None,alias="X-Role"),
+    authorization:str|None=Header(None,alias="Authorization"),
+    x_employee_id:str|None=Header(None,alias="X-Employee-Id"),
+):
+    try:
+        from customer_crm_api import list_intakes as live_list_intakes
+        return await live_list_intakes(x_role=x_role, authorization=authorization, x_employee_id=x_employee_id)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        rows=_prepared_crm_prospects()
+        return {
+            "intakes":rows[:250],
+            "real_intake_count":0,
+            "prospect_count":len(rows),
+            "status":"DEGRADED_READ_ONLY",
+            "persisted_records_available":False,
+            "prepared_records_visible":True,
+            "database_write_enabled":False,
+            "database_issue":"CANONICAL_DATABASE_AUTHENTICATION_REQUIRED",
+            "error_type":type(exc).__name__,
+            "message":"Prepared CRM prospects are visible read-only while the canonical production database credential is repaired.",
+        }
+
+
+@app.post("/crm/intake")
+async def resilient_public_crm_intake(request:Request):
+    try:
+        from customer_crm_api import IntakeIn, public_intake
+        payload=IntakeIn.model_validate(await request.json())
+        return await public_intake(payload)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail={
+            "code":"CANONICAL_DATABASE_AUTHENTICATION_REQUIRED",
+            "message":"New CRM intake writes are temporarily unavailable until the canonical production database credential is repaired.",
+            "fail_closed":True,
+            "error_type":type(exc).__name__,
+        })
+
 
 @app.get("/activation/health")
 async def activation_health():
