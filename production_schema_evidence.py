@@ -94,16 +94,20 @@ def _probe() -> dict[str, Any]:
             )
             index_count = len(cur.fetchall())
 
-            cur.execute(
-                "SELECT count(*) AS n FROM public.ledger_accounts WHERE active = true AND currency = 'USD'"
-            )
-            active_usd_accounts = int(cur.fetchone()["n"])
+            active_usd_accounts = 0
+            if "ledger_accounts" in present_tables:
+                ledger_columns = columns.get("ledger_accounts", set())
+                if {"active", "currency"}.issubset(ledger_columns):
+                    cur.execute(
+                        "SELECT count(*) AS n FROM public.ledger_accounts WHERE active = true AND currency = 'USD'"
+                    )
+                    active_usd_accounts = int(cur.fetchone()["n"])
 
     missing_tables = sorted(_REQUIRED_TABLES - present_tables)
     missing_columns = {
         table: sorted(required - columns.get(table, set()))
         for table, required in _REQUIRED_COLUMNS.items()
-        if required - columns.get(table, set())
+        if table in present_tables and required - columns.get(table, set())
     }
     verified = (
         not missing_tables
