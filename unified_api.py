@@ -50,12 +50,13 @@ from ai_brain_api import app as ai_brain_app
 from ai_trade_agent_api import app as ai_trade_agent_app
 from trade_workflow_certification_api import app as trade_certification_app
 from customer_crm_api import app as customer_crm_app
+from external_trade_prospects_api import app as external_trade_prospects_app
 from fastapi_server import app as core_app
 
 _RUNTIME_EMPLOYEE_BRIDGE_TOKEN = os.getenv("EMPLOYEE_TOKEN", "").strip() or secrets.token_urlsafe(48)
 os.environ.setdefault("EMPLOYEE_TOKEN", _RUNTIME_EMPLOYEE_BRIDGE_TOKEN)
 
-app = FastAPI(title="SAHJONY Global Trade Unified API", version="6.0.0", docs_url=None, redoc_url=None)
+app = FastAPI(title="SAHJONY Global Trade Unified API", version="6.1.0", docs_url=None, redoc_url=None)
 
 
 @app.middleware("http")
@@ -131,6 +132,7 @@ async def crm_runtime_health():
         "service": "customer-crm", "public_intake": True, "fail_closed_promotion": True,
         "country_segmentation": True, "cuba_department_permanent": True,
         "global_lead_search_control_plane": True, "energy_vertical_connected": True,
+        "external_trade_prospects": True, "external_trade_prospects_research_only": True,
         "persistence": status["provider"], "backend_configured": status["configured"], "operational": status["configured"],
         "database_url_configured": status["database_url_configured"], "insforge_configured": status["insforge_configured"],
     }
@@ -141,7 +143,7 @@ async def platform_health():
     activation = await activation_health()
     cloudflare_crawler_configured = bool(os.getenv("CLOUDFLARE_ACCOUNT_ID", "").strip()) and bool(os.getenv("CLOUDFLARE_API_TOKEN", "").strip())
     return {
-        "status": "ok", "service": "global-trade-intelligence-os", "version": "6.0.0",
+        "status": "ok", "service": "global-trade-intelligence-os", "version": "6.1.0",
         "release_policy": "fail-closed", "production_ready": activation["production_ready"],
         "readiness_score": activation["readiness_score"], "passed_gates": activation["passed_gates"],
         "total_gates": activation["total_gates"], "blocker_count": activation["blocker_count"],
@@ -152,6 +154,7 @@ async def platform_health():
         "native_gmail_transport_control_plane": True,
         "trade_agent_control_plane": True, "trade_workflow_certification_monitor": True,
         "country_segmented_crm": True, "cuba_crm_department": True, "global_lead_search_control_plane": True,
+        "external_trade_prospects": True, "external_trade_prospects_research_only": True,
         "cloudflare_research_crawler": True, "cloudflare_research_crawler_configured": cloudflare_crawler_configured,
         "energy_crude_oil_os": True, "energy_autonomous_origination": True, "energy_origination_markets": 21,
         "energy_market_intelligence": True, "energy_autonomous_matching": True, "energy_provider_hub": True,
@@ -167,7 +170,7 @@ async def platform_health():
 
 
 for subapp in (
-    activation_app, telegram_app, business_email_app, email_agent_app, gmail_transport_app, owner_auth_app, core_app, customer_crm_app, country_crm_app, global_lead_search_app, cloudflare_crawler_app,
+    activation_app, telegram_app, business_email_app, email_agent_app, gmail_transport_app, owner_auth_app, core_app, customer_crm_app, external_trade_prospects_app, country_crm_app, global_lead_search_app, cloudflare_crawler_app,
     energy_app, energy_origination_app, energy_intelligence_app, energy_provider_hub_app, energy_provider_ingestion_app, energy_provider_catalog_app,
     energy_ofac_screening_app, energy_eia_app, energy_deal_flow_app, energy_revenue_intelligence_app,
     communications_app, documents_app, document_storage_app, shipments_app, compliance_app, commercial_app, language_app, collaboration_app, finance_app,
