@@ -74,6 +74,7 @@
     { "src": "/cuba-energy(.*)", "dest": "cuba_energy_desk_api.py" },
     { "src": "/ui-language(.*)", "dest": "ui_language_api.py" },
     { "src": "/cuba-language(.*)", "dest": "cuba_language_api.py" },
+    { "src": "/crawler(.*)", "dest": "unified_api.py" },
     { "src": "/lead-scout/(health|leads.*)", "dest": "unified_api.py" },
     { "src": "/lead-search(.*)", "dest": "unified_api.py" },
     { "src": "/energy(.*)", "dest": "unified_api.py" },
