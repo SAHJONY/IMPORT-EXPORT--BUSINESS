@@ -7,10 +7,11 @@ from auth import neon_auth_jwks_url, neon_auth_url
 from insforge_backend import persistent_backend_status
 from payment_engine import CANONICAL_TRANSACTION_CURRENCY, USD_ONLY_TRANSACTIONS
 from production_readiness import evaluate_production_readiness
+from production_schema_bootstrap import ensure_production_schema
 from production_schema_evidence import production_schema_evidence
 from trade_connectors import trade_connectors
 
-app = FastAPI(title="SAHJONY Production Activation Control", version="1.3.1", docs_url=None, redoc_url=None)
+app = FastAPI(title="SAHJONY Production Activation Control", version="1.4.0", docs_url=None, redoc_url=None)
 
 
 _DATABASE_ENV_ORDER = (
@@ -38,6 +39,7 @@ def _database_env_diagnostics() -> dict:
         "present_variables": present,
         "multiple_database_variables_present": len(present) > 1,
         "values_exposed": False,
+        "canonical_policy": "Use the active Vercel production database; do not substitute databases from other applications.",
     }
 
 
@@ -53,6 +55,7 @@ def _provider_state(schema_evidence: dict | None = None) -> dict:
         },
         "persistence": {
             **persistence,
+            "canonical_database": "active_vercel_database_url",
             "database_env_diagnostics": _database_env_diagnostics(),
             "rls_verified": _true("PERSISTENCE_ISOLATION_VERIFIED") or _true("INSFORGE_RLS_VERIFIED"),
             "schemas_applied": schema_verified or _true("PERSISTENCE_SCHEMA_VERIFIED") or _true("INSFORGE_SCHEMAS_APPLIED"),
@@ -92,7 +95,7 @@ def _external_requirements() -> list[dict]:
     requirements: list[dict] = []
     persistence = persistent_backend_status()
     if not persistence["configured"]:
-        requirements.append({"area": "persistence", "action": "Attach Neon/Postgres to Vercel so DATABASE_URL/POSTGRES_URL exists, or configure InsForge server credentials."})
+        requirements.append({"area": "persistence", "action": "Attach the canonical production database to Vercel so DATABASE_URL/POSTGRES_URL exists."})
     if not _present("ANTHROPIC_API_KEY"):
         requirements.append({"area": "ai", "action": "Add ANTHROPIC_API_KEY in Vercel and run AI Brain E2E verification for governed dual-model high-stakes consensus."})
     if not (_present("AZURE_TRANSLATOR_ENDPOINT") and _present("AZURE_TRANSLATOR_KEY")):
@@ -102,7 +105,7 @@ def _external_requirements() -> list[dict]:
     if not USD_ONLY_TRANSACTIONS and not (_present("FX_EXECUTION_PROVIDER") or _present("FX_DATA_PROVIDER")):
         requirements.append({"area": "settlement", "action": "Connect the production bank/settlement FX provider before enabling non-USD customer settlement."})
     if not _true("BACKUP_RESTORE_TESTED"):
-        requirements.append({"area": "resilience", "action": "Complete and record a database/storage restore drill."})
+        requirements.append({"area": "resilience", "action": "Complete and record a database/storage restore drill on the canonical Vercel production database."})
     if not _true("FIRST_LIVE_TRADE_CERTIFIED"):
         requirements.append({"area": "live_business", "action": "Complete one real customer-to-supplier transaction, delivery, reconciliation, fee collection and Owner certification."})
     return requirements
@@ -110,6 +113,18 @@ def _external_requirements() -> list[dict]:
 
 @app.get("/activation/health")
 async def activation_health():
+    bootstrap = None
+    if os.getenv("VERCEL_ENV", "").strip().lower() == "production" and persistent_backend_status()["database_url_configured"]:
+        try:
+            bootstrap = await ensure_production_schema()
+        except Exception as exc:
+            bootstrap = {
+                "completed": False,
+                "canonical_database": "active_vercel_database_url",
+                "reason": f"{type(exc).__name__}: {str(exc).strip().splitlines()[0][:240] if str(exc).strip() else 'unknown bootstrap error'}",
+                "fail_closed": True,
+            }
+
     connector_health = await trade_connectors.health()
     schema_evidence = await production_schema_evidence()
     readiness = evaluate_production_readiness(
@@ -124,6 +139,8 @@ async def activation_health():
         "status": "ready" if readiness["production_ready"] else "activation_required",
         "service": "production-activation-control",
         "business": "SAHJONY Global Trade",
+        "canonical_database": "active_vercel_database_url",
+        "schema_bootstrap": bootstrap,
         "readiness_score": readiness["score"],
         "passed_gates": readiness["passed_gates"],
         "total_gates": readiness["total_gates"],
