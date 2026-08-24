@@ -15,9 +15,12 @@
   let active='';
   let observerTimer=null;
 
-  function normalize(value){
+  function normalizeLocale(value){
     const raw=String(value||'').trim().replaceAll('_','-');
     if(!raw)return '';
+    const lower=raw.toLowerCase();
+    if(lower==='en'||lower.startsWith('en-'))return 'en-US';
+    if(lower==='es'||lower.startsWith('es-'))return 'es';
     const parts=raw.split('-').filter(Boolean);
     if(!parts.length)return '';
     const base=parts[0].toLowerCase();
@@ -28,31 +31,32 @@
       return part;
     })].join('-');
   }
-  const base=value=>normalize(value).split('-')[0].toLowerCase();
-  const sameLanguage=(a,b)=>base(a)===base(b);
-  const direction=locale=>RTL.has(base(locale))?'rtl':'ltr';
-  const sourceLocale=normalize(document.documentElement.dataset.sourceLocale||document.documentElement.lang||'en-US')||'en-US';
+  const baseLocale=value=>normalizeLocale(value).split('-')[0].toLowerCase();
+  const sameLanguage=(a,b)=>baseLocale(a)===baseLocale(b);
+  const direction=locale=>RTL.has(baseLocale(locale))?'rtl':'ltr';
+  const sourceLocale=normalizeLocale(document.documentElement.dataset.sourceLocale||document.documentElement.lang||'en-US')||'en-US';
 
   function requestedLocale(){
     const p=new URLSearchParams(location.search);
-    return normalize(p.get(QUERY)||p.get('locale')||'');
+    return normalizeLocale(p.get(QUERY)||p.get('locale')||'');
   }
   function storedLocale(){
-    try{return normalize(localStorage.getItem(STORAGE)||'')}catch{return ''}
+    try{return normalizeLocale(localStorage.getItem(STORAGE)||'')}catch{return ''}
   }
   function setStored(locale){
-    try{localStorage.setItem(STORAGE,normalize(locale)||sourceLocale)}catch{}
+    try{localStorage.setItem(STORAGE,normalizeLocale(locale)||sourceLocale)}catch{}
   }
   function rewriteUrl(locale){
     try{
       const u=new URL(location.href);
+      const marker=normalizeLocale(locale)||sourceLocale;
       u.searchParams.delete('locale');
-      u.searchParams.set(QUERY,normalize(locale)||sourceLocale);
+      u.searchParams.set('lang',marker);
       history.replaceState(history.state,'',u.pathname+u.search+u.hash);
     }catch{}
   }
   function propagateLinks(locale){
-    const value=normalize(locale)||sourceLocale;
+    const marker=normalizeLocale(locale)||sourceLocale;
     document.querySelectorAll('a[href]').forEach(a=>{
       if(a.closest('[data-no-translate]'))return;
       const raw=a.getAttribute('href');
@@ -61,7 +65,7 @@
         const u=new URL(raw,location.origin);
         if(u.origin!==location.origin)return;
         u.searchParams.delete('locale');
-        u.searchParams.set(QUERY,value);
+        u.searchParams.set('lang',marker);
         a.setAttribute('href',u.pathname+u.search+u.hash);
       }catch{}
     });
@@ -133,7 +137,7 @@
     if(small)small.textContent=label||'';
   }
   function applyDirection(locale){
-    document.documentElement.lang=normalize(locale)||sourceLocale;
+    document.documentElement.lang=normalizeLocale(locale)||sourceLocale;
     document.documentElement.dir=direction(locale);
   }
 
@@ -151,15 +155,15 @@
 
   async function applyLanguage(locale,{persist=true}={}){
     if(busy)return;
-    const target=normalize(locale)||sourceLocale;
+    const target=normalizeLocale(locale)||sourceLocale;
     active=target;
     if(persist){setStored(target);rewriteUrl(target)}
     propagateLinks(target);
     if(sameLanguage(target,sourceLocale)){
-      restore();applyDirection(target);state('ok',base(target)==='es'?'Español':base(target)==='en'?'English':target);return;
+      restore();applyDirection(target);state('ok',baseLocale(target)==='en'?'English':'Original');return;
     }
     busy=true;
-    state('busy',base(target)==='es'?'Traduciendo…':'Translating…');
+    state('busy',baseLocale(target)==='es'?'Traduciendo…':'Translating…');
     try{
       restore();
       const items=collect();
@@ -189,7 +193,7 @@
       const r=await fetch(UI_GEO,{cache:'no-store'});
       if(!r.ok)return '';
       const j=await r.json();
-      return normalize(j.default_locale||'');
+      return normalizeLocale(j.default_locale||'');
     }catch{return ''}
   }
 
@@ -208,7 +212,7 @@
     for(const locale of LOCALES){
       const option=document.createElement('option');option.value=locale;
       let label=locale;
-      try{label=(displayNames?.of(base(locale))||locale)+' · '+locale}catch{}
+      try{label=(displayNames?.of(baseLocale(locale))||locale)+' · '+locale}catch{}
       option.textContent=label;select.appendChild(option);
     }
     select.addEventListener('change',()=>applyLanguage(select.value,{persist:true}));
@@ -233,9 +237,11 @@
     await applyLanguage(active,{persist:false});
 
     const observer=new MutationObserver(records=>{
-      if(busy||records.every(record=>record.target.closest?.('.sahjony-language')))return;
-      clearTimeout(observerTimer);
-      observerTimer=setTimeout(()=>applyLanguage(active,{persist:false}),350);
+      if(!sameLanguage(active,sourceLocale)&&!busy){
+        if(records.every(record=>record.target.closest?.('.sahjony-language')))return;
+        clearTimeout(observerTimer);
+        observerTimer=setTimeout(()=>applyLanguage(active,{persist:false}),350);
+      }
     });
     observer.observe(document.body,{childList:true,subtree:true});
   }
