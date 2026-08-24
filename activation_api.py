@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import os
 from fastapi import FastAPI
+from postgres_runtime import install_neon_ipv4_preference
+
+install_neon_ipv4_preference()
 
 from auth import neon_auth_jwks_url, neon_auth_url
 from energy_crm_seed import ENERGY_CRM_LEADS, ensure_energy_crm_seed
@@ -17,7 +20,7 @@ from production_schema_evidence import production_schema_evidence
 from secure_storage import storage_configuration_status
 from trade_connectors import trade_connectors
 
-app = FastAPI(title="SAHJONY Production Activation Control", version="1.7.0", docs_url=None, redoc_url=None)
+app = FastAPI(title="SAHJONY Production Activation Control", version="1.7.1", docs_url=None, redoc_url=None)
 
 _DATABASE_ENV_ORDER=("DATABASE_URL","POSTGRES_URL","NEON_DATABASE_URL","NEON_POSTGRES_URL","POSTGRES_PRISMA_URL")
 
