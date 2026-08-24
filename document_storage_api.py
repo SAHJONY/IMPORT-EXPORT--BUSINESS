@@ -10,9 +10,9 @@ from pydantic import BaseModel, Field
 
 from auth import verify_customer_token, verify_owner_token
 from insforge_backend import get_backend
-from secure_storage import create_download_url, create_upload_url, object_key, validate_file, verify_uploaded_object
+from secure_storage import create_download_url, create_upload_url, object_key, storage_configuration_status, validate_file, verify_uploaded_object
 
-app = FastAPI(title="SAHJONY Secure Document Storage", version="1.0.0", docs_url=None, redoc_url=None)
+app = FastAPI(title="SAHJONY Secure Document Storage", version="1.1.0", docs_url=None, redoc_url=None)
 Role = Literal["owner", "employee", "customer"]
 
 
@@ -95,8 +95,16 @@ async def storage_event(document_id, actor, event_type, doc, detail=None):
 
 @app.get("/document-storage/health")
 async def health():
-    configured = all(os.getenv(x, "").strip() for x in ["INSFORGE_S3_ENDPOINT", "INSFORGE_S3_ACCESS_KEY_ID", "INSFORGE_S3_SECRET_ACCESS_KEY", "INSFORGE_STORAGE_BUCKET"])
-    return {"status": "ok", "service": "secure-document-storage", "configured": configured, "signed_urls": True, "server_derived_keys": True, "raw_storage_credentials_exposed": False}
+    status = storage_configuration_status()
+    return {
+        "status": "ok" if status["configured"] else "configuration_required",
+        "service": "secure-document-storage",
+        **status,
+        "malware_scan_required": os.getenv("DOCUMENT_MALWARE_SCAN_REQUIRED", "true").strip().lower() == "true",
+        "malware_scan_callback_configured": bool(os.getenv("MALWARE_SCAN_CALLBACK_SECRET", "").strip()),
+        "legal_hold_supported": True,
+        "retention_governance": True,
+    }
 
 
 @app.post("/document-storage/{document_id}/upload")
