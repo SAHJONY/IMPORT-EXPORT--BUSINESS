@@ -1,0 +1,2 @@
+Production redeploy trigger for latest main energy intelligence release.
+No application configuration or database target changes.
