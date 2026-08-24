@@ -59,44 +59,45 @@ def _database_url() -> str:
 def _probe() -> dict[str, Any]:
     with psycopg.connect(_database_url(), connect_timeout=10, row_factory=dict_row) as conn:
         with conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT table_name
-                FROM information_schema.tables
-                WHERE table_schema = 'public'
-                  AND table_name = ANY(%s)
-                """,
-                (sorted(_REQUIRED_TABLES),),
-            )
-            present_tables = {row["table_name"] for row in cur.fetchall()}
+            present_tables: set[str] = set()
+            for table in sorted(_REQUIRED_TABLES):
+                cur.execute("SELECT to_regclass(%s) AS relation", (f"public.{table}",))
+                row = cur.fetchone()
+                if row and row["relation"] is not None:
+                    present_tables.add(table)
 
-            cur.execute(
-                """
-                SELECT table_name, column_name
-                FROM information_schema.columns
-                WHERE table_schema = 'public'
-                  AND table_name = ANY(%s)
-                """,
-                (sorted(_REQUIRED_COLUMNS),),
-            )
             columns: dict[str, set[str]] = {name: set() for name in _REQUIRED_COLUMNS}
-            for row in cur.fetchall():
-                columns.setdefault(row["table_name"], set()).add(row["column_name"])
+            for table in sorted(_REQUIRED_COLUMNS):
+                if table not in present_tables:
+                    continue
+                cur.execute(
+                    """
+                    SELECT column_name
+                    FROM information_schema.columns
+                    WHERE table_schema = 'public' AND table_name = %s
+                    """,
+                    (table,),
+                )
+                columns[table] = {row["column_name"] for row in cur.fetchall()}
 
-            cur.execute(
-                """
-                SELECT tablename, indexname
-                FROM pg_indexes
-                WHERE schemaname = 'public'
-                  AND tablename = ANY(%s)
-                """,
-                (sorted(_REQUIRED_TABLES),),
-            )
-            index_count = len(cur.fetchall())
+            index_count = 0
+            for table in sorted(present_tables):
+                cur.execute(
+                    "SELECT count(*) AS n FROM pg_indexes WHERE schemaname = 'public' AND tablename = %s",
+                    (table,),
+                )
+                index_count += int(cur.fetchone()["n"])
 
             active_usd_accounts = 0
             if "ledger_accounts" in present_tables:
-                ledger_columns = columns.get("ledger_accounts", set())
+                cur.execute(
+                    """
+                    SELECT column_name
+                    FROM information_schema.columns
+                    WHERE table_schema = 'public' AND table_name = 'ledger_accounts'
+                    """
+                )
+                ledger_columns = {row["column_name"] for row in cur.fetchall()}
                 if {"active", "currency"}.issubset(ledger_columns):
                     cur.execute(
                         "SELECT count(*) AS n FROM public.ledger_accounts WHERE active = true AND currency = 'USD'"
@@ -132,10 +133,11 @@ async def production_schema_evidence() -> dict[str, Any]:
     try:
         return await asyncio.to_thread(_probe)
     except Exception as exc:
+        detail = str(exc).strip().splitlines()[0][:240] if str(exc).strip() else "unknown database error"
         return {
             "verified": False,
             "provider": "neon_postgres",
-            "reason": f"{type(exc).__name__}: schema evidence probe failed",
+            "reason": f"{type(exc).__name__}: {detail}",
             "missing_tables": [],
             "missing_columns": {},
             "fail_closed": True,
