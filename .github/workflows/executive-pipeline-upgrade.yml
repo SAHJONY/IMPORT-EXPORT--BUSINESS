@@ -1,0 +1,75 @@
+name: Executive pipeline upgrade
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/executive-pipeline-upgrade.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  upgrade:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Upgrade executive pipeline dashboard
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/App.tsx')
+          text = path.read_text()
+          start = text.index('function Dashboard({role,health,token,api}:any){')
+          end = text.index('\nfunction Brief', start)
+          replacement = r'''function Dashboard({role,health,token,api}:any){
+ const [counts,setCounts]=useState({crm:0,trade:0,sourcing:0});
+ const [pipeline,setPipeline]=useState({gross:0,qualified:0,active:0,budgeted:0,realIntakes:0,researchProspects:0,nonUsdBudgeted:0});
+ useEffect(()=>{if(!token||role==='customer')return;Promise.allSettled([api('/crm/intakes',{cache:'no-store'}),api('/managed-trade/requests',{cache:'no-store'}),api('/global-sourcing/requests',{cache:'no-store'})]).then(results=>{
+   const list=(result:any)=>{if(result.status!=='fulfilled')return [] as any[];const found=Object.values(result.value).find(v=>Array.isArray(v)) as any[]|undefined;return found||[]};
+   const crm=list(results[0]);const trade=list(results[1]);const sourcing=list(results[2]);
+   setCounts({crm:crm.length,trade:trade.length,sourcing:sourcing.length});
+   const researchProspects=crm.filter((row:any)=>String(row.intake_id||'').startsWith('prospect:'));
+   const realIntakes=crm.filter((row:any)=>!String(row.intake_id||'').startsWith('prospect:'));
+   const budgeted=realIntakes.filter((row:any)=>Number(row.target_budget)>0);
+   const usdBudgeted=budgeted.filter((row:any)=>(row.currency||'USD').toUpperCase()==='USD');
+   const total=(rows:any[])=>rows.reduce((sum:number,row:any)=>sum+(Number(row.target_budget)||0),0);
+   const qualified=usdBudgeted.filter((row:any)=>row.qualification_status==='QUALIFIED');
+   const active=usdBudgeted.filter((row:any)=>row.status==='PROMOTED'||Boolean(row.managed_trade_request_id));
+   setPipeline({gross:total(usdBudgeted),qualified:total(qualified),active:total(active),budgeted:usdBudgeted.length,realIntakes:realIntakes.length,researchProspects:researchProspects.length,nonUsdBudgeted:budgeted.length-usdBudgeted.length});
+ })},[role,token]);
+ if(role==='customer')return <CustomerDashboard health={health}/>;
+ const owner=role==='owner';
+ const usd=(value:number)=>value?new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',maximumFractionDigits:0}).format(value):'$0';
+ const stats=owner?[['CRM RECORDS',counts.crm,'Prospects + submitted trade requirements'],['TRADE CASES',counts.trade,'Managed-trade records'],['SOURCING',counts.sourcing,'Global sourcing requests'],['CONTROL POSTURE',health?.production_ready?'READY':'GOVERNED',health?.production_ready?'Production gates satisfied':'Fail-closed controls active']]:[['QUALIFICATION',counts.crm,'Visible intake records'],['TRADE CASES',counts.trade,'Execution records'],['SOURCING',counts.sourcing,'Research requests'],['RELEASE','OWNER','Escalate controlled releases']];
+ return <><section className="command-hero executive-hero"><div><div className="eyebrow gold">{owner?'GLOBAL TRADE COMMAND CENTER':'DAILY OPERATIONS'}</div><h1>{owner?'Control the pipeline. See the risk. Move with evidence.':'Work the queue. Resolve blockers. Escalate exceptions.'}</h1><p>{owner?'One operating layer across demand, suppliers, commercial terms, compliance, documents, payments, logistics and reconciliation.':'Your workspace is organized around the next operational action.'}</p><div className="hero-chip-row"><span>Worldwide sourcing</span><span>Case-based execution</span><span>Owner-governed release</span></div></div><div className="control-posture"><small>PLATFORM STATUS</small><strong>{health?.status==='ok'?'ONLINE':'CHECKING'}</strong><div><span>Release policy</span><b>FAIL-CLOSED</b></div><div><span>AI authority</span><b>ADVISORY</b></div><div><span>Access</span><b>{owner?'FULL OWNER':'OPERATIONS'}</b></div></div></section>{owner&&<section className="workspace-section"><div className="section-title"><div><span className="eyebrow">EVIDENCE-BASED COMMERCIAL FUNNEL</span><h2>Pipeline value without inflated claims</h2><p>Only explicit USD target budgets from real trade intakes are valued. Research prospects without a submitted requirement are excluded from dollar pipeline.</p></div></div><section className="stat-grid institutional-stats"><article><small>GROSS PIPELINE</small><strong>{usd(pipeline.gross)}</strong><span>{pipeline.budgeted} budgeted USD intakes · not revenue</span></article><article><small>QUALIFIED PIPELINE</small><strong>{usd(pipeline.qualified)}</strong><span>Requires qualification status = QUALIFIED</span></article><article><small>ACTIVE MANAGED TRADE</small><strong>{usd(pipeline.active)}</strong><span>Promoted intakes only · not contracted value</span></article><article><small>CONTRACTED VALUE</small><strong>EVIDENCE GATE</strong><span>Shown only when executed-contract evidence is recorded</span></article><article><small>RECOGNIZED REVENUE</small><strong>LEDGER ONLY</strong><span>Never inferred from pipeline or opportunity value</span></article><article><small>RESEARCH PROSPECTS</small><strong>{pipeline.researchProspects}</strong><span>Excluded from dollar pipeline until a real requirement exists</span></article><article><small>REAL INTAKES</small><strong>{pipeline.realIntakes}</strong><span>Submitted/captured trade requirements</span></article><article><small>NON-USD BUDGETS</small><strong>{pipeline.nonUsdBudgeted}</strong><span>Excluded from USD totals until governed conversion</span></article></section></section>}<section className="stat-grid institutional-stats">{stats.map(([a,b,c]:any)=><article key={a}><small>{a}</small><strong>{b}</strong><span>{c}</span></article>)}</section>{owner&&<section className="executive-grid"><article className="panel trade-network"><div className="panel-head"><div><small>GLOBAL CONTROL PLANE</small><h2>Trade corridor posture</h2></div><span className="live-pill">LIVE MODEL</span></div><div className="network-canvas"><div className="world-line l1"/><div className="world-line l2"/><div className="world-line l3"/><div className="world-hub origin">ORIGIN<br/><b>SUPPLIERS</b></div><div className="world-hub center">SAHJONY<br/><b>CONTROL</b></div><div className="world-hub destination">DESTINATION<br/><b>CUSTOMERS</b></div></div><div className="network-legend"><span><i className="ok-dot"/>Qualified path</span><span><i className="hold-dot"/>Evidence gates</span><span><i className="ai-dot"/>AI advisory</span></div></article><article className="panel ai-brief"><div className="panel-head"><div><small>EXECUTIVE BRIEF</small><h2>What needs attention</h2></div></div><Brief n="01" title={`${pipeline.researchProspects} research prospects`} text="Convert verified interest into explicit trade requirements before assigning dollar value."/><Brief n="02" title={`${pipeline.realIntakes} real trade intakes`} text="Qualify budget, destination, quantity and decision authority."/><Brief n="03" title={`${counts.trade} managed trade cases`} text="Focus on evidence gates, commercial terms, documents, logistics and reconciliation."/><button className="secondary-button" onClick={()=>nav('/owner/ai-brain')}>Open AI Intelligence</button></article></section>}<QuickActions role={role}/><Pipeline/></>
+}'''
+          path.write_text(text[:start] + replacement + text[end:])
+          PY
+      - name: Validate build
+        run: npm run build
+      - name: Commit dashboard upgrade
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            echo 'No changes required.'
+            exit 0
+          fi
+          git config user.name 'SAHJONY Automation'
+          git config user.email 'actions@users.noreply.github.com'
+          git add src/App.tsx
+          git commit -m 'Make executive pipeline evidence-based'
+          git push origin HEAD:main
