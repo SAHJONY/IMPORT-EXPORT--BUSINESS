@@ -1,3 +1,12 @@
+from __future__ import annotations
+
+import json
+import re
+import secrets
+from datetime import datetime, timezone
+from typing import Any
+
+import httpx
 from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
 
@@ -12,15 +21,116 @@ from auth import (
     verify_owner_password,
     verify_owner_totp,
 )
+from insforge_backend import _matches, _safe_table, get_backend
 
 
-app = FastAPI(title="SAHJONY Owner Authentication", version="1.1.0", docs_url=None, redoc_url=None)
+app = FastAPI(title="SAHJONY Owner Authentication", version="1.2.0", docs_url=None, redoc_url=None)
 
 
 class OwnerLoginRequest(BaseModel):
     email: str = Field(min_length=3, max_length=320)
     password: str = Field(min_length=8, max_length=256)
     mfa_code: str | None = Field(default=None, min_length=6, max_length=6, pattern=r"^\d{6}$")
+
+
+class OwnerDataPreviewRequest(BaseModel):
+    table: str = Field(min_length=1, max_length=120)
+    filters: dict[str, str] = Field(default_factory=dict)
+    limit: int = Field(default=50, ge=1, le=250)
+    include_system: bool = False
+
+
+class OwnerDataDeleteRequest(BaseModel):
+    table: str = Field(min_length=1, max_length=120)
+    filters: dict[str, str] = Field(default_factory=dict)
+    confirm: str = Field(min_length=6, max_length=32)
+    reason: str | None = Field(default=None, max_length=500)
+    include_system: bool = False
+
+
+PROTECTED_TABLES = {"system_integrations"}
+IMMUTABLE_TABLES = {"owner_data_deletion_audit"}
+COMMON_DATASETS = [
+    {"table": "crm_intakes", "label": "CRM leads / intakes"},
+    {"table": "customer_intakes", "label": "Customer intakes"},
+    {"table": "global_leads", "label": "Global research leads"},
+    {"table": "country_leads", "label": "Country CRM leads"},
+    {"table": "business_events", "label": "Messages / business events"},
+    {"table": "outbound_notifications", "label": "Outbound email / WhatsApp messages"},
+    {"table": "email_messages", "label": "Email messages"},
+    {"table": "email_threads", "label": "Email threads"},
+    {"table": "trade_cases", "label": "Trade cases"},
+    {"table": "sourcing_requests", "label": "Sourcing requests"},
+    {"table": "suppliers", "label": "Suppliers"},
+    {"table": "documents", "label": "Document records"},
+    {"table": "shipments", "label": "Shipment records"},
+    {"table": "system_integrations", "label": "System integration configuration (protected)"},
+]
+
+
+def _owner_session_payload(authorization: str | None) -> dict[str, Any]:
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing owner session")
+    token = authorization.removeprefix("Bearer ").strip()
+    payload = decode_owner_session(token)
+    if not payload:
+        raise HTTPException(status_code=401, detail="Invalid or expired owner session")
+    return payload
+
+
+def _validate_table(table: str, *, include_system: bool) -> str:
+    table = _safe_table(table.strip())
+    if table in IMMUTABLE_TABLES:
+        raise HTTPException(status_code=403, detail="Deletion audit records are immutable")
+    if table in PROTECTED_TABLES and not include_system:
+        raise HTTPException(status_code=403, detail="This is a protected system dataset. Enable include_system to manage it.")
+    return table
+
+
+def _normalize_filters(filters: dict[str, str]) -> dict[str, str]:
+    clean: dict[str, str] = {}
+    for key, value in filters.items():
+        if not re.fullmatch(r"[A-Za-z0-9_]+", key):
+            raise HTTPException(status_code=400, detail=f"Invalid filter field: {key}")
+        text = str(value).strip()
+        if not text:
+            continue
+        clean[key] = text if "." in text else f"eq.{text}"
+    return clean
+
+
+async def _delete_records(table: str, filters: dict[str, str]) -> int:
+    backend = get_backend()
+    if hasattr(backend, "_connect"):
+        def run() -> int:
+            deleted = 0
+            with backend._connect() as conn:  # type: ignore[attr-defined]
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT record_key, data FROM sahjony_trade_records WHERE logical_table = %s",
+                        (table,),
+                    )
+                    for record_key, raw in cur.fetchall():
+                        row = raw if isinstance(raw, dict) else json.loads(raw)
+                        if filters and not _matches(row, filters):
+                            continue
+                        cur.execute(
+                            "DELETE FROM sahjony_trade_records WHERE logical_table = %s AND record_key = %s",
+                            (table, record_key),
+                        )
+                        deleted += cur.rowcount
+            return deleted
+        import asyncio
+        return await asyncio.to_thread(run)
+
+    headers = {**backend.headers, "Prefer": "return=representation"}  # type: ignore[attr-defined]
+    async with httpx.AsyncClient(timeout=30) as client:
+        response = await client.delete(backend._records_url(table), headers=headers, params=filters)  # type: ignore[attr-defined]
+        response.raise_for_status()
+        if not response.content:
+            return 0
+        payload = response.json()
+        return len(payload) if isinstance(payload, list) else 1
 
 
 @app.get("/owner-auth/health")
@@ -34,6 +144,7 @@ def owner_auth_health():
         "mfa_configured": owner_totp_configured(),
         "session_ttl_seconds": OWNER_SESSION_TTL_SECONDS,
         "full_owner_scope": True,
+        "owner_data_deletion": True,
         "fail_closed": True,
     }
 
@@ -44,20 +155,14 @@ def owner_login(payload: OwnerLoginRequest):
     if normalized_email != owner_email():
         raise HTTPException(status_code=401, detail="Invalid owner credentials")
     if not owner_password_configured():
-        raise HTTPException(
-            status_code=503,
-            detail="Owner password is not configured in the production environment",
-        )
+        raise HTTPException(status_code=503, detail="Owner password is not configured in the production environment")
     if not verify_owner_password(payload.password):
         raise HTTPException(status_code=401, detail="Invalid owner credentials")
 
     mfa_verified = False
     if owner_mfa_required():
         if not owner_totp_configured():
-            raise HTTPException(
-                status_code=503,
-                detail="Owner MFA is required but OWNER_TOTP_SECRET is not configured",
-            )
+            raise HTTPException(status_code=503, detail="Owner MFA is required but OWNER_TOTP_SECRET is not configured")
         if not payload.mfa_code or not verify_owner_totp(payload.mfa_code):
             raise HTTPException(status_code=401, detail="Invalid owner MFA code")
         mfa_verified = True
@@ -79,12 +184,7 @@ def owner_login(payload: OwnerLoginRequest):
 
 @app.get("/owner-auth/session")
 def owner_session(authorization: str | None = Header(None, alias="Authorization")):
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Missing owner session")
-    token = authorization.removeprefix("Bearer ").strip()
-    payload = decode_owner_session(token)
-    if not payload:
-        raise HTTPException(status_code=401, detail="Invalid or expired owner session")
+    payload = _owner_session_payload(authorization)
     return {
         "status": "authenticated",
         "role": "owner",
@@ -93,3 +193,52 @@ def owner_session(authorization: str | None = Header(None, alias="Authorization"
         "mfa_verified": payload.get("mfa_verified") is True,
         "expires_at": payload["exp"],
     }
+
+
+@app.get("/owner-auth/data/datasets")
+def owner_data_datasets(authorization: str | None = Header(None, alias="Authorization")):
+    _owner_session_payload(authorization)
+    return {
+        "datasets": COMMON_DATASETS,
+        "advanced_table_access": True,
+        "protected_tables": sorted(PROTECTED_TABLES),
+        "immutable_tables": sorted(IMMUTABLE_TABLES),
+    }
+
+
+@app.post("/owner-auth/data/preview")
+async def owner_data_preview(payload: OwnerDataPreviewRequest, authorization: str | None = Header(None, alias="Authorization")):
+    _owner_session_payload(authorization)
+    table = _validate_table(payload.table, include_system=payload.include_system)
+    filters = _normalize_filters(payload.filters)
+    rows = await get_backend().select(table, params={**filters, "limit": str(payload.limit)})
+    return {"table": table, "count": len(rows), "rows": rows, "filters": filters}
+
+
+@app.post("/owner-auth/data/delete")
+async def owner_data_delete(payload: OwnerDataDeleteRequest, authorization: str | None = Header(None, alias="Authorization")):
+    session = _owner_session_payload(authorization)
+    table = _validate_table(payload.table, include_system=payload.include_system)
+    filters = _normalize_filters(payload.filters)
+    expected = "DELETE" if filters else "DELETE ALL"
+    if payload.confirm.strip().upper() != expected:
+        raise HTTPException(status_code=400, detail=f"Type {expected} exactly to confirm this deletion")
+
+    before = await get_backend().select(table, params={**filters, "limit": "5000"})
+    if not before:
+        return {"status": "no_match", "table": table, "deleted": 0}
+
+    deleted = await _delete_records(table, filters)
+    audit = {
+        "id": f"del_{secrets.token_urlsafe(16)}",
+        "table": table,
+        "deleted_count": deleted,
+        "filter_fields": sorted(filters.keys()),
+        "delete_all": not bool(filters),
+        "system_dataset": table in PROTECTED_TABLES,
+        "reason": payload.reason,
+        "owner_email": session.get("email"),
+        "performed_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await get_backend().insert("owner_data_deletion_audit", audit)
+    return {"status": "deleted", "table": table, "deleted": deleted, "audit_id": audit["id"]}
