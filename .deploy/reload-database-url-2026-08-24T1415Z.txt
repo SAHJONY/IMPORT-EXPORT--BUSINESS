@@ -1,0 +1,1 @@
+Production redeploy trigger after canonical DATABASE_URL credential rotation in Vercel. No secrets stored in repository.
