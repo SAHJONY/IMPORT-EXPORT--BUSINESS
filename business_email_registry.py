@@ -4,12 +4,21 @@ from typing import Dict, List
 from fastapi import FastAPI
 
 
-app = FastAPI(title="SAHJONY Business Email Registry", version="1.1.0", docs_url=None, redoc_url=None)
+app = FastAPI(title="SAHJONY Business Email Registry", version="1.2.0", docs_url=None, redoc_url=None)
 
 CANONICAL_DOMAIN = os.getenv("BUSINESS_CANONICAL_DOMAIN", "sahjony.com").strip().lower()
 CANONICAL_WEBSITE = os.getenv("BUSINESS_CANONICAL_WEBSITE", "https://www.sahjony.com").strip()
 TRADE_OS_URL = os.getenv("TRADE_OS_URL", "https://trade.sahjony.com").strip()
 OWNER_EMAIL = os.getenv("OWNER_EMAIL", "sahjonycapitalllc@outlook.com").strip().lower()
+OPERATIONAL_MAILBOX = os.getenv("OPERATIONAL_MAILBOX", "sahjonyllc@gmail.com").strip().lower()
+MAILBOX_PROVIDER = os.getenv("MAILBOX_PROVIDER", "gmail").strip().lower()
+MAILBOX_AGENT_MANAGED = os.getenv("MAILBOX_AGENT_MANAGED", "true").strip().lower() == "true"
+DIRECT_MAIL_DELIVERY_CONFIGURED = bool(
+    os.getenv("SMTP_HOST", "").strip()
+    or os.getenv("GMAIL_CLIENT_ID", "").strip()
+    or os.getenv("MICROSOFT_GRAPH_CLIENT_ID", "").strip()
+    or os.getenv("RESEND_API_KEY", "").strip()
+)
 
 
 def _canonical(local_part: str) -> str:
@@ -43,6 +52,18 @@ DEPARTMENTS: List[Dict[str, str]] = [
 ]
 
 
+def _mailbox_state() -> dict:
+    return {
+        "operational_mailbox": OPERATIONAL_MAILBOX,
+        "provider": MAILBOX_PROVIDER,
+        "agent_managed": MAILBOX_AGENT_MANAGED,
+        "direct_platform_delivery_configured": DIRECT_MAIL_DELIVERY_CONFIGURED,
+        "direct_platform_delivery": "configured" if DIRECT_MAIL_DELIVERY_CONFIGURED else "fail-closed-until-provider-oauth-or-smtp-is-configured",
+        "canonical_aliases_hosted_verified": False,
+        "policy": "Use the operational mailbox for real communications. Departmental @sahjony.com identities remain routing identities until matching aliases/shared mailboxes are verified with a domain mail provider.",
+    }
+
+
 @app.get("/business-email/health")
 def email_registry_health():
     return {
@@ -52,9 +73,28 @@ def email_registry_health():
         "canonical_website": CANONICAL_WEBSITE,
         "trade_os_url": TRADE_OS_URL,
         "owner_identity_email": OWNER_EMAIL,
+        "operational_mailbox": _mailbox_state(),
         "departments": len(DEPARTMENTS),
-        "routing_mode": "canonical sahjony.com departmental identities with environment overrides",
-        "mailboxes_require_provider_configuration": True,
+        "routing_mode": "operational mailbox + canonical sahjony.com departmental identities",
+        "mailboxes_require_provider_configuration": not DIRECT_MAIL_DELIVERY_CONFIGURED,
+    }
+
+
+@app.get("/business-email/configuration")
+def email_configuration():
+    return {
+        "status": "configured",
+        "canonical_domain": CANONICAL_DOMAIN,
+        "canonical_website": CANONICAL_WEBSITE,
+        "owner_identity_email": OWNER_EMAIL,
+        "mailbox": _mailbox_state(),
+        "department_count": len(DEPARTMENTS),
+        "departments": DEPARTMENTS,
+        "safety": {
+            "secrets_exposed": False,
+            "sensitive_kyc_over_email": False,
+            "binding_commitments_require_owner": True,
+        },
     }
 
 
@@ -65,6 +105,7 @@ def email_departments():
         "canonical_website": CANONICAL_WEBSITE,
         "trade_os_url": TRADE_OS_URL,
         "owner_identity_email": OWNER_EMAIL,
+        "operational_mailbox": _mailbox_state(),
         "departments": DEPARTMENTS,
-        "note": "Department identities default to @sahjony.com. Create matching aliases/shared mailboxes with the domain mail provider, or override individual EMAIL_* variables. The Owner login identity remains separate unless intentionally changed.",
+        "note": "Real external communications use the operational mailbox unless and until a verified domain-mail provider hosts the departmental aliases. The Owner login identity remains separate unless intentionally changed.",
     }
