@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 from auth import verify_owner_token
 from insforge_backend import get_backend, persistent_backend_status
 
-app = FastAPI(title='SAHJONY Energy Market Intelligence', version='1.0.0', docs_url=None, redoc_url=None)
+app = FastAPI(title='SAHJONY Energy Market Intelligence', version='1.1.0', docs_url=None, redoc_url=None)
 
 BenchmarkName = Literal['BRENT','WTI','DUBAI','OMAN','MURBAN','WTI_MIDLAND','WCS','MAYA','OTHER']
 AssetType = Literal['REFINERY','TERMINAL','STORAGE','PORT','PIPELINE','FPSO','OTHER']
@@ -162,16 +162,20 @@ async def health():
     return {
         'status': 'ok' if p['configured'] else 'configuration_required',
         'service': 'sahjony-energy-market-intelligence',
+        'version': '1.1.0',
         'benchmark_ledger': True,
         'refinery_terminal_intelligence': True,
         'vessel_voyage_intelligence': True,
         'sanctions_snapshot_ledger': True,
+        'commercial_opportunity_ledger': True,
+        'commercial_opportunity_desks': ['CUBA_FUELS','GLOBAL_CRUDE'],
         'autonomous_counterparty_matching': True,
         'source_provenance_required': True,
         'freshness_controls': True,
         'providers': provider_flags(),
         'automatic_trade_execution': False,
         'automatic_compliance_clearance': False,
+        'research_leads_have_binding_authority': False,
         'fail_closed': True,
         'persistence_provider': p['provider'],
     }
@@ -216,6 +220,26 @@ async def list_market_scans(authorization: str|None=Header(None,alias='Authoriza
     owner(authorization); return {'jobs':await get_backend().select('energy_intelligence_jobs',params={'order':'updated_at.desc','limit':'500'}) or []}
 
 
+@app.get('/energy-intelligence/commercial-opportunities')
+async def commercial_opportunities(
+    desk: Literal['CUBA_FUELS','GLOBAL_CRUDE'] | None = None,
+    authorization: str|None=Header(None,alias='Authorization'),
+):
+    owner(authorization)
+    params={'order':'updated_at.desc','limit':'1000'}
+    if desk:
+        params['desk']=f'eq.{desk}'
+    rows=await get_backend().select('energy_research_leads',params=params) or []
+    return {
+        'opportunities': rows,
+        'count': len(rows),
+        'desk': desk or 'ALL',
+        'authority': 'RESEARCH_AND_QUALIFICATION_ONLY',
+        'automatic_release': False,
+        'binding_authority': False,
+    }
+
+
 @app.post('/energy-intelligence/matches/run')
 async def run_matches(p: MatchRunIn, authorization: str|None=Header(None,alias='Authorization')):
     owner(authorization); backend=get_backend()
@@ -243,12 +267,22 @@ async def dashboard(authorization: str|None=Header(None,alias='Authorization')):
     vessels=await b.select('energy_vessel_observations',params={'order':'observed_at.desc','limit':'500'}) or []
     sanctions=await b.select('energy_sanctions_snapshots',params={'order':'checked_at.desc','limit':'500'}) or []
     matches=await b.select('energy_deal_matches',params={'order':'score.desc','limit':'500'}) or []
+    opportunities=await b.select('energy_research_leads',params={'order':'updated_at.desc','limit':'1000'}) or []
     latest={}
     for x in benchmarks:
         latest.setdefault(x.get('benchmark'),{**x,'freshness':freshness(x.get('assessment_time'),24)})
+    cuba_fuels=sum(1 for x in opportunities if x.get('desk')=='CUBA_FUELS')
+    global_crude=sum(1 for x in opportunities if x.get('desk')=='GLOBAL_CRUDE')
+    qualification_pending=sum(1 for x in opportunities if x.get('verification_status') in {'QUALIFICATION_PENDING','DEADLINE_REVIEW'} or x.get('outreach_status')=='QUALIFICATION_SENT')
     return {
         'status':'ok','benchmarks':latest,'assets':assets,'vessels':[{**v,'freshness':freshness(v.get('observed_at'),6)} for v in vessels],
         'sanctions':[{**s,'freshness':freshness(s.get('checked_at'),24)} for s in sanctions],'matches':matches,
-        'metrics':{'benchmark_count':len(latest),'asset_count':len(assets),'vessel_observations':len(vessels),'sanctions_snapshots':len(sanctions),'match_candidates':len(matches)},
+        'commercial_opportunities': opportunities,
+        'metrics':{
+            'benchmark_count':len(latest),'asset_count':len(assets),'vessel_observations':len(vessels),
+            'sanctions_snapshots':len(sanctions),'match_candidates':len(matches),'commercial_opportunities':len(opportunities),
+            'cuba_fuel_opportunities':cuba_fuels,'global_crude_opportunities':global_crude,'qualification_pending':qualification_pending,
+        },
         'providers':provider_flags(),
+        'commercial_opportunity_authority':'RESEARCH_AND_QUALIFICATION_ONLY',
     }
