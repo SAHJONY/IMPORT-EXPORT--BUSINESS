@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from collections import defaultdict
+from collections import Counter, defaultdict
 from fastapi import FastAPI, Header, HTTPException
 
 from auth import verify_owner_token
 from insforge_backend import get_backend, persistent_backend_status
 
-app = FastAPI(title='SAHJONY Country CRM', version='1.0.0', docs_url=None, redoc_url=None)
+app = FastAPI(title='SAHJONY Country CRM', version='1.1.0', docs_url=None, redoc_url=None)
 
 COUNTRIES = {
     'CU': 'Cuba', 'US': 'United States', 'MX': 'Mexico', 'DO': 'Dominican Republic',
@@ -14,6 +14,7 @@ COUNTRIES = {
     'CR': 'Costa Rica', 'GT': 'Guatemala', 'CA': 'Canada', 'ES': 'Spain',
     'GB': 'United Kingdom', 'DE': 'Germany', 'NL': 'Netherlands', 'TR': 'Türkiye',
     'AE': 'United Arab Emirates', 'IN': 'India', 'VN': 'Vietnam', 'CN': 'China',
+    'JP': 'Japan', 'KR': 'South Korea', 'TW': 'Taiwan',
 }
 
 ALIASES = {
@@ -26,10 +27,11 @@ ALIASES = {
     'netherlands': 'NL', 'holland': 'NL', 'países bajos': 'NL', 'turkey': 'TR', 'türkiye': 'TR',
     'united arab emirates': 'AE', 'uae': 'AE', 'emiratos árabes unidos': 'AE',
     'india': 'IN', 'vietnam': 'VN', 'viet nam': 'VN', 'china': 'CN',
+    'japan': 'JP', 'japón': 'JP', 'south korea': 'KR', 'korea': 'KR', 'corea del sur': 'KR',
+    'taiwan': 'TW', 'taiwán': 'TW',
 }
 
-# Cuba is permanently visible; the other entries are the first global search departments.
-DEFAULT_DEPARTMENTS = ['CU','US','MX','DO','PA','CO','BR','CL','PE','CR','GT','CA','ES','GB','DE','NL','TR','AE','IN','VN','CN']
+DEFAULT_DEPARTMENTS = ['CU','US','MX','DO','PA','CO','BR','CL','PE','CR','GT','CA','ES','GB','DE','NL','TR','AE','IN','VN','CN','JP','KR','TW']
 
 
 def owner(authorization: str | None) -> None:
@@ -49,6 +51,62 @@ def country_code(value: str | None) -> str:
     return ALIASES.get(raw.lower(), 'UN')
 
 
+def classify_lead(lead: dict) -> dict:
+    text = ' '.join(str(lead.get(k) or '') for k in ('business_name','product_need_or_offer','notes','source_description')).lower()
+    country = country_code(lead.get('country'))
+    role_raw = str(lead.get('deal_side') or lead.get('lead_type') or 'OTHER').upper()
+
+    if any(x in text for x in ('crude oil','crude buyer','refinery crude','murban','upper zakum','mars crude','wti crude')):
+        sector = 'GLOBAL_CRUDE'
+        product_family = 'CRUDE_OIL'
+    elif any(x in text for x in ('gasoline','diesel','ulsd','fuel distributor','fuel supply','combustible')):
+        sector = 'CUBA_FUELS' if country in {'CU','US','CN'} and 'cuba' in text else 'REFINED_PRODUCTS'
+        if 'gasoline' in text and 'diesel' in text:
+            product_family = 'GASOLINE_DIESEL'
+        elif 'gasoline' in text:
+            product_family = 'GASOLINE'
+        elif 'diesel' in text or 'ulsd' in text:
+            product_family = 'DIESEL_ULSD'
+        else:
+            product_family = 'REFINED_FUELS'
+    elif any(x in text for x in ('jet fuel','a1 jet','jet a-1')):
+        sector = 'REFINED_PRODUCTS'
+        product_family = 'JET_A1'
+    elif any(x in text for x in ('solar','photovoltaic','inverter','battery','batteries','ecoflow','charging','electrolinera')):
+        sector = 'CUBA_RENEWABLES' if country == 'CU' else 'RENEWABLE_ENERGY'
+        product_family = 'SOLAR_STORAGE_EV'
+    elif any(x in text for x in ('agro','agriculture','irrigation','riego')):
+        sector = 'CUBA_AGRO_ENERGY' if country == 'CU' else 'AGRO_ENERGY'
+        product_family = 'AGRO_IRRIGATION_POWER'
+    elif any(x in text for x in ('backup power','generator','electrical services','refrigeration','telecom')):
+        sector = 'CUBA_ENERGY_INFRASTRUCTURE' if country == 'CU' else 'ENERGY_INFRASTRUCTURE'
+        product_family = 'BACKUP_POWER_INFRASTRUCTURE'
+    elif any(x in text for x in ('investment partner','investor','investment opportunity')):
+        sector = 'ENERGY_INVESTMENT'
+        product_family = 'STRATEGIC_CAPITAL'
+    else:
+        sector = 'GENERAL_TRADE'
+        product_family = 'OTHER'
+
+    if role_raw in {'BUYER','IMPORT_NEED'}:
+        commercial_role = 'BUYER'
+    elif role_raw in {'SELLER','SUPPLIER','EXPORT_OFFER'}:
+        commercial_role = 'SELLER_SUPPLIER'
+    elif role_raw in {'BOTH','DISTRIBUTOR'}:
+        commercial_role = 'DISTRIBUTOR_CHANNEL'
+    elif role_raw in {'PARTNER','REFERRAL'}:
+        commercial_role = 'STRATEGIC_PARTNER'
+    else:
+        commercial_role = role_raw or 'OTHER'
+
+    return {
+        'sector': sector,
+        'product_family': product_family,
+        'commercial_role': commercial_role,
+        'country_department': country,
+    }
+
+
 def department(code: str) -> dict:
     return {
         'country_code': code,
@@ -63,6 +121,9 @@ def department(code: str) -> dict:
         'promoted_intake_count': 0,
         'follow_up_due': 0,
         'estimated_pipeline_value': 0.0,
+        'sector_counts': {},
+        'product_family_counts': {},
+        'commercial_role_counts': {},
     }
 
 
@@ -75,6 +136,9 @@ async def snapshot() -> tuple[list[dict], dict[str, list[dict]]]:
     by_customer = {row.get('customer_id'): row for row in accounts}
     buckets: dict[str, dict] = {code: department(code) for code in DEFAULT_DEPARTMENTS}
     detail: dict[str, list[dict]] = defaultdict(list)
+    sector_counters: dict[str, Counter] = defaultdict(Counter)
+    product_counters: dict[str, Counter] = defaultdict(Counter)
+    role_counters: dict[str, Counter] = defaultdict(Counter)
 
     for account in accounts:
         code = country_code(account.get('country_code'))
@@ -108,11 +172,20 @@ async def snapshot() -> tuple[list[dict], dict[str, list[dict]]]:
         buckets.setdefault(code, department(code))
         b = buckets[code]
         b['lead_count'] += 1
+        classification = classify_lead(lead)
+        sector_counters[code][classification['sector']] += 1
+        product_counters[code][classification['product_family']] += 1
+        role_counters[code][classification['commercial_role']] += 1
         try:
             b['estimated_pipeline_value'] += float(lead.get('estimated_deal_value') or 0)
         except (TypeError, ValueError):
             pass
-        detail[code].append({'kind': 'lead', **lead})
+        detail[code].append({'kind': 'lead', **classification, **lead})
+
+    for code, bucket in buckets.items():
+        bucket['sector_counts'] = dict(sector_counters[code].most_common())
+        bucket['product_family_counts'] = dict(product_counters[code].most_common())
+        bucket['commercial_role_counts'] = dict(role_counters[code].most_common())
 
     rows = list(buckets.values())
     rows.sort(key=lambda r: (0 if r['country_code'] == 'CU' else 1, -(r['lead_count'] + r['customer_count'] + r['trade_intake_count']), r['country_name']))
@@ -125,7 +198,7 @@ async def health():
     return {
         'status': 'ok' if persistence['configured'] else 'configuration_required',
         'service': 'country-segmented-crm',
-        'segmentation': 'COUNTRY',
+        'segmentation': ['COUNTRY','SECTOR','PRODUCT_FAMILY','COMMERCIAL_ROLE'],
         'cuba_department_permanent': True,
         'dynamic_country_departments': True,
         'global_search_departments': DEFAULT_DEPARTMENTS,
@@ -136,12 +209,21 @@ async def health():
 @app.get('/country-crm/departments')
 async def departments(authorization: str | None = Header(None, alias='Authorization')):
     owner(authorization)
-    rows, _ = await snapshot()
+    rows, detail = await snapshot()
+    all_items = [item for items in detail.values() for item in items if item.get('kind') == 'lead']
+    sector_totals = Counter(item.get('sector','GENERAL_TRADE') for item in all_items)
+    product_totals = Counter(item.get('product_family','OTHER') for item in all_items)
+    role_totals = Counter(item.get('commercial_role','OTHER') for item in all_items)
     return {
         'status': 'ok',
         'department_count': len(rows),
         'cuba_department': 'CU',
         'departments': rows,
+        'portfolio_segmentation': {
+            'sectors': dict(sector_totals.most_common()),
+            'product_families': dict(product_totals.most_common()),
+            'commercial_roles': dict(role_totals.most_common()),
+        },
         'totals': {
             'leads': sum(r['lead_count'] for r in rows),
             'customers': sum(r['customer_count'] for r in rows),
