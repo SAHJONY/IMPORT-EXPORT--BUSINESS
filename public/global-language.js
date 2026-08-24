@@ -1,83 +1,244 @@
 (()=>{
+  'use strict';
+
   const STORAGE='sahjony.locale';
-  const normalizeLocale=value=>{
-    const raw=String(value||'').trim().replace('_','-');
+  const QUERY='lang';
+  const UI_TRANSLATE='/ui-language/translate-batch';
+  const UI_GEO='/ui-language/geo';
+  const RTL=new Set(['ar','fa','he','ur','ps','sd','ug','yi']);
+  const LOCALES=['en-US','es','fr','pt-BR','de','it','nl','pl','ru','uk','tr','ar','he','fa','ur','hi','bn','zh-Hans','zh-Hant','ja','ko','vi','th','id','ms','fil','sw','am','ha','yo','ig','zu','af','el','cs','ro','hu','sv','no','da','fi'];
+  const SKIP_TAGS=new Set(['SCRIPT','STYLE','NOSCRIPT','CODE','PRE','TEXTAREA']);
+  const originalText=new WeakMap();
+  const originalAttrs=new WeakMap();
+  const cache=new Map();
+  let busy=false;
+  let active='';
+  let observerTimer=null;
+
+  function normalize(value){
+    const raw=String(value||'').trim().replaceAll('_','-');
     if(!raw)return '';
-    const lower=raw.toLowerCase();
-    if(lower==='en'||lower.startsWith('en-'))return 'en-US';
-    if(lower==='es'||lower.startsWith('es-'))return 'es';
-    return raw;
-  };
-  const baseLocale=value=>normalizeLocale(value).split('-')[0].toLowerCase();
-  const sameLanguage=(a,b)=>baseLocale(a)===baseLocale(b);
-  const params=new URLSearchParams(location.search);
-  const requestedLocale=normalizeLocale(params.get('lang')||params.get('locale')||'');
-  const sourceLocale=normalizeLocale(document.documentElement.dataset.sourceLocale||document.documentElement.lang||'en-US')||'en-US';
-  const storedLocale=normalizeLocale(localStorage.getItem(STORAGE)||'');
-  let active=requestedLocale||storedLocale||sourceLocale;
-  let busy=false,cubaAuto=false;
-  const skipTags=new Set(['SCRIPT','STYLE','NOSCRIPT','CODE','PRE']);
-  const cache=new Map(),originalAttrs=new WeakMap(),originalText=new WeakMap();
+    const parts=raw.split('-').filter(Boolean);
+    if(!parts.length)return '';
+    const base=parts[0].toLowerCase();
+    if(!/^[a-z]{2,3}$/.test(base))return '';
+    return [base,...parts.slice(1).map(part=>{
+      if(/^[a-zA-Z]{2}$/.test(part))return part.toUpperCase();
+      if(/^[a-zA-Z]{4}$/.test(part))return part[0].toUpperCase()+part.slice(1).toLowerCase();
+      return part;
+    })].join('-');
+  }
+  const base=value=>normalize(value).split('-')[0].toLowerCase();
+  const sameLanguage=(a,b)=>base(a)===base(b);
+  const direction=locale=>RTL.has(base(locale))?'rtl':'ltr';
+  const sourceLocale=normalize(document.documentElement.dataset.sourceLocale||document.documentElement.lang||'en-US')||'en-US';
 
-  const css=`.sahjony-language{position:fixed;right:18px;bottom:18px;z-index:2147483000;display:flex;gap:8px;align-items:center;padding:8px 10px;border:1px solid rgba(255,255,255,.16);border-radius:999px;background:rgba(5,14,24,.94);box-shadow:0 12px 40px rgba(0,0,0,.28);backdrop-filter:blur(14px);font:600 12px Inter,system-ui,sans-serif;color:#eef6ff}.sahjony-language select{max-width:180px;background:#0a1b2a;color:#eef6ff;border:1px solid rgba(255,255,255,.14);border-radius:999px;padding:7px 10px;font:inherit}.sahjony-language button{border:0;border-radius:999px;padding:7px 10px;background:#e9f3fb;color:#07111d;font:800 11px Inter,system-ui,sans-serif;cursor:pointer}.sahjony-language small{opacity:.76}.sahjony-language[data-state=error] small{color:#ffb8bd;opacity:1}.sahjony-usdesk-card{margin:30px 0;border:1px solid rgba(255,255,255,.14);border-radius:22px;background:linear-gradient(145deg,#10283e,#081522);padding:22px;box-shadow:0 24px 70px rgba(0,0,0,.24);color:#f4f8fc}.sahjony-usdesk-card .flag{height:5px;border-radius:999px;background:linear-gradient(90deg,#1d70d6 0 33%,#fff 33% 66%,#d23d47 66%);margin-bottom:18px}.sahjony-usdesk-card .ey{font-size:10px;font-weight:900;letter-spacing:.17em;color:#e1bd73}.sahjony-usdesk-card h2{font-size:clamp(26px,5vw,44px);line-height:1;margin:10px 0 12px}.sahjony-usdesk-card p{color:#b8cad8;line-height:1.6;max-width:780px}.sahjony-usdesk-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}.sahjony-usdesk-actions a,.sahjony-usdesk-actions button{border:0;border-radius:11px;padding:12px 15px;font:850 12px Inter,system-ui,sans-serif;cursor:pointer;text-decoration:none}.sahjony-usdesk-actions a{background:linear-gradient(135deg,#64d9ff,#7ce8bd);color:#03121c}.sahjony-usdesk-actions button{background:#142b40;color:#eef6ff;border:1px solid rgba(255,255,255,.13)}.sahjony-usdesk-status{font-size:11px;color:#8fa7ba;margin-top:9px}@media(max-width:600px){.sahjony-language{left:12px;right:12px;bottom:12px;justify-content:center}.sahjony-language select{max-width:54vw}.sahjony-usdesk-card{padding:18px}}`;
-  const style=document.createElement('style');style.textContent=css;document.head.appendChild(style);
+  function requestedLocale(){
+    const p=new URLSearchParams(location.search);
+    return normalize(p.get(QUERY)||p.get('locale')||'');
+  }
+  function storedLocale(){
+    try{return normalize(localStorage.getItem(STORAGE)||'')}catch{return ''}
+  }
+  function setStored(locale){
+    try{localStorage.setItem(STORAGE,normalize(locale)||sourceLocale)}catch{}
+  }
+  function rewriteUrl(locale){
+    try{
+      const u=new URL(location.href);
+      u.searchParams.delete('locale');
+      u.searchParams.set(QUERY,normalize(locale)||sourceLocale);
+      history.replaceState(history.state,'',u.pathname+u.search+u.hash);
+    }catch{}
+  }
+  function propagateLinks(locale){
+    const value=normalize(locale)||sourceLocale;
+    document.querySelectorAll('a[href]').forEach(a=>{
+      if(a.closest('[data-no-translate]'))return;
+      const raw=a.getAttribute('href');
+      if(!raw||raw.startsWith('#')||raw.startsWith('mailto:')||raw.startsWith('tel:')||raw.startsWith('javascript:'))return;
+      try{
+        const u=new URL(raw,location.origin);
+        if(u.origin!==location.origin)return;
+        u.searchParams.delete('locale');
+        u.searchParams.set(QUERY,value);
+        a.setAttribute('href',u.pathname+u.search+u.hash);
+      }catch{}
+    });
+  }
 
-  const meaningful=t=>{const s=(t||'').trim();return s.length>=2&&!/^[-+–—•·|/\\\s\d.,:$%()]+$/.test(s)};
-  function textItems(root=document.body){const out=[];const w=document.createTreeWalker(root,NodeFilter.SHOW_TEXT,{acceptNode(n){const p=n.parentElement;if(!p||skipTags.has(p.tagName)||p.closest('[data-no-translate],.sahjony-language'))return NodeFilter.FILTER_REJECT;return meaningful(n.nodeValue)?NodeFilter.FILTER_ACCEPT:NodeFilter.FILTER_REJECT;}});let n;while((n=w.nextNode()))out.push({kind:'text',node:n,text:(n.nodeValue||'').trim()});return out;}
-  function attributeItems(root=document.body){const out=[];const attrs=['placeholder','title','aria-label'];root.querySelectorAll('*').forEach(el=>{if(el.closest('[data-no-translate],.sahjony-language')||skipTags.has(el.tagName))return;for(const attr of attrs){const v=el.getAttribute(attr);if(meaningful(v))out.push({kind:'attr',el,attr,text:v.trim()});}if(el.tagName==='INPUT'&&['button','submit','reset'].includes((el.getAttribute('type')||'').toLowerCase())){const v=el.getAttribute('value');if(meaningful(v))out.push({kind:'attr',el,attr:'value',text:v.trim()});}if(el.tagName==='OPTION'){const v=(el.textContent||'').trim();if(meaningful(v))out.push({kind:'option',el,text:v});}});return out;}
-  function remember(items){for(const item of items){if(item.kind==='text'&&!originalText.has(item.node))originalText.set(item.node,item.node.nodeValue||'');else if(item.kind==='attr'){let map=originalAttrs.get(item.el);if(!map){map={};originalAttrs.set(item.el,map)}if(!(item.attr in map))map[item.attr]=item.el.getAttribute(item.attr)||'';}else if(item.kind==='option'&&!originalText.has(item.el))originalText.set(item.el,item.el.textContent||'');}}
-  function restore(){const w=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT);let n;while((n=w.nextNode()))if(originalText.has(n))n.nodeValue=originalText.get(n);document.querySelectorAll('*').forEach(el=>{const map=originalAttrs.get(el);if(map)Object.entries(map).forEach(([k,v])=>el.setAttribute(k,v));if(el.tagName==='OPTION'&&originalText.has(el))el.textContent=originalText.get(el)});document.documentElement.lang=sourceLocale;document.documentElement.dir='ltr';}
-  function setState(state,msg){const w=document.querySelector('.sahjony-language');if(!w)return;w.dataset.state=state;const s=w.querySelector('small');if(s)s.textContent=msg||'';}
-  async function geoDefault(){try{const r=await fetch('/cuba-language/geo',{cache:'no-store'});if(!r.ok)return null;const j=await r.json();cubaAuto=j.country==='CU'&&j.auto_translate===true;return j}catch{return null}}
-  async function locales(){try{const r=await fetch('/language/locales',{cache:'no-store'});if(!r.ok)throw 0;const j=await r.json();return j.locales||[]}catch{return ['en-US','es','fr','pt-BR','de','it','nl','pl','ru','uk','tr','ar','he','fa','ur','hi','bn','zh-Hans','zh-Hant','ja','ko','vi','th','id','ms','fil','sw','am','ha','yo','ig','zu','af','el','cs','ro','hu','sv','no','da','fi']}}
+  function meaningful(value){
+    const text=String(value||'').trim();
+    return text.length>=2&&!/^[-+–—•·|/\\\s\d.,:$%()]+$/.test(text);
+  }
+  function blocked(el){
+    return !el||SKIP_TAGS.has(el.tagName)||Boolean(el.closest('[data-no-translate],.sahjony-language'));
+  }
+  function collect(){
+    const items=[];
+    const walker=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT,{acceptNode(node){
+      const el=node.parentElement;
+      return blocked(el)||!meaningful(node.nodeValue)?NodeFilter.FILTER_REJECT:NodeFilter.FILTER_ACCEPT;
+    }});
+    let node;
+    while((node=walker.nextNode())){
+      if(!originalText.has(node))originalText.set(node,node.nodeValue||'');
+      items.push({kind:'text',node,text:(originalText.get(node)||'').trim()});
+    }
+    document.querySelectorAll('*').forEach(el=>{
+      if(blocked(el))return;
+      for(const attr of ['placeholder','title','aria-label']){
+        const current=el.getAttribute(attr);
+        if(!meaningful(current))continue;
+        let map=originalAttrs.get(el);
+        if(!map){map={};originalAttrs.set(el,map)}
+        if(!(attr in map))map[attr]=current;
+        items.push({kind:'attr',el,attr,text:String(map[attr]).trim()});
+      }
+      if(el.tagName==='INPUT'&&['button','submit','reset'].includes((el.getAttribute('type')||'').toLowerCase())){
+        const current=el.getAttribute('value');
+        if(meaningful(current)){
+          let map=originalAttrs.get(el);
+          if(!map){map={};originalAttrs.set(el,map)}
+          if(!('value' in map))map.value=current;
+          items.push({kind:'attr',el,attr:'value',text:String(map.value).trim()});
+        }
+      }
+      if(el.tagName==='OPTION'){
+        const current=el.textContent||'';
+        if(meaningful(current)){
+          if(!originalText.has(el))originalText.set(el,current);
+          items.push({kind:'option',el,text:String(originalText.get(el)||'').trim()});
+        }
+      }
+    });
+    return items;
+  }
+  function restore(){
+    const walker=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT);
+    let node;
+    while((node=walker.nextNode()))if(originalText.has(node))node.nodeValue=originalText.get(node);
+    document.querySelectorAll('*').forEach(el=>{
+      const map=originalAttrs.get(el);
+      if(map)for(const [key,value] of Object.entries(map))el.setAttribute(key,value);
+      if(el.tagName==='OPTION'&&originalText.has(el))el.textContent=originalText.get(el);
+    });
+  }
 
-  function urlLocale(locale){return baseLocale(locale)==='en'?'en':baseLocale(locale)==='es'?'es':normalizeLocale(locale);}
-  function updateCurrentUrl(locale){try{const u=new URL(location.href);u.searchParams.delete('locale');u.searchParams.set('lang',urlLocale(locale));history.replaceState(history.state,'',u.pathname+u.search+u.hash)}catch{}}
-  function persistLocale(locale){const normalized=normalizeLocale(locale)||sourceLocale;active=normalized;localStorage.setItem(STORAGE,normalized);updateCurrentUrl(normalized);propagateLocale(normalized);}
-  function propagateLocale(locale=active){const marker=urlLocale(locale);document.querySelectorAll('a[href]').forEach(a=>{const raw=a.getAttribute('href');if(!raw||raw.startsWith('#')||raw.startsWith('mailto:')||raw.startsWith('tel:')||raw.startsWith('javascript:'))return;try{const u=new URL(raw,location.origin);if(u.origin!==location.origin)return;u.searchParams.delete('locale');u.searchParams.set('lang',marker);a.setAttribute('href',u.pathname+u.search+u.hash)}catch{}});}
+  function state(kind,label){
+    const root=document.querySelector('.sahjony-language');
+    if(!root)return;
+    root.dataset.state=kind;
+    const small=root.querySelector('small');
+    if(small)small.textContent=label||'';
+  }
+  function applyDirection(locale){
+    document.documentElement.lang=normalize(locale)||sourceLocale;
+    document.documentElement.dir=direction(locale);
+  }
 
-  async function translate(locale,{persist=true}={}){
+  async function translateBatch(texts,target){
+    const key=sourceLocale+'>'+target+'|'+texts.join('\u241e');
+    if(cache.has(key))return cache.get(key);
+    const response=await fetch(UI_TRANSLATE,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({texts,target_locale:target,source_locale:sourceLocale})});
+    const payload=await response.json().catch(()=>({}));
+    if(!response.ok)throw new Error(payload.detail||'UI translation unavailable');
+    const result=payload.translations||[];
+    if(result.length!==texts.length)throw new Error('UI translation response mismatch');
+    cache.set(key,payload);
+    return payload;
+  }
+
+  async function applyLanguage(locale,{persist=true}={}){
     if(busy)return;
-    const target=normalizeLocale(locale)||sourceLocale;
+    const target=normalize(locale)||sourceLocale;
     active=target;
-    if(persist)persistLocale(target);
+    if(persist){setStored(target);rewriteUrl(target)}
+    propagateLinks(target);
     if(sameLanguage(target,sourceLocale)){
-      restore();document.documentElement.lang=target;setState('ok',baseLocale(target)==='en'?'English':'Original');propagateLocale(target);return;
+      restore();applyDirection(target);state('ok',base(target)==='es'?'Español':base(target)==='en'?'English':target);return;
     }
     busy=true;
-    const spanish=baseLocale(target)==='es';
-    setState('busy',spanish?'Traduciendo al español…':'Translating…');
+    state('busy',base(target)==='es'?'Traduciendo…':'Translating…');
     try{
       restore();
-      const items=[...textItems(),...attributeItems()];remember(items);
-      for(let i=0;i<items.length;i+=50){
-        const chunk=items.slice(i,i+50),texts=chunk.map(x=>x.text),key=sourceLocale+'>'+target+'|'+texts.join('\u241e');let result=cache.get(key);
-        if(!result){
-          const endpoint=spanish?'/cuba-language/translate-batch':'/language/ui-translate-batch';
-          const body=spanish?{texts,target_locale:'es'}:{texts,target_locale:target,source_type:'ui'};
-          const r=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-          const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.detail||'Translation unavailable');result=j;cache.set(key,result);
-        }
-        (result.translations||[]).forEach((x,idx)=>{const item=chunk[idx];if(!item)return;const translated=x.text||item.text;if(item.kind==='text'){const raw=item.node.nodeValue||'';item.node.nodeValue=raw.replace(item.text,translated)}else if(item.kind==='attr')item.el.setAttribute(item.attr,translated);else if(item.kind==='option')item.el.textContent=translated});if(result.direction)document.documentElement.dir=result.direction;
+      const items=collect();
+      for(let offset=0;offset<items.length;offset+=50){
+        const chunk=items.slice(offset,offset+50);
+        const payload=await translateBatch(chunk.map(item=>item.text),target);
+        payload.translations.forEach((entry,index)=>{
+          const item=chunk[index];
+          if(!item)return;
+          const value=entry.text||item.text;
+          if(item.kind==='text')item.node.nodeValue=value;
+          else if(item.kind==='attr')item.el.setAttribute(item.attr,value);
+          else if(item.kind==='option')item.el.textContent=value;
+        });
       }
-      document.documentElement.lang=target;setState('ok',spanish?(cubaAuto?'Español · Cuba':'Español'):target);propagateLocale(target);
-    }catch(e){restore();setState('error',spanish?'No se pudo traducir':'Translation unavailable');console.warn('SAHJONY language layer:',e)}finally{busy=false}
+      applyDirection(target);
+      state('ok',target);
+      propagateLinks(target);
+    }catch(error){
+      restore();applyDirection(sourceLocale);state('error','Original');
+      console.warn('SAHJONY language layer:',error);
+    }finally{busy=false}
   }
 
-  function mountUsDeskShareCard(){if(!location.pathname.toLowerCase().startsWith('/cuba-private-sector')||document.querySelector('.sahjony-usdesk-card'))return;const card=document.createElement('section');card.className='sahjony-usdesk-card';card.setAttribute('data-no-translate','true');card.innerHTML='<div class="flag"></div><div class="ey">TARJETA DIGITAL · SAHJONY U.S. DESK</div><h2>Comparta nuestra Mesa de Estados Unidos.</h2><p>Envíe esta tarjeta por WhatsApp, mensaje o correo a otra empresa privada cubana que necesite proveedores, equipos, maquinaria, materias primas, compradores internacionales o coordinación comercial.</p><div class="sahjony-usdesk-actions"><a href="/us-desk-card?lang=es">Abrir tarjeta de presentación</a><button type="button" data-share-card>Compartir enlace</button></div><div class="sahjony-usdesk-status" data-share-status></div>';const anchor=document.querySelector('#solicitud');if(anchor?.parentNode)anchor.parentNode.insertBefore(card,anchor);else document.body.appendChild(card);const button=card.querySelector('[data-share-card]'),status=card.querySelector('[data-share-status]');button?.addEventListener('click',async()=>{const url=new URL('/us-desk-card?lang=es',location.origin).href;const data={title:'SAHJONY U.S. Desk',text:'Mesa de Estados Unidos para empresas privadas cubanas — abastecimiento global y comercio gestionado.',url};try{if(navigator.share){await navigator.share(data);status.textContent='Tarjeta compartida.'}else{await navigator.clipboard.writeText(url);status.textContent='Enlace copiado para compartir.'}}catch(e){if(e?.name!=='AbortError')status.textContent='Enlace: '+url}})}
-
-  async function mount(){
-    const wrap=document.createElement('div');wrap.className='sahjony-language';wrap.setAttribute('data-no-translate','true');wrap.innerHTML='<small>Idioma</small><select aria-label="Idioma"></select><button type="button">Original</button>';document.body.appendChild(wrap);
-    const select=wrap.querySelector('select');const geo=await geoDefault();if(!requestedLocale&&!storedLocale&&geo?.locale)active=normalizeLocale(geo.locale)||active;
-    const rawList=await locales();const list=[];for(const value of ['en-US','es',...rawList]){const normalized=normalizeLocale(value);if(normalized&&!list.includes(normalized))list.push(normalized)}
-    const names=new Intl.DisplayNames([navigator.language||'es'],{type:'language'});for(const loc of list){const o=document.createElement('option');o.value=loc;const base=baseLocale(loc);let label=loc;try{label=names.of(base)||loc}catch{}o.textContent=label+' · '+loc;select.appendChild(o)}
-    if(!list.includes(active))active=sourceLocale;select.value=active;
-    select.addEventListener('change',()=>translate(select.value,{persist:true}));
-    wrap.querySelector('button').addEventListener('click',()=>{select.value=sourceLocale;translate(sourceLocale,{persist:true})});
-    mountUsDeskShareCard();propagateLocale(active);if(!sameLanguage(active,sourceLocale))translate(active,{persist:Boolean(requestedLocale||storedLocale)});else{restore();document.documentElement.lang=active;setState('ok',baseLocale(active)==='en'?'English':'Original')}
+  async function geoDefault(){
+    try{
+      const r=await fetch(UI_GEO,{cache:'no-store'});
+      if(!r.ok)return '';
+      const j=await r.json();
+      return normalize(j.default_locale||'');
+    }catch{return ''}
   }
 
-  const observer=new MutationObserver(()=>{propagateLocale(active);if(!sameLanguage(active,sourceLocale)&&!busy){clearTimeout(observer._t);observer._t=setTimeout(()=>translate(active,{persist:false}),180)}});
-  const boot=()=>{mount();observer.observe(document.body,{childList:true,subtree:true})};
-  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot);else boot();
+  function mountSelector(){
+    if(document.querySelector('.sahjony-language'))return;
+    const style=document.createElement('style');
+    style.textContent='.sahjony-language{position:fixed;right:16px;bottom:16px;z-index:2147483000;display:flex;gap:7px;align-items:center;padding:8px 9px;border:1px solid rgba(255,255,255,.16);border-radius:999px;background:rgba(5,14,24,.94);box-shadow:0 12px 40px rgba(0,0,0,.28);backdrop-filter:blur(14px);font:600 12px Inter,system-ui,sans-serif;color:#eef6ff}.sahjony-language select{max-width:190px;background:#0a1b2a;color:#eef6ff;border:1px solid rgba(255,255,255,.14);border-radius:999px;padding:7px 10px;font:inherit}.sahjony-language button{border:0;border-radius:999px;padding:7px 10px;background:#e9f3fb;color:#07111d;font:800 11px Inter,system-ui,sans-serif;cursor:pointer}.sahjony-language small{opacity:.78}.sahjony-language[data-state=error] small{color:#ffb8bd;opacity:1}@media(max-width:600px){.sahjony-language{left:10px;right:10px;bottom:10px;justify-content:center}.sahjony-language select{max-width:55vw}}';
+    document.head.appendChild(style);
+    const root=document.createElement('div');
+    root.className='sahjony-language';root.setAttribute('data-no-translate','true');
+    root.innerHTML='<small>Language</small><select aria-label="Language"></select><button type="button">Original</button>';
+    document.body.appendChild(root);
+    const select=root.querySelector('select');
+    let displayNames=null;
+    try{displayNames=new Intl.DisplayNames([navigator.language||'en'],{type:'language'})}catch{}
+    for(const locale of LOCALES){
+      const option=document.createElement('option');option.value=locale;
+      let label=locale;
+      try{label=(displayNames?.of(base(locale))||locale)+' · '+locale}catch{}
+      option.textContent=label;select.appendChild(option);
+    }
+    select.addEventListener('change',()=>applyLanguage(select.value,{persist:true}));
+    root.querySelector('button').addEventListener('click',()=>{select.value=sourceLocale;applyLanguage(sourceLocale,{persist:true})});
+    return select;
+  }
+
+  async function boot(){
+    const select=mountSelector();
+    const requested=requestedLocale();
+    const stored=storedLocale();
+    const geo=!requested&&!stored?await geoDefault():'';
+    active=requested||stored||geo||sourceLocale;
+    if(select){
+      if(!LOCALES.includes(active))LOCALES.push(active);
+      if(!Array.from(select.options).some(option=>option.value===active)){
+        const option=document.createElement('option');option.value=active;option.textContent=active;select.appendChild(option);
+      }
+      select.value=active;
+    }
+    setStored(active);rewriteUrl(active);propagateLinks(active);
+    await applyLanguage(active,{persist:false});
+
+    const observer=new MutationObserver(records=>{
+      if(busy||records.every(record=>record.target.closest?.('.sahjony-language')))return;
+      clearTimeout(observerTimer);
+      observerTimer=setTimeout(()=>applyLanguage(active,{persist:false}),350);
+    });
+    observer.observe(document.body,{childList:true,subtree:true});
+  }
+
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
 })();
