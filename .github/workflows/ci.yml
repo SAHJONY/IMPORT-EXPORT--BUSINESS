@@ -19,4 +19,6 @@ jobs:
           cache: pip
       - run: python -m pip install -r requirements.txt
       - run: python -m compileall -q .
+      - name: Unified API runtime import smoke
+        run: python -c "import unified_api; print('Unified API import OK')"
       - run: python -m pytest -q
