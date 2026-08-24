@@ -7,6 +7,8 @@ from auth import neon_auth_jwks_url, neon_auth_url
 from energy_crm_seed import ENERGY_CRM_LEADS, ensure_energy_crm_seed
 from global_energy_crm_seed import GLOBAL_ENERGY_CRM_LEADS, ensure_global_energy_crm_seed
 from worldwide_trade_counterparty_seed import WORLDWIDE_TRADE_COUNTERPARTIES, ensure_worldwide_trade_counterparty_seed
+from midmarket_oil_dependent_crm_seed import MIDMARKET_OIL_DEPENDENT_LEADS, ensure_midmarket_oil_dependent_seed
+from cuba_mipyme_expansion_seed import CUBA_MIPYME_EXPANSION_LEADS, ensure_cuba_mipyme_expansion_seed
 from insforge_backend import persistent_backend_status
 from payment_engine import CANONICAL_TRANSACTION_CURRENCY, USD_ONLY_TRANSACTIONS
 from production_readiness import evaluate_production_readiness
@@ -15,7 +17,7 @@ from production_schema_evidence import production_schema_evidence
 from secure_storage import storage_configuration_status
 from trade_connectors import trade_connectors
 
-app = FastAPI(title="SAHJONY Production Activation Control", version="1.6.0", docs_url=None, redoc_url=None)
+app = FastAPI(title="SAHJONY Production Activation Control", version="1.7.0", docs_url=None, redoc_url=None)
 
 _DATABASE_ENV_ORDER=("DATABASE_URL","POSTGRES_URL","NEON_DATABASE_URL","NEON_POSTGRES_URL","POSTGRES_PRISMA_URL")
 
@@ -63,6 +65,8 @@ async def activation_health():
             ("energy_core",len(ENERGY_CRM_LEADS),ensure_energy_crm_seed),
             ("global_energy",len(GLOBAL_ENERGY_CRM_LEADS),ensure_global_energy_crm_seed),
             ("worldwide_trade",len(WORLDWIDE_TRADE_COUNTERPARTIES),ensure_worldwide_trade_counterparty_seed),
+            ("midmarket_oil_dependent",len(MIDMARKET_OIL_DEPENDENT_LEADS),ensure_midmarket_oil_dependent_seed),
+            ("cuba_mipyme_expansion",len(CUBA_MIPYME_EXPANSION_LEADS),ensure_cuba_mipyme_expansion_seed),
         ):
             try: crm_seeds[name]=await runner()
             except Exception as exc: crm_seeds[name]=_seed_failure(expected,exc)
