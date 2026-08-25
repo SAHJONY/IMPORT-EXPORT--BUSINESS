@@ -30,19 +30,18 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-          cache: npm
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Install application dependencies
-        run: npm ci
-      - name: Run deployment guard
-        run: npm run prebuild --if-present
       - name: Verify Vercel deployment credential
         run: |
           if [ -z "$VERCEL_TOKEN" ]; then
             echo '::error::Missing GitHub Actions secret VERCEL_TOKEN. Create a scoped Vercel token and save it as repository secret VERCEL_TOKEN.'
             exit 78
           fi
+      - name: Install application dependencies
+        run: npm install --no-audit --no-fund
+      - name: Run deployment guard
+        run: npm run prebuild --if-present
       - name: Build and deploy prebuilt production output
         run: bash scripts/vercel_deploy_recovery.sh
