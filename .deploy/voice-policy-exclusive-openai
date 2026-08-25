@@ -1,0 +1,4 @@
+openai_realtime_only=true
+bland_voice_ai=false
+reasoning_model=gpt-5.6-sol
+realtime_model=gpt-realtime-2.1
