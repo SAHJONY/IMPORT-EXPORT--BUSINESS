@@ -1,0 +1,1 @@
+Bland must not act as the conversational AI or voice model. GPT-5.6 Sol provides governed reasoning and OpenAI Realtime provides the live speech-to-speech engine. Bland may remain only as SIP/telephony transport where technically required.
