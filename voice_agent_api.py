@@ -154,6 +154,224 @@ class SolReasoningRequest(BaseModel):
     context: str | None = Field(default=None, max_length=6000)
 
 
+class BlandPathwaySyncRequest(BaseModel):
+    version_number: int = Field(default=6, ge=1, le=10_000)
+    apply: bool = False
+    confirmation: str | None = Field(default=None, max_length=80)
+
+
+def _bland_pathway_id() -> str:
+    return _env("BLAND_PATHWAY_ID")
+
+
+def _pathway_nodes() -> list[dict[str, Any]]:
+    return [
+        {
+            "id": "welcome_intent",
+            "type": "Default",
+            "data": {
+                "name": "Welcome & Intent",
+                "isStart": True,
+                "prompt": (
+                    "Greet the caller in the language they use. Introduce yourself as SARA, "
+                    "SAHJONY Global Trade's AI virtual assistant, disclose that the call is not "
+                    "being recorded, and ask how you may help. Ask one concise question at a time."
+                ),
+            },
+        },
+        {
+            "id": "general_trade",
+            "type": "Default",
+            "data": {
+                "name": "General Trade Qualification",
+                "prompt": (
+                    "Qualify the international trade request in the caller's language. Collect one "
+                    "field at a time: full name, company, country, callback number or email, buyer "
+                    "or seller status, product or service, specifications, quantity, destination, "
+                    "timeline, target price or budget, and preferred Incoterm. Never invent pricing, "
+                    "inventory, suppliers, certifications, approvals, or delivery dates."
+                ),
+            },
+        },
+        {
+            "id": "fuel_isotank",
+            "type": "Default",
+            "data": {
+                "name": "Fuel & Isotank Qualification",
+                "prompt": (
+                    "Qualify the fuel or isotank inquiry in the caller's language. Explain when "
+                    "relevant that SAHJONY facilitates commercial coordination and does not claim "
+                    "to be the direct producer. Collect one field at a time: full name, company, "
+                    "country, contact, buyer or seller status, fuel type and grade, shipment quantity, "
+                    "frequency or monthly volume, destination port, Incoterm, inspection requirements, "
+                    "timeline, target price, and proof-of-funds readiness. Never request banking "
+                    "credentials or invent availability, allocation, licenses, pricing, or delivery."
+                ),
+            },
+        },
+        {
+            "id": "partner_enrollment",
+            "type": "Default",
+            "data": {
+                "name": "Partner Enrollment",
+                "prompt": (
+                    "Assist with enrolling the caller, Reynier, or another prospective partner in "
+                    "the caller's language. Collect one field at a time: full legal name, country and "
+                    "city, phone, email, company, experience, languages, target market, industries, "
+                    "intended role, relevant relationships, and reason for joining. State that review "
+                    "is required and submission does not guarantee approval. Do not request identity "
+                    "numbers, passwords, banking credentials, or payment."
+                ),
+            },
+        },
+        {
+            "id": "human_callback",
+            "type": "Default",
+            "data": {
+                "name": "Human Callback",
+                "prompt": (
+                    "Explain in the caller's language that live transfer is unavailable but a specialist "
+                    "callback can be requested. Collect one field at a time: name, company, verified "
+                    "callback number, country, preferred language, reason, time zone, preferred date/time, "
+                    "and whether voicemail or SMS is acceptable. Do not promise a response time and never "
+                    "dial either Bland number as a transfer destination."
+                ),
+            },
+        },
+        {
+            "id": "confirm_information",
+            "type": "Default",
+            "data": {
+                "name": "Confirm Information",
+                "prompt": (
+                    "Summarize the collected information concisely in the caller's language. Ask the "
+                    "caller to confirm or correct it. Explain that a SAHJONY specialist will review the "
+                    "request. Do not promise approval, pricing, availability, delivery, or response time."
+                ),
+            },
+        },
+        {
+            "id": "opt_out",
+            "type": "Default",
+            "data": {
+                "name": "Opt Out",
+                "prompt": (
+                    "Immediately acknowledge the request to stop in the caller's language. Confirm briefly "
+                    "that the AI interaction will end. Ask no questions, collect no further information, "
+                    "and do not persuade the caller to continue."
+                ),
+            },
+        },
+        {
+            "id": "end_call",
+            "type": "End Call",
+            "data": {
+                "name": "End Call",
+                "prompt": "Thank the caller professionally in their language and end the call without new questions or promises.",
+            },
+        },
+    ]
+
+
+def _pathway_edges() -> list[dict[str, str]]:
+    definitions = [
+        ("welcome_general", "welcome_intent", "general_trade", "The caller needs importing, exporting, sourcing, buying, selling, supplier, manufacturer, shipping, or product assistance."),
+        ("welcome_fuel", "welcome_intent", "fuel_isotank", "The caller mentions fuel, diesel, gasoline, petroleum, energy commodities, tanks, or isotanks."),
+        ("welcome_partner", "welcome_intent", "partner_enrollment", "The caller wants to join, become a partner, register Reynier, or act as a representative, agent, or referral partner."),
+        ("welcome_callback", "welcome_intent", "human_callback", "The caller asks for a human, authorized representative, specialist, or callback."),
+        ("welcome_optout", "welcome_intent", "opt_out", "The caller says stop, opt out, do not call, remove me, refuses AI processing, or asks to end."),
+        ("general_confirm", "general_trade", "confirm_information", "The available general trade information is sufficient for specialist review, or the caller cannot provide more information."),
+        ("fuel_confirm", "fuel_isotank", "confirm_information", "The available fuel or isotank information is sufficient for specialist review, or the caller cannot provide more information."),
+        ("partner_confirm", "partner_enrollment", "confirm_information", "The available partner enrollment information is sufficient for specialist review, or the caller cannot provide more information."),
+        ("callback_confirm", "human_callback", "confirm_information", "The callback details have been collected and confirmed."),
+        ("confirm_end", "confirm_information", "end_call", "The caller confirms the summary or declines further corrections."),
+        ("optout_end", "opt_out", "end_call", "The opt-out request has been acknowledged."),
+    ]
+    return [
+        {"id": edge_id, "source": source, "target": target, "label": label}
+        for edge_id, source, target, label in definitions
+    ]
+
+
+def _safe_pathway_summary(payload: Any) -> dict[str, Any]:
+    data = payload if isinstance(payload, dict) else {}
+    nodes = data.get("nodes") if isinstance(data.get("nodes"), list) else []
+    edges = data.get("edges") if isinstance(data.get("edges"), list) else []
+    names = []
+    for node in nodes:
+        if isinstance(node, dict):
+            node_data = node.get("data") if isinstance(node.get("data"), dict) else {}
+            names.append(str(node_data.get("name") or node.get("id") or "unnamed")[:120])
+    return {
+        "name": str(data.get("name") or "")[:160],
+        "version_number": data.get("version_number"),
+        "node_count": len(nodes),
+        "edge_count": len(edges),
+        "node_names": names,
+    }
+
+
+@app.post("/voice/bland/pathway/sync")
+async def sync_bland_pathway(
+    payload: BlandPathwaySyncRequest,
+    authorization: str | None = Header(None, alias="Authorization"),
+):
+    _owner(authorization)
+    key = _bland_key()
+    pathway_id = _bland_pathway_id()
+    if not key:
+        raise HTTPException(503, "BLAND_API_KEY is not configured")
+    if not pathway_id:
+        raise HTTPException(503, "BLAND_PATHWAY_ID is not configured")
+
+    url = f"https://api.bland.ai/v1/pathway/{pathway_id}/version/{payload.version_number}"
+    headers = {"authorization": key, "Content-Type": "application/json"}
+    async with httpx.AsyncClient(timeout=30) as client:
+        current = await client.get(url, headers=headers)
+        if current.status_code >= 400:
+            raise HTTPException(502, f"Unable to read Bland pathway version ({current.status_code})")
+        current_payload = current.json()
+        before = _safe_pathway_summary(current_payload)
+
+        planned = {
+            "name": "SAHJONY Global Trade — Inbound Qualification · Compliance Final",
+            "nodes": _pathway_nodes(),
+            "edges": _pathway_edges(),
+        }
+        result: dict[str, Any] = {
+            "status": "dry_run",
+            "pathway_id": pathway_id,
+            "target_version": payload.version_number,
+            "before": before,
+            "planned": _safe_pathway_summary(planned),
+            "production_promoted": False,
+        }
+        if not payload.apply:
+            return result
+        if payload.confirmation != f"SYNC_VERSION_{payload.version_number}":
+            raise HTTPException(409, f"Confirmation must equal SYNC_VERSION_{payload.version_number}")
+
+        update = await client.post(url, headers=headers, json=planned)
+        if update.status_code >= 400:
+            raise HTTPException(502, f"Bland pathway update failed ({update.status_code})")
+        verify = await client.get(url, headers=headers)
+        if verify.status_code >= 400:
+            raise HTTPException(502, f"Bland pathway updated but verification failed ({verify.status_code})")
+        after = _safe_pathway_summary(verify.json())
+
+    expected_names = [str(node["data"]["name"]) for node in planned["nodes"]]
+    if after["node_count"] != len(planned["nodes"]) or after["edge_count"] != len(planned["edges"]):
+        raise HTTPException(502, "Bland pathway verification did not match the planned node and edge counts")
+    if sorted(after["node_names"]) != sorted(expected_names):
+        raise HTTPException(502, "Bland pathway verification did not match the planned node names")
+    return {
+        **result,
+        "status": "synchronized",
+        "after": after,
+        "production_promoted": False,
+    }
+
+
 @app.post("/voice/sol/reason")
 async def sol_reason(payload: SolReasoningRequest, authorization: str | None = Header(None, alias="Authorization")):
     _owner(authorization)
