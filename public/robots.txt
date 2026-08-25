@@ -1,0 +1,12 @@
+User-agent: *
+Allow: /
+Disallow: /owner/
+Disallow: /owner-
+Disallow: /api/
+Disallow: /crm/
+Disallow: /voice/
+Disallow: /finance/
+Disallow: /backend/
+Disallow: /activation/
+
+Sitemap: https://www.sahjony.com/sitemap.xml
