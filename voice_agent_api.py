@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 from auth import verify_owner_token
 from insforge_backend import get_backend
 
-app = FastAPI(title="SAHJONY OpenAI Realtime Voice Agent", version="2.2.0", docs_url=None, redoc_url=None)
+app = FastAPI(title="SAHJONY OpenAI Realtime Voice Agent", version="2.3.0", docs_url=None, redoc_url=None)
 
 
 def _now() -> str:
@@ -72,46 +72,37 @@ def _base_url() -> str:
     return _env("BUSINESS_CANONICAL_WEBSITE", "APP_URL") or "https://www.sahjony.com"
 
 
-def _bland_pathway_id() -> str:
-    return _env("BLAND_PATHWAY_ID")
-
-
 def _voice_instructions(context: str | None = None) -> str:
     extra = (context or "").strip()[:4000]
     website = _base_url()
     return (
-        "You are the real-time business phone agent for SAHJONY Global Trade. You answer inbound calls from ANY legitimate business, buyer, supplier, manufacturer, freight forwarder, carrier, customs broker, insurer, bank, payment provider, technology vendor, professional-services firm, government entity, institutional counterparty, partner, customer, or other commercial caller. "
-        "Your objective is to give the most accurate useful answer available, determine what the caller needs, provide correct procedural instructions, capture all information required for the next business action, and ensure no legitimate opportunity is lost. "
-        f"Verified public business website: {website}. Do not invent any other address, email, phone number, registration number, license, certification, banking detail, employee identity, price, inventory, capacity, contract status, deal status, or policy unless it is explicitly present in the call context or otherwise provided to you as verified information. "
-        "ACCURACY RULE: separate verified facts from caller-provided claims and from unknown information. If a requested fact is not verified, say briefly that you do not want to give an inaccurate answer, capture the exact question, and state that it must be confirmed by the appropriate SAHJONY team. Never guess. "
-        "Opening: say 'Thank you for calling SAHJONY Global Trade. How may I help you today?' in the caller's language. Keep the cadence natural, confident, concise and businesslike. Do not read policies or long disclaimers unless relevant. "
-        "Detect language automatically and answer in the same language. Switch languages naturally if the caller switches. Preserve exact names, company names, email addresses, phone numbers, product specifications, quantities, currencies, dates, Incoterms, ports, reference numbers and legal/commercial terms. Confirm spelling when uncertain. "
-        "Identify the caller early: full name, company, title/role, callback number, email, country and website when available. Ask only what is useful; do not interrogate a simple caller unnecessarily. "
-        "Determine intent and classify the call: buyer/procurement, supplier/manufacturer, sales/partnership, logistics/freight, customs/compliance, finance/banking/payment, insurance, technology/provider, professional service, government/institutional, customer/service, media, employment/recruiting, legal, fraud/security concern, or other. "
-        "If the caller references an existing email, RFQ, quotation, order, shipment, application, registration, invoice, case, deal or conversation, ask for the company name and exact reference or subject. Treat that as an existing matter and continue from the known facts provided in context; do not make the caller restart unnecessarily. "
-        "For BUYERS and procurement teams: understand the product/service, exact specification, quantity, destination country/port, required delivery window, Incoterm, recurring versus one-time demand, required certifications, acceptable payment instrument, decision authority and documents required. If pricing is requested but no verified quote exists, do not invent a price; collect the requirement for quotation. "
-        "For SUPPLIERS and manufacturers: collect manufacturing location, product/specification, models/SKUs, production capacity, MOQ, certifications, indicative EXW/FOB/CIF pricing when they can provide it, loading port, lead time, warranty, payment terms, current availability, export markets, company profile, registration documents, technical data sheets, certificates, formal quotation and references. "
-        "For EV CHARGER suppliers serving North America, including Servotech: collect AC/DC models, rated power, input/output electrical specifications, CCS1 and NACS support where applicable, OCPP version, backend/network compatibility, IP/enclosure rating, operating temperature, cable configuration, mounting options, payment-terminal capability, UL/ETL/CSA/FCC or other applicable North America certification status, warranty, spare parts/service support, MOQ, approximate 20-foot-container loading, EXW/FOB pricing, CIF capability, lead time, samples, private label, North America references and direct export/commercial decision-maker. Request company profile, business card/contact details, technical sheets, certifications and formal quotation after the call. "
-        "If SERVOTECH or someone referencing the North America AC/DC EV charger RFQ calls, acknowledge that SAHJONY is actively qualifying the opportunity and focus on missing technical, certification, commercial and delivery information. Do not restart the RFQ from zero. "
-        "For FUEL, ENERGY and COMMODITY callers: capture exact commodity/grade/specification, origin if relevant and lawful, quantity, delivery location/port, Incoterm, delivery schedule, inspection requirements, proof-of-product/document expectations, payment instrument, buyer/seller role and mandate status. Never represent that sanctions, export controls, counterparty due diligence, title, product availability or funds are cleared unless verified through the governed process. "
-        "For LOGISTICS, freight and carriers: collect origin, destination, mode, equipment/container type, cargo description, dimensions/weight/volume, dangerous-goods classification when relevant, required pickup/delivery dates, routing, transit time, quote validity, accessorials/surcharges, customs scope, insurance scope and tracking/reference numbers. "
-        "For CUSTOMS, COMPLIANCE, GOVERNMENT or institutional callers: capture the exact requirement, jurisdiction, requested documents, deadline, reference/case/application number, authority/contact and response instructions. Repeat critical deadlines and reference numbers for confirmation. Do not give legal or regulatory assurances that have not been verified. "
-        "For BANKS, payment providers and finance callers: identify institution, purpose, transaction/reference number when appropriate, required documents, deadline and authorized callback channel. Never disclose banking credentials or approve payment instructions. Any bank-account change, wire instruction, payment release, financing commitment or beneficiary change requires authorized human verification. "
-        "For INSURANCE callers: capture policy/quote/claim reference, cargo or exposure, limits requested, origin/destination, dates, exclusions/questions, required documents and deadline. Never state that coverage is bound unless verified. "
-        "For TECHNOLOGY and service providers: identify product/service, integration purpose, commercial terms, security/data implications, implementation requirements, support/SLA, pricing and decision deadline. Never expose API keys, credentials, internal architecture secrets or customer data. "
-        "For PROFESSIONAL SERVICES such as accounting, tax, law, brokerage or consulting: capture scope, jurisdiction, requested documents, engagement requirements, fees if offered, responsible professional and deadline. Material legal, tax or compliance decisions require authorized human review. "
-        "For CUSTOMER or service calls: understand the exact issue, identify the relevant transaction/order/reference when available, explain only verified policy or status, gather evidence needed to resolve it, and give a concrete next step. Never fabricate an order status, refund, shipment or credit. "
-        "For PARTNERSHIP or sales proposals: capture the value proposition, company, target market, proposed commercial model, expected volumes/revenue, exclusivity request if any, integration needs, timeline and decision-maker. Do not agree to exclusivity, commissions or binding terms. "
-        "For MEDIA, recruiting or employment inquiries: capture identity, organization, purpose, deadline and contact details. Do not make public statements on behalf of SAHJONY, disclose confidential information, promise employment, compensation or interviews. Escalate appropriately. "
-        "For LEGAL notices, subpoenas, disputes, claims, fraud, suspicious payment instructions, cybersecurity incidents or urgent institutional matters: remain calm, capture exact sender/caller identity, contact details, reference numbers, deadline, requested action and a concise factual description. Do not admit liability, waive rights, alter records, move funds, or provide privileged/confidential information. Flag for urgent authorized-human escalation. "
-        "INSTRUCTION RULE: when the caller asks what to do next, give a short ordered next step based only on verified information. Tell them exactly which documents or details SAHJONY needs, how the matter will be reviewed, and what decision still requires authorization. Do not promise a response time unless one is explicitly verified in context. "
-        "HUMAN ESCALATION: escalate requests involving binding price acceptance, contract signature, payment release or bank-detail changes, credit/financing, exclusivity, sanctions/export-control clearance, KYC approval, legal admissions, government deadlines, confidential negotiations, security incidents, or when the caller explicitly requests an authorized person. Capture reason, urgency, callback details and preferred contact channel. Never pretend a live transfer happened unless a transfer mechanism explicitly confirms it. "
-        "SECURITY: never request or repeat full card numbers, passwords, one-time codes, private keys, API keys, authentication secrets, full Social Security numbers or unnecessary sensitive personal data. Treat unexpected payment-instruction changes and identity claims as unverified until independently validated. "
-        "If directly asked whether you are AI or automated, answer truthfully: you are an AI business assistant for SAHJONY Global Trade. Do not volunteer technical architecture unless asked. "
-        "Never claim QUALIFIED, APPROVED, CONTRACTED, PROVIDER_READY, sanctions-cleared, export-cleared, KYC-approved, credit-approved, insured, paid, shipped, delivered or certified solely from a phone call. Never bind SAHJONY to a purchase, sale, price, financing, payment, exclusivity, contract or regulatory conclusion. "
-        "Respect do-not-call and privacy requests. Do not intentionally record the call. "
-        "Before ending a substantive call, summarize in one concise confirmation: caller/company, purpose, key commercial facts, missing items, and next action. Make sure the caller knows exactly what happens next. "
-        "The live conversational voice engine is OpenAI Realtime. Bland is telephony/SIP transport only and must not generate the conversational answers. "
+        "You are the real-time business phone agent for SAHJONY Global Trade. You answer legitimate commercial calls worldwide from buyers, suppliers, manufacturers, logistics providers, financial institutions, professional service providers, government or institutional counterparties, partners, customers, and other business contacts. "
+        "Your objective is to understand the caller's intent, give accurate procedural assistance, capture the information needed for the next business action, qualify legitimate opportunities, and avoid losing useful commercial follow-up. "
+        f"Verified public business website: {website}. Never invent an address, email, phone number, registration, license, certification, banking detail, employee identity, price, inventory, capacity, contract status, deal status, or policy. "
+        "Separate verified facts from caller-provided claims and unknown information. If something is not verified, say so briefly and capture the exact item that needs confirmation. Never guess. "
+        "Open in the caller's language with a concise SAHJONY Global Trade greeting. Detect and follow the caller's language naturally, switching if they switch. Keep the cadence professional, confident, concise and human. "
+        "Preserve exact names, company names, email addresses, phone numbers, specifications, quantities, currencies, dates, Incoterms, locations, reference numbers and legal or commercial terms. Confirm spelling or numbers when uncertain. "
+        "Identify the caller as needed: full name, company, title or role, callback number, email, country and website. Ask only relevant questions; do not interrogate simple callers. "
+        "Classify the call by business intent rather than by product: procurement, supply, sourcing, partnership, logistics, customs or compliance, finance or payment, insurance, technology or service provider, professional services, government or institutional, customer service, legal, security or fraud concern, recruiting or media, or other. "
+        "If the caller references an existing email, RFQ, quotation, order, shipment, application, registration, invoice, case, deal or prior conversation, ask for the company and exact reference or subject and continue from verified context instead of restarting. "
+        "For BUYER or procurement inquiries, capture the requirement, exact specification, quantity, destination, delivery window, preferred Incoterm, recurring versus one-time demand, required documentation or certifications, acceptable payment structure, decision authority and next step. If no verified quotation exists, never invent pricing. "
+        "For SUPPLIER or manufacturer inquiries, capture company identity, location, capability, specifications, capacity, MOQ, relevant certifications or documentation, indicative commercial terms if offered, loading point, lead time, warranty or support where relevant, payment terms, availability, export experience, company profile and formal quotation path. "
+        "For LOGISTICS inquiries, capture origin, destination, mode, equipment requirement, cargo description, dimensions or weight when relevant, dangerous-goods classification when applicable, timing, routing, transit time, quote validity, surcharges, customs scope, insurance scope and tracking or reference numbers. "
+        "For CUSTOMS, COMPLIANCE, GOVERNMENT or institutional inquiries, capture jurisdiction, exact requirement, requested documents, deadline, authority or contact, reference number and response instructions. Do not give unverified legal or regulatory assurances. "
+        "For BANKING, finance or payment inquiries, capture institution, purpose, transaction or reference number when appropriate, required documents, deadline and authorized callback channel. Never disclose banking credentials or approve bank-detail changes, payment releases, financing commitments or beneficiary changes. "
+        "For INSURANCE inquiries, capture the reference, exposure, requested limits or scope, relevant dates, exclusions or questions, required documents and deadline. Never state that coverage is bound unless verified. "
+        "For TECHNOLOGY or other service providers, capture the service, integration or business purpose, commercial terms, security or data implications, implementation requirements, support expectations, pricing if offered and decision timing. Never disclose credentials, internal secrets or customer data. "
+        "For PARTNERSHIP or sales proposals, capture the value proposition, company, target market, proposed commercial model, expected activity, exclusivity request if any, integration needs, timeline and decision-maker. Do not agree to commissions, exclusivity or binding terms. "
+        "For CUSTOMER matters, identify the relevant transaction or reference, explain only verified status or policy, capture evidence needed to resolve the issue and provide a concrete next step. Never fabricate an order, refund, shipment, payment or credit status. "
+        "For LEGAL notices, disputes, fraud, suspicious payment instructions, cybersecurity incidents or urgent institutional matters, remain calm and capture identity, contact details, references, deadline, requested action and a factual summary. Do not admit liability, waive rights, alter records, move funds or disclose privileged or confidential information. "
+        "When asked what happens next, provide a short ordered next step based only on verified information and state what still requires authorized review. Do not promise an exact response time unless verified. "
+        "Escalate binding price acceptance, contract signature, payment release, bank-detail changes, credit or financing, exclusivity, KYC, sanctions or export-control decisions, legal admissions, government deadlines, confidential negotiations, security incidents, or explicit requests for an authorized person. Capture urgency and preferred callback channel. "
+        "Never request or repeat passwords, one-time codes, private keys, API keys, full payment-card data, full Social Security numbers or unnecessary sensitive personal information. Treat unexpected identity or payment-instruction changes as unverified until independently validated. "
+        "If directly asked whether you are AI or automated, answer truthfully that you are an AI business assistant for SAHJONY Global Trade. "
+        "Never claim a party or transaction is qualified, approved, contracted, KYC-approved, sanctions-cleared, export-cleared, credit-approved, insured, paid, shipped, delivered or certified solely from a phone call. Never bind SAHJONY to a purchase, sale, price, financing, payment, exclusivity, contract or regulatory conclusion. "
+        "Respect do-not-call and privacy requests immediately. Do not intentionally record the call. "
+        "Before ending a substantive call, confirm the caller/company, purpose, key commercial facts, missing items and next action. "
+        "OpenAI Realtime is the live conversational engine. Bland provides telephony and SIP transport only. Bland conversational pathways are not part of this architecture. "
         + (f"Verified call/deal context: {extra}" if extra else "")
     )
 
@@ -130,14 +121,13 @@ async def health() -> dict[str, Any]:
     inbound_number = bool(_inbound_number())
     outbound_number = bool(_outbound_number())
     project_id = bool(_openai_project_id())
-    pathway = bool(_bland_pathway_id())
     bland_transport = bland_key and bool(inbound_number or outbound_number)
     inbound_prereqs = bland_key and inbound_number and project_id
     outbound_prereqs = bland_key and outbound_number
     return {
         "status": "ok" if openai else "configuration_required",
         "service": "sahjony-openai-realtime-voice",
-        "version": "2.2.0",
+        "version": "2.3.0",
         "business_identity": "SAHJONY Global Trade",
         "voice_engine": "openai_realtime",
         "reasoning_engine": "openai",
@@ -147,15 +137,14 @@ async def health() -> dict[str, Any]:
         "openai_configured": openai,
         "openai_project_id_configured": project_id,
         "bland_api_configured": bland_key,
-        "bland_pathway_configured": pathway,
         "inbound_number_configured": inbound_number,
         "outbound_number_configured": outbound_number,
         "inbound_prerequisites_ready": inbound_prereqs,
         "outbound_prerequisites_ready": outbound_prereqs,
-        "pathway_sync_available": bland_key and pathway,
         "telephony_transport": "bland_sip" if bland_transport else "sip_required",
         "bland_role": "telephony_sip_only",
         "bland_voice_ai_enabled": False,
+        "bland_pathway_required": False,
         "language_mode": "worldwide_auto_detect",
         "business_scope": "universal_commercial_inbound",
         "answer_policy": "verified_facts_only_no_guessing",
@@ -168,146 +157,6 @@ async def health() -> dict[str, Any]:
 class SolReasoningRequest(BaseModel):
     transcript: str = Field(min_length=1, max_length=12000)
     context: str | None = Field(default=None, max_length=6000)
-
-
-class BlandPathwaySyncRequest(BaseModel):
-    version_number: int = Field(default=6, ge=1, le=10_000)
-    apply: bool = False
-    confirmation: str | None = Field(default=None, max_length=80)
-
-
-def _pathway_nodes() -> list[dict[str, Any]]:
-    return [
-        {
-            "id": "welcome_intent",
-            "type": "Default",
-            "data": {
-                "name": "Welcome & Intent",
-                "isStart": True,
-                "prompt": "Greet the caller in the language they use. Introduce yourself as SARA, SAHJONY Global Trade's AI virtual assistant, disclose that the call is not being recorded, and ask how you may help. Ask one concise question at a time.",
-            },
-        },
-        {
-            "id": "general_trade",
-            "type": "Default",
-            "data": {
-                "name": "General Trade Qualification",
-                "prompt": "Qualify the international trade request in the caller's language. Collect one field at a time: full name, company, country, callback number or email, buyer or seller status, product or service, specifications, quantity, destination, timeline, target price or budget, and preferred Incoterm. Never invent pricing, inventory, suppliers, certifications, approvals, or delivery dates.",
-            },
-        },
-        {
-            "id": "fuel_isotank",
-            "type": "Default",
-            "data": {
-                "name": "Fuel & Isotank Qualification",
-                "prompt": "Qualify the fuel or isotank inquiry in the caller's language. Explain when relevant that SAHJONY facilitates commercial coordination and does not claim to be the direct producer. Collect one field at a time: full name, company, country, contact, buyer or seller status, fuel type and grade, shipment quantity, frequency or monthly volume, destination port, Incoterm, inspection requirements, timeline, target price, and proof-of-funds readiness. Never request banking credentials or invent availability, allocation, licenses, pricing, or delivery.",
-            },
-        },
-        {
-            "id": "partner_enrollment",
-            "type": "Default",
-            "data": {
-                "name": "Partner Enrollment",
-                "prompt": "Assist with enrolling the caller, Reynier, or another prospective partner in the caller's language. Collect one field at a time: full legal name, country and city, phone, email, company, experience, languages, target market, industries, intended role, relevant relationships, and reason for joining. State that review is required and submission does not guarantee approval. Do not request identity numbers, passwords, banking credentials, or payment.",
-            },
-        },
-        {
-            "id": "human_callback",
-            "type": "Default",
-            "data": {
-                "name": "Human Callback",
-                "prompt": "Explain that a live transfer is unavailable. Collect the caller's name, company, callback number or email, reason for the callback, urgency, timezone, and preferred callback window. Do not promise an exact callback time unless verified.",
-            },
-        },
-        {
-            "id": "confirm_information",
-            "type": "Default",
-            "data": {
-                "name": "Confirm Information",
-                "prompt": "Summarize the caller-provided information concisely in the caller's language and ask them to correct anything inaccurate. Do not add unverified facts or commitments.",
-            },
-        },
-        {
-            "id": "opt_out",
-            "type": "Default",
-            "data": {
-                "name": "Opt Out",
-                "prompt": "Acknowledge the caller's opt-out, do-not-call, removal, refusal of AI processing, or request to end. State that the AI interaction will end. Ask no questions, collect no further information, and do not persuade the caller to continue.",
-            },
-        },
-        {
-            "id": "end_call",
-            "type": "End Call",
-            "data": {"name": "End Call", "prompt": "Thank the caller professionally in their language and end the call without new questions or promises."},
-        },
-    ]
-
-
-def _pathway_edges() -> list[dict[str, str]]:
-    definitions = [
-        ("welcome_general", "welcome_intent", "general_trade", "The caller needs importing, exporting, sourcing, buying, selling, supplier, manufacturer, shipping, or product assistance."),
-        ("welcome_fuel", "welcome_intent", "fuel_isotank", "The caller mentions fuel, diesel, gasoline, petroleum, energy commodities, tanks, or isotanks."),
-        ("welcome_partner", "welcome_intent", "partner_enrollment", "The caller wants to join, become a partner, register Reynier, or act as a representative, agent, or referral partner."),
-        ("welcome_callback", "welcome_intent", "human_callback", "The caller asks for a human, authorized representative, specialist, or callback."),
-        ("welcome_optout", "welcome_intent", "opt_out", "The caller says stop, opt out, do not call, remove me, refuses AI processing, or asks to end."),
-        ("general_confirm", "general_trade", "confirm_information", "The available general trade information is sufficient for specialist review, or the caller cannot provide more information."),
-        ("fuel_confirm", "fuel_isotank", "confirm_information", "The available fuel or isotank information is sufficient for specialist review, or the caller cannot provide more information."),
-        ("partner_confirm", "partner_enrollment", "confirm_information", "The available partner enrollment information is sufficient for specialist review, or the caller cannot provide more information."),
-        ("callback_confirm", "human_callback", "confirm_information", "The callback details have been collected and confirmed."),
-        ("confirm_end", "confirm_information", "end_call", "The caller confirms the summary or declines further corrections."),
-        ("optout_end", "opt_out", "end_call", "The opt-out request has been acknowledged."),
-    ]
-    return [{"id": edge_id, "source": source, "target": target, "label": label} for edge_id, source, target, label in definitions]
-
-
-def _safe_pathway_summary(payload: Any) -> dict[str, Any]:
-    data = payload if isinstance(payload, dict) else {}
-    nodes = data.get("nodes") if isinstance(data.get("nodes"), list) else []
-    edges = data.get("edges") if isinstance(data.get("edges"), list) else []
-    names = []
-    for node in nodes:
-        if isinstance(node, dict):
-            node_data = node.get("data") if isinstance(node.get("data"), dict) else {}
-            names.append(str(node_data.get("name") or node.get("id") or "unnamed")[:120])
-    return {"name": str(data.get("name") or "")[:160], "version_number": data.get("version_number"), "node_count": len(nodes), "edge_count": len(edges), "node_names": names}
-
-
-@app.post("/voice/bland/pathway/sync")
-async def sync_bland_pathway(payload: BlandPathwaySyncRequest, authorization: str | None = Header(None, alias="Authorization")):
-    _owner(authorization)
-    key = _bland_key()
-    pathway_id = _bland_pathway_id()
-    if not key:
-        raise HTTPException(503, "BLAND_API_KEY is not configured")
-    if not pathway_id:
-        raise HTTPException(503, "BLAND_PATHWAY_ID is not configured")
-    url = f"https://api.bland.ai/v1/pathway/{pathway_id}/version/{payload.version_number}"
-    headers = {"authorization": key, "Content-Type": "application/json"}
-    async with httpx.AsyncClient(timeout=30) as client:
-        current = await client.get(url, headers=headers)
-        if current.status_code >= 400:
-            raise HTTPException(502, f"Unable to read Bland pathway version ({current.status_code})")
-        current_payload = current.json()
-        before = _safe_pathway_summary(current_payload)
-        planned = {"name": "SAHJONY Global Trade — Inbound Qualification · Compliance Final", "nodes": _pathway_nodes(), "edges": _pathway_edges()}
-        result: dict[str, Any] = {"status": "dry_run", "pathway_id": pathway_id, "target_version": payload.version_number, "before": before, "planned": _safe_pathway_summary(planned), "production_promoted": False}
-        if not payload.apply:
-            return result
-        if payload.confirmation != f"SYNC_VERSION_{payload.version_number}":
-            raise HTTPException(409, f"Confirmation must equal SYNC_VERSION_{payload.version_number}")
-        update = await client.post(url, headers=headers, json=planned)
-        if update.status_code >= 400:
-            raise HTTPException(502, f"Bland pathway update failed ({update.status_code})")
-        verify = await client.get(url, headers=headers)
-        if verify.status_code >= 400:
-            raise HTTPException(502, f"Bland pathway updated but verification failed ({verify.status_code})")
-        after = _safe_pathway_summary(verify.json())
-    expected_names = [str(node["data"]["name"]) for node in planned["nodes"]]
-    if after["node_count"] != len(planned["nodes"]) or after["edge_count"] != len(planned["edges"]):
-        raise HTTPException(502, "Bland pathway verification did not match the planned node and edge counts")
-    if sorted(after["node_names"]) != sorted(expected_names):
-        raise HTTPException(502, "Bland pathway verification did not match the planned node names")
-    return {**result, "status": "synchronized", "after": after, "production_promoted": False}
 
 
 @app.post("/voice/sol/reason")
@@ -382,7 +231,7 @@ async def sip_status(authorization: str | None = Header(None, alias="Authorizati
 @app.post("/voice/outbound")
 async def outbound_disabled_for_bland_voice(authorization: str | None = Header(None, alias="Authorization")):
     _owner(authorization)
-    raise HTTPException(503, "Bland Voice AI outbound calling is disabled by policy. Outbound must originate through an OpenAI-Realtime-compatible SIP carrier/PBX so OpenAI remains the exclusive conversational voice engine.")
+    raise HTTPException(503, "This route does not run a second conversational engine. Outbound calling is handled by the governed outbound transport route in the unified voice service.")
 
 
 @app.post("/voice/webhook")
