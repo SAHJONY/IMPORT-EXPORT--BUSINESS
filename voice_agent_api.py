@@ -5,7 +5,7 @@ import json
 import os
 import secrets
 from datetime import datetime, timezone
-from typing import Any, Literal
+from typing import Any
 
 import httpx
 from fastapi import FastAPI, Header, HTTPException, Request
@@ -14,8 +14,7 @@ from pydantic import BaseModel, Field
 from auth import verify_owner_token
 from insforge_backend import get_backend
 
-app = FastAPI(title="SAHJONY Voice Agent", version="1.3.0", docs_url=None, redoc_url=None)
-Direction = Literal["inbound", "outbound"]
+app = FastAPI(title="SAHJONY OpenAI Realtime Voice Agent", version="2.0.0", docs_url=None, redoc_url=None)
 
 
 def _now() -> str:
@@ -30,20 +29,35 @@ def _env(*names: str) -> str:
     return ""
 
 
-def _bland_key() -> str:
-    return _env("BLAND_API_KEY", "BLAND_AI_API_KEY")
+def _owner(authorization: str | None) -> None:
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(401, "Missing Authorization")
+    if not verify_owner_token(authorization.removeprefix("Bearer ").strip()):
+        raise HTTPException(403, "Invalid owner credential")
 
 
 def _openai_key() -> str:
     return _env("OPENAI_API_KEY")
 
 
-def _sol_model() -> str:
+def _reasoning_model() -> str:
     return _env("OPENAI_PRIMARY_MODEL") or "gpt-5.6-sol"
 
 
-def _sol_service_tier() -> str:
-    return _env("OPENAI_VOICE_SERVICE_TIER") or "fast"
+def _realtime_model() -> str:
+    return _env("OPENAI_REALTIME_MODEL") or "gpt-realtime-2.1"
+
+
+def _openai_project_id() -> str:
+    return _env("OPENAI_PROJECT_ID")
+
+
+def _realtime_voice() -> str:
+    return _env("OPENAI_REALTIME_VOICE") or "cedar"
+
+
+def _bland_key() -> str:
+    return _env("BLAND_API_KEY", "BLAND_AI_API_KEY")
 
 
 def _outbound_number() -> str:
@@ -58,66 +72,21 @@ def _base_url() -> str:
     return _env("BUSINESS_CANONICAL_WEBSITE", "APP_URL") or "https://www.sahjony.com"
 
 
-def _sol_tool_secret() -> str:
-    seed = _env("VOICE_SOL_TOOL_SECRET") or _bland_key()
-    if not seed:
-        return ""
-    return hashlib.sha256(("sahjony-sol-voice:" + seed).encode()).hexdigest()
-
-
-def _owner(authorization: str | None) -> None:
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(401, "Missing Authorization")
-    if not verify_owner_token(authorization.removeprefix("Bearer ").strip()):
-        raise HTTPException(403, "Invalid owner credential")
-
-
-def _normalize_language(value: str | None) -> str:
-    language = (value or "auto").strip()
-    return language[:35] or "auto"
-
-
-def _task(context: str | None = None, language: str = "auto", direction: Direction = "outbound") -> str:
+def _voice_instructions(context: str | None = None) -> str:
     extra = (context or "").strip()[:4000]
-    requested = _normalize_language(language)
-    opening = (
-        "For an inbound call, open naturally with: Thank you for calling SAHJONY Global Trade. How may I help you? "
-        if direction == "inbound"
-        else "For an outbound call, open naturally with: Hello, this is SAHJONY Global Trade. "
-    )
     return (
-        "You are the worldwide business phone agent for SAHJONY Global Trade. "
-        "Use the AskSolBrain tool before every substantive answer, recommendation, qualification judgment, objection response, negotiation response, or next-step decision. "
-        "Treat sol_reply returned by AskSolBrain as the authoritative conversational answer and speak it naturally without adding unsupported facts. "
-        "Use your native voice layer only for greetings, brief acknowledgements, turn-taking, repetition requests, and reading the Sol response aloud. "
-        + opening +
-        "Do not spontaneously introduce yourself as AI, a bot, virtual assistant, automated system, or language model. "
-        "If directly asked whether you are AI, automated, a bot, or human, answer truthfully that you are an AI business assistant for SAHJONY Global Trade; never falsely claim to be human. "
-        "Detect the caller's language and respond in that same language. If the person changes languages, follow them. "
-        "Preserve names, companies, product specifications, quantities, currencies, Incoterms, addresses, ports, legal terms, and numbers accurately. "
-        "Never claim QUALIFIED, APPROVED, CONTRACTED, PROVIDER_READY, sanctions-cleared, or credit-approved solely from the call. "
-        "Never bind SAHJONY to price, purchase, sale, financing, payment, exclusivity, contract, KYC approval, sanctions approval, or another legal/commercial commitment. "
-        "Respect do-not-call requests immediately. Do not intentionally record the call. "
-        f"Language hint: {requested}. "
+        "You are the real-time business phone agent for SAHJONY Global Trade. "
+        "Use natural, fast, concise phone cadence. Detect the caller's language automatically and answer in that same language; switch when the caller switches. "
+        "Preserve exact names, companies, product specifications, quantities, currencies, Incoterms, ports, legal terms and numbers. "
+        "For buyers collect company, product, quantity, destination, timing, Incoterm preference, payment capability, documentation readiness and decision authority. "
+        "For suppliers collect company, product/specification, capacity, MOQ, certifications, indicative FOB/CIF pricing, lead time, warranty, payment terms and availability. "
+        "If directly asked whether you are AI or automated, answer truthfully that you are an AI business assistant for SAHJONY Global Trade. "
+        "Never claim QUALIFIED, APPROVED, CONTRACTED, PROVIDER_READY, sanctions-cleared or credit-approved solely from a call. "
+        "Never bind SAHJONY to price, purchase, sale, financing, payment, exclusivity, contract, KYC approval or sanctions approval; escalate those decisions to an authorized human. "
+        "Respect do-not-call requests immediately. Do not intentionally record the call. End with a concise confirmed next step. "
+        "The governed commercial reasoning model is GPT-5.6 Sol. The only live conversational voice engine is OpenAI Realtime; Bland must never generate the conversational voice or answers. "
         + (f"Call context: {extra}" if extra else "")
     )
-
-
-class OutboundCall(BaseModel):
-    phone_number: str = Field(min_length=7, max_length=32)
-    contact_name: str | None = Field(default=None, max_length=160)
-    company: str | None = Field(default=None, max_length=240)
-    context: str | None = Field(default=None, max_length=4000)
-    lead_id: str | None = Field(default=None, max_length=160)
-    trade_case_id: str | None = Field(default=None, max_length=160)
-    language: str = Field(default="auto", max_length=35)
-
-
-class SolBrainRequest(BaseModel):
-    latest_utterance: str = Field(default="", max_length=8000)
-    conversation_summary: str = Field(default="", max_length=12000)
-    context: str = Field(default="", max_length=4000)
-    language: str = Field(default="auto", max_length=35)
 
 
 async def _store(row: dict[str, Any]) -> None:
@@ -127,174 +96,179 @@ async def _store(row: dict[str, Any]) -> None:
         pass
 
 
-def _extract_response_text(data: dict[str, Any]) -> str:
-    direct = data.get("output_text")
-    if isinstance(direct, str) and direct.strip():
-        return direct.strip()
-    parts: list[str] = []
-    for item in data.get("output") or []:
-        if not isinstance(item, dict):
-            continue
-        for content in item.get("content") or []:
-            if not isinstance(content, dict):
-                continue
-            text = content.get("text")
-            if isinstance(text, str) and text.strip():
-                parts.append(text.strip())
-    return " ".join(parts).strip()
+@app.get("/voice/health")
+async def health() -> dict[str, Any]:
+    openai = bool(_openai_key())
+    bland_transport = bool(_bland_key()) and bool(_inbound_number() or _outbound_number())
+    return {
+        "status": "ok" if openai else "configuration_required",
+        "service": "sahjony-openai-realtime-voice",
+        "version": "2.0.0",
+        "business_identity": "SAHJONY Global Trade",
+        "voice_engine": "openai_realtime",
+        "reasoning_engine": "openai",
+        "reasoning_model": _reasoning_model(),
+        "realtime_model": _realtime_model(),
+        "realtime_voice": _realtime_voice(),
+        "openai_configured": openai,
+        "openai_project_id_configured": bool(_openai_project_id()),
+        "telephony_transport": "bland_sip" if bland_transport else "sip_required",
+        "bland_role": "telephony_sip_only",
+        "bland_voice_ai_enabled": False,
+        "inbound_number_configured": bool(_inbound_number()),
+        "outbound_number_configured": bool(_outbound_number()),
+        "language_mode": "worldwide_auto_detect",
+        "recording_enabled": False,
+        "human_approval_gates": ["price_commitment", "contract", "payment", "credit", "exclusivity", "kyc", "sanctions"],
+        "fail_closed": True,
+    }
 
 
-@app.post("/voice/sol-brain")
-async def sol_brain(payload: SolBrainRequest, x_sahjony_voice_secret: str | None = Header(None, alias="X-Sahjony-Voice-Secret")):
-    expected = _sol_tool_secret()
-    if not expected or not x_sahjony_voice_secret or not secrets.compare_digest(x_sahjony_voice_secret, expected):
-        raise HTTPException(401, "Invalid voice brain credential")
+class SolReasoningRequest(BaseModel):
+    transcript: str = Field(min_length=1, max_length=12000)
+    context: str | None = Field(default=None, max_length=6000)
+
+
+@app.post("/voice/sol/reason")
+async def sol_reason(payload: SolReasoningRequest, authorization: str | None = Header(None, alias="Authorization")):
+    _owner(authorization)
     if not _openai_key():
         raise HTTPException(503, "OpenAI is not configured")
-    system = (
-        "You are GPT-5.6 Sol, the decision brain for SAHJONY Global Trade's live phone agent. "
-        "Return only the exact short spoken reply the voice layer should say next. Keep normal replies to 1-3 concise sentences unless detail is essential. "
-        "Use the caller's language. Be commercially sharp, natural and fast. Preserve exact trade facts. "
-        "For buyers, qualify company, product, volume, destination, timing, Incoterm, payment capability, documents and authority. "
-        "For suppliers, qualify specification, capacity, MOQ, certifications, FOB/CIF pricing, lead time, warranty, payment terms and availability. "
-        "Never fabricate verification. Never bind SAHJONY to price, contract, financing, payment, exclusivity, KYC, sanctions clearance or legal commitments. "
-        "If a decision requires authorization, say what information is needed and that an authorized SAHJONY representative will confirm it."
-    )
-    prompt = (
-        f"Language hint: {payload.language}\n"
-        f"Trade/call context: {payload.context}\n"
-        f"Conversation so far: {payload.conversation_summary}\n"
-        f"Caller just said: {payload.latest_utterance}"
-    )
-    body: dict[str, Any] = {
-        "model": _sol_model(),
-        "input": [
-            {"role": "system", "content": system},
-            {"role": "user", "content": prompt},
-        ],
-        "reasoning": {"effort": "none"},
-        "max_output_tokens": 220,
+    body = {
+        "model": _reasoning_model(),
+        "instructions": _voice_instructions(payload.context),
+        "input": payload.transcript,
+        "max_output_tokens": 700,
     }
-    tier = _sol_service_tier()
-    if tier:
-        body["service_tier"] = tier
-    async with httpx.AsyncClient(timeout=12) as client:
+    async with httpx.AsyncClient(timeout=45) as client:
         response = await client.post(
             "https://api.openai.com/v1/responses",
             headers={"Authorization": f"Bearer {_openai_key()}", "Content-Type": "application/json"},
             json=body,
         )
     if response.status_code >= 400:
-        raise HTTPException(502, f"OpenAI Sol brain rejected request ({response.status_code})")
+        raise HTTPException(502, f"OpenAI Sol reasoning request failed ({response.status_code})")
     data = response.json()
-    reply = _extract_response_text(data)
-    if not reply:
-        raise HTTPException(502, "OpenAI Sol brain returned no spoken reply")
-    return {"reply": reply, "model": _sol_model(), "service_tier": tier or "standard", "reasoning_effort": "none"}
+    text = ""
+    for item in data.get("output", []):
+        if item.get("type") == "message":
+            for content in item.get("content", []):
+                if content.get("type") == "output_text":
+                    text += content.get("text", "")
+    return {"status": "ok", "model": _reasoning_model(), "output_text": text.strip(), "response_id": data.get("id")}
 
 
-def _sol_tool(context: str | None, language: str) -> dict[str, Any]:
+@app.post("/voice/openai/sip/incoming")
+async def openai_sip_incoming(request: Request):
+    """OpenAI webhook target for realtime.call.incoming events."""
+    if not _openai_key():
+        raise HTTPException(503, "OpenAI is not configured")
+    payload = await request.json()
+    event_type = str(payload.get("type") or "")
+    data = payload.get("data") if isinstance(payload.get("data"), dict) else payload
+    call_id = str(data.get("call_id") or data.get("id") or "").strip()
+    if event_type and event_type != "realtime.call.incoming":
+        return {"status": "ignored", "event_type": event_type}
+    if not call_id:
+        raise HTTPException(400, "Missing OpenAI realtime call_id")
+    accept = {
+        "type": "realtime",
+        "model": _realtime_model(),
+        "instructions": _voice_instructions(),
+        "output_modalities": ["audio"],
+        "audio": {
+            "output": {"voice": _realtime_voice()},
+            "input": {"turn_detection": {"type": "semantic_vad"}},
+        },
+        "tracing": "auto",
+    }
+    async with httpx.AsyncClient(timeout=30) as client:
+        response = await client.post(
+            f"https://api.openai.com/v1/realtime/calls/{call_id}/accept",
+            headers={"Authorization": f"Bearer {_openai_key()}", "Content-Type": "application/json"},
+            json=accept,
+        )
+    if response.status_code >= 400:
+        raise HTTPException(502, f"OpenAI Realtime SIP accept failed ({response.status_code})")
+    await _store({
+        "call_id": call_id,
+        "direction": "inbound",
+        "status": "accepted",
+        "provider": "openai_realtime",
+        "reasoning_model": _reasoning_model(),
+        "realtime_model": _realtime_model(),
+        "telephony_transport": "sip",
+        "recording_enabled": False,
+        "created_at": _now(),
+        "updated_at": _now(),
+    })
+    return {"status": "accepted", "call_id": call_id, "voice_engine": "openai_realtime", "model": _realtime_model()}
+
+
+@app.post("/voice/sip/configure-bland-inbound")
+async def configure_bland_inbound(authorization: str | None = Header(None, alias="Authorization")):
+    """Use Bland only to forward its inbound number over SIP to OpenAI Realtime."""
+    _owner(authorization)
+    if not _bland_key() or not _inbound_number():
+        raise HTTPException(503, "Bland SIP transport is not configured")
+    if not _openai_project_id():
+        raise HTTPException(503, "OPENAI_PROJECT_ID is required to route SIP directly to OpenAI Realtime")
+    sip_endpoint = f"sip:{_openai_project_id()}@sip.api.openai.com;transport=tls"
+    body = {
+        "phone_number": _inbound_number(),
+        "service": "sip",
+        "directions": [{
+            "type": "inbound",
+            "auth_mode": "ip",
+            "sip_endpoint": sip_endpoint,
+            "options": {"port": 5061, "transport": "tls", "secure_media": True},
+        }],
+    }
+    async with httpx.AsyncClient(timeout=30) as client:
+        response = await client.post(
+            "https://api.bland.ai/v1/sip/attach",
+            headers={"authorization": _bland_key(), "Content-Type": "application/json"},
+            json=body,
+        )
+    if response.status_code >= 400:
+        raise HTTPException(502, f"Bland SIP routing update failed ({response.status_code})")
     return {
-        "name": "AskSolBrain",
-        "description": "MANDATORY: call GPT-5.6 Sol before every substantive spoken response, trade judgment, objection response, qualification decision, or recommendation. Then speak the returned sol_reply.",
-        "url": f"{_base_url().rstrip('/')}/voice/sol-brain",
-        "method": "POST",
-        "headers": {"X-Sahjony-Voice-Secret": _sol_tool_secret(), "Content-Type": "application/json"},
-        "body": {
-            "latest_utterance": "{{input.latest_utterance}}",
-            "conversation_summary": "{{input.conversation_summary}}",
-            "context": (context or "")[:4000],
-            "language": "{{input.language}}",
-        },
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "latest_utterance": {"type": "string", "description": "The caller's latest complete utterance."},
-                "conversation_summary": {"type": "string", "description": "A concise summary of the conversation so far including exact commercial facts."},
-                "language": {"type": "string", "description": f"Current caller language or locale. Initial hint: {language}."},
-                "speech": {"type": "string", "description": "A very short natural filler such as 'One moment.' Only if needed."},
-            },
-            "required": ["latest_utterance", "conversation_summary", "language"],
-        },
-        "response": {"sol_reply": "$.reply", "sol_model": "$.model", "sol_service_tier": "$.service_tier"},
-        "timeout": 10000,
+        "status": "configured",
+        "phone_number": _inbound_number(),
+        "sip_endpoint": sip_endpoint,
+        "voice_engine": "openai_realtime",
+        "bland_role": "telephony_sip_only",
+        "bland_voice_ai_enabled": False,
     }
 
 
-@app.get("/voice/health")
-async def health() -> dict[str, Any]:
-    key, outbound, inbound = bool(_bland_key()), bool(_outbound_number()), bool(_inbound_number())
-    openai = bool(_openai_key())
-    sol_tool = bool(_sol_tool_secret()) and openai
-    return {
-        "status": "ok" if key and outbound and inbound and sol_tool else "configuration_required",
-        "service": "sahjony-voice-agent", "version": "1.3.0", "provider": "bland_ai_telephony_openai_sol_brain",
-        "business_identity": "SAHJONY Global Trade",
-        "bland_api_configured": key, "outbound_number_configured": outbound, "inbound_number_configured": inbound,
-        "openai_configured": openai,
-        "openai_primary_model": _sol_model(),
-        "openai_service_tier": _sol_service_tier(),
-        "sol_brain_tool_configured": sol_tool,
-        "voice_transport": "bland_ai",
-        "conversation_brain": _sol_model(),
-        "bland_model": "base",
-        "language_mode": "worldwide_auto_detect", "recording_enabled": False,
-        "human_approval_gates": ["price_commitment", "contract", "payment", "credit", "exclusivity", "kyc", "sanctions"],
-        "fail_closed": True,
-    }
+@app.get("/voice/sip/status")
+async def sip_status(authorization: str | None = Header(None, alias="Authorization")):
+    _owner(authorization)
+    if not _bland_key() or not _inbound_number():
+        raise HTTPException(503, "Bland SIP transport is not configured")
+    async with httpx.AsyncClient(timeout=20) as client:
+        response = await client.get(
+            "https://api.bland.ai/v1/sip",
+            headers={"authorization": _bland_key()},
+            params={"phone_number": _inbound_number()},
+        )
+    if response.status_code >= 400:
+        raise HTTPException(502, f"Unable to read Bland SIP configuration ({response.status_code})")
+    return {"status": "ok", "voice_engine": "openai_realtime", "bland_role": "telephony_sip_only", "sip": response.json().get("data")}
 
 
 @app.post("/voice/outbound")
-async def outbound(payload: OutboundCall, authorization: str | None = Header(None, alias="Authorization")):
+async def outbound_disabled_for_bland_voice(authorization: str | None = Header(None, alias="Authorization")):
     _owner(authorization)
-    if not _bland_key() or not _outbound_number():
-        raise HTTPException(503, "Bland AI outbound calling is not configured")
-    if not _openai_key() or not _sol_tool_secret():
-        raise HTTPException(503, "GPT-5.6 Sol voice brain is not configured")
-    language = _normalize_language(payload.language)
-    metadata = {
-        "lead_id": payload.lead_id, "trade_case_id": payload.trade_case_id, "contact_name": payload.contact_name,
-        "company": payload.company, "language_hint": language, "source": "sahjony_global_trade_os",
-        "conversation_brain": _sol_model(), "voice_transport": "bland_ai",
-    }
-    body: dict[str, Any] = {
-        "phone_number": payload.phone_number,
-        "from": _outbound_number(),
-        "task": _task(payload.context, language, "outbound"),
-        "first_sentence": "Hello, this is SAHJONY Global Trade.",
-        "model": "base",
-        "interruption_threshold": 250,
-        "noise_cancellation": True,
-        "record": False,
-        "metadata": metadata,
-        "webhook": f"{_base_url().rstrip('/')}/voice/webhook",
-        "tools": [_sol_tool(payload.context, language)],
-    }
-    if language.lower() != "auto":
-        body["language"] = language
-    pathway = _env("BLAND_PATHWAY_ID")
-    if pathway:
-        body["pathway_id"] = pathway
-    async with httpx.AsyncClient(timeout=30) as client:
-        response = await client.post("https://api.bland.ai/v1/calls", headers={"authorization": _bland_key(), "Content-Type": "application/json"}, json=body)
-    if response.status_code >= 400:
-        raise HTTPException(502, f"Bland AI rejected outbound call ({response.status_code})")
-    data = response.json()
-    call_id = str(data.get("call_id") or data.get("id") or f"call_{secrets.token_urlsafe(12)}")
-    await _store({
-        "call_id": call_id, "direction": "outbound", "phone_number": payload.phone_number, "contact_name": payload.contact_name,
-        "company": payload.company, "lead_id": payload.lead_id, "trade_case_id": payload.trade_case_id, "language_hint": language,
-        "status": "queued", "provider": "bland_ai", "conversation_brain": _sol_model(), "sol_service_tier": _sol_service_tier(),
-        "recording_enabled": False, "created_at": _now(), "updated_at": _now(),
-    })
-    return {
-        "status": "queued", "call_id": call_id, "provider": "bland_ai", "conversation_brain": _sol_model(),
-        "service_tier": _sol_service_tier(), "language_mode": language, "recording_enabled": False,
-    }
+    raise HTTPException(
+        503,
+        "Bland Voice AI outbound calling is disabled by policy. Outbound must originate through an OpenAI-Realtime-compatible SIP carrier/PBX so OpenAI remains the exclusive conversational voice engine.",
+    )
 
 
 @app.post("/voice/webhook")
-async def webhook(request: Request, x_bland_signature: str | None = Header(None, alias="X-Bland-Signature")):
+async def legacy_bland_webhook(request: Request, x_bland_signature: str | None = Header(None, alias="X-Bland-Signature")):
     raw = await request.body()
     secret = _env("BLAND_WEBHOOK_SECRET")
     if secret:
@@ -307,30 +281,15 @@ async def webhook(request: Request, x_bland_signature: str | None = Header(None,
     except Exception:
         payload = {}
     call_id = str(payload.get("call_id") or payload.get("id") or f"call_{secrets.token_urlsafe(12)}")
-    metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
     await _store({
-        "call_id": call_id, "direction": payload.get("direction") or "unknown", "status": payload.get("disposition") or payload.get("status") or "completed",
-        "provider": "bland_ai", "conversation_brain": metadata.get("conversation_brain") or _sol_model(), "lead_id": metadata.get("lead_id"),
-        "trade_case_id": metadata.get("trade_case_id"), "contact_name": metadata.get("contact_name"), "company": metadata.get("company"),
-        "language_hint": metadata.get("language_hint"), "summary": payload.get("summary") or payload.get("call_summary"),
-        "transcript": payload.get("concatenated_transcript") or payload.get("transcript"), "recording_enabled": False,
-        "provider_payload": payload, "created_at": payload.get("created_at") or _now(), "updated_at": _now(),
+        "call_id": call_id,
+        "direction": payload.get("direction") or "unknown",
+        "status": payload.get("status") or "legacy_event",
+        "provider": "bland_sip",
+        "voice_engine": "openai_realtime",
+        "recording_enabled": False,
+        "provider_payload": payload,
+        "created_at": _now(),
+        "updated_at": _now(),
     })
-    return {"status": "accepted", "call_id": call_id}
-
-
-@app.post("/voice/inbound")
-async def inbound_event(request: Request):
-    payload = await request.json()
-    call_id = str(payload.get("call_id") or payload.get("id") or f"call_{secrets.token_urlsafe(12)}")
-    language = _normalize_language(payload.get("language") or payload.get("locale") or "auto")
-    await _store({
-        "call_id": call_id, "direction": "inbound", "phone_number": payload.get("from") or payload.get("phone_number"),
-        "language_hint": language, "status": payload.get("status") or "received", "provider": "bland_ai",
-        "conversation_brain": _sol_model(), "recording_enabled": False, "provider_payload": payload,
-        "created_at": _now(), "updated_at": _now(),
-    })
-    return {
-        "status": "accepted", "call_id": call_id, "language_mode": "worldwide_auto_detect",
-        "conversation_brain": _sol_model(), "agent_policy": _task(language=language, direction="inbound"),
-    }
+    return {"status": "accepted", "call_id": call_id, "bland_role": "telephony_sip_only"}
