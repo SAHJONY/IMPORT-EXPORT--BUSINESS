@@ -1,0 +1,1 @@
+Deploy OpenAI Realtime exclusive voice architecture. Bland is SIP/telephony transport only; Bland Voice AI outbound is disabled. Production should use current main.
