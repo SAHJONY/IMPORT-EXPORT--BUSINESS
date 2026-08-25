@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 import re
 from typing import Any
@@ -9,7 +10,8 @@ from fastapi import FastAPI, Header, HTTPException
 
 from auth import verify_owner_token
 
-app = FastAPI(title="SAHJONY Inbound Voice Transport", version="1.0.0", docs_url=None, redoc_url=None)
+app = FastAPI(title="SAHJONY Inbound Voice Transport", version="1.1.0", docs_url=None, redoc_url=None)
+logger = logging.getLogger("sahjony.voice.inbound")
 
 
 def _env(*names: str) -> str:
@@ -56,20 +58,112 @@ def _normalize_phone(value: str) -> str:
 
 
 def _sip_endpoint(project_id: str) -> str:
-    return f"sip:{project_id}@sip.api.openai.com"
+    # OpenAI Realtime SIP destination. Transport is declared both in the URI
+    # and in Bland options because carriers commonly canonicalize either form.
+    return f"sip:{project_id}@sip.api.openai.com;transport=tls"
+
+
+def _sip_direction(project_id: str) -> dict[str, Any]:
+    return {
+        "type": "inbound",
+        "auth_mode": "ip",
+        "sip_endpoint": _sip_endpoint(project_id),
+        "options": {
+            "port": 5061,
+            "transport": "tls",
+            "secure_media": True,
+        },
+    }
+
+
+def _provider_message(response: httpx.Response) -> str:
+    try:
+        data = response.json()
+        if isinstance(data, dict):
+            value = data.get("message") or data.get("error") or data.get("errors") or data.get("detail")
+            if value:
+                return str(value)[:800]
+    except Exception:
+        pass
+    return response.text[:800]
 
 
 def _provider_error(response: httpx.Response, prefix: str) -> HTTPException:
-    message = ""
-    try:
-        data = response.json()
-        message = str(data.get("message") or data.get("error") or data.get("errors") or data.get("detail") or "")[:800]
-    except Exception:
-        message = response.text[:800]
+    message = _provider_message(response)
     detail = f"{prefix} ({response.status_code})"
     if message:
         detail += f": {message}"
     return HTTPException(502, detail)
+
+
+def _inbound_from_payload(payload: Any) -> dict[str, Any] | None:
+    if not isinstance(payload, dict):
+        return None
+    data = payload.get("data")
+    if not isinstance(data, dict):
+        return None
+    inbound = data.get("inbound")
+    return inbound if isinstance(inbound, dict) and inbound else None
+
+
+def _build_write(current_payload: Any, number: str, project_id: str) -> tuple[str, str, dict[str, Any]]:
+    direction = _sip_direction(project_id)
+    if _inbound_from_payload(current_payload):
+        return (
+            "update",
+            "https://api.bland.ai/v1/sip/update",
+            {"phone_number": number, "updates": direction},
+        )
+    return (
+        "attach",
+        "https://api.bland.ai/v1/sip/attach",
+        {"phone_number": number, "service": "sip", "directions": [direction]},
+    )
+
+
+async def _read_config(client: httpx.AsyncClient, key: str, number: str) -> tuple[httpx.Response, Any]:
+    response = await client.get(
+        "https://api.bland.ai/v1/sip",
+        headers={"authorization": key},
+        params={"phone_number": number},
+    )
+    payload: Any = {}
+    if response.status_code < 400:
+        try:
+            payload = response.json()
+        except Exception:
+            payload = {}
+    return response, payload
+
+
+async def _validate_destination(client: httpx.AsyncClient, key: str, endpoint: str) -> tuple[bool, int, str | None]:
+    response = await client.post(
+        "https://api.bland.ai/v1/sip/parse-destination",
+        headers={"authorization": key, "Content-Type": "application/json"},
+        json={"input": endpoint},
+    )
+    if response.status_code < 400:
+        return True, response.status_code, None
+    return False, response.status_code, _provider_message(response) or None
+
+
+def _verification(payload: Any, project_id: str) -> dict[str, Any]:
+    inbound = _inbound_from_payload(payload)
+    actual_endpoint = str((inbound or {}).get("sip_endpoint") or "")
+    options = (inbound or {}).get("options") if isinstance((inbound or {}).get("options"), dict) else {}
+    endpoint_ok = project_id.lower() in actual_endpoint.lower() and "sip.api.openai.com" in actual_endpoint.lower()
+    transport_value = str(options.get("transport") or ("tls" if "transport=tls" in actual_endpoint.lower() else ""))
+    transport_ok = transport_value.lower() == "tls"
+    secure_media = options.get("secure_media")
+    return {
+        "inbound": inbound,
+        "actual_endpoint": actual_endpoint,
+        "options": options,
+        "endpoint_ok": endpoint_ok,
+        "transport_ok": transport_ok,
+        "sip_verified": bool(inbound) and endpoint_ok and transport_ok,
+        "secure_media": secure_media,
+    }
 
 
 @app.get("/voice/inbound/status")
@@ -90,36 +184,82 @@ async def inbound_status(authorization: str | None = Header(None, alias="Authori
         }
 
     number = _normalize_phone(number_raw)
-    expected_endpoint = _sip_endpoint(project_id)
     async with httpx.AsyncClient(timeout=20) as client:
-        response = await client.get(
-            "https://api.bland.ai/v1/sip",
-            headers={"authorization": key},
-            params={"phone_number": number},
-        )
+        response, payload = await _read_config(client, key, number)
     if response.status_code >= 400:
         raise _provider_error(response, "Unable to read Bland inbound SIP configuration")
 
-    payload = response.json()
-    inbound = ((payload.get("data") or {}).get("inbound")) if isinstance(payload, dict) else None
-    actual_endpoint = str((inbound or {}).get("sip_endpoint") or "")
-    options = (inbound or {}).get("options") or {}
-    endpoint_ok = expected_endpoint.lower() in actual_endpoint.lower() or project_id.lower() in actual_endpoint.lower()
-    transport_ok = str(options.get("transport") or "tls").lower() == "tls"
-    sip_verified = bool(inbound) and endpoint_ok and transport_ok
-
+    check = _verification(payload, project_id)
     return {
-        "status": "ok" if sip_verified else "configuration_required",
+        "status": "ok" if check["sip_verified"] else "configuration_required",
         "service": "inbound_voice_transport",
         "phone_number": number,
         "provider": "bland_sip",
         "destination": "openai_realtime",
-        "expected_sip_endpoint": expected_endpoint,
-        "configured_sip_endpoint": actual_endpoint or None,
-        "transport": options.get("transport"),
-        "secure_media": options.get("secure_media"),
-        "sip_verified": sip_verified,
+        "expected_sip_endpoint": _sip_endpoint(project_id),
+        "configured_sip_endpoint": check["actual_endpoint"] or None,
+        "transport": check["options"].get("transport"),
+        "secure_media": check["secure_media"],
+        "sip_verified": check["sip_verified"],
         "openai_incoming_webhook_path": "/voice/openai/sip/incoming",
+        "fail_closed": True,
+    }
+
+
+@app.get("/voice/inbound/doctor")
+async def inbound_doctor(authorization: str | None = Header(None, alias="Authorization")) -> dict[str, Any]:
+    """Read-only preflight for Bland -> OpenAI Realtime SIP routing."""
+    _owner(authorization)
+    key = _bland_key()
+    number_raw = _inbound_number()
+    project_id = _openai_project_id()
+    missing = [
+        name for name, value in (
+            ("BLAND_API_KEY", key),
+            ("BLAND_INBOUND_NUMBER", number_raw),
+            ("OPENAI_PROJECT_ID", project_id),
+        ) if not value
+    ]
+    if missing:
+        return {
+            "status": "blocked",
+            "service": "inbound_voice_doctor",
+            "missing": missing,
+            "preflight_ok": False,
+            "fail_closed": True,
+        }
+
+    number = _normalize_phone(number_raw)
+    endpoint = _sip_endpoint(project_id)
+    async with httpx.AsyncClient(timeout=20) as client:
+        read, current = await _read_config(client, key, number)
+        if read.status_code >= 400:
+            return {
+                "status": "blocked",
+                "service": "inbound_voice_doctor",
+                "read_status": read.status_code,
+                "provider_message": _provider_message(read) or None,
+                "preflight_ok": False,
+                "fail_closed": True,
+            }
+        parse_ok, parse_status, parse_message = await _validate_destination(client, key, endpoint)
+
+    operation, _, _ = _build_write(current, number, project_id)
+    check = _verification(current, project_id)
+    data = current.get("data") if isinstance(current, dict) and isinstance(current.get("data"), dict) else {}
+    return {
+        "status": "ready" if parse_ok else "blocked",
+        "service": "inbound_voice_doctor",
+        "phone_number": number,
+        "expected_sip_endpoint": endpoint,
+        "current_inbound_exists": bool(_inbound_from_payload(current)),
+        "current_sip_verified": check["sip_verified"],
+        "recommended_operation": operation,
+        "parse_destination_status": parse_status,
+        "parse_destination_ok": parse_ok,
+        "provider_message": parse_message,
+        "provider_org_id": data.get("org_id") or data.get("organization_id"),
+        "preflight_ok": parse_ok,
         "fail_closed": True,
     }
 
@@ -139,64 +279,44 @@ async def configure_inbound(authorization: str | None = Header(None, alias="Auth
 
     number = _normalize_phone(number_raw)
     endpoint = _sip_endpoint(project_id)
-    body = {
-        "phone_number": number,
-        "service": "sip",
-        "directions": [
-            {
-                "type": "inbound",
-                "auth_mode": "ip",
-                "sip_endpoint": endpoint,
-                "options": {
-                    "port": 5061,
-                    "transport": "tls",
-                    "secure_media": True,
-                },
-            }
-        ],
-    }
-
     async with httpx.AsyncClient(timeout=30) as client:
-        attach = await client.post(
-            "https://api.bland.ai/v1/sip/attach",
+        read, current = await _read_config(client, key, number)
+        if read.status_code >= 400:
+            raise _provider_error(read, "Unable to read Bland SIP configuration before update")
+
+        parse_ok, parse_status, parse_message = await _validate_destination(client, key, endpoint)
+        if not parse_ok:
+            logger.warning("Bland SIP destination preflight rejected status=%s message=%s", parse_status, parse_message)
+            raise HTTPException(502, f"Bland rejected OpenAI SIP destination preflight ({parse_status}): {parse_message or 'no provider detail'}")
+
+        operation, url, body = _build_write(current, number, project_id)
+        write = await client.post(
+            url,
             headers={"authorization": key, "Content-Type": "application/json"},
             json=body,
         )
-        if attach.status_code >= 400:
-            raise _provider_error(attach, "Bland rejected inbound SIP configuration")
+        if write.status_code >= 400:
+            message = _provider_message(write)
+            logger.warning("Bland SIP %s rejected status=%s message=%s", operation, write.status_code, message)
+            raise _provider_error(write, f"Bland rejected inbound SIP {operation}")
 
-        attach_payload = attach.json()
-        data = attach_payload.get("data") or {}
-        configured = data.get("configured") or []
-        failed = data.get("failed") or []
-        if number not in configured or failed:
-            raise HTTPException(502, f"Bland did not confirm inbound SIP configuration: failed={failed}")
-
-        verify = await client.get(
-            "https://api.bland.ai/v1/sip",
-            headers={"authorization": key},
-            params={"phone_number": number},
-        )
+        verify, verified_payload = await _read_config(client, key, number)
         if verify.status_code >= 400:
-            raise _provider_error(verify, "Inbound SIP attach succeeded but verification failed")
+            raise _provider_error(verify, "Inbound SIP write succeeded but verification failed")
 
-    verified_payload = verify.json()
-    inbound = ((verified_payload.get("data") or {}).get("inbound")) if isinstance(verified_payload, dict) else None
-    actual_endpoint = str((inbound or {}).get("sip_endpoint") or "")
-    options = (inbound or {}).get("options") or {}
-    endpoint_ok = endpoint.lower() in actual_endpoint.lower() or project_id.lower() in actual_endpoint.lower()
-    transport_ok = str(options.get("transport") or "tls").lower() == "tls"
-    if not inbound or not endpoint_ok or not transport_ok:
+    check = _verification(verified_payload, project_id)
+    if not check["sip_verified"]:
         raise HTTPException(502, "Bland returned success but inbound SIP verification did not match the expected OpenAI Realtime destination")
 
     return {
         "status": "configured",
+        "operation": operation,
         "phone_number": number,
         "provider": "bland_sip",
         "destination": "openai_realtime",
-        "sip_endpoint": actual_endpoint,
-        "transport": options.get("transport") or "tls",
-        "secure_media": options.get("secure_media"),
+        "sip_endpoint": check["actual_endpoint"],
+        "transport": check["options"].get("transport") or "tls",
+        "secure_media": check["secure_media"],
         "openai_incoming_webhook_path": "/voice/openai/sip/incoming",
         "next_gate": "OpenAI project webhook must deliver realtime.call.incoming events to the incoming webhook path",
         "fail_closed": True,
