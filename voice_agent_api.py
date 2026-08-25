@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 from auth import verify_owner_token
 from insforge_backend import get_backend
 
-app = FastAPI(title="SAHJONY OpenAI Realtime Voice Agent", version="2.1.0", docs_url=None, redoc_url=None)
+app = FastAPI(title="SAHJONY OpenAI Realtime Voice Agent", version="2.2.0", docs_url=None, redoc_url=None)
 
 
 def _now() -> str:
@@ -72,6 +72,10 @@ def _base_url() -> str:
     return _env("BUSINESS_CANONICAL_WEBSITE", "APP_URL") or "https://www.sahjony.com"
 
 
+def _bland_pathway_id() -> str:
+    return _env("BLAND_PATHWAY_ID")
+
+
 def _voice_instructions(context: str | None = None) -> str:
     extra = (context or "").strip()[:4000]
     website = _base_url()
@@ -122,11 +126,18 @@ async def _store(row: dict[str, Any]) -> None:
 @app.get("/voice/health")
 async def health() -> dict[str, Any]:
     openai = bool(_openai_key())
-    bland_transport = bool(_bland_key()) and bool(_inbound_number() or _outbound_number())
+    bland_key = bool(_bland_key())
+    inbound_number = bool(_inbound_number())
+    outbound_number = bool(_outbound_number())
+    project_id = bool(_openai_project_id())
+    pathway = bool(_bland_pathway_id())
+    bland_transport = bland_key and bool(inbound_number or outbound_number)
+    inbound_prereqs = bland_key and inbound_number and project_id
+    outbound_prereqs = bland_key and outbound_number
     return {
         "status": "ok" if openai else "configuration_required",
         "service": "sahjony-openai-realtime-voice",
-        "version": "2.1.0",
+        "version": "2.2.0",
         "business_identity": "SAHJONY Global Trade",
         "voice_engine": "openai_realtime",
         "reasoning_engine": "openai",
@@ -134,12 +145,17 @@ async def health() -> dict[str, Any]:
         "realtime_model": _realtime_model(),
         "realtime_voice": _realtime_voice(),
         "openai_configured": openai,
-        "openai_project_id_configured": bool(_openai_project_id()),
+        "openai_project_id_configured": project_id,
+        "bland_api_configured": bland_key,
+        "bland_pathway_configured": pathway,
+        "inbound_number_configured": inbound_number,
+        "outbound_number_configured": outbound_number,
+        "inbound_prerequisites_ready": inbound_prereqs,
+        "outbound_prerequisites_ready": outbound_prereqs,
+        "pathway_sync_available": bland_key and pathway,
         "telephony_transport": "bland_sip" if bland_transport else "sip_required",
         "bland_role": "telephony_sip_only",
         "bland_voice_ai_enabled": False,
-        "inbound_number_configured": bool(_inbound_number()),
-        "outbound_number_configured": bool(_outbound_number()),
         "language_mode": "worldwide_auto_detect",
         "business_scope": "universal_commercial_inbound",
         "answer_policy": "verified_facts_only_no_guessing",
@@ -160,10 +176,6 @@ class BlandPathwaySyncRequest(BaseModel):
     confirmation: str | None = Field(default=None, max_length=80)
 
 
-def _bland_pathway_id() -> str:
-    return _env("BLAND_PATHWAY_ID")
-
-
 def _pathway_nodes() -> list[dict[str, Any]]:
     return [
         {
@@ -172,11 +184,7 @@ def _pathway_nodes() -> list[dict[str, Any]]:
             "data": {
                 "name": "Welcome & Intent",
                 "isStart": True,
-                "prompt": (
-                    "Greet the caller in the language they use. Introduce yourself as SARA, "
-                    "SAHJONY Global Trade's AI virtual assistant, disclose that the call is not "
-                    "being recorded, and ask how you may help. Ask one concise question at a time."
-                ),
+                "prompt": "Greet the caller in the language they use. Introduce yourself as SARA, SAHJONY Global Trade's AI virtual assistant, disclose that the call is not being recorded, and ask how you may help. Ask one concise question at a time.",
             },
         },
         {
@@ -184,13 +192,7 @@ def _pathway_nodes() -> list[dict[str, Any]]:
             "type": "Default",
             "data": {
                 "name": "General Trade Qualification",
-                "prompt": (
-                    "Qualify the international trade request in the caller's language. Collect one "
-                    "field at a time: full name, company, country, callback number or email, buyer "
-                    "or seller status, product or service, specifications, quantity, destination, "
-                    "timeline, target price or budget, and preferred Incoterm. Never invent pricing, "
-                    "inventory, suppliers, certifications, approvals, or delivery dates."
-                ),
+                "prompt": "Qualify the international trade request in the caller's language. Collect one field at a time: full name, company, country, callback number or email, buyer or seller status, product or service, specifications, quantity, destination, timeline, target price or budget, and preferred Incoterm. Never invent pricing, inventory, suppliers, certifications, approvals, or delivery dates.",
             },
         },
         {
@@ -198,15 +200,7 @@ def _pathway_nodes() -> list[dict[str, Any]]:
             "type": "Default",
             "data": {
                 "name": "Fuel & Isotank Qualification",
-                "prompt": (
-                    "Qualify the fuel or isotank inquiry in the caller's language. Explain when "
-                    "relevant that SAHJONY facilitates commercial coordination and does not claim "
-                    "to be the direct producer. Collect one field at a time: full name, company, "
-                    "country, contact, buyer or seller status, fuel type and grade, shipment quantity, "
-                    "frequency or monthly volume, destination port, Incoterm, inspection requirements, "
-                    "timeline, target price, and proof-of-funds readiness. Never request banking "
-                    "credentials or invent availability, allocation, licenses, pricing, or delivery."
-                ),
+                "prompt": "Qualify the fuel or isotank inquiry in the caller's language. Explain when relevant that SAHJONY facilitates commercial coordination and does not claim to be the direct producer. Collect one field at a time: full name, company, country, contact, buyer or seller status, fuel type and grade, shipment quantity, frequency or monthly volume, destination port, Incoterm, inspection requirements, timeline, target price, and proof-of-funds readiness. Never request banking credentials or invent availability, allocation, licenses, pricing, or delivery.",
             },
         },
         {
@@ -214,14 +208,7 @@ def _pathway_nodes() -> list[dict[str, Any]]:
             "type": "Default",
             "data": {
                 "name": "Partner Enrollment",
-                "prompt": (
-                    "Assist with enrolling the caller, Reynier, or another prospective partner in "
-                    "the caller's language. Collect one field at a time: full legal name, country and "
-                    "city, phone, email, company, experience, languages, target market, industries, "
-                    "intended role, relevant relationships, and reason for joining. State that review "
-                    "is required and submission does not guarantee approval. Do not request identity "
-                    "numbers, passwords, banking credentials, or payment."
-                ),
+                "prompt": "Assist with enrolling the caller, Reynier, or another prospective partner in the caller's language. Collect one field at a time: full legal name, country and city, phone, email, company, experience, languages, target market, industries, intended role, relevant relationships, and reason for joining. State that review is required and submission does not guarantee approval. Do not request identity numbers, passwords, banking credentials, or payment.",
             },
         },
         {
@@ -229,13 +216,7 @@ def _pathway_nodes() -> list[dict[str, Any]]:
             "type": "Default",
             "data": {
                 "name": "Human Callback",
-                "prompt": (
-                    "Explain in the caller's language that live transfer is unavailable but a specialist "
-                    "callback can be requested. Collect one field at a time: name, company, verified "
-                    "callback number, country, preferred language, reason, time zone, preferred date/time, "
-                    "and whether voicemail or SMS is acceptable. Do not promise a response time and never "
-                    "dial either Bland number as a transfer destination."
-                ),
+                "prompt": "Explain that a live transfer is unavailable. Collect the caller's name, company, callback number or email, reason for the callback, urgency, timezone, and preferred callback window. Do not promise an exact callback time unless verified.",
             },
         },
         {
@@ -243,11 +224,7 @@ def _pathway_nodes() -> list[dict[str, Any]]:
             "type": "Default",
             "data": {
                 "name": "Confirm Information",
-                "prompt": (
-                    "Summarize the collected information concisely in the caller's language. Ask the "
-                    "caller to confirm or correct it. Explain that a SAHJONY specialist will review the "
-                    "request. Do not promise approval, pricing, availability, delivery, or response time."
-                ),
+                "prompt": "Summarize the caller-provided information concisely in the caller's language and ask them to correct anything inaccurate. Do not add unverified facts or commitments.",
             },
         },
         {
@@ -255,20 +232,13 @@ def _pathway_nodes() -> list[dict[str, Any]]:
             "type": "Default",
             "data": {
                 "name": "Opt Out",
-                "prompt": (
-                    "Immediately acknowledge the request to stop in the caller's language. Confirm briefly "
-                    "that the AI interaction will end. Ask no questions, collect no further information, "
-                    "and do not persuade the caller to continue."
-                ),
+                "prompt": "Acknowledge the caller's opt-out, do-not-call, removal, refusal of AI processing, or request to end. State that the AI interaction will end. Ask no questions, collect no further information, and do not persuade the caller to continue.",
             },
         },
         {
             "id": "end_call",
             "type": "End Call",
-            "data": {
-                "name": "End Call",
-                "prompt": "Thank the caller professionally in their language and end the call without new questions or promises.",
-            },
+            "data": {"name": "End Call", "prompt": "Thank the caller professionally in their language and end the call without new questions or promises."},
         },
     ]
 
@@ -287,10 +257,7 @@ def _pathway_edges() -> list[dict[str, str]]:
         ("confirm_end", "confirm_information", "end_call", "The caller confirms the summary or declines further corrections."),
         ("optout_end", "opt_out", "end_call", "The opt-out request has been acknowledged."),
     ]
-    return [
-        {"id": edge_id, "source": source, "target": target, "label": label}
-        for edge_id, source, target, label in definitions
-    ]
+    return [{"id": edge_id, "source": source, "target": target, "label": label} for edge_id, source, target, label in definitions]
 
 
 def _safe_pathway_summary(payload: Any) -> dict[str, Any]:
@@ -302,20 +269,11 @@ def _safe_pathway_summary(payload: Any) -> dict[str, Any]:
         if isinstance(node, dict):
             node_data = node.get("data") if isinstance(node.get("data"), dict) else {}
             names.append(str(node_data.get("name") or node.get("id") or "unnamed")[:120])
-    return {
-        "name": str(data.get("name") or "")[:160],
-        "version_number": data.get("version_number"),
-        "node_count": len(nodes),
-        "edge_count": len(edges),
-        "node_names": names,
-    }
+    return {"name": str(data.get("name") or "")[:160], "version_number": data.get("version_number"), "node_count": len(nodes), "edge_count": len(edges), "node_names": names}
 
 
 @app.post("/voice/bland/pathway/sync")
-async def sync_bland_pathway(
-    payload: BlandPathwaySyncRequest,
-    authorization: str | None = Header(None, alias="Authorization"),
-):
+async def sync_bland_pathway(payload: BlandPathwaySyncRequest, authorization: str | None = Header(None, alias="Authorization")):
     _owner(authorization)
     key = _bland_key()
     pathway_id = _bland_pathway_id()
@@ -323,7 +281,6 @@ async def sync_bland_pathway(
         raise HTTPException(503, "BLAND_API_KEY is not configured")
     if not pathway_id:
         raise HTTPException(503, "BLAND_PATHWAY_ID is not configured")
-
     url = f"https://api.bland.ai/v1/pathway/{pathway_id}/version/{payload.version_number}"
     headers = {"authorization": key, "Content-Type": "application/json"}
     async with httpx.AsyncClient(timeout=30) as client:
@@ -332,25 +289,12 @@ async def sync_bland_pathway(
             raise HTTPException(502, f"Unable to read Bland pathway version ({current.status_code})")
         current_payload = current.json()
         before = _safe_pathway_summary(current_payload)
-
-        planned = {
-            "name": "SAHJONY Global Trade — Inbound Qualification · Compliance Final",
-            "nodes": _pathway_nodes(),
-            "edges": _pathway_edges(),
-        }
-        result: dict[str, Any] = {
-            "status": "dry_run",
-            "pathway_id": pathway_id,
-            "target_version": payload.version_number,
-            "before": before,
-            "planned": _safe_pathway_summary(planned),
-            "production_promoted": False,
-        }
+        planned = {"name": "SAHJONY Global Trade — Inbound Qualification · Compliance Final", "nodes": _pathway_nodes(), "edges": _pathway_edges()}
+        result: dict[str, Any] = {"status": "dry_run", "pathway_id": pathway_id, "target_version": payload.version_number, "before": before, "planned": _safe_pathway_summary(planned), "production_promoted": False}
         if not payload.apply:
             return result
         if payload.confirmation != f"SYNC_VERSION_{payload.version_number}":
             raise HTTPException(409, f"Confirmation must equal SYNC_VERSION_{payload.version_number}")
-
         update = await client.post(url, headers=headers, json=planned)
         if update.status_code >= 400:
             raise HTTPException(502, f"Bland pathway update failed ({update.status_code})")
@@ -358,18 +302,12 @@ async def sync_bland_pathway(
         if verify.status_code >= 400:
             raise HTTPException(502, f"Bland pathway updated but verification failed ({verify.status_code})")
         after = _safe_pathway_summary(verify.json())
-
     expected_names = [str(node["data"]["name"]) for node in planned["nodes"]]
     if after["node_count"] != len(planned["nodes"]) or after["edge_count"] != len(planned["edges"]):
         raise HTTPException(502, "Bland pathway verification did not match the planned node and edge counts")
     if sorted(after["node_names"]) != sorted(expected_names):
         raise HTTPException(502, "Bland pathway verification did not match the planned node names")
-    return {
-        **result,
-        "status": "synchronized",
-        "after": after,
-        "production_promoted": False,
-    }
+    return {**result, "status": "synchronized", "after": after, "production_promoted": False}
 
 
 @app.post("/voice/sol/reason")
@@ -377,18 +315,9 @@ async def sol_reason(payload: SolReasoningRequest, authorization: str | None = H
     _owner(authorization)
     if not _openai_key():
         raise HTTPException(503, "OpenAI is not configured")
-    body = {
-        "model": _reasoning_model(),
-        "instructions": _voice_instructions(payload.context),
-        "input": payload.transcript,
-        "max_output_tokens": 700,
-    }
+    body = {"model": _reasoning_model(), "instructions": _voice_instructions(payload.context), "input": payload.transcript, "max_output_tokens": 700}
     async with httpx.AsyncClient(timeout=45) as client:
-        response = await client.post(
-            "https://api.openai.com/v1/responses",
-            headers={"Authorization": f"Bearer {_openai_key()}", "Content-Type": "application/json"},
-            json=body,
-        )
+        response = await client.post("https://api.openai.com/v1/responses", headers={"Authorization": f"Bearer {_openai_key()}", "Content-Type": "application/json"}, json=body)
     if response.status_code >= 400:
         raise HTTPException(502, f"OpenAI Sol reasoning request failed ({response.status_code})")
     data = response.json()
@@ -403,7 +332,6 @@ async def sol_reason(payload: SolReasoningRequest, authorization: str | None = H
 
 @app.post("/voice/openai/sip/incoming")
 async def openai_sip_incoming(request: Request):
-    """OpenAI webhook target for realtime.call.incoming events."""
     if not _openai_key():
         raise HTTPException(503, "OpenAI is not configured")
     payload = await request.json()
@@ -414,75 +342,29 @@ async def openai_sip_incoming(request: Request):
         return {"status": "ignored", "event_type": event_type}
     if not call_id:
         raise HTTPException(400, "Missing OpenAI realtime call_id")
-    accept = {
-        "type": "realtime",
-        "model": _realtime_model(),
-        "instructions": _voice_instructions(),
-        "output_modalities": ["audio"],
-        "audio": {
-            "output": {"voice": _realtime_voice()},
-            "input": {"turn_detection": {"type": "semantic_vad"}},
-        },
-        "tracing": "auto",
-    }
+    accept = {"type": "realtime", "model": _realtime_model(), "instructions": _voice_instructions(), "output_modalities": ["audio"], "audio": {"output": {"voice": _realtime_voice()}, "input": {"turn_detection": {"type": "semantic_vad"}}}, "tracing": "auto"}
     async with httpx.AsyncClient(timeout=30) as client:
-        response = await client.post(
-            f"https://api.openai.com/v1/realtime/calls/{call_id}/accept",
-            headers={"Authorization": f"Bearer {_openai_key()}", "Content-Type": "application/json"},
-            json=accept,
-        )
+        response = await client.post(f"https://api.openai.com/v1/realtime/calls/{call_id}/accept", headers={"Authorization": f"Bearer {_openai_key()}", "Content-Type": "application/json"}, json=accept)
     if response.status_code >= 400:
         raise HTTPException(502, f"OpenAI Realtime SIP accept failed ({response.status_code})")
-    await _store({
-        "call_id": call_id,
-        "direction": "inbound",
-        "status": "accepted",
-        "provider": "openai_realtime",
-        "reasoning_model": _reasoning_model(),
-        "realtime_model": _realtime_model(),
-        "telephony_transport": "sip",
-        "recording_enabled": False,
-        "created_at": _now(),
-        "updated_at": _now(),
-    })
+    await _store({"call_id": call_id, "direction": "inbound", "status": "accepted", "provider": "openai_realtime", "reasoning_model": _reasoning_model(), "realtime_model": _realtime_model(), "telephony_transport": "sip", "recording_enabled": False, "created_at": _now(), "updated_at": _now()})
     return {"status": "accepted", "call_id": call_id, "voice_engine": "openai_realtime", "model": _realtime_model()}
 
 
 @app.post("/voice/sip/configure-bland-inbound")
 async def configure_bland_inbound(authorization: str | None = Header(None, alias="Authorization")):
-    """Use Bland only to forward its inbound number over SIP to OpenAI Realtime."""
     _owner(authorization)
     if not _bland_key() or not _inbound_number():
         raise HTTPException(503, "Bland SIP transport is not configured")
     if not _openai_project_id():
         raise HTTPException(503, "OPENAI_PROJECT_ID is required to route SIP directly to OpenAI Realtime")
     sip_endpoint = f"sip:{_openai_project_id()}@sip.api.openai.com;transport=tls"
-    body = {
-        "phone_number": _inbound_number(),
-        "service": "sip",
-        "directions": [{
-            "type": "inbound",
-            "auth_mode": "ip",
-            "sip_endpoint": sip_endpoint,
-            "options": {"port": 5061, "transport": "tls", "secure_media": True},
-        }],
-    }
+    body = {"phone_number": _inbound_number(), "service": "sip", "directions": [{"type": "inbound", "auth_mode": "ip", "sip_endpoint": sip_endpoint, "options": {"port": 5061, "transport": "tls", "secure_media": True}}]}
     async with httpx.AsyncClient(timeout=30) as client:
-        response = await client.post(
-            "https://api.bland.ai/v1/sip/attach",
-            headers={"authorization": _bland_key(), "Content-Type": "application/json"},
-            json=body,
-        )
+        response = await client.post("https://api.bland.ai/v1/sip/attach", headers={"authorization": _bland_key(), "Content-Type": "application/json"}, json=body)
     if response.status_code >= 400:
         raise HTTPException(502, f"Bland SIP routing update failed ({response.status_code})")
-    return {
-        "status": "configured",
-        "phone_number": _inbound_number(),
-        "sip_endpoint": sip_endpoint,
-        "voice_engine": "openai_realtime",
-        "bland_role": "telephony_sip_only",
-        "bland_voice_ai_enabled": False,
-    }
+    return {"status": "configured", "phone_number": _inbound_number(), "sip_endpoint": sip_endpoint, "voice_engine": "openai_realtime", "bland_role": "telephony_sip_only", "bland_voice_ai_enabled": False}
 
 
 @app.get("/voice/sip/status")
@@ -491,11 +373,7 @@ async def sip_status(authorization: str | None = Header(None, alias="Authorizati
     if not _bland_key() or not _inbound_number():
         raise HTTPException(503, "Bland SIP transport is not configured")
     async with httpx.AsyncClient(timeout=20) as client:
-        response = await client.get(
-            "https://api.bland.ai/v1/sip",
-            headers={"authorization": _bland_key()},
-            params={"phone_number": _inbound_number()},
-        )
+        response = await client.get("https://api.bland.ai/v1/sip", headers={"authorization": _bland_key()}, params={"phone_number": _inbound_number()})
     if response.status_code >= 400:
         raise HTTPException(502, f"Unable to read Bland SIP configuration ({response.status_code})")
     return {"status": "ok", "voice_engine": "openai_realtime", "bland_role": "telephony_sip_only", "sip": response.json().get("data")}
@@ -504,10 +382,7 @@ async def sip_status(authorization: str | None = Header(None, alias="Authorizati
 @app.post("/voice/outbound")
 async def outbound_disabled_for_bland_voice(authorization: str | None = Header(None, alias="Authorization")):
     _owner(authorization)
-    raise HTTPException(
-        503,
-        "Bland Voice AI outbound calling is disabled by policy. Outbound must originate through an OpenAI-Realtime-compatible SIP carrier/PBX so OpenAI remains the exclusive conversational voice engine.",
-    )
+    raise HTTPException(503, "Bland Voice AI outbound calling is disabled by policy. Outbound must originate through an OpenAI-Realtime-compatible SIP carrier/PBX so OpenAI remains the exclusive conversational voice engine.")
 
 
 @app.post("/voice/webhook")
@@ -518,21 +393,9 @@ async def legacy_bland_webhook(request: Request, x_bland_signature: str | None =
         digest = hashlib.sha256(secret.encode() + raw).hexdigest()
         supplied = (x_bland_signature or request.headers.get("X-Webhook-Secret") or "").strip()
         if not supplied or not (secrets.compare_digest(supplied, secret) or secrets.compare_digest(supplied, digest)):
-            raise HTTPException(401, "Invalid voice webhook signature")
+            raise HTTPException(401, "Invalid Bland webhook signature")
     try:
-        payload = json.loads(raw.decode() or "{}")
+        payload = json.loads(raw.decode("utf-8") or "{}")
     except Exception:
-        payload = {}
-    call_id = str(payload.get("call_id") or payload.get("id") or f"call_{secrets.token_urlsafe(12)}")
-    await _store({
-        "call_id": call_id,
-        "direction": payload.get("direction") or "unknown",
-        "status": payload.get("status") or "legacy_event",
-        "provider": "bland_sip",
-        "voice_engine": "openai_realtime",
-        "recording_enabled": False,
-        "provider_payload": payload,
-        "created_at": _now(),
-        "updated_at": _now(),
-    })
-    return {"status": "accepted", "call_id": call_id, "bland_role": "telephony_sip_only"}
+        raise HTTPException(400, "Invalid JSON payload")
+    return {"status": "legacy_transport_event_received", "provider": "bland", "voice_engine": "openai_realtime", "event": payload.get("status") or payload.get("event")}
