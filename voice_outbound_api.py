@@ -12,8 +12,9 @@ from pydantic import BaseModel, Field
 
 from auth import verify_owner_token
 from insforge_backend import get_backend
+from voice_inbound_api import app as voice_inbound_app
 
-app = FastAPI(title="SAHJONY Bland Outbound Transport", version="1.0.0", docs_url=None, redoc_url=None)
+app = FastAPI(title="SAHJONY Bland Outbound Transport", version="1.0.1", docs_url=None, redoc_url=None)
 
 
 def _env(*names: str) -> str:
@@ -132,9 +133,6 @@ async def outbound(payload: OutboundCall, authorization: str | None = Header(Non
         "source": "sahjony_global_trade_os",
     }
 
-    # Keep this payload intentionally conservative. This exact shape is compatible
-    # with Bland's current Send Call API and mirrors the last production request
-    # shape that successfully queued an outbound call.
     body: dict[str, Any] = {
         "phone_number": phone_number,
         "from": from_number,
@@ -194,3 +192,6 @@ async def outbound(payload: OutboundCall, authorization: str | None = Header(Non
         "language_mode": language or "auto",
         "recording_enabled": False,
     }
+
+
+app.include_router(voice_inbound_app.router)
