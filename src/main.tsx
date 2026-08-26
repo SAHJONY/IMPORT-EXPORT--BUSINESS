@@ -45,6 +45,7 @@ function boot(){
  if(!rootElement)return;
  const path=location.pathname;
  if(path==='/sign-in'||path.startsWith('/sign-in/')){createRoot(rootElement).render(withI18n(<StrictMode><AppBoundary><NeonAuthPage/></AppBoundary></StrictMode>));return}
+ if(path==='/owner'){location.replace('/owner/deals');return}
  if(path==='/owner/deals'||path.startsWith('/owner/deals/')){createRoot(rootElement).render(withI18n(<StrictMode><AppBoundary><DealCommandCenter/></AppBoundary></StrictMode>));return}
  const role=protectedRoleFromPath();
  if(role&&!sessionStorage.getItem(`sahjony.${role}.token`)){
