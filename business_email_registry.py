@@ -4,7 +4,7 @@ from typing import Dict, List
 from fastapi import FastAPI
 
 
-app = FastAPI(title="SAHJONY Business Email Registry", version="1.2.0", docs_url=None, redoc_url=None)
+app = FastAPI(title="SAHJONY Business Email Registry", version="1.3.0", docs_url=None, redoc_url=None)
 
 CANONICAL_DOMAIN = os.getenv("BUSINESS_CANONICAL_DOMAIN", "sahjony.com").strip().lower()
 CANONICAL_WEBSITE = os.getenv("BUSINESS_CANONICAL_WEBSITE", "https://www.sahjony.com").strip()
@@ -13,6 +13,7 @@ OWNER_EMAIL = os.getenv("OWNER_EMAIL", "sahjonycapitalllc@outlook.com").strip().
 OPERATIONAL_MAILBOX = os.getenv("OPERATIONAL_MAILBOX", "sahjonyllc@gmail.com").strip().lower()
 MAILBOX_PROVIDER = os.getenv("MAILBOX_PROVIDER", "gmail").strip().lower()
 MAILBOX_AGENT_MANAGED = os.getenv("MAILBOX_AGENT_MANAGED", "true").strip().lower() == "true"
+CANONICAL_ALIASES_HOSTED_VERIFIED = os.getenv("CANONICAL_ALIASES_HOSTED_VERIFIED", "false").strip().lower() == "true"
 DIRECT_MAIL_DELIVERY_CONFIGURED = bool(
     os.getenv("SMTP_HOST", "").strip()
     or os.getenv("GMAIL_CLIENT_ID", "").strip()
@@ -30,25 +31,12 @@ def _addr(env_name: str, local_part: str) -> str:
 
 
 DEPARTMENTS: List[Dict[str, str]] = [
-    {"key": "executive", "name": "Executive Office", "email": _addr("EMAIL_EXECUTIVE", "executive"), "function": "Owner, executive decisions, escalations"},
-    {"key": "general", "name": "General Inquiries", "email": _addr("EMAIL_GENERAL", "info"), "function": "General business inquiries and routing"},
-    {"key": "sales", "name": "Sales & Commercial", "email": _addr("EMAIL_SALES", "sales"), "function": "New customers, quotes, commercial opportunities"},
-    {"key": "sourcing", "name": "Global Sourcing & Procurement", "email": _addr("EMAIL_SOURCING", "sourcing"), "function": "Supplier discovery, RFQs, procurement"},
-    {"key": "operations", "name": "Managed Trade Operations", "email": _addr("EMAIL_OPERATIONS", "operations"), "function": "Trade execution, case coordination, milestones"},
-    {"key": "compliance", "name": "Trade Compliance", "email": _addr("EMAIL_COMPLIANCE", "compliance"), "function": "Sanctions, export/import controls, release gates"},
-    {"key": "documents", "name": "Trade Documents", "email": _addr("EMAIL_DOCUMENTS", "documents"), "function": "Commercial documents, certificates, records"},
-    {"key": "logistics", "name": "Logistics & Shipping", "email": _addr("EMAIL_LOGISTICS", "logistics"), "function": "Freight, carriers, shipment coordination"},
-    {"key": "finance", "name": "Finance & Reconciliation", "email": _addr("EMAIL_FINANCE", "finance"), "function": "Invoices, payments, reconciliation"},
-    {"key": "accounts", "name": "Accounts Payable / Receivable", "email": _addr("EMAIL_ACCOUNTS", "accounts"), "function": "Bills, vendor/customer account statements"},
-    {"key": "customer_success", "name": "Customer Success", "email": _addr("EMAIL_CUSTOMER_SUCCESS", "customers"), "function": "Customer updates, service coordination"},
-    {"key": "support", "name": "Platform Support", "email": _addr("EMAIL_SUPPORT", "support"), "function": "Application access and technical support"},
-    {"key": "partnerships", "name": "Partners & Intermediaries", "email": _addr("EMAIL_PARTNERSHIPS", "partners"), "function": "Broker, forwarder, insurer, bank and channel partners"},
-    {"key": "us_import", "name": "U.S. Import Desk", "email": _addr("EMAIL_US_IMPORT", "imports"), "function": "U.S. import operations, customs coordination"},
-    {"key": "cuba", "name": "Cuba Private Sector Desk", "email": _addr("EMAIL_CUBA", "cuba"), "function": "Eligible Cuba private-sector commercial inquiries"},
-    {"key": "legal", "name": "Legal & Contracts", "email": _addr("EMAIL_LEGAL", "legal"), "function": "Contracts, terms, legal notices"},
-    {"key": "technology", "name": "AI & Technology", "email": _addr("EMAIL_TECHNOLOGY", "technology"), "function": "AI systems, integrations, platform engineering"},
-    {"key": "security", "name": "Security", "email": _addr("EMAIL_SECURITY", "security"), "function": "Security incidents, access-control escalation"},
-    {"key": "people", "name": "People & Administration", "email": _addr("EMAIL_PEOPLE", "hr"), "function": "Hiring, staff administration, internal operations"},
+    {"key": "sales", "name": "SAHJONY Global Trade — Sales", "email": _addr("EMAIL_SALES", "sales"), "function": "New customers, quotes, commercial opportunities"},
+    {"key": "sourcing", "name": "SAHJONY Global Trade — Sourcing", "email": _addr("EMAIL_SOURCING", "sourcing"), "function": "Supplier discovery, RFQs, procurement"},
+    {"key": "operations", "name": "SAHJONY Global Trade — Operations", "email": _addr("EMAIL_OPERATIONS", "operations"), "function": "Trade execution, case coordination, milestones"},
+    {"key": "compliance", "name": "SAHJONY Global Trade — Compliance", "email": _addr("EMAIL_COMPLIANCE", "compliance"), "function": "Sanctions, export/import controls, release gates"},
+    {"key": "finance", "name": "SAHJONY Global Trade — Finance", "email": _addr("EMAIL_FINANCE", "finance"), "function": "Invoices, payments, reconciliation"},
+    {"key": "logistics", "name": "SAHJONY Global Trade — Logistics", "email": _addr("EMAIL_LOGISTICS", "logistics"), "function": "Freight, carriers, shipment coordination"},
 ]
 
 
@@ -58,9 +46,13 @@ def _mailbox_state() -> dict:
         "provider": MAILBOX_PROVIDER,
         "agent_managed": MAILBOX_AGENT_MANAGED,
         "direct_platform_delivery_configured": DIRECT_MAIL_DELIVERY_CONFIGURED,
-        "direct_platform_delivery": "configured" if DIRECT_MAIL_DELIVERY_CONFIGURED else "fail-closed-until-provider-oauth-or-smtp-is-configured",
-        "canonical_aliases_hosted_verified": False,
-        "policy": "Use the operational mailbox for real communications. Departmental @sahjony.com identities remain routing identities until matching aliases/shared mailboxes are verified with a domain mail provider.",
+        "canonical_aliases_hosted_verified": CANONICAL_ALIASES_HOSTED_VERIFIED,
+        "customer_visible_sender_mode": "canonical_department" if CANONICAL_ALIASES_HOSTED_VERIFIED else "SAHJONY Global Trade display name over authenticated operational mailbox",
+        "policy": (
+            "Use authenticated canonical @sahjony.com department senders only after hosted aliases/mailboxes are verified."
+            if CANONICAL_ALIASES_HOSTED_VERIFIED
+            else "Use the authenticated operational mailbox for delivery while assigning every conversation to its canonical SAHJONY Global Trade department. Never spoof an unverified @sahjony.com From address."
+        ),
     }
 
 
@@ -69,14 +61,14 @@ def email_registry_health():
     return {
         "status": "ok",
         "service": "business-email-registry",
+        "version": "1.3.0",
         "canonical_domain": CANONICAL_DOMAIN,
         "canonical_website": CANONICAL_WEBSITE,
         "trade_os_url": TRADE_OS_URL,
-        "owner_identity_email": OWNER_EMAIL,
         "operational_mailbox": _mailbox_state(),
         "departments": len(DEPARTMENTS),
-        "routing_mode": "operational mailbox + canonical sahjony.com departmental identities",
-        "mailboxes_require_provider_configuration": not DIRECT_MAIL_DELIVERY_CONFIGURED,
+        "active_departments": [d["key"] for d in DEPARTMENTS],
+        "routing_mode": "department-aware canonical routing with authenticated transport",
     }
 
 
@@ -92,6 +84,7 @@ def email_configuration():
         "departments": DEPARTMENTS,
         "safety": {
             "secrets_exposed": False,
+            "unverified_from_spoofing": False,
             "sensitive_kyc_over_email": False,
             "binding_commitments_require_owner": True,
         },
@@ -104,8 +97,7 @@ def email_departments():
         "canonical_domain": CANONICAL_DOMAIN,
         "canonical_website": CANONICAL_WEBSITE,
         "trade_os_url": TRADE_OS_URL,
-        "owner_identity_email": OWNER_EMAIL,
         "operational_mailbox": _mailbox_state(),
         "departments": DEPARTMENTS,
-        "note": "Real external communications use the operational mailbox unless and until a verified domain-mail provider hosts the departmental aliases. The Owner login identity remains separate unless intentionally changed.",
+        "note": "Six canonical business departments are active for routing now. Until domain mail hosting is verified, external delivery remains on the authenticated operational mailbox with SAHJONY Global Trade as the customer-facing display identity.",
     }
