@@ -2,6 +2,7 @@ import {Component,StrictMode,type ErrorInfo,type PropsWithChildren,type ReactNod
 import {createRoot} from 'react-dom/client';
 import {I18nextProvider} from 'react-i18next';
 import App from './App';
+import DealCommandCenter from './DealCommandCenter';
 import NeonAuthPage from './NeonAuthPage';
 import i18n from './i18n';
 import '../app/globals.css';
@@ -44,6 +45,7 @@ function boot(){
  if(!rootElement)return;
  const path=location.pathname;
  if(path==='/sign-in'||path.startsWith('/sign-in/')){createRoot(rootElement).render(withI18n(<StrictMode><AppBoundary><NeonAuthPage/></AppBoundary></StrictMode>));return}
+ if(path==='/owner/deals'||path.startsWith('/owner/deals/')){createRoot(rootElement).render(withI18n(<StrictMode><AppBoundary><DealCommandCenter/></AppBoundary></StrictMode>));return}
  const role=protectedRoleFromPath();
  if(role&&!sessionStorage.getItem(`sahjony.${role}.token`)){
    const next=encodeURIComponent(location.pathname+location.search);
