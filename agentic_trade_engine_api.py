@@ -13,7 +13,7 @@ from ai_brain_api import call_anthropic, call_openai
 from auth import verify_owner_token
 from insforge_backend import get_backend, persistent_backend_status
 
-app = FastAPI(title='SAHJONY LLC Frontier Agentic Trade Engine', version='2.0.0', docs_url=None, redoc_url=None)
+app = FastAPI(title='SAHJONY LLC Frontier Agentic Trade Engine', version='2.1.0', docs_url=None, redoc_url=None)
 
 Task = Literal['OPPORTUNITY_TRIAGE','SUPPLIER_SOURCING','BUYER_QUALIFICATION','RFQ_BUILD','NEGOTIATION','COMPLIANCE_REVIEW','PAYMENT_REVIEW','LOGISTICS_PLAN','CATALOG_ENRICHMENT','EXECUTIVE_DECISION']
 Mode = Literal['AUTO','OPENAI','ANTHROPIC','CONSENSUS']
@@ -24,8 +24,9 @@ EXTERNAL_COMMITMENTS = {'SEND_EMAIL','SEND_RFQ','PLACE_ORDER','SEND_PAYMENT','RE
 OPENAI_FRONTIER = lambda: os.getenv('OPENAI_PRIMARY_MODEL','gpt-5.6-sol').strip() or 'gpt-5.6-sol'
 OPENAI_BALANCED = lambda: os.getenv('OPENAI_FAST_MODEL','gpt-5.6-terra').strip() or 'gpt-5.6-terra'
 OPENAI_ECONOMY = lambda: os.getenv('OPENAI_ECONOMY_MODEL','gpt-5.6-luna').strip() or 'gpt-5.6-luna'
-ANTHROPIC_FRONTIER = lambda: os.getenv('ANTHROPIC_PRIMARY_MODEL','claude-opus-5').strip() or 'claude-opus-5'
-ANTHROPIC_BALANCED = lambda: os.getenv('ANTHROPIC_FAST_MODEL','claude-sonnet-5').strip() or 'claude-sonnet-5'
+ANTHROPIC_FABLE = lambda: os.getenv('ANTHROPIC_FRONTIER_MODEL','claude-fable-5').strip() or 'claude-fable-5'
+ANTHROPIC_OPUS = lambda: os.getenv('ANTHROPIC_PRIMARY_MODEL','claude-opus-5').strip() or 'claude-opus-5'
+ANTHROPIC_SONNET = lambda: os.getenv('ANTHROPIC_FAST_MODEL','claude-sonnet-5').strip() or 'claude-sonnet-5'
 
 POLICY = '''You are the autonomous trade intelligence engine for SAHJONY LLC. Optimize for legitimate, capital-light trade intermediation: sourcing, origination, introductions, RFQ management and managed-trade fees without SAHJONY LLC owning inventory or advancing transaction capital. Separate verified facts from assumptions. Never invent buyer authority, supplier capacity, pricing, certifications, bankability, sanctions clearance, or shipment status. Research and analysis may run autonomously. External commitments, payments, contracts, supplier selection, compliance clearance, shipment release and disclosure of protected counterparties require deterministic authorization gates. Prefer highest commercially defensible fee economics while preserving legality, disclosure duties and close probability. Return concise structured recommendations with evidence gaps, next actions, fee strategy, risk controls and measurable success conditions.'''
 
@@ -57,10 +58,11 @@ class OrchestrateIn(BaseModel):
 def route(task: str, mode: str) -> tuple[list[tuple[str,str]], bool]:
     high = task in HIGH_STAKES
     if mode == 'OPENAI': return [('openai', OPENAI_FRONTIER())], high
-    if mode == 'ANTHROPIC': return [('anthropic', ANTHROPIC_FRONTIER())], high
-    if mode == 'CONSENSUS' or high: return [('openai', OPENAI_FRONTIER()),('anthropic', ANTHROPIC_FRONTIER())], high
+    if mode == 'ANTHROPIC': return [('anthropic', ANTHROPIC_FABLE() if high else ANTHROPIC_OPUS())], high
+    if mode == 'CONSENSUS' or high: return [('openai', OPENAI_FRONTIER()),('anthropic', ANTHROPIC_FABLE())], high
     if task in {'CATALOG_ENRICHMENT','RFQ_BUILD'}: return [('openai', OPENAI_BALANCED())], high
-    if task in {'SUPPLIER_SOURCING','BUYER_QUALIFICATION','NEGOTIATION'}: return [('anthropic', ANTHROPIC_BALANCED())], high
+    if task in {'SUPPLIER_SOURCING','BUYER_QUALIFICATION','NEGOTIATION'}: return [('anthropic', ANTHROPIC_OPUS())], high
+    if task in {'LOGISTICS_PLAN'}: return [('anthropic', ANTHROPIC_SONNET())], high
     return [('openai', OPENAI_FRONTIER())], high
 
 
@@ -84,12 +86,14 @@ async def health():
     return {
         'status':'ok',
         'service':'sahjony-llc-frontier-agentic-trade-engine',
-        'version':'2.0.0',
+        'version':'2.1.0',
         'openai_frontier':OPENAI_FRONTIER(),
         'openai_balanced':OPENAI_BALANCED(),
         'openai_economy':OPENAI_ECONOMY(),
-        'anthropic_frontier':ANTHROPIC_FRONTIER(),
-        'anthropic_balanced':ANTHROPIC_BALANCED(),
+        'anthropic_fable':ANTHROPIC_FABLE(),
+        'anthropic_opus':ANTHROPIC_OPUS(),
+        'anthropic_sonnet':ANTHROPIC_SONNET(),
+        'fable_for_high_stakes_and_long_horizon':True,
         'dual_model_consensus_for_high_stakes':True,
         'autonomous_internal_research':True,
         'autonomous_external_commitments':False,
