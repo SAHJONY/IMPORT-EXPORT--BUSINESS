@@ -1,0 +1,107 @@
+{
+  "version": 1,
+  "updated_at": "2026-08-26T22:50:00Z",
+  "policy": "Canonical governed deal records. No QUALIFIED, CONTRACTED, FUNDED, CLOSING_READY or REVENUE status without documentary evidence.",
+  "deals": [
+    {
+      "id": "SAHJONY-UMB-CA-8000",
+      "title": "8,000 Wooden Patio Umbrellas",
+      "market": "Canada",
+      "stage": "FIRM_QUOTE",
+      "priority": "A",
+      "buyer": "Active Canadian requirement; buyer-side validation pending",
+      "supplier": "Milan Umbrella; engaged",
+      "sahjonyPosition": "Sourcing/origination intermediary; framework accepted",
+      "economics": "8% supplier-side commission requested; not yet contractually confirmed",
+      "payment": "Supplier proposal: 30% deposit / 70% against copy of B/L",
+      "blocker": "Final FOB pricing, written commission protection and buyer qualification",
+      "nextAction": "Receive tier pricing; lock protected economics; issue controlled buyer offer",
+      "lastActivity": "2026-08-26",
+      "confidence": 72,
+      "source": "Governed email evidence",
+      "evidence": ["Supplier confirmed intermediary framework", "MOQ 1,000 pcs", "Monthly capacity 3,000 pcs", "FSC available", "Sample lead time 15 days", "Production 60-75 days after pre-production sample and deposit"],
+      "documents": ["Quotation pending", "Artwork/specification pending"],
+      "timeline": [
+        {"at":"2026-08-26","event":"RFQ sent for 8,000 units","status":"complete"},
+        {"at":"2026-08-26","event":"Supplier accepted intermediary framework","status":"complete"},
+        {"at":"2026-08-26","event":"Protected 8% economics requested","status":"waiting"},
+        {"at":"Next","event":"Firm tier quotation and controlled buyer presentation","status":"next"}
+      ]
+    },
+    {
+      "id": "SAHJONY-SODA-KR-500",
+      "title": "Soda Ash Light · 500 MT/month",
+      "market": "South Korea",
+      "stage": "MARGIN_PROTECTION",
+      "priority": "A",
+      "buyer": "Active South Korea requirement; L/C requested",
+      "supplier": "TNJ Chemical primary; YRC alternate",
+      "sahjonyPosition": "Commercial intermediary; TNJ customer protection confirmed",
+      "economics": "Supplier quotes net; SAHJONY margin to be added; exact margin not yet locked",
+      "payment": "TNJ accepts irrevocable L/C at sight from acceptable international bank",
+      "blocker": "Immediate 500 MT capacity unavailable; executable first-lot quantity and buyer acceptance required",
+      "nextAction": "Structure 42 MT trial; secure improved net; buyer acceptance; L/C draft review",
+      "lastActivity": "2026-08-26",
+      "confidence": 68,
+      "source": "Governed email evidence",
+      "evidence": ["TNJ reference: USD 245/MT FOB Qingdao for 42 MT", "15-day lead time after original L/C received", "Customer protection available", "Commission structure available above supplier net", "YRC states up to 1,000 MT/month but requested T/T"],
+      "documents": ["TNJ COA", "TNJ TDS", "TNJ MSDS", "YRC MSDS/COA"],
+      "timeline": [
+        {"at":"2026-08-25","event":"500 MT/month RFQs issued","status":"complete"},
+        {"at":"2026-08-26","event":"TNJ confirmed L/C and commission/customer protection mechanics","status":"complete"},
+        {"at":"2026-08-26","event":"42 MT trial structure requested","status":"waiting"},
+        {"at":"Next","event":"Buyer accepts executable trial and L/C draft","status":"next"}
+      ]
+    },
+    {
+      "id": "SAHJONY-EV-NA-20FT",
+      "title": "AC/DC EV Chargers · 20-ft container",
+      "market": "United States / Canada",
+      "stage": "QUALIFICATION",
+      "priority": "B",
+      "buyer": "North America program requirement; buyer validation pending",
+      "supplier": "Servotech Renewable Power System; interested",
+      "sahjonyPosition": "Origination/channel intermediary",
+      "economics": "8% supplier-side channel/referral commission requested; awaiting confirmation",
+      "payment": "Pending supplier commercial package",
+      "blocker": "North America certifications, SKU-level pricing, container load, warranty and protected economics",
+      "nextAction": "Receive compliant SKU package; verify certifications; lock economics; buyer-side review",
+      "lastActivity": "2026-08-25",
+      "confidence": 50,
+      "source": "Governed email evidence",
+      "evidence": ["Export sales manager confirmed interest", "Supplier requested company profile/business contact", "Commercial package requested", "8% protected partner economics requested"],
+      "documents": ["Company profile requested", "Product catalog pending", "Certification evidence pending"],
+      "timeline": [
+        {"at":"2026-08-25","event":"North America RFQ routed to Servotech","status":"complete"},
+        {"at":"2026-08-25","event":"Export sales confirmed interest","status":"complete"},
+        {"at":"2026-08-25","event":"8% protected economics requested","status":"waiting"},
+        {"at":"Next","event":"Receive compliant SKU/price/certification package","status":"next"}
+      ]
+    },
+    {
+      "id": "SAHJONY-MOTOR-OM-20FT",
+      "title": "Industrial Motors · 20-ft container",
+      "market": "Oman",
+      "stage": "BLOCKED",
+      "priority": "B",
+      "buyer": "Oman requirement; detailed technical schedule pending",
+      "supplier": "Bharat Bijlee; engaged",
+      "sahjonyPosition": "Sourcing intermediary; economics not yet protected",
+      "economics": "Not established",
+      "payment": "Supplier requires 100% advance before dispatch; buyer-side requirement is L/C",
+      "blocker": "Payment-term mismatch plus missing model-by-model technical schedule",
+      "nextAction": "Obtain bank-backed payment alternative or replace supplier; complete technical schedule",
+      "lastActivity": "2026-08-26",
+      "confidence": 32,
+      "source": "Governed email evidence",
+      "evidence": ["Supplier catalogues received", "Safe-area lead time 12-14 weeks", "Non-standard/hazardous lead time 18-20 weeks", "Ex-works Mumbai", "100% advance before dispatch"],
+      "documents": ["LT motor catalog", "HT motor catalog", "IE4/IE5 catalog"],
+      "timeline": [
+        {"at":"2026-08-25","event":"RFQ issued","status":"complete"},
+        {"at":"2026-08-26","event":"Supplier capability and catalogs received","status":"complete"},
+        {"at":"2026-08-26","event":"100% advance requirement identified","status":"blocked"},
+        {"at":"Next","event":"Resolve payment mismatch or replace supplier","status":"next"}
+      ]
+    }
+  ]
+}
