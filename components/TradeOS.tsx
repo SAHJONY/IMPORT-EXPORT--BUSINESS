@@ -88,7 +88,7 @@ export default function TradeOS({slug}:Props){
 
   return <div className="app">
     <aside className="side">
-      <div className="brand">SAHJONY GLOBAL TRADE</div>
+      <div className="brand">SAHJONY LLC</div>
       <div className="sub">Live Import · Export Operating System</div>
       <div className="nav">{visible.map(([key,m])=><button key={key} className={key===section?'active':''} onClick={()=>go(key)}>{m.label}</button>)}</div>
     </aside>
