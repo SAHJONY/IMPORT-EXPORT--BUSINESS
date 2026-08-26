@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Recovery deploy trigger: premium SAHJONY LLC landing refresh.
 PROJECT_ID="${VERCEL_PROJECT_ID:-prj_XmlR9SuaYKEE9siBC7lrsjLzYjb9}"
 ORG_ID="${VERCEL_ORG_ID:-team_Me3fB0D0J6He10CgJlJ44Xaq}"
 PROD_URL="${PRODUCTION_URL:-https://import-export-business.vercel.app}"
