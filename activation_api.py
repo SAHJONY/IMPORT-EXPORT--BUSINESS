@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import os
+from urllib.parse import urlsplit
+
 from fastapi import FastAPI, Header, HTTPException, Request
 from postgres_runtime import install_neon_ipv4_preference
 
@@ -28,15 +30,39 @@ _DATABASE_ENV_ORDER=("DATABASE_URL","POSTGRES_URL","NEON_DATABASE_URL","NEON_POS
 def _present(name:str)->bool: return bool(os.getenv(name,"").strip())
 def _true(name:str)->bool: return os.getenv(name,"false").strip().lower()=="true"
 
+def _database_connection_fingerprint()->dict:
+    selected=next((name for name in _DATABASE_ENV_ORDER if _present(name)),None)
+    if not selected:
+        return {"selected_variable":None,"configured":False,"values_exposed":False}
+    raw=os.getenv(selected,"").strip()
+    try:
+        parsed=urlsplit(raw)
+        host=(parsed.hostname or "").lower()
+        parts=[part for part in host.split(".") if part]
+        proxy_suffix=".".join(parts[-5:]) if len(parts)>=5 else host
+        endpoint=parts[0] if parts else ""
+        return {
+            "selected_variable":selected,
+            "configured":True,
+            "provider_hint":"neon" if "neon.tech" in host else "postgres",
+            "proxy_host_suffix":proxy_suffix or None,
+            "endpoint_fingerprint":hashlib.sha256(endpoint.encode()).hexdigest()[:12] if endpoint else None,
+            "database_name":parsed.path.lstrip("/").split("?")[0] or None,
+            "values_exposed":False,
+            "credentials_exposed":False,
+        }
+    except Exception:
+        return {"selected_variable":selected,"configured":True,"provider_hint":"unknown","values_exposed":False,"credentials_exposed":False}
+
 def _database_env_diagnostics()->dict:
     present=[name for name in _DATABASE_ENV_ORDER if _present(name)]; selected=present[0] if present else None
-    return {"selected_variable":selected,"present_variables":present,"multiple_database_variables_present":len(present)>1,"values_exposed":False,"canonical_policy":"Use the active Vercel production database; do not substitute databases from other applications."}
+    return {"selected_variable":selected,"present_variables":present,"multiple_database_variables_present":len(present)>1,"values_exposed":False,"connection_fingerprint":_database_connection_fingerprint(),"canonical_policy":"Use the active Vercel production database; do not substitute databases from other applications."}
 
 def _provider_state(schema_evidence:dict|None=None)->dict:
-    persistence=persistent_backend_status(); schema_verified=bool((schema_evidence or {}).get("verified")); storage=storage_configuration_status()
+    persistence=persistent_backend_status(); schema_verified=bool((schema_evidence or {}).get("verified")); storage=storage_configuration_status(); live_rls=bool((schema_evidence or {}).get("rls_verified"))
     return {
         "identity":{"provider":"neon_auth","auth_url_configured":bool(neon_auth_url()),"jwks_url_configured":bool(neon_auth_jwks_url()),"legacy_local_auth_disabled":not _true("ALLOW_LEGACY_LOCAL_AUTH")},
-        "persistence":{**persistence,"canonical_database":"active_vercel_database_url","database_env_diagnostics":_database_env_diagnostics(),"rls_verified":_true("PERSISTENCE_ISOLATION_VERIFIED") or _true("INSFORGE_RLS_VERIFIED"),"schemas_applied":schema_verified or _true("PERSISTENCE_SCHEMA_VERIFIED") or _true("INSFORGE_SCHEMAS_APPLIED"),"runtime_schema_evidence":schema_evidence},
+        "persistence":{**persistence,"canonical_database":"active_vercel_database_url","database_env_diagnostics":_database_env_diagnostics(),"rls_verified":live_rls or _true("PERSISTENCE_ISOLATION_VERIFIED") or _true("INSFORGE_RLS_VERIFIED"),"schemas_applied":schema_verified or _true("PERSISTENCE_SCHEMA_VERIFIED") or _true("INSFORGE_SCHEMAS_APPLIED"),"runtime_schema_evidence":schema_evidence},
         "payments":{"canonical_transaction_currency":CANONICAL_TRANSACTION_CURRENCY,"usd_only_transactions":USD_ONLY_TRANSACTIONS,"fx_execution_required_for_customer_settlement":not USD_ONLY_TRANSACTIONS},
         "ai":{"openai_configured":_present("OPENAI_API_KEY"),"anthropic_configured":_present("ANTHROPIC_API_KEY"),"e2e_verified":_true("AI_BRAIN_E2E_VERIFIED"),"release_authority":False},
         "translation":{"provider":"azure-translator","configured":_present("AZURE_TRANSLATOR_ENDPOINT") and _present("AZURE_TRANSLATOR_KEY"),"e2e_verified":_true("MULTILINGUAL_E2E_VERIFIED")},
