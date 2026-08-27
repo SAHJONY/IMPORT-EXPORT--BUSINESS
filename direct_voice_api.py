@@ -15,6 +15,7 @@ from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import RedirectResponse, Response
 
 from auth import verify_owner_token
+from insforge_backend import get_backend
 from voice_agent_api import (
     _openai_key,
     _reasoning_model,
@@ -24,11 +25,19 @@ from voice_agent_api import (
     _store,
 )
 
-app = FastAPI(title="SAHJONY Direct Voice", version="1.0.0", docs_url=None, redoc_url=None)
+app = FastAPI(title="SAHJONY Direct Voice", version="1.2.0", docs_url=None, redoc_url=None)
 
 _DIRECT_WINDOW_SECONDS = 600
 _DIRECT_MAX_SESSIONS_PER_WINDOW = 6
 _DIRECT_ATTEMPTS: dict[str, deque[float]] = defaultdict(deque)
+_AGENTIC_ALLOWED_TOOLS = [
+    "get_contact_context",
+    "get_trade_context",
+    "route_contact",
+    "create_follow_up",
+    "record_note",
+    "request_human_handoff",
+]
 
 
 def _env(*names: str) -> str:
@@ -81,9 +90,94 @@ def _rate_limit(request: Request) -> str:
     while queue and now - queue[0] > _DIRECT_WINDOW_SECONDS:
         queue.popleft()
     if len(queue) >= _DIRECT_MAX_SESSIONS_PER_WINDOW:
-        raise HTTPException(429, "Direct voice session limit reached. Please try again later.")
+        raise HTTPException(429, {"code": "DIRECT_VOICE_RATE_LIMITED", "message": "Direct voice session limit reached. Please try again later."})
     queue.append(now)
     return fingerprint
+
+
+def _agent_mcp_token() -> str:
+    key = _openai_key()
+    if not key:
+        return ""
+    return hashlib.sha256(("sahjony-agentic-communications:" + key).encode()).hexdigest()
+
+
+def _agentic_mcp_tool() -> dict[str, Any] | None:
+    token = _agent_mcp_token()
+    if not token:
+        return None
+    return {
+        "type": "mcp",
+        "server_label": "sahjony_agentic_communications",
+        "server_description": "Consent-aware SAHJONY Contact 360, trade context, routing, internal follow-up, note and human-handoff tools. No binding commercial tools are exposed.",
+        "server_url": f"{_base_url().rstrip('/')}/communications-os/mcp/agent",
+        "headers": {"Authorization": f"Bearer {token}"},
+        "allowed_tools": _AGENTIC_ALLOWED_TOOLS,
+        "require_approval": "never",
+    }
+
+
+async def _room_ai_context(request: Request) -> dict[str, Any] | None:
+    room_id = request.headers.get("x-sahjony-room-id", "").strip()
+    participant_id = request.headers.get("x-sahjony-participant-id", "").strip()
+    if not room_id and not participant_id:
+        return None
+    if not room_id or not participant_id:
+        raise HTTPException(403, {"code": "ROOM_CONTEXT_INCOMPLETE", "message": "AI room context is incomplete."})
+
+    token = request.headers.get("x-room-token", "").strip()
+    if not token:
+        raise HTTPException(403, {"code": "ROOM_TOKEN_REQUIRED", "message": "A valid AI room token is required."})
+    rows = await get_backend().select("communication_rooms", params={"room_id": f"eq.{room_id}", "limit": "1"}) or []
+    if not rows:
+        raise HTTPException(404, {"code": "ROOM_NOT_FOUND", "message": "Communication room not found."})
+    room = rows[0]
+    expected = str(room.get("join_token") or "")
+    if not expected or not secrets.compare_digest(expected, token):
+        raise HTTPException(403, {"code": "ROOM_TOKEN_INVALID", "message": "Communication room token is invalid."})
+    if str(room.get("status") or "") != "OPEN":
+        raise HTTPException(410, {"code": "ROOM_CLOSED", "message": "Communication room is closed."})
+    if str(room.get("privacy_mode") or "AI_ASSISTED").upper() != "AI_ASSISTED" or room.get("ai_enabled") is False:
+        raise HTTPException(409, {"code": "PRIVATE_HUMAN_AI_BLOCKED", "message": "Private Human rooms do not permit AI processing."})
+
+    consents = await get_backend().select(
+        "communication_room_consents",
+        params={"room_id": f"eq.{room_id}", "participant_id": f"eq.{participant_id}", "limit": "1"},
+    ) or []
+    if not consents:
+        raise HTTPException(409, {"code": "AI_CONSENT_REQUIRED", "message": "Explicit AI audio consent is required before starting this room."})
+    consent = consents[0]
+    if bool(consent.get("revoked_at")) or not bool(consent.get("ai_audio_consent")):
+        raise HTTPException(409, {"code": "AI_CONSENT_REQUIRED", "message": "Explicit AI audio consent is required before starting this room."})
+    return {
+        "room_id": room_id,
+        "participant_id": participant_id,
+        "conversation_id": room.get("conversation_id"),
+        "lead_id": room.get("lead_id"),
+        "customer_id": room.get("customer_id"),
+        "trade_case_id": room.get("trade_case_id"),
+        "context": room.get("context"),
+        "language": room.get("language"),
+        "vision_consented": bool(consent.get("ai_vision_consent")) and not bool(consent.get("revoked_at")),
+    }
+
+
+def _provider_error(response: httpx.Response) -> HTTPException:
+    raw = response.text[:2000]
+    lowered = raw.lower()
+    if response.status_code == 429 and any(x in lowered for x in ("credit_balance_exhausted", "insufficient_quota", "no credits remaining")):
+        return HTTPException(503, {
+            "code": "AI_CAPACITY_EXHAUSTED",
+            "message": "AI-assisted calling is temporarily unavailable because API capacity is exhausted. Private Human rooms remain available without OpenAI credits.",
+            "retryable": True,
+        })
+    if response.status_code == 429:
+        return HTTPException(503, {"code": "AI_PROVIDER_RATE_LIMITED", "message": "AI-assisted calling is temporarily rate limited. Please retry shortly.", "retryable": True})
+    if response.status_code in {401, 403}:
+        return HTTPException(503, {"code": "AI_PROVIDER_AUTHORIZATION_REQUIRED", "message": "AI-assisted calling requires provider authorization to be restored.", "retryable": False})
+    if response.status_code >= 500:
+        return HTTPException(503, {"code": "AI_PROVIDER_UNAVAILABLE", "message": "AI-assisted calling is temporarily unavailable. Private Human rooms remain available.", "retryable": True})
+    return HTTPException(502, {"code": "AI_SESSION_REJECTED", "message": "The AI-assisted session could not be started.", "retryable": False})
 
 
 @app.get("/voice/direct/health")
@@ -93,7 +187,7 @@ async def direct_health() -> dict[str, Any]:
     return {
         "status": "ok" if openai and enabled else "configuration_required",
         "service": "sahjony-direct-webrtc-voice",
-        "version": "1.0.0",
+        "version": "1.2.0",
         "enabled": enabled,
         "openai_configured": openai,
         "voice_engine": "openai_realtime",
@@ -101,6 +195,9 @@ async def direct_health() -> dict[str, Any]:
         "realtime_voice": _realtime_voice(),
         "reasoning_model": _reasoning_model(),
         "sol_brain_enabled": openai,
+        "agentic_communication_tools": bool(_agent_mcp_token()),
+        "agentic_binding_tools_exposed": False,
+        "room_ai_consent_enforced": True,
         "transport": "browser_webrtc",
         "pstn": False,
         "carrier_required": False,
@@ -115,12 +212,13 @@ async def direct_health() -> dict[str, Any]:
 @app.post("/voice/direct/session")
 async def direct_session(request: Request):
     if not _direct_enabled():
-        raise HTTPException(503, "Direct WebRTC voice is disabled")
+        raise HTTPException(503, {"code": "DIRECT_WEBRTC_DISABLED", "message": "Direct WebRTC voice is disabled."})
     if not _openai_key():
-        raise HTTPException(503, "OpenAI Realtime is not configured")
+        raise HTTPException(503, {"code": "AI_PROVIDER_NOT_CONFIGURED", "message": "AI-assisted calling is not configured. Private Human rooms remain available."})
     if not _origin_allowed(request):
         raise HTTPException(403, "Direct voice sessions must originate from the canonical SAHJONY website")
     fingerprint = _rate_limit(request)
+    room_context = await _room_ai_context(request)
     content_type = request.headers.get("content-type", "").split(";", 1)[0].strip().lower()
     if content_type != "application/sdp":
         raise HTTPException(415, "Content-Type must be application/sdp")
@@ -132,9 +230,19 @@ async def direct_session(request: Request):
     except UnicodeDecodeError:
         raise HTTPException(422, "SDP offer must be UTF-8")
 
-    session = _realtime_session(
-        "This is a direct internet voice call initiated from the official SAHJONY website. Treat the caller as unverified until they identify themselves. Do not expose internal system details, credentials, private customer data, or confidential deal information."
+    verified_context = (
+        "This is a consented AI-assisted SAHJONY communication room. "
+        f"Room ID: {room_context.get('room_id')}. Conversation ID: {room_context.get('conversation_id') or 'unlinked'}. "
+        f"Lead ID: {room_context.get('lead_id') or 'unlinked'}. Customer ID: {room_context.get('customer_id') or 'unlinked'}. "
+        f"Trade case ID: {room_context.get('trade_case_id') or 'unlinked'}. Preferred language: {room_context.get('language') or 'auto'}. "
+        f"Vision consent: {'yes' if room_context.get('vision_consented') else 'no'}. Verified room context: {str(room_context.get('context') or '')[:3000]}"
+        if room_context
+        else "This is a direct internet voice call initiated from the official SAHJONY website. Treat the caller as unverified until they identify themselves. Do not expose internal system details, credentials, private customer data, or confidential deal information."
     )
+    session = _realtime_session(verified_context)
+    agentic_tool = _agentic_mcp_tool()
+    if agentic_tool:
+        session.setdefault("tools", []).append(agentic_tool)
     multipart = {
         "sdp": (None, sdp_offer),
         "session": (None, __import__("json").dumps(session)),
@@ -149,8 +257,7 @@ async def direct_session(request: Request):
             files=multipart,
         )
     if response.status_code >= 400:
-        detail = response.text[:800]
-        raise HTTPException(502, f"OpenAI Realtime WebRTC session failed ({response.status_code}): {detail}")
+        raise _provider_error(response)
 
     call_id = f"web_{secrets.token_urlsafe(12)}"
     await _store({
@@ -262,9 +369,6 @@ async def byon_callback(request: Request):
     state = request.query_params.get("state") or ""
     if not code or not state or not _validate_tmobile_state(state):
         raise HTTPException(400, "Invalid or expired T-Mobile BYON authorization callback")
-    # T-Mobile BYON token exchange also requires its proof-of-possession authentication flow.
-    # We deliberately stop here until the DevEdge application is approved and its supported PoP
-    # library/credentials are available; fabricating that step would create a false production state.
     await _store({
         "call_id": f"byon_auth_{secrets.token_urlsafe(10)}",
         "direction": "configuration",
