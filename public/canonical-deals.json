@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-08-27T00:27:00Z",
+  "updated_at": "2026-08-27T01:36:29Z",
   "policy": "Canonical governed deal records. No QUALIFIED, CONTRACTED, FUNDED, CLOSING_READY or REVENUE status without documentary evidence.",
   "deals": [
     {
@@ -32,25 +32,25 @@
       "id": "SAHJONY-SODA-KR-500",
       "title": "Soda Ash Light · 500 MT/month",
       "market": "South Korea",
-      "stage": "MARGIN_PROTECTION",
+      "stage": "FIRM_QUOTE",
       "priority": "A",
-      "buyer": "Active South Korea requirement; L/C requested",
+      "buyer": "Active South Korea requirement; buyer acceptance of 42 MT trial and L/C issuance not yet evidenced",
       "supplier": "TNJ Chemical primary; YRC alternate",
-      "sahjonyPosition": "Commercial intermediary; TNJ customer protection confirmed",
-      "economics": "Supplier quotes net; SAHJONY margin to be added; exact margin not yet locked",
-      "payment": "TNJ accepts irrevocable L/C at sight from acceptable international bank",
-      "blocker": "Immediate 500 MT capacity unavailable; executable first-lot quantity and buyer acceptance required",
-      "nextAction": "Structure 42 MT trial; secure improved net; buyer acceptance; L/C draft review",
-      "lastActivity": "2026-08-26",
-      "confidence": 68,
-      "source": "Governed email evidence",
-      "evidence": ["TNJ reference: USD 245/MT FOB Qingdao for 42 MT", "15-day lead time after original L/C received", "Customer protection available", "Commission structure available above supplier net", "YRC states up to 1,000 MT/month but requested T/T"],
-      "documents": ["TNJ COA", "TNJ TDS", "TNJ MSDS", "YRC MSDS/COA"],
+      "sahjonyPosition": "Commercial intermediary; TNJ confirms supplier net pricing and SAHJONY may add its own commission; repeat-customer protection previously confirmed",
+      "economics": "TNJ net offer USD 265/MT FOB Qingdao for 42 MT; SAHJONY margin may be added above supplier net; exact SAHJONY margin not yet locked",
+      "payment": "100% irrevocable L/C at sight; supplier requires acceptable original L/C before shipment lead time begins",
+      "blocker": "Buyer acceptance of USD 265/MT net basis plus SAHJONY margin, L/C draft review, and future monthly allocation still required",
+      "nextAction": "Present controlled 42 MT economics to buyer; obtain buyer acceptance and L/C draft; confirm TNJ 30-60 day allocation and future 500 MT indicative net",
+      "lastActivity": "2026-08-27",
+      "confidence": 76,
+      "source": "Governed Gmail evidence",
+      "evidence": ["TNJ firm 42 MT net offer: USD 265/MT FOB Qingdao", "Packing: 25 kg bags, 21 MT per 20-foot FCL without pallets", "Delivery about 15 days after receipt of original L/C", "Payment: 100% irrevocable L/C at sight", "Quotation validity: 3 days", "Origin: China", "Supplier states offer is net and SAHJONY may add its own commission", "Supplier states commission cooperation is available"],
+      "documents": ["TNJ COA", "TNJ TDS", "TNJ MSDS", "YRC MSDS/COA", "TNJ 42 MT email quotation dated 2026-08-27"],
       "timeline": [
         {"at":"2026-08-25","event":"500 MT/month RFQs issued","status":"complete"},
         {"at":"2026-08-26","event":"TNJ confirmed L/C and commission/customer protection mechanics","status":"complete"},
-        {"at":"2026-08-26","event":"42 MT trial structure requested","status":"waiting"},
-        {"at":"Next","event":"Buyer accepts executable trial and L/C draft","status":"next"}
+        {"at":"2026-08-27","event":"TNJ issued executable 42 MT net offer at USD 265/MT FOB Qingdao, valid 3 days","status":"complete"},
+        {"at":"Next","event":"Buyer accepts controlled economics and provides L/C draft for supplier review","status":"next"}
       ]
     },
     {
