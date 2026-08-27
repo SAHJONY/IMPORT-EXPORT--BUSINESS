@@ -5,16 +5,16 @@ import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Any, Literal
 
-from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
 
 from auth import verify_owner_token
 from insforge_backend import get_backend, persistent_backend_status
 from voice_agent_api import _openai_key, _reasoning_model, _realtime_model, _realtime_voice
 
-app = FastAPI(title="SAHJONY Agentic Communication OS", version="1.0.0", docs_url=None, redoc_url=None)
+app = FastAPI(title="SAHJONY Agentic Communication OS", version="1.1.0", docs_url=None, redoc_url=None)
 
-Channel = Literal["web_voice", "web_video", "screen_share", "whatsapp", "email", "pstn", "portal"]
+Channel = Literal["direct_text", "web_voice", "web_video", "screen_share", "whatsapp", "email", "pstn", "portal"]
 Priority = Literal["urgent", "high", "normal", "low"]
 
 
@@ -50,6 +50,10 @@ def _direct_voice_ready() -> bool:
     return bool(_openai_key() and enabled)
 
 
+def _direct_text_ready() -> bool:
+    return bool(persistent_backend_status().get("configured", False) and _openai_key())
+
+
 def _whatsapp_send_ready() -> bool:
     return bool(_env("WHATSAPP_ACCESS_TOKEN") and _env("WHATSAPP_PHONE_NUMBER_ID") and _env("WHATSAPP_GRAPH_API_VERSION"))
 
@@ -74,12 +78,13 @@ def _tmobile_runtime_ready() -> bool:
 def _channel_state() -> dict[str, dict[str, Any]]:
     direct = _direct_voice_ready()
     return {
-        "web_voice": {"ready": direct, "transport": "browser_webrtc", "ai": "openai_realtime"},
-        "web_video": {"ready": direct, "transport": "browser_webrtc_camera_plus_realtime_image_frames", "ai": "openai_realtime"},
-        "screen_share": {"ready": direct, "transport": "browser_webrtc_screen_plus_realtime_image_frames", "ai": "openai_realtime"},
+        "direct_text": {"ready": _direct_text_ready(), "transport": "direct_internet_text", "ai": "gpt-5.6-sol", "carrier_fee": False, "notifications": True},
+        "web_voice": {"ready": direct, "transport": "browser_webrtc", "ai": "openai_realtime", "carrier_fee": False},
+        "web_video": {"ready": direct, "transport": "browser_webrtc_camera_plus_realtime_image_frames", "ai": "openai_realtime", "carrier_fee": False},
+        "screen_share": {"ready": direct, "transport": "browser_webrtc_screen_plus_realtime_image_frames", "ai": "openai_realtime", "carrier_fee": False},
         "whatsapp": {"ready": _whatsapp_send_ready(), "transport": "meta_cloud", "voice_invite": direct},
         "email": {"ready": _email_ready(), "transport": "native_business_email"},
-        "pstn": {"ready": _tmobile_runtime_ready(), "transport": "tmobile_devedge_byon"},
+        "pstn": {"ready": _tmobile_runtime_ready(), "transport": "tmobile_devedge_byon", "ai": "openai_realtime", "reasoning": _reasoning_model(), "auto_answer": True, "autonomous_outbound": True},
         "portal": {"ready": persistent_backend_status().get("configured", False), "transport": "native_portal"},
     }
 
@@ -92,7 +97,7 @@ async def health() -> dict[str, Any]:
     return {
         "status": "ok" if persistence.get("configured") and _openai_key() else "configuration_required",
         "service": "sahjony-agentic-communication-os",
-        "version": "1.0.0",
+        "version": "1.1.0",
         "operating_mode": "24x7_event_driven",
         "reasoning_model": _reasoning_model(),
         "realtime_model": _realtime_model(),
@@ -100,10 +105,14 @@ async def health() -> dict[str, Any]:
         "conversation_graph": True,
         "agentic_routing": True,
         "multilingual": True,
+        "direct_text": True,
+        "autonomous_notifications": True,
+        "phone_service": True,
         "vision_frames": True,
         "screen_share_frames": True,
         "human_takeover_bus": True,
         "crm_linkage": True,
+        "cross_channel_context_preservation": True,
         "recording_enabled": False,
         "channels_ready": ready_count,
         "channels_total": len(channels),
@@ -126,7 +135,7 @@ class ConversationCreate(BaseModel):
     context: str | None = Field(default=None, max_length=6000)
     language: str = Field(default="auto", max_length=35)
     priority: Priority = "normal"
-    preferred_channel: Channel = "web_voice"
+    preferred_channel: Channel = "direct_text"
 
 
 @app.post("/communications-os/conversations")
@@ -151,7 +160,7 @@ async def create_conversation(payload: ConversationCreate, authorization: str | 
         "preferred_channel": payload.preferred_channel,
         "last_channel": None,
         "human_takeover": False,
-        "ai_owner": "gpt-5.6-sol",
+        "ai_owner": _reasoning_model(),
         "voice_engine": "openai_realtime",
         "created_at": ts,
         "updated_at": ts,
@@ -230,11 +239,7 @@ async def ingest_event(payload: EventIngest, authorization: str | None = Header(
         "updated_at": ts,
     }
     await get_backend().insert("communication_events", row)
-    await get_backend().patch(
-        "communication_conversations",
-        {"last_channel": payload.channel, "updated_at": ts},
-        params={"conversation_id": f"eq.{conversation_id}"},
-    )
+    await get_backend().patch("communication_conversations", {"last_channel": payload.channel, "updated_at": ts}, params={"conversation_id": f"eq.{conversation_id}"})
     return {"status": "recorded", "event": row}
 
 
@@ -298,15 +303,9 @@ async def join_room(room_id: str, token: str):
     if room.get("status") != "OPEN":
         raise HTTPException(410, "Room is closed")
     return {
-        "status": "ok",
-        "room_id": room_id,
-        "mode": room.get("mode"),
-        "context": room.get("context"),
-        "language": room.get("language"),
-        "realtime_model": _realtime_model(),
-        "realtime_voice": _realtime_voice(),
-        "reasoning_model": _reasoning_model(),
-        "recording_enabled": False,
+        "status": "ok", "room_id": room_id, "mode": room.get("mode"), "context": room.get("context"),
+        "language": room.get("language"), "realtime_model": _realtime_model(), "realtime_voice": _realtime_voice(),
+        "reasoning_model": _reasoning_model(), "recording_enabled": False,
     }
 
 
@@ -320,14 +319,9 @@ class Presence(BaseModel):
 @app.post("/communications-os/rooms/{room_id}/presence")
 async def room_presence(room_id: str, payload: Presence):
     row = {
-        "presence_id": f"presence:{room_id}:{payload.participant_type}:{payload.participant_id}",
-        "room_id": room_id,
-        "participant_type": payload.participant_type,
-        "participant_id": payload.participant_id,
-        "state": payload.state,
-        "device": payload.device,
-        "heartbeat_at": _now(),
-        "updated_at": _now(),
+        "presence_id": f"presence:{room_id}:{payload.participant_type}:{payload.participant_id}", "room_id": room_id,
+        "participant_type": payload.participant_type, "participant_id": payload.participant_id, "state": payload.state,
+        "device": payload.device, "heartbeat_at": _now(), "updated_at": _now(),
     }
     await get_backend().insert("communication_presence", row)
     return {"status": "ok"}
@@ -345,15 +339,9 @@ class HandoffRequest(BaseModel):
 async def request_handoff(payload: HandoffRequest):
     handoff_id = f"handoff_{secrets.token_urlsafe(12)}"
     row = {
-        "handoff_id": handoff_id,
-        "status": "REQUESTED",
-        "conversation_id": payload.conversation_id,
-        "room_id": payload.room_id,
-        "reason": payload.reason,
-        "urgency": payload.urgency,
-        "requested_by": payload.requested_by,
-        "created_at": _now(),
-        "updated_at": _now(),
+        "handoff_id": handoff_id, "status": "REQUESTED", "conversation_id": payload.conversation_id,
+        "room_id": payload.room_id, "reason": payload.reason, "urgency": payload.urgency,
+        "requested_by": payload.requested_by, "created_at": _now(), "updated_at": _now(),
     }
     await get_backend().insert("communication_handoffs", row)
     if payload.conversation_id:
@@ -387,6 +375,8 @@ async def command_center(authorization: str | None = Header(None, alias="Authori
     handoffs = await get_backend().select("communication_handoffs", params={"status": "eq.REQUESTED", "order": "created_at.desc", "limit": "80"})
     rooms = await get_backend().select("communication_rooms", params={"status": "eq.OPEN", "order": "created_at.desc", "limit": "80"})
     voice_queue = await get_backend().select("voice_outbound_queue", params={"order": "created_at.desc", "limit": "80"})
+    text_threads = await get_backend().select("direct_text_threads", params={"status": "eq.OPEN", "order": "updated_at.desc", "limit": "80"})
+    notifications = await get_backend().select("direct_text_notifications", params={"order": "created_at.desc", "limit": "80"})
     return {
         "status": "ok",
         "health": await health(),
@@ -394,6 +384,10 @@ async def command_center(authorization: str | None = Header(None, alias="Authori
         "requested_handoffs": handoffs or [],
         "open_rooms": rooms or [],
         "voice_queue": voice_queue or [],
+        "text_threads": text_threads or [],
+        "notifications": notifications or [],
         "public_voice_url": f"{_base_url().rstrip('/')}/call-sahjony.html",
+        "public_text_base": f"{_base_url().rstrip('/')}/direct-chat.html",
         "live_room_base": f"{_base_url().rstrip('/')}/live-communications.html",
+        "phone_service": {"provider": "tmobile_devedge_byon", "ready": _tmobile_runtime_ready(), "voice_engine": "openai_realtime", "reasoning_model": _reasoning_model()},
     }
