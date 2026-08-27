@@ -5,6 +5,7 @@ from dataclasses import asdict, dataclass
 from typing import Any
 
 from country_governance_evidence import country_governance_evidence
+from managed_trade_gateway_evidence import managed_trade_gateway_evidence
 from payment_engine import CANONICAL_TRANSACTION_CURRENCY, USD_ONLY_TRANSACTIONS
 from secure_storage import storage_configuration_status
 from supplier_sourcing_evidence import supplier_sourcing_evidence
@@ -156,6 +157,20 @@ def evaluate_production_readiness(
             + str(sourcing_evidence.get('reason') or 'no fully evidenced selected supplier candidate')
         )
 
+    managed_evidence = managed_trade_gateway_evidence()
+    managed_gateway_ok = bool(managed_evidence.get('verified'))
+    if managed_gateway_ok:
+        managed_evidence_text = (
+            f"Live managed-trade state machine verified from PostgreSQL: "
+            f"{managed_evidence.get('valid_closed_case_count', 0)} fully governed CLOSED case(s), "
+            "with no active or closed state-machine violations"
+        )
+    else:
+        managed_evidence_text = (
+            'Managed-trade state-machine evidence incomplete: '
+            + str(managed_evidence.get('reason') or 'no fully governed CLOSED case')
+        )
+
     gates = [
         ReadinessGate('production_runtime', runtime_ok, True, 'HTTP runtime health', 'Deploy a healthy production revision.'),
         ReadinessGate('persistent_backend', persistent_backend_ok, True, persistent_backend_evidence, 'Attach Neon/Postgres to Vercel (DATABASE_URL/POSTGRES_URL) or configure InsForge server credentials.'),
@@ -172,7 +187,7 @@ def evaluate_production_readiness(
         ReadinessGate('global_translation', translation_provider_ok and _true('MULTILINGUAL_E2E_VERIFIED'), True, 'Translation provider plus multilingual E2E verified', 'Verify language persistence, RTL and source preservation.'),
         ReadinessGate('country_activation_governance', country_governance_ok, True, country_evidence_text, 'Apply the country-governance schema, maintain all 16 mandatory controls with current evidence, owner-approve each live jurisdiction, and verify at least one fully governed LIVE/READY corridor. Hypothetical jurisdictions must remain simulation-only.'),
         ReadinessGate('global_supplier_sourcing', supplier_sourcing_ok, True, sourcing_evidence_text, 'Complete at least one supplier workflow with owner-verified current quote, all eight sourcing controls evidenced, and a separately governed owner-approved LIVE/READY origin-to-destination corridor. Any control change revokes selection until revalidated.'),
-        ReadinessGate('managed_trade_gateway', _true('MANAGED_TRADE_GATEWAY_E2E_VERIFIED'), True, 'SAHJONY request intake, supplier sourcing/due diligence, role assignment, milestone gating and owner release verified', 'Run an E2E managed transaction against the active persistence provider.'),
+        ReadinessGate('managed_trade_gateway', managed_gateway_ok, True, managed_evidence_text, 'Run a governed managed-trade case through OPEN → READY_FOR_EXECUTION → EXECUTING → DELIVERED → RECONCILED → CLOSED. Release must be backed by live supplier/corridor/compliance/document/payment/logistics evidence; delivery and reconciliation are system-derived.'),
         ReadinessGate('intermediary_mode', _true('INTERMEDIARY_MODE_E2E_VERIFIED'), True, 'Broker/agent engagement, disclosed economics, legal-role assignments, title/funds controls and database release guard verified', 'Run intermediary E2E tests.'),
         ReadinessGate('business_operational_controls', _true('BUSINESS_OPERATIONAL_READINESS_E2E_VERIFIED'), True, 'Partners, agreements, counterparty due diligence, product dossiers, incident handling and reconciliation controls verified', 'Verify signed operating partners, approved agreement templates, KYB/sanctions dossiers, product classification dossiers and incident/claims workflow.'),
         ReadinessGate('cuba_private_business_eligibility', _true('CUBA_PRIVATE_BUSINESS_E2E_VERIFIED'), True, 'Cuban private-business ownership, employee-count, government-control, screening, banking and eligibility workflow verified', 'Prove ineligible or disallowed businesses cannot pass.'),
@@ -203,6 +218,7 @@ def evaluate_production_readiness(
         'persistence_schema_evidence': persistence_schema_evidence,
         'country_governance_evidence': country_evidence,
         'supplier_sourcing_evidence': sourcing_evidence,
+        'managed_trade_gateway_evidence': managed_evidence,
         'gates': [asdict(g) for g in gates],
         'blockers': blockers,
     }
