@@ -4,6 +4,7 @@ import os
 from dataclasses import asdict, dataclass
 from typing import Any
 
+from country_governance_evidence import country_governance_evidence
 from payment_engine import CANONICAL_TRANSACTION_CURRENCY, USD_ONLY_TRANSACTIONS
 from secure_storage import storage_configuration_status
 
@@ -127,6 +128,20 @@ def evaluate_production_readiness(
     owner_mfa_ok = _true('OWNER_MFA_REQUIRED') and _present('OWNER_TOTP_SECRET')
     ai_provider_configured = _present('OPENAI_API_KEY') and _present('ANTHROPIC_API_KEY')
 
+    country_evidence = country_governance_evidence()
+    country_governance_ok = bool(country_evidence.get('verified'))
+    if country_governance_ok:
+        country_evidence_text = (
+            f"Live PostgreSQL country/corridor governance verified: "
+            f"{country_evidence.get('ready_live_country_count', 0)} READY live countries and "
+            f"{country_evidence.get('ready_live_corridor_count', 0)} fully governed LIVE/READY corridors"
+        )
+    else:
+        country_evidence_text = (
+            'Live country/corridor governance incomplete: '
+            + str(country_evidence.get('reason') or 'no fully evidenced owner-approved LIVE/READY corridor')
+        )
+
     gates = [
         ReadinessGate('production_runtime', runtime_ok, True, 'HTTP runtime health', 'Deploy a healthy production revision.'),
         ReadinessGate('persistent_backend', persistent_backend_ok, True, persistent_backend_evidence, 'Attach Neon/Postgres to Vercel (DATABASE_URL/POSTGRES_URL) or configure InsForge server credentials.'),
@@ -141,7 +156,7 @@ def evaluate_production_readiness(
         ReadinessGate('fx_execution_provider', settlement_ok, True, settlement_evidence, settlement_remediation),
         ReadinessGate('secure_document_storage', secure_storage_configured and _true('SIGNED_DOCUMENT_STORAGE_VERIFIED'), True, f'Provider-neutral private signed document storage configured via {storage_provider}; signed storage verification={_true("SIGNED_DOCUMENT_STORAGE_VERIFIED")}', 'Configure one supported S3-compatible storage profile (InsForge S3, Cloudflare R2, or generic S3-compatible), then verify signed upload/download, malware gate, retention and legal hold.'),
         ReadinessGate('global_translation', translation_provider_ok and _true('MULTILINGUAL_E2E_VERIFIED'), True, 'Translation provider plus multilingual E2E verified', 'Verify language persistence, RTL and source preservation.'),
-        ReadinessGate('country_activation_governance', _true('COUNTRY_ACTIVATION_E2E_VERIFIED'), True, 'Country/corridor activation governance verified', 'Verify READY/LIMITED/BLOCKED derivation and hypothetical/live isolation.'),
+        ReadinessGate('country_activation_governance', country_governance_ok, True, country_evidence_text, 'Apply the country-governance schema, maintain all 16 mandatory controls with current evidence, owner-approve each live jurisdiction, and verify at least one fully governed LIVE/READY corridor. Hypothetical jurisdictions must remain simulation-only.'),
         ReadinessGate('global_supplier_sourcing', _true('GLOBAL_SUPPLIER_SOURCING_E2E_VERIFIED'), True, 'Worldwide candidate sourcing, origin/destination corridor controls and owner supplier selection verified', 'Run a permitted corridor E2E and prove BLOCKED/LIMITED candidates cannot be selected.'),
         ReadinessGate('managed_trade_gateway', _true('MANAGED_TRADE_GATEWAY_E2E_VERIFIED'), True, 'SAHJONY request intake, supplier sourcing/due diligence, role assignment, milestone gating and owner release verified', 'Run an E2E managed transaction against the active persistence provider.'),
         ReadinessGate('intermediary_mode', _true('INTERMEDIARY_MODE_E2E_VERIFIED'), True, 'Broker/agent engagement, disclosed economics, legal-role assignments, title/funds controls and database release guard verified', 'Run intermediary E2E tests.'),
@@ -172,6 +187,7 @@ def evaluate_production_readiness(
         'canonical_transaction_currency': CANONICAL_TRANSACTION_CURRENCY,
         'usd_only_transactions': USD_ONLY_TRANSACTIONS,
         'persistence_schema_evidence': persistence_schema_evidence,
+        'country_governance_evidence': country_evidence,
         'gates': [asdict(g) for g in gates],
         'blockers': blockers,
     }
