@@ -1,0 +1,3 @@
+SAHJONY Global Trade OS production deployment trigger.
+Includes Neon participant-domain RLS migration artifact from c9afd8c267577e1d452bde20633b5ad835d469cb.
+No database migration is auto-executed by this trigger.
