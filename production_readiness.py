@@ -7,6 +7,7 @@ from typing import Any
 from country_governance_evidence import country_governance_evidence
 from payment_engine import CANONICAL_TRANSACTION_CURRENCY, USD_ONLY_TRANSACTIONS
 from secure_storage import storage_configuration_status
+from supplier_sourcing_evidence import supplier_sourcing_evidence
 
 
 @dataclass(frozen=True)
@@ -142,6 +143,19 @@ def evaluate_production_readiness(
             + str(country_evidence.get('reason') or 'no fully evidenced owner-approved LIVE/READY corridor')
         )
 
+    sourcing_evidence = supplier_sourcing_evidence(country_evidence)
+    supplier_sourcing_ok = bool(sourcing_evidence.get('verified'))
+    if supplier_sourcing_ok:
+        sourcing_evidence_text = (
+            f"Live supplier sourcing verified: {sourcing_evidence.get('valid_selected_candidate_count', 0)} "
+            "owner-selected candidate(s) retain current quote, control evidence and governed country-corridor eligibility"
+        )
+    else:
+        sourcing_evidence_text = (
+            'Live supplier sourcing incomplete: '
+            + str(sourcing_evidence.get('reason') or 'no fully evidenced selected supplier candidate')
+        )
+
     gates = [
         ReadinessGate('production_runtime', runtime_ok, True, 'HTTP runtime health', 'Deploy a healthy production revision.'),
         ReadinessGate('persistent_backend', persistent_backend_ok, True, persistent_backend_evidence, 'Attach Neon/Postgres to Vercel (DATABASE_URL/POSTGRES_URL) or configure InsForge server credentials.'),
@@ -157,7 +171,7 @@ def evaluate_production_readiness(
         ReadinessGate('secure_document_storage', secure_storage_configured and _true('SIGNED_DOCUMENT_STORAGE_VERIFIED'), True, f'Provider-neutral private signed document storage configured via {storage_provider}; signed storage verification={_true("SIGNED_DOCUMENT_STORAGE_VERIFIED")}', 'Configure one supported S3-compatible storage profile (InsForge S3, Cloudflare R2, or generic S3-compatible), then verify signed upload/download, malware gate, retention and legal hold.'),
         ReadinessGate('global_translation', translation_provider_ok and _true('MULTILINGUAL_E2E_VERIFIED'), True, 'Translation provider plus multilingual E2E verified', 'Verify language persistence, RTL and source preservation.'),
         ReadinessGate('country_activation_governance', country_governance_ok, True, country_evidence_text, 'Apply the country-governance schema, maintain all 16 mandatory controls with current evidence, owner-approve each live jurisdiction, and verify at least one fully governed LIVE/READY corridor. Hypothetical jurisdictions must remain simulation-only.'),
-        ReadinessGate('global_supplier_sourcing', _true('GLOBAL_SUPPLIER_SOURCING_E2E_VERIFIED'), True, 'Worldwide candidate sourcing, origin/destination corridor controls and owner supplier selection verified', 'Run a permitted corridor E2E and prove BLOCKED/LIMITED candidates cannot be selected.'),
+        ReadinessGate('global_supplier_sourcing', supplier_sourcing_ok, True, sourcing_evidence_text, 'Complete at least one supplier workflow with owner-verified current quote, all eight sourcing controls evidenced, and a separately governed owner-approved LIVE/READY origin-to-destination corridor. Any control change revokes selection until revalidated.'),
         ReadinessGate('managed_trade_gateway', _true('MANAGED_TRADE_GATEWAY_E2E_VERIFIED'), True, 'SAHJONY request intake, supplier sourcing/due diligence, role assignment, milestone gating and owner release verified', 'Run an E2E managed transaction against the active persistence provider.'),
         ReadinessGate('intermediary_mode', _true('INTERMEDIARY_MODE_E2E_VERIFIED'), True, 'Broker/agent engagement, disclosed economics, legal-role assignments, title/funds controls and database release guard verified', 'Run intermediary E2E tests.'),
         ReadinessGate('business_operational_controls', _true('BUSINESS_OPERATIONAL_READINESS_E2E_VERIFIED'), True, 'Partners, agreements, counterparty due diligence, product dossiers, incident handling and reconciliation controls verified', 'Verify signed operating partners, approved agreement templates, KYB/sanctions dossiers, product classification dossiers and incident/claims workflow.'),
@@ -188,6 +202,7 @@ def evaluate_production_readiness(
         'usd_only_transactions': USD_ONLY_TRANSACTIONS,
         'persistence_schema_evidence': persistence_schema_evidence,
         'country_governance_evidence': country_evidence,
+        'supplier_sourcing_evidence': sourcing_evidence,
         'gates': [asdict(g) for g in gates],
         'blockers': blockers,
     }
