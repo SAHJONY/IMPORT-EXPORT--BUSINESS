@@ -60,6 +60,37 @@ _REQUIRED_COLUMNS = {
     "global_sourcing_control_evidence": {"evidence_id", "global_candidate_id", "control_key", "verified"},
 }
 
+# Participant-facing tables expected to be protected by the identity/RLS foundation.
+_RLS_REQUIRED_TABLES = {
+    "app_memberships",
+    "trade_documents",
+    "document_movements",
+    "shipments",
+    "shipment_milestones",
+    "trade_compliance_cases",
+    "business_events",
+    "communications",
+}
+
+_RLS_REQUIRED_POLICIES = {
+    "app_memberships_self_select",
+    "trade_documents_read",
+    "trade_documents_customer_insert",
+    "document_movements_read",
+    "shipments_read",
+    "shipment_milestones_read",
+    "compliance_cases_read",
+    "business_events_read",
+    "communications_read",
+}
+
+_RLS_REQUIRED_FUNCTIONS = {
+    "requesting_user_id",
+    "app_has_role",
+    "app_can_access_customer",
+    "app_is_internal",
+}
+
 
 def _database_url() -> str:
     for name in (
@@ -114,6 +145,51 @@ def _probe() -> dict[str, Any]:
                 )
                 active_usd_accounts = int(cur.fetchone()["n"])
 
+            cur.execute(
+                """
+                SELECT c.relname AS table_name, c.relrowsecurity AS rls_enabled,
+                       c.relforcerowsecurity AS rls_forced
+                FROM pg_class c
+                JOIN pg_namespace n ON n.oid = c.relnamespace
+                WHERE n.nspname = 'public' AND c.relkind IN ('r','p')
+                  AND c.relname = ANY(%s)
+                """,
+                (sorted(_RLS_REQUIRED_TABLES),),
+            )
+            rls_rows = {row["table_name"]: row for row in cur.fetchall()}
+            rls_present_tables = set(rls_rows)
+            rls_enabled_tables = {
+                table for table, row in rls_rows.items() if bool(row["rls_enabled"])
+            }
+            rls_forced_tables = {
+                table for table, row in rls_rows.items() if bool(row["rls_forced"])
+            }
+
+            cur.execute(
+                """
+                SELECT policyname, tablename
+                FROM pg_policies
+                WHERE schemaname = 'public' AND policyname = ANY(%s)
+                """,
+                (sorted(_RLS_REQUIRED_POLICIES),),
+            )
+            policy_rows = cur.fetchall()
+            present_policies = {row["policyname"] for row in policy_rows}
+            policy_tables = {
+                row["policyname"]: row["tablename"] for row in policy_rows
+            }
+
+            cur.execute(
+                """
+                SELECT DISTINCT p.proname
+                FROM pg_proc p
+                JOIN pg_namespace n ON n.oid = p.pronamespace
+                WHERE n.nspname = 'public' AND p.proname = ANY(%s)
+                """,
+                (sorted(_RLS_REQUIRED_FUNCTIONS),),
+            )
+            present_functions = {row["proname"] for row in cur.fetchall()}
+
     missing_tables = sorted(_REQUIRED_TABLES - present_tables)
     missing_columns = {
         table: sorted(required - columns.get(table, set()))
@@ -126,6 +202,18 @@ def _probe() -> dict[str, Any]:
         and active_usd_accounts >= 12
         and index_count >= 10
     )
+
+    missing_rls_tables = sorted(_RLS_REQUIRED_TABLES - rls_present_tables)
+    rls_not_enabled = sorted(_RLS_REQUIRED_TABLES - rls_enabled_tables)
+    missing_policies = sorted(_RLS_REQUIRED_POLICIES - present_policies)
+    missing_functions = sorted(_RLS_REQUIRED_FUNCTIONS - present_functions)
+    rls_verified = (
+        not missing_rls_tables
+        and not rls_not_enabled
+        and not missing_policies
+        and not missing_functions
+    )
+
     return {
         "verified": verified,
         "provider": "neon_postgres",
@@ -137,6 +225,21 @@ def _probe() -> dict[str, Any]:
         "missing_tables": missing_tables,
         "missing_columns": missing_columns,
         "reason": None if verified else "Required canonical production schema evidence is incomplete",
+        "rls_verified": rls_verified,
+        "rls_required_table_count": len(_RLS_REQUIRED_TABLES),
+        "rls_present_table_count": len(rls_present_tables),
+        "rls_enabled_table_count": len(rls_enabled_tables),
+        "rls_forced_table_count": len(rls_forced_tables),
+        "rls_missing_tables": missing_rls_tables,
+        "rls_not_enabled": rls_not_enabled,
+        "rls_required_policy_count": len(_RLS_REQUIRED_POLICIES),
+        "rls_present_policy_count": len(present_policies),
+        "rls_missing_policies": missing_policies,
+        "rls_policy_tables": policy_tables,
+        "rls_required_function_count": len(_RLS_REQUIRED_FUNCTIONS),
+        "rls_present_function_count": len(present_functions),
+        "rls_missing_functions": missing_functions,
+        "rls_reason": None if rls_verified else "Identity/RLS foundation is incomplete on the active production database",
     }
 
 
@@ -152,5 +255,11 @@ async def production_schema_evidence() -> dict[str, Any]:
             "reason": f"{type(exc).__name__}: {detail}",
             "missing_tables": [],
             "missing_columns": {},
+            "rls_verified": False,
+            "rls_reason": f"{type(exc).__name__}: {detail}",
+            "rls_missing_tables": [],
+            "rls_not_enabled": [],
+            "rls_missing_policies": [],
+            "rls_missing_functions": [],
             "fail_closed": True,
         }
