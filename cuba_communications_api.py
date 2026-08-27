@@ -11,7 +11,7 @@ from auth import verify_owner_token
 from insforge_backend import get_backend, persistent_backend_status
 from voice_agent_api import _openai_key, _reasoning_model, _realtime_model, _realtime_voice
 
-app = FastAPI(title="SAHJONY Cuba Communications Department", version="1.0.0", docs_url=None, redoc_url=None)
+app = FastAPI(title="SAHJONY Cuba Communications Department", version="1.1.0", docs_url=None, redoc_url=None)
 
 PreferredContact = Literal["direct_text", "whatsapp", "email", "phone", "none"]
 RequestStatus = Literal["RECEIVED", "REVIEWING", "WAITING_CUSTOMER", "ELIGIBLE", "NOT_AVAILABLE", "CLOSED"]
@@ -41,6 +41,7 @@ class CubaCommunicationsRequest(BaseModel):
     service_address: str | None = Field(default=None, max_length=500)
     preferred_contact: PreferredContact = "direct_text"
     wants_communication_os: bool = True
+    wants_free_internet: bool = False
     wants_starlink: bool = False
     has_existing_starlink: bool = False
     household_or_personal_use: bool = True
@@ -52,6 +53,7 @@ class CubaCommunicationsRequest(BaseModel):
 class OwnerStatusUpdate(BaseModel):
     status: RequestStatus
     communication_os_status: str | None = Field(default=None, max_length=120)
+    free_internet_status: str | None = Field(default=None, max_length=160)
     starlink_status: str | None = Field(default=None, max_length=160)
     owner_note: str | None = Field(default=None, max_length=3000)
 
@@ -62,7 +64,7 @@ async def health() -> dict[str, Any]:
     return {
         "status": "ok" if persistence.get("configured") else "configuration_required",
         "service": "sahjony-cuba-communications-department",
-        "version": "1.0.0",
+        "version": "1.1.0",
         "language": "es",
         "audience": "personas_y_clientes_en_cuba",
         "communication_os": {
@@ -76,6 +78,16 @@ async def health() -> dict[str, Any]:
             "reasoning_model": _reasoning_model(),
             "realtime_model": _realtime_model(),
             "realtime_voice": _realtime_voice(),
+        },
+        "free_internet": {
+            "optional": True,
+            "free_to_end_user": True,
+            "sponsor_or_program_funded": True,
+            "requires_active_program": True,
+            "requires_verified_backhaul": True,
+            "requires_provider_terms_allow_sharing": True,
+            "not_guaranteed_by_request": True,
+            "local_wifi_without_internet_supported": True,
         },
         "starlink": {
             "optional": True,
@@ -91,6 +103,7 @@ async def health() -> dict[str, Any]:
             "telecommunications_and_internet_services_subject_to_applicable_us_cuba_rules": True,
             "no_sanctions_evasion": True,
             "no_provider_activation_bypass": True,
+            "no_unverified_free_internet_promise": True,
             "fail_closed": True,
         },
         "persistence": persistence,
@@ -103,7 +116,7 @@ async def create_request(payload: CubaCommunicationsRequest):
         raise HTTPException(400, "Invalid submission")
     if not payload.consent_to_contact:
         raise HTTPException(422, "Debes autorizar el contacto para registrar la solicitud")
-    if not payload.wants_communication_os and not payload.wants_starlink:
+    if not payload.wants_communication_os and not payload.wants_free_internet and not payload.wants_starlink:
         raise HTTPException(422, "Selecciona al menos un servicio")
     if not persistent_backend_status().get("configured"):
         raise HTTPException(503, "El registro de solicitudes no está disponible temporalmente")
@@ -123,11 +136,15 @@ async def create_request(payload: CubaCommunicationsRequest):
         "service_address": payload.service_address,
         "preferred_contact": payload.preferred_contact,
         "wants_communication_os": payload.wants_communication_os,
+        "wants_free_internet": payload.wants_free_internet,
         "wants_starlink": payload.wants_starlink,
         "has_existing_starlink": payload.has_existing_starlink,
         "household_or_personal_use": payload.household_or_personal_use,
         "notes": payload.notes,
         "communication_os_status": "ELIGIBILITY_REVIEW" if payload.wants_communication_os else "NOT_REQUESTED",
+        "free_internet_status": "PROGRAM_AVAILABILITY_REVIEW" if payload.wants_free_internet else "NOT_REQUESTED",
+        "free_internet_is_sponsor_or_program_funded": True,
+        "free_internet_guaranteed": False,
         "starlink_status": "AVAILABILITY_CHECK_REQUIRED" if payload.wants_starlink else "NOT_REQUESTED",
         "starlink_customer_pays_provider_directly": True,
         "starlink_provider_activation_required": True,
@@ -143,7 +160,9 @@ async def create_request(payload: CubaCommunicationsRequest):
         "request_id": request_id,
         "status_token": status_token,
         "communication_os_status": row["communication_os_status"],
+        "free_internet_status": row["free_internet_status"],
         "starlink_status": row["starlink_status"],
+        "free_internet_note": "El acceso puede ser gratis para el usuario final cuando exista un programa financiado, backhaul verificado y términos del proveedor que permitan compartirlo.",
         "starlink_note": "La disponibilidad y activación de Starlink deben confirmarse directamente con Starlink para la dirección y cuenta aplicables.",
     }
 
@@ -160,8 +179,10 @@ async def request_status(request_id: str, x_request_token: str | None = Header(N
         "request_id": request_id,
         "status": row.get("status"),
         "communication_os_status": row.get("communication_os_status"),
+        "free_internet_status": row.get("free_internet_status"),
         "starlink_status": row.get("starlink_status"),
         "wants_communication_os": row.get("wants_communication_os"),
+        "wants_free_internet": row.get("wants_free_internet"),
         "wants_starlink": row.get("wants_starlink"),
         "starlink_availability_confirmed": bool(row.get("starlink_availability_confirmed")),
         "updated_at": row.get("updated_at"),
@@ -181,6 +202,9 @@ async def owner_update(request_id: str, payload: OwnerStatusUpdate, authorizatio
     values: dict[str, Any] = {"status": payload.status, "updated_at": _now()}
     if payload.communication_os_status is not None:
         values["communication_os_status"] = payload.communication_os_status
+    if payload.free_internet_status is not None:
+        values["free_internet_status"] = payload.free_internet_status
+        values["free_internet_guaranteed"] = payload.free_internet_status.upper() in {"ACTIVE_PASS_ISSUED", "ACTIVE_PROGRAM_CONFIRMED"}
     if payload.starlink_status is not None:
         values["starlink_status"] = payload.starlink_status
         values["starlink_availability_confirmed"] = payload.starlink_status.upper() in {"PROVIDER_CONFIRMED", "AVAILABLE_CONFIRMED"}
