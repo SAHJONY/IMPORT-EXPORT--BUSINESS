@@ -105,7 +105,15 @@ def evaluate_production_readiness(
     storage_provider = storage_status.get('provider') or 'none'
     production_identity, identity_evidence, identity_remediation = _production_identity_status(auth_provider)
     persistent_backend_ok, persistent_backend_evidence = _persistent_backend_status()
-    persistence_isolation_ok = _true('PERSISTENCE_ISOLATION_VERIFIED') or _true('INSFORGE_RLS_VERIFIED')
+
+    live_rls_verified = bool((persistence_schema_evidence or {}).get('rls_verified'))
+    persistence_isolation_ok = live_rls_verified or _true('PERSISTENCE_ISOLATION_VERIFIED') or _true('INSFORGE_RLS_VERIFIED')
+    if live_rls_verified:
+        isolation_evidence = 'Active production Postgres RLS tables, identity functions and required policies verified directly from pg_class/pg_policies/pg_proc'
+    elif persistence_schema_evidence:
+        isolation_evidence = f"Live RLS evidence incomplete: {(persistence_schema_evidence or {}).get('rls_reason') or 'required RLS tables, functions or policies are incomplete'}"
+    else:
+        isolation_evidence = 'Tenant/role persistence isolation requires recorded live verification'
 
     schema_runtime_verified = bool((persistence_schema_evidence or {}).get('verified'))
     persistence_schema_ok = schema_runtime_verified or _true('PERSISTENCE_SCHEMA_VERIFIED') or _true('INSFORGE_SCHEMAS_APPLIED')
@@ -123,7 +131,7 @@ def evaluate_production_readiness(
         ReadinessGate('production_runtime', runtime_ok, True, 'HTTP runtime health', 'Deploy a healthy production revision.'),
         ReadinessGate('persistent_backend', persistent_backend_ok, True, persistent_backend_evidence, 'Attach Neon/Postgres to Vercel (DATABASE_URL/POSTGRES_URL) or configure InsForge server credentials.'),
         ReadinessGate('production_identity', production_identity, True, identity_evidence, identity_remediation),
-        ReadinessGate('persistence_isolation_verified', persistence_isolation_ok, True, 'Live tenant/role persistence isolation verification recorded', 'Run owner/staff/customer isolation tests and set PERSISTENCE_ISOLATION_VERIFIED=true only after evidence is recorded.'),
+        ReadinessGate('persistence_isolation_verified', persistence_isolation_ok, True, isolation_evidence, 'Apply and verify the identity/RLS foundation on participant-facing tables, then prove owner/staff/customer isolation. Do not set a manual verification flag without evidence.'),
         ReadinessGate('persistence_schema_verified', persistence_schema_ok, True, schema_evidence, 'Verify the active durable backend schema against required physical tables, columns and indexes.'),
         ReadinessGate('owner_mfa', owner_mfa_ok, True, 'Owner TOTP MFA policy enabled and a server-side TOTP secret is configured', 'Set OWNER_MFA_REQUIRED=true and configure OWNER_TOTP_SECRET through the production secret manager; never commit the secret to Git.'),
         ReadinessGate('ai_brain_providers', ai_provider_configured and _true('AI_BRAIN_E2E_VERIFIED'), True, 'OpenAI + Anthropic credentials and AI Brain E2E verification; model routing uses application defaults or explicit overrides', 'Configure ANTHROPIC_API_KEY, verify GPT/Claude routing and consensus, and prove ADVISORY_ONLY cannot cross transaction authority boundaries.'),
