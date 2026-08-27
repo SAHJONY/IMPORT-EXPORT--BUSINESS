@@ -214,9 +214,8 @@ async def create_rfq(payload: RfqIn):
         'destination_country':payload.destination_country.upper(),'preferred_incoterm':payload.preferred_incoterm,
         'target_delivery_date':payload.target_delivery_date,'managed_trade_requested':payload.managed_trade_requested,
         'source':'WEB','qualification_status':'PENDING','status':'NEW','revenue_priority':'UNRANKED',
-        'inventory_owned_by_sahjony':False,'sa hjony_capital_required':False,
+        'inventory_owned_by_sahjony':False,'sahjony_capital_required':False,
         'created_at':ts,'updated_at':ts,
     }
-    row['sahjony_capital_required']=False
     await get_backend().insert('marketplace_rfqs',row)
     return {'rfq':row,'next_step':'SAHJONY LLC will qualify the requirement before supplier introductions or commercial commitments.','binding_commitment':False}

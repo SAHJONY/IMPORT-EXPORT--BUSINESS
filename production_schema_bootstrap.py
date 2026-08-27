@@ -9,6 +9,7 @@ import psycopg
 
 MIGRATION_ID = "2026-08-23-canonical-vercel-trade-schema-v1"
 ENERGY_INTELLIGENCE_MIGRATION_ID = "2026-08-24-energy-commercial-intelligence-v1"
+INDUSTRIAL_MARKETPLACE_MIGRATION_ID = "2026-08-27-industrial-marketplace-sourcing-v1"
 
 
 def _database_url() -> str:
@@ -243,6 +244,168 @@ CREATE TABLE IF NOT EXISTS beneficiary_change_requests (
 );
 CREATE INDEX IF NOT EXISTS beneficiary_changes_status_idx ON beneficiary_change_requests(status, created_at DESC);
 
+CREATE TABLE IF NOT EXISTS marketplace_suppliers (
+    id bigserial PRIMARY KEY,
+    supplier_id text NOT NULL UNIQUE,
+    legal_name text NOT NULL,
+    trade_name text,
+    supplier_type text NOT NULL CHECK (supplier_type IN ('MANUFACTURER','DISTRIBUTOR','WHOLESALER','EXPORTER')),
+    country_code text NOT NULL,
+    website text,
+    public_contact_url text,
+    verification_tier text NOT NULL DEFAULT 'LISTED' CHECK (verification_tier IN ('LISTED','VERIFIED','FACTORY_VERIFIED','TRADE_READY','SAHJONY_MANAGED')),
+    source_url text,
+    source_date date,
+    status text NOT NULL DEFAULT 'RESEARCH',
+    notes text,
+    created_by text,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS marketplace_suppliers_country_idx ON marketplace_suppliers(country_code, verification_tier, updated_at DESC);
+CREATE INDEX IF NOT EXISTS marketplace_suppliers_status_idx ON marketplace_suppliers(status, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS marketplace_products (
+    id bigserial PRIMARY KEY,
+    product_id text NOT NULL UNIQUE,
+    supplier_id text NOT NULL REFERENCES marketplace_suppliers(supplier_id) ON DELETE RESTRICT,
+    sku text,
+    manufacturer text,
+    brand text,
+    name text NOT NULL,
+    category text NOT NULL,
+    description text NOT NULL,
+    specifications jsonb NOT NULL DEFAULT '{}'::jsonb,
+    hs_code text,
+    country_of_origin text,
+    moq numeric(22,4),
+    unit text,
+    price_type text NOT NULL DEFAULT 'RFQ' CHECK (price_type IN ('RFQ','INDICATIVE','FIXED')),
+    indicative_price numeric(22,4),
+    currency text NOT NULL DEFAULT 'USD',
+    incoterms text[] NOT NULL DEFAULT '{}',
+    lead_time_days integer,
+    production_capacity text,
+    certifications text[] NOT NULL DEFAULT '{}',
+    image_urls text[] NOT NULL DEFAULT '{}',
+    media_rights_status text NOT NULL DEFAULT 'PENDING_REVIEW' CHECK (media_rights_status IN ('SUPPLIER_AUTHORIZED','DISTRIBUTOR_AUTHORIZED','LICENSED','PUBLIC_DOMAIN','PENDING_REVIEW')),
+    source_url text,
+    source_date date,
+    verification_tier text NOT NULL DEFAULT 'LISTED' CHECK (verification_tier IN ('LISTED','VERIFIED','FACTORY_VERIFIED','TRADE_READY','SAHJONY_MANAGED')),
+    published boolean NOT NULL DEFAULT false,
+    availability_claim text NOT NULL DEFAULT 'UNVERIFIED_UNLESS_QUOTED',
+    inventory_owned_by_sahjony boolean NOT NULL DEFAULT false CHECK (inventory_owned_by_sahjony = false),
+    created_by text,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS marketplace_products_public_idx ON marketplace_products(published, category, updated_at DESC);
+CREATE INDEX IF NOT EXISTS marketplace_products_supplier_idx ON marketplace_products(supplier_id, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS marketplace_rfqs (
+    id bigserial PRIMARY KEY,
+    rfq_id text NOT NULL UNIQUE,
+    product_id text REFERENCES marketplace_products(product_id) ON DELETE SET NULL,
+    buyer_company text NOT NULL,
+    contact_name text NOT NULL,
+    email text NOT NULL,
+    country_code text NOT NULL,
+    product_need text NOT NULL,
+    specifications text,
+    quantity numeric(22,4),
+    unit text,
+    target_budget numeric(22,4),
+    currency text NOT NULL DEFAULT 'USD',
+    destination_country text NOT NULL,
+    preferred_incoterm text,
+    target_delivery_date date,
+    managed_trade_requested boolean NOT NULL DEFAULT true,
+    source text NOT NULL DEFAULT 'WEB',
+    qualification_status text NOT NULL DEFAULT 'PENDING',
+    status text NOT NULL DEFAULT 'NEW',
+    revenue_priority text NOT NULL DEFAULT 'UNRANKED',
+    inventory_owned_by_sahjony boolean NOT NULL DEFAULT false CHECK (inventory_owned_by_sahjony = false),
+    sahjony_capital_required boolean NOT NULL DEFAULT false CHECK (sahjony_capital_required = false),
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS marketplace_rfqs_status_idx ON marketplace_rfqs(qualification_status, status, updated_at DESC);
+CREATE INDEX IF NOT EXISTS marketplace_rfqs_product_idx ON marketplace_rfqs(product_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS global_sourcing_requests (
+    id bigserial PRIMARY KEY,
+    sourcing_request_id text NOT NULL UNIQUE,
+    managed_request_id text,
+    private_business_id text,
+    product_need text NOT NULL,
+    specifications text,
+    quantity numeric(22,4),
+    destination_country text NOT NULL DEFAULT 'CU',
+    allowed_origin_countries text[] NOT NULL DEFAULT '{}',
+    excluded_origin_countries text[] NOT NULL DEFAULT '{}',
+    worldwide_search boolean NOT NULL DEFAULT true,
+    target_budget numeric(22,4),
+    currency text NOT NULL DEFAULT 'USD',
+    target_delivery_date date,
+    status text NOT NULL DEFAULT 'OPEN' CHECK (status IN ('OPEN','SEARCHING','SHORTLISTED','HOLD','CLOSED','CANCELLED')),
+    created_by text,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS global_sourcing_requests_status_idx ON global_sourcing_requests(status, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS global_supplier_candidates (
+    id bigserial PRIMARY KEY,
+    global_candidate_id text NOT NULL UNIQUE,
+    sourcing_request_id text NOT NULL REFERENCES global_sourcing_requests(sourcing_request_id) ON DELETE CASCADE,
+    supplier_name text NOT NULL,
+    supplier_country text NOT NULL,
+    supplier_id text,
+    website text,
+    product_match text,
+    unit_cost numeric(22,4),
+    currency text,
+    moq numeric(22,4),
+    lead_time_days integer,
+    incoterm text,
+    payment_terms text,
+    source_reference text,
+    source_evidence jsonb NOT NULL DEFAULT '{}'::jsonb,
+    supplier_screening_status text NOT NULL DEFAULT 'PENDING' CHECK (supplier_screening_status IN ('PENDING','PASS','FAIL','REVIEW','NOT_APPLICABLE')),
+    origin_export_control_status text NOT NULL DEFAULT 'PENDING' CHECK (origin_export_control_status IN ('PENDING','PASS','FAIL','REVIEW','NOT_APPLICABLE')),
+    destination_import_control_status text NOT NULL DEFAULT 'PENDING' CHECK (destination_import_control_status IN ('PENDING','PASS','FAIL','REVIEW','NOT_APPLICABLE')),
+    product_restriction_status text NOT NULL DEFAULT 'PENDING' CHECK (product_restriction_status IN ('PENDING','PASS','FAIL','REVIEW','NOT_APPLICABLE')),
+    banking_status text NOT NULL DEFAULT 'PENDING' CHECK (banking_status IN ('PENDING','PASS','FAIL','REVIEW','NOT_APPLICABLE')),
+    logistics_status text NOT NULL DEFAULT 'PENDING' CHECK (logistics_status IN ('PENDING','PASS','FAIL','REVIEW','NOT_APPLICABLE')),
+    tax_duty_status text NOT NULL DEFAULT 'PENDING' CHECK (tax_duty_status IN ('PENDING','PASS','FAIL','REVIEW','NOT_APPLICABLE')),
+    us_nexus_status text NOT NULL DEFAULT 'PENDING' CHECK (us_nexus_status IN ('PENDING','PASS','FAIL','REVIEW','NOT_APPLICABLE')),
+    corridor_status text NOT NULL DEFAULT 'BLOCKED' CHECK (corridor_status IN ('READY','LIMITED','BLOCKED')),
+    landed_cost_estimate numeric(22,4),
+    score numeric(7,2),
+    selected boolean NOT NULL DEFAULT false,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS global_supplier_candidates_request_idx ON global_supplier_candidates(sourcing_request_id, selected, score DESC);
+CREATE INDEX IF NOT EXISTS global_supplier_candidates_country_idx ON global_supplier_candidates(supplier_country, corridor_status);
+
+CREATE TABLE IF NOT EXISTS global_sourcing_control_evidence (
+    id bigserial PRIMARY KEY,
+    evidence_id text NOT NULL UNIQUE,
+    global_candidate_id text NOT NULL REFERENCES global_supplier_candidates(global_candidate_id) ON DELETE CASCADE,
+    control_key text NOT NULL,
+    authority text,
+    reference text,
+    summary text NOT NULL,
+    effective_at timestamptz,
+    expires_at timestamptz,
+    verified boolean NOT NULL DEFAULT false,
+    verified_by text,
+    verified_at timestamptz,
+    created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS global_sourcing_evidence_candidate_idx ON global_sourcing_control_evidence(global_candidate_id, control_key, created_at DESC);
+
 CREATE TABLE IF NOT EXISTS energy_research_leads (
     id bigserial PRIMARY KEY,
     lead_key text NOT NULL UNIQUE,
@@ -462,6 +625,10 @@ def _bootstrap_sync() -> dict[str, Any]:
                 "INSERT INTO sahjony_schema_migrations (migration_id) VALUES (%s) ON CONFLICT DO NOTHING",
                 (ENERGY_INTELLIGENCE_MIGRATION_ID,),
             )
+            cur.execute(
+                "INSERT INTO sahjony_schema_migrations (migration_id) VALUES (%s) ON CONFLICT DO NOTHING",
+                (INDUSTRIAL_MARKETPLACE_MIGRATION_ID,),
+            )
         conn.commit()
 
         with conn.cursor() as cur:
@@ -475,7 +642,9 @@ def _bootstrap_sync() -> dict[str, Any]:
                 ([
                     'trade_payment_ledger','trade_payment_events','cuba_partner_accounts','cuba_partner_referrals',
                     'cuba_consumer_marketplace_requests','ledger_accounts','ledger_journals','ledger_entries',
-                    'payment_reconciliations','beneficiary_change_requests'
+                    'payment_reconciliations','beneficiary_change_requests','marketplace_suppliers',
+                    'marketplace_products','marketplace_rfqs','global_sourcing_requests',
+                    'global_supplier_candidates','global_sourcing_control_evidence'
                 ],),
             )
             table_count = int(cur.fetchone()[0])
@@ -486,12 +655,13 @@ def _bootstrap_sync() -> dict[str, Any]:
     return {
         "migration_id": MIGRATION_ID,
         "energy_intelligence_migration_id": ENERGY_INTELLIGENCE_MIGRATION_ID,
+        "industrial_marketplace_migration_id": INDUSTRIAL_MARKETPLACE_MIGRATION_ID,
         "canonical_database": "active_vercel_database_url",
         "required_tables_present": table_count,
         "active_usd_accounts": active_usd_accounts,
         "energy_research_lead_count": energy_research_lead_count,
         "destructive_operations": False,
-        "completed": table_count == 10 and active_usd_accounts >= 12,
+        "completed": table_count == 16 and active_usd_accounts >= 12,
     }
 
 

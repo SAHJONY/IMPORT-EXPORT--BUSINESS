@@ -7,7 +7,7 @@ from fastapi import FastAPI, Header
 from customer_crm_api import identity
 from insforge_backend import get_backend
 
-app = FastAPI(title="SAHJONY External Trade Prospects", version="1.3.0", docs_url=None, redoc_url=None)
+app = FastAPI(title="SAHJONY External Trade Prospects", version="1.4.0", docs_url=None, redoc_url=None)
 ORG_ID = "org_sahjony_global_trade"
 
 
@@ -67,6 +67,11 @@ def _deal(
         "source_url": source_url,
         "evidence_urls": evidence_urls or ([source_url] if source_url else []),
         "supplier_outreach": supplier_outreach or [],
+        "possible_profit_status": "INPUTS_REQUIRED",
+        "possible_profit_basis": "Supplier cost, buyer price and protected SAHJONY compensation are not yet evidenced.",
+        "possible_profit_min_usd": None,
+        "possible_profit_max_usd": None,
+        "possible_profit_period": None,
         "source_record": "live_execution_snapshot",
         "created_at": created_at or now(),
         "updated_at": now(),
@@ -133,7 +138,10 @@ EXECUTION_SNAPSHOT = [
         source_url="https://www.servotech.in/",
         evidence_urls=["https://www.exicom.com/","https://www.servotech.in/","https://www.lubievsolutions.com/"],
         created_at="2026-06-08T00:00:00+00:00",
-        extra={"supplier_contacted_count":4,"supplier_effective_count":4,"supplier_reply_count":1,"supplier_delivery_failures":1},
+        extra={"supplier_contacted_count":4,"supplier_effective_count":4,"supplier_reply_count":1,"supplier_delivery_failures":1,
+            "possible_profit_status":"TARGET_ONLY","possible_profit_rate_pct":8,
+            "possible_profit_period":"Initial 20-ft container",
+            "possible_profit_basis":"8% supplier-side channel/referral commission requested; compliant SKU pricing and written protection are pending."},
     ),
     _deal(
         "ext_al_scrap_mombasa_20260727",
@@ -161,7 +169,10 @@ EXECUTION_SNAPSHOT = [
         next_action="Compare SCOs on delivered economics, chemistry, stock evidence, inspection, loading, lead time and L/C acceptance; verify buyer entity and destination/incoterm consistency before matching.",
         source_url="https://nauticametalscrap.com/aluminum-scrap-6063",
         created_at="2026-07-27T00:00:00+00:00",
-        extra={"supplier_contacted_count":4,"supplier_effective_count":4,"supplier_reply_count":0},
+        extra={"supplier_contacted_count":4,"supplier_effective_count":4,"supplier_reply_count":0,
+            "possible_profit_status":"UNCONFIRMED_TARGET","possible_profit_min_usd":3750,
+            "possible_profit_max_usd":7500,"possible_profit_period":"25–50 MT trial",
+            "possible_profit_basis":"USD 150/MT requested supplier-side commission × 25–50 MT; supplier confirmation is pending."},
     ),
     _deal(
         "ext_soda_ash_korea_20260825",
@@ -188,7 +199,11 @@ EXECUTION_SNAPSHOT = [
         next_action="Obtain supplier COA/specification, price per MT, monthly capacity, packing/loading, lead time and L/C acceptance; confirm buyer legal entity, destination port and issuing bank before commercial matching.",
         source_url="https://www.go4worldbusiness.com/",
         created_at="2026-08-25T01:06:45+00:00",
-        extra={"supplier_contacted_count":2,"supplier_effective_count":2,"buyer_contacted":True},
+        extra={"supplier_contacted_count":2,"supplier_effective_count":2,"buyer_contacted":True,
+            "possible_profit_status":"EVIDENCED_ESTIMATE","possible_profit_min_usd":420,
+            "possible_profit_max_usd":630,"possible_profit_period":"42 MT controlled trial",
+            "possible_profit_basis":"USD 10–15/MT margin × 42 MT; supplier net and buyer offer are evidenced, but buyer acceptance and collection are not.",
+            "possible_profit_recurring_usd":7500,"possible_profit_recurring_period":"500 MT/month target at USD 15/MT"},
     ),
     _deal(
         "ext_uae_motors_20260825",
@@ -438,6 +453,11 @@ def _project_research_lead(row: dict) -> dict:
         "scout_code": row.get("scout_code"),
         "lead_search_job_id": row.get("lead_search_job_id"),
         "next_action": "Independently verify identity, authority, active commercial need, sanctions/compliance posture and payment capability before promotion or outreach authority.",
+        "possible_profit_status": "INPUTS_REQUIRED",
+        "possible_profit_basis": "Supplier cost, buyer price and protected SAHJONY compensation are not yet evidenced.",
+        "possible_profit_min_usd": None,
+        "possible_profit_max_usd": None,
+        "possible_profit_period": None,
         "created_at": row.get("created_at"),
         "updated_at": row.get("updated_at"),
         "source_record": "lead_scout_leads",
@@ -458,6 +478,8 @@ async def external_prospects_health():
         "customer_intake_isolation":True,
         "research_pipeline_connected":True,
         "all_lead_scout_records_visible":True,
+        "possible_profit_projection":True,
+        "possible_profit_is_not_booked_revenue":True,
         "execution_snapshot_records":len(EXECUTION_SNAPSHOT),
         "mailbox_buy_lead_records":len(MAILBOX_BUY_LEADS),
         "lead_scout_record_count":len(researched),

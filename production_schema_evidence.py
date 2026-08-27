@@ -19,6 +19,12 @@ _REQUIRED_TABLES = {
     "ledger_entries",
     "payment_reconciliations",
     "beneficiary_change_requests",
+    "marketplace_suppliers",
+    "marketplace_products",
+    "marketplace_rfqs",
+    "global_sourcing_requests",
+    "global_supplier_candidates",
+    "global_sourcing_control_evidence",
 }
 
 _REQUIRED_COLUMNS = {
@@ -46,6 +52,12 @@ _REQUIRED_COLUMNS = {
         "approved_by",
         "status",
     },
+    "marketplace_suppliers": {"supplier_id", "supplier_type", "verification_tier", "source_url", "status"},
+    "marketplace_products": {"product_id", "supplier_id", "price_type", "media_rights_status", "published", "inventory_owned_by_sahjony"},
+    "marketplace_rfqs": {"rfq_id", "qualification_status", "status", "inventory_owned_by_sahjony", "sahjony_capital_required"},
+    "global_sourcing_requests": {"sourcing_request_id", "destination_country", "worldwide_search", "status"},
+    "global_supplier_candidates": {"global_candidate_id", "sourcing_request_id", "source_evidence", "corridor_status", "selected"},
+    "global_sourcing_control_evidence": {"evidence_id", "global_candidate_id", "control_key", "verified"},
 }
 
 
