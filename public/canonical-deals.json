@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-08-26T22:50:00Z",
+  "updated_at": "2026-08-27T00:27:00Z",
   "policy": "Canonical governed deal records. No QUALIFIED, CONTRACTED, FUNDED, CLOSING_READY or REVENUE status without documentary evidence.",
   "deals": [
     {
@@ -101,6 +101,56 @@
         {"at":"2026-08-26","event":"Supplier capability and catalogs received","status":"complete"},
         {"at":"2026-08-26","event":"100% advance requirement identified","status":"blocked"},
         {"at":"Next","event":"Resolve payment mismatch or replace supplier","status":"next"}
+      ]
+    },
+    {
+      "id": "SAHJONY-POWER-445MW-V942",
+      "title": "445 MW Siemens V94.2 / Combined-Cycle Plant",
+      "market": "Destination pending buyer verification",
+      "stage": "QUALIFICATION",
+      "priority": "A",
+      "buyer": "Private buyer requirement referenced by SAHJONY; destination, site/permitting, fuel supply, PPA/offtake, budget, timeline and proof of funds not yet verified",
+      "supplier": "American Plant & Equipment; Jason Ford replied on behalf of Victor Lebron; specific asset availability and seller authority not yet confirmed",
+      "sahjonyPosition": "Sourcing/origination intermediary; controlled introduction requested",
+      "economics": "Intermediary/referral protection requested in writing; not confirmed",
+      "payment": "Not established",
+      "blocker": "Seller-side asset package and authority unverified; buyer qualification package incomplete; intermediary protection unconfirmed",
+      "nextAction": "Receive asset package, current availability, technical/commercial basis and seller authority; secure written SAHJONY protection; then obtain buyer qualification evidence before any direct introduction",
+      "lastActivity": "2026-08-26",
+      "confidence": 40,
+      "source": "Governed Gmail thread evidence",
+      "evidence": ["American Plant & Equipment replied to SAHJONY's 445 MW inquiry", "Counterparty requested ultimate destination, fuel supply, permits, PPA/offtake, environmental/site approval, budget, timeline and proof of funds", "SAHJONY explicitly stated those buyer-side items are not yet verified", "SAHJONY requested current asset availability, technical configuration, commercial basis, seller/mandate authority and written intermediary protection"],
+      "documents": ["Asset package pending", "Seller/mandate authority evidence pending", "Buyer qualification evidence pending", "Intermediary protection pending"],
+      "timeline": [
+        {"at":"2026-08-26","event":"SAHJONY opened controlled inquiry for TT-2097, TY-1940 and TY-2031 / approximately 445 MW","status":"complete"},
+        {"at":"2026-08-26","event":"American Plant & Equipment requested buyer/project qualification information","status":"complete"},
+        {"at":"2026-08-26","event":"SAHJONY requested seller-side asset validation and protected intermediary path before buyer disclosure","status":"complete"},
+        {"at":"Next","event":"Validate asset/seller authority and obtain buyer-side qualification evidence","status":"next"}
+      ]
+    },
+    {
+      "id": "SAHJONY-AL-SCRAP-KE-25-50",
+      "title": "Aluminium 6063 Extrusion + UBC Scrap · 25–50 MT Trial",
+      "market": "Mombasa, Kenya",
+      "stage": "FIRM_QUOTE",
+      "priority": "B",
+      "buyer": "Trial requirement referenced by SAHJONY; buyer acceptance and identity not released",
+      "supplier": "Nautica Metal Scrap B.V.; SCO received",
+      "sahjonyPosition": "Procurement/origination intermediary; buyer identity withheld pending KYB, payment alignment and fee protection",
+      "economics": "USD 150/MT supplier-side origination commission requested; not confirmed",
+      "payment": "Supplier standard: 30% T/T advance / 70% T/T against copy B/L; buyer-side preference: irrevocable 100% L/C at sight",
+      "blocker": "Payment mismatch, supplier KYB/stock evidence pending, exact available quantity pending, and SAHJONY commission protection unconfirmed",
+      "nextAction": "Obtain KYB, current stock photos/XRF, exact quantity, bank-secured payment alternative and written commission protection before controlled buyer review",
+      "lastActivity": "2026-08-25",
+      "confidence": 48,
+      "source": "Governed Gmail thread evidence",
+      "evidence": ["Supplier issued 5-banking-day SCO for 25–50 MT trial", "6063 quoted USD 2,120/MT FOB Rotterdam and USD 2,290/MT CFR Mombasa", "UBC quoted USD 2,050/MT FOB Rotterdam and USD 2,120/MT CFR Mombasa", "SGS or Bureau Veritas inspection offered at loading", "Supplier states shipment lead time approximately 25–27 days after advance/payment instrument and formalities", "SAHJONY requested L/C alternative, KYB/stock evidence and USD 150/MT protected supplier-side economics"],
+      "documents": ["SCO in email", "KYB documents pending", "Current stock photos/videos pending", "6063 XRF/chemical analysis pending", "Inspection certificate available if ordered"],
+      "timeline": [
+        {"at":"2026-08-24","event":"SAHJONY issued RFQ for 25–50 MT aluminium scrap trial to Mombasa","status":"complete"},
+        {"at":"2026-08-25","event":"Nautica Metal Scrap B.V. issued SCO with FOB/CFR prices and 30/70 T/T terms","status":"complete"},
+        {"at":"2026-08-25","event":"SAHJONY requested KYB, stock evidence, L/C alternative and USD 150/MT protected economics","status":"waiting"},
+        {"at":"Next","event":"Supplier verification and commercial alignment before buyer presentation","status":"next"}
       ]
     }
   ]
