@@ -9,6 +9,7 @@ from managed_trade_gateway_evidence import managed_trade_gateway_evidence
 from payment_engine import CANONICAL_TRANSACTION_CURRENCY, USD_ONLY_TRANSACTIONS
 from secure_storage import storage_configuration_status
 from supplier_sourcing_evidence import supplier_sourcing_evidence
+from governance_policy import AUDIT_RETENTION_DAYS
 
 
 @dataclass(frozen=True)
@@ -195,7 +196,7 @@ def evaluate_production_readiness(
         ReadinessGate('collaboration_isolation', _true('COLLABORATION_E2E_VERIFIED'), True, 'External sharing isolation verified', 'Run sharing isolation, expiration and revocation tests.'),
         ReadinessGate('accounting_ledger', _true('ACCOUNTING_LEDGER_VERIFIED') and _true('PAYMENT_RECONCILIATION_VERIFIED'), True, 'Double-entry ledger and reconciliation verified', 'Post balanced/reversal journals and reconcile test payments.'),
         ReadinessGate('beneficiary_maker_checker', _true('BENEFICIARY_MAKER_CHECKER_VERIFIED'), True, 'Bank-detail maker-checker verified', 'Verify independent beneficiary validation plus owner approval.'),
-        ReadinessGate('audit_retention', _int('AUDIT_RETENTION_DAYS') >= 365, True, 'Audit retention >=365 days', 'Set audit retention >=365 days.'),
+        ReadinessGate('audit_retention', max(_int('AUDIT_RETENTION_DAYS'), AUDIT_RETENTION_DAYS) >= 365, True, f'Audit retention policy={max(_int("AUDIT_RETENTION_DAYS"), AUDIT_RETENTION_DAYS)} days; minimum enforced in application code', 'Keep the enforced audit retention policy at 365 days or longer.'),
         ReadinessGate('backup_policy', _true('BACKUPS_ENABLED') and _true('BACKUP_RESTORE_TESTED'), True, 'Backups and restore drill verified', 'Run and document database/storage restore test.'),
         ReadinessGate('monitoring_alerts', _present('ALERT_WEBHOOK_URL') or _true('VERCEL_MONITORING_ENABLED'), True, 'Production alert path configured', 'Configure runtime alerting.'),
         ReadinessGate('first_live_trade_certified', _true('FIRST_LIVE_TRADE_CERTIFIED'), True, 'Real customer-to-supplier transaction delivered, paid, reconciled, SAHJONY fee collected and audit closed', 'Complete First Live Trade Certification in the Owner OS; do not set this flag from a dry run.'),

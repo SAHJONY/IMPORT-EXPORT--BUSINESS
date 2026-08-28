@@ -22,6 +22,7 @@ from auth import (
     verify_owner_totp,
 )
 from insforge_backend import _matches, _safe_table, get_backend
+from governance_policy import AUDIT_RETENTION_DAYS
 
 
 app = FastAPI(title="SAHJONY Owner Authentication", version="1.2.0", docs_url=None, redoc_url=None)
@@ -49,7 +50,24 @@ class OwnerDataDeleteRequest(BaseModel):
 
 
 PROTECTED_TABLES = {"system_integrations"}
-IMMUTABLE_TABLES = {"owner_data_deletion_audit"}
+IMMUTABLE_TABLES = {
+    "collaboration_access_events",
+    "communication_events",
+    "communication_policy_events",
+    "compliance_audit_events",
+    "country_activation_audit",
+    "cuba_trade_audit",
+    "customer_crm_audit",
+    "document_storage_events",
+    "energy_audit_events",
+    "energy_provider_ingestion_events",
+    "lead_scout_audit",
+    "managed_trade_audit",
+    "owner_data_deletion_audit",
+    "trade_agent_audit",
+    "translation_audit_events",
+    "us_import_audit",
+}
 COMMON_DATASETS = [
     {"table": "crm_intakes", "label": "CRM leads / intakes"},
     {"table": "customer_intakes", "label": "Customer intakes"},
@@ -146,6 +164,8 @@ def owner_auth_health():
         "full_owner_scope": True,
         "owner_data_deletion": True,
         "fail_closed": True,
+        "audit_retention_days": AUDIT_RETENTION_DAYS,
+        "audit_ledgers_immutable": True,
     }
 
 
