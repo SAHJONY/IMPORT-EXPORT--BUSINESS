@@ -20,6 +20,7 @@ from payment_engine import CANONICAL_TRANSACTION_CURRENCY, USD_ONLY_TRANSACTIONS
 from production_readiness import evaluate_production_readiness
 from production_schema_bootstrap import ensure_production_schema
 from production_schema_evidence import production_schema_evidence
+from production_rls_bootstrap import ensure_production_rls
 from secure_storage import storage_configuration_status
 from trade_connectors import trade_connectors
 
@@ -176,10 +177,11 @@ async def resilient_public_crm_intake(request:Request):
 
 @app.get("/activation/health")
 async def activation_health():
-    bootstrap=None; crm_seeds={}
+    bootstrap=None; rls_bootstrap=None; crm_seeds={}
     if os.getenv("VERCEL_ENV","").strip().lower()=="production" and persistent_backend_status()["database_url_configured"]:
         try: bootstrap=await ensure_production_schema()
         except Exception as exc: bootstrap={"completed":False,"canonical_database":"active_vercel_database_url","reason":f"{type(exc).__name__}: {str(exc).strip().splitlines()[0][:240] if str(exc).strip() else 'unknown bootstrap error'}","fail_closed":True}
+        rls_bootstrap=await ensure_production_rls()
         for name, expected, runner in (
             ("energy_core",len(ENERGY_CRM_LEADS),ensure_energy_crm_seed),
             ("global_energy",len(GLOBAL_ENERGY_CRM_LEADS),ensure_global_energy_crm_seed),
@@ -193,7 +195,7 @@ async def activation_health():
     connector_health=await trade_connectors.health(); schema_evidence=await production_schema_evidence(); readiness=evaluate_production_readiness(runtime_ok=True,connector_health=connector_health,persistence_schema_evidence=schema_evidence); providers=_provider_state(schema_evidence); external=_external_requirements(); persistence_ready=providers["persistence"]["configured"] and providers["persistence"]["schemas_applied"]
     seed_expected=sum(int(v.get("expected") or 0) for v in crm_seeds.values()); seed_inserted=sum(int(v.get("inserted") or 0) for v in crm_seeds.values()); seed_present=sum(int(v.get("already_present") or 0) for v in crm_seeds.values()); seed_failed=sum(int(v.get("failed") or 0) for v in crm_seeds.values())
     return {
-        "status":"ready" if readiness["production_ready"] else "activation_required","service":"production-activation-control","business":"SAHJONY Global Trade","canonical_database":"active_vercel_database_url","schema_bootstrap":bootstrap,
+        "status":"ready" if readiness["production_ready"] else "activation_required","service":"production-activation-control","business":"SAHJONY Global Trade","canonical_database":"active_vercel_database_url","schema_bootstrap":bootstrap,"rls_bootstrap":rls_bootstrap,
         "crm_seeds":{"books":crm_seeds,"expected":seed_expected,"inserted_this_run":seed_inserted,"already_present":seed_present,"failed":seed_failed,"buyer_seller_worldwide":True,"automatic_deal_promotion":False},
         "readiness_score":readiness["score"],"passed_gates":readiness["passed_gates"],"total_gates":readiness["total_gates"],"blocker_count":readiness["blocker_count"],"release_gate":readiness["release_gate"],"production_ready":readiness["production_ready"],"safe_to_accept_persisted_trade_requests":persistence_ready,"safe_to_release_transactions":readiness["production_ready"],"providers":providers,"connectors":connector_health,"blockers":readiness["blockers"],"external_actions_required":external,
         "policy":{"fail_closed":True,"no_fake_100_percent":True,"first_live_trade_required":True,"canonical_transaction_currency":CANONICAL_TRANSACTION_CURRENCY,"usd_only_transactions":USD_ONLY_TRANSACTIONS,"ai_has_release_authority":False},

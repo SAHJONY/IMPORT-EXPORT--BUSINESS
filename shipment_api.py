@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 
 from auth import verify_customer_token, verify_owner_token
 from credentialed_providers import ProviderConfigurationError, maersk_provider
-from insforge_backend import InsForgeConfigurationError, get_backend
+from insforge_backend import InsForgeConfigurationError, get_backend, persistent_backend_status
 
 app = FastAPI(title="SAHJONY Global Trade Shipments", version="1.0.0", docs_url=None, redoc_url=None)
 
@@ -140,10 +140,14 @@ async def get_shipment_or_404(shipment_id: str, actor: dict[str, str]) -> dict[s
 
 @app.get("/shipments/health")
 async def health() -> dict[str, Any]:
+    persistence = persistent_backend_status()
     return {
         "status": "ok",
         "service": "end-to-end-shipment-tracking",
-        "persistence_configured": bool(os.getenv("INSFORGE_BASE_URL") and os.getenv("INSFORGE_API_KEY")),
+        "persistence_configured": persistence["configured"],
+        "persistence_provider": persistence["provider"],
+        "database_url_configured": persistence["database_url_configured"],
+        "insforge_configured": persistence["insforge_configured"],
         "maersk_configured": maersk_provider.configured,
         "provider_path_configured": bool(os.getenv("MAERSK_TRACKING_PATH_TEMPLATE")),
         "modes": ["ocean", "air", "ground", "lcl", "parcel", "multimodal"],
