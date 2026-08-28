@@ -4,7 +4,7 @@ from fastapi import FastAPI
 
 from insforge_backend import get_backend
 
-app = FastAPI(title="SAHJONY Cuba MIPYME CRM", version="1.0.0", docs_url=None, redoc_url=None)
+app = FastAPI(title="SAHJONY Cuba MIPYME CRM", version="1.1.0", docs_url=None, redoc_url=None)
 ORG_ID = "org_sahjony_global_trade"
 
 
@@ -36,14 +36,21 @@ def _public_record(row: dict) -> dict:
     return {k: row.get(k) for k in allowed}
 
 
-@app.get("/cuba-mipymes-api/health")
-async def health():
+async def _records() -> list[dict]:
     backend = get_backend()
     rows = await backend.select(
         "external_trade_prospects",
-        params={"organization_id": f"eq.{ORG_ID}", "limit": "5000"},
+        params={"organization_id": f"eq.{ORG_ID}", "order": "created_at.desc", "limit": "5000"},
     ) or []
     records = [_public_record(dict(r)) for r in rows if _is_mipyme(dict(r))]
+    records.sort(key=lambda r: (str(r.get("buyer_company") or "").casefold(), str(r.get("external_reference") or "")))
+    return records
+
+
+@app.get("/cuba-mipymes-api/health")
+@app.get("/crm/cuba-mipymes/health")
+async def health():
+    records = await _records()
     return {
         "status": "ok",
         "service": "cuba-mipyme-read-only-crm",
@@ -54,14 +61,10 @@ async def health():
 
 
 @app.get("/cuba-mipymes-api/list")
+@app.get("/crm/cuba-mipymes")
+@app.get("/crm/cuba-mipymes/list")
 async def list_mipymes():
-    backend = get_backend()
-    rows = await backend.select(
-        "external_trade_prospects",
-        params={"organization_id": f"eq.{ORG_ID}", "order": "created_at.desc", "limit": "5000"},
-    ) or []
-    records = [_public_record(dict(r)) for r in rows if _is_mipyme(dict(r))]
-    records.sort(key=lambda r: (str(r.get("buyer_company") or "").casefold(), str(r.get("external_reference") or "")))
+    records = await _records()
     return {
         "status": "ok",
         "count": len(records),
