@@ -112,3 +112,23 @@
   }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',mountIntentLauncher,{once:true});else mountIntentLauncher();
 })();
+
+(()=>{
+  function enforceOwnerPrivacy(){
+    const path=location.pathname.replace(/\/+$/,'')||'/';
+    const ownerArea=path==='/owner-login'||path==='/owner'||path.startsWith('/owner/');
+    if(ownerArea){
+      let meta=document.querySelector('meta[name="robots"]');
+      if(!meta){meta=document.createElement('meta');meta.name='robots';document.head.appendChild(meta)}
+      meta.content='noindex,nofollow,noarchive,nosnippet';
+      return;
+    }
+    document.querySelectorAll('a[href]').forEach(a=>{
+      try{
+        const u=new URL(a.getAttribute('href')||'',location.origin);
+        if(u.origin===location.origin&&(u.pathname==='/owner-login'||u.pathname==='/owner'||u.pathname.startsWith('/owner/'))){a.remove()}
+      }catch{}
+    });
+  }
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',enforceOwnerPrivacy,{once:true});else enforceOwnerPrivacy();
+})();
