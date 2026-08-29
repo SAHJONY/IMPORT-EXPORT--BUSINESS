@@ -1,0 +1,107 @@
+/* SAHJONY LLC — contextual ultra-high-resolution visual system */
+:root{
+  --uv-image:url('/media/native/global-logistics.webp');
+  --uv-focus:center;
+  --uv-opacity:.18;
+  --uv-line:rgba(255,255,255,.12);
+}
+html[data-visual-sector="global"],html[data-visual-sector="logistics"],html[data-visual-sector="government"],html[data-visual-sector="cuba"]{--uv-image:url('/media/native/global-logistics.webp');--uv-focus:center}
+html[data-visual-sector="marketplace"],html[data-visual-sector="manufacturing"],html[data-visual-sector="people"],html[data-visual-sector="communications"],html[data-visual-sector="partners"]{--uv-image:url('/media/native/human-manufacturing.webp');--uv-focus:center}
+html[data-visual-sector="energy"],html[data-visual-sector="finance"],html[data-visual-sector="compliance"],html[data-visual-sector="intelligence"]{--uv-image:url('/media/native/energy-infrastructure.webp');--uv-focus:center}
+
+/* Cuba experience: one native editorial photograph per public and Owner page. */
+html[data-visual-page="cuba-comunicaciones"]{--uv-image:url('/media/native/cuba/cuba-comunicaciones.webp')}
+html[data-visual-page="cuba-desk"]{--uv-image:url('/media/native/cuba/cuba-desk.webp')}
+html[data-visual-page="cuba-es"]{--uv-image:url('/media/native/cuba/cuba-es.webp')}
+html[data-visual-page="cuba-individual-consumers"]{--uv-image:url('/media/native/cuba/cuba-individual-consumers.webp')}
+html[data-visual-page="cuba-order-documents"]{--uv-image:url('/media/native/cuba/cuba-order-documents.webp')}
+html[data-visual-page="cuba-order"]{--uv-image:url('/media/native/cuba/cuba-order.webp')}
+html[data-visual-page="cuba-partners"]{--uv-image:url('/media/native/cuba/cuba-partners.webp')}
+html[data-visual-page="cuba-payments"]{--uv-image:url('/media/native/cuba/cuba-payments.webp')}
+html[data-visual-page="cuba-private-sector"]{--uv-image:url('/media/native/cuba/cuba-private-sector.webp')}
+html[data-visual-page="cuba-us-desk-card"]{--uv-image:url('/media/native/cuba/cuba-us-desk-card.webp')}
+html[data-visual-page="cuba-us-desk"]{--uv-image:url('/media/native/cuba/cuba-us-desk.webp')}
+html[data-visual-page="cuba"]{--uv-image:url('/media/native/cuba/cuba.webp')}
+html[data-visual-page="owner-cuba-communications"]{--uv-image:url('/media/native/cuba/owner-cuba-communications.webp')}
+html[data-visual-page="owner-cuba-consumers"]{--uv-image:url('/media/native/cuba/owner-cuba-consumers.webp')}
+html[data-visual-page="owner-cuba-energy"]{--uv-image:url('/media/native/cuba/owner-cuba-energy.webp')}
+html[data-visual-page="owner-cuba-fuels"]{--uv-image:url('/media/native/cuba/owner-cuba-fuels.webp')}
+html[data-visual-page="owner-cuba-logistics"]{--uv-image:url('/media/native/cuba/owner-cuba-logistics.webp')}
+html[data-visual-page="owner-cuba-mipymes"]{--uv-image:url('/media/native/cuba/owner-cuba-mipymes.webp')}
+html[data-visual-page="owner-cuba-partners"]{--uv-image:url('/media/native/cuba/owner-cuba-partners.webp')}
+html[data-visual-page="private-sector-cuba"]{--uv-image:url('/media/native/cuba/private-sector-cuba.webp')}
+
+html.sahjony-ultra-visuals body{position:relative;isolation:isolate;background-color:#030507}
+html.sahjony-ultra-visuals body::before{
+  content:'';position:fixed;z-index:0;inset:0;pointer-events:none;
+  background:
+    linear-gradient(90deg,rgba(3,5,7,.98) 0%,rgba(3,5,7,.9) 44%,rgba(3,5,7,.62) 76%,rgba(3,5,7,.82) 100%),
+    linear-gradient(180deg,rgba(3,5,7,.2),#030507 94%),
+    var(--uv-image) var(--uv-focus)/cover no-repeat;
+  opacity:var(--uv-opacity);filter:saturate(.82) contrast(1.08);
+  transform:translateZ(0)
+}
+html.sahjony-ultra-visuals body::after{
+  content:'';position:fixed;z-index:0;inset:0;pointer-events:none;opacity:.16;
+  background-image:linear-gradient(rgba(255,255,255,.035) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.035) 1px,transparent 1px);
+  background-size:72px 72px;mask-image:linear-gradient(180deg,#000,transparent 82%)
+}
+html.sahjony-ultra-visuals body>*{position:relative;z-index:1}
+
+html.sahjony-ultra-visuals .sahjony-photo-hero{
+  position:relative;isolation:isolate;overflow:hidden;border-color:rgba(255,255,255,.14)
+}
+html.sahjony-ultra-visuals .sahjony-photo-hero::before{
+  content:'';position:absolute;z-index:-2;inset:0 0 0 46%;pointer-events:none;
+  background:var(--uv-image) var(--uv-focus)/cover no-repeat;
+  filter:saturate(.82) contrast(1.08);transform:scale(1.015)
+}
+html.sahjony-ultra-visuals .sahjony-photo-hero::after{
+  content:'';position:absolute;z-index:-1;inset:-1px;pointer-events:none;
+  background:linear-gradient(90deg,rgba(4,7,10,1) 0%,rgba(4,7,10,.95) 43%,rgba(4,7,10,.42) 74%,rgba(4,7,10,.7) 100%),linear-gradient(180deg,transparent 42%,rgba(3,5,7,.78) 100%)
+}
+html.sahjony-ultra-visuals .sahjony-photo-hero>*,html.sahjony-ultra-visuals .sahjony-photo-hero>section{position:relative;z-index:1}
+html.sahjony-ultra-visuals .sahjony-photo-hero :is(.panel,.card,.console,.status,.summary,.side,.desk){backdrop-filter:blur(18px) saturate(120%)}
+
+html.sahjony-ultra-visuals .sahjony-visual-badge{
+  position:absolute;z-index:4;right:18px;top:18px;display:flex;align-items:center;gap:7px;
+  padding:8px 10px;border:1px solid rgba(255,255,255,.15);border-radius:999px;
+  background:rgba(3,6,9,.58);backdrop-filter:blur(16px);color:rgba(255,255,255,.78);
+  font:800 7px/1 Inter,system-ui,sans-serif;letter-spacing:.14em;text-transform:uppercase
+}
+html.sahjony-ultra-visuals .sahjony-visual-badge::before{content:'';width:5px;height:5px;border-radius:50%;background:#9aeaff;box-shadow:0 0 12px rgba(154,234,255,.7)}
+
+@media(max-width:900px){
+  :root{--uv-opacity:.14}
+  html.sahjony-ultra-visuals .sahjony-photo-hero::before{inset:0;opacity:.42}
+  html.sahjony-ultra-visuals .sahjony-photo-hero::after{background:linear-gradient(180deg,rgba(3,6,9,.58),rgba(3,6,9,.94) 68%,#030609)}
+}
+@media(max-width:600px){
+  :root{--uv-image:url('/media/native/global-logistics-mobile.webp');--uv-opacity:.1}
+  html[data-visual-sector="global"],html[data-visual-sector="logistics"],html[data-visual-sector="government"],html[data-visual-sector="cuba"]{--uv-image:url('/media/native/global-logistics-mobile.webp')}
+  html[data-visual-sector="marketplace"],html[data-visual-sector="manufacturing"],html[data-visual-sector="people"],html[data-visual-sector="communications"],html[data-visual-sector="partners"]{--uv-image:url('/media/native/human-manufacturing-mobile.webp')}
+  html[data-visual-sector="energy"],html[data-visual-sector="finance"],html[data-visual-sector="compliance"],html[data-visual-sector="intelligence"]{--uv-image:url('/media/native/energy-infrastructure-mobile.webp')}
+  html[data-visual-page="cuba-comunicaciones"]{--uv-image:url('/media/native/cuba/cuba-comunicaciones-mobile.webp')}
+  html[data-visual-page="cuba-desk"]{--uv-image:url('/media/native/cuba/cuba-desk-mobile.webp')}
+  html[data-visual-page="cuba-es"]{--uv-image:url('/media/native/cuba/cuba-es-mobile.webp')}
+  html[data-visual-page="cuba-individual-consumers"]{--uv-image:url('/media/native/cuba/cuba-individual-consumers-mobile.webp')}
+  html[data-visual-page="cuba-order-documents"]{--uv-image:url('/media/native/cuba/cuba-order-documents-mobile.webp')}
+  html[data-visual-page="cuba-order"]{--uv-image:url('/media/native/cuba/cuba-order-mobile.webp')}
+  html[data-visual-page="cuba-partners"]{--uv-image:url('/media/native/cuba/cuba-partners-mobile.webp')}
+  html[data-visual-page="cuba-payments"]{--uv-image:url('/media/native/cuba/cuba-payments-mobile.webp')}
+  html[data-visual-page="cuba-private-sector"]{--uv-image:url('/media/native/cuba/cuba-private-sector-mobile.webp')}
+  html[data-visual-page="cuba-us-desk-card"]{--uv-image:url('/media/native/cuba/cuba-us-desk-card-mobile.webp')}
+  html[data-visual-page="cuba-us-desk"]{--uv-image:url('/media/native/cuba/cuba-us-desk-mobile.webp')}
+  html[data-visual-page="cuba"]{--uv-image:url('/media/native/cuba/cuba-mobile.webp')}
+  html[data-visual-page="owner-cuba-communications"]{--uv-image:url('/media/native/cuba/owner-cuba-communications-mobile.webp')}
+  html[data-visual-page="owner-cuba-consumers"]{--uv-image:url('/media/native/cuba/owner-cuba-consumers-mobile.webp')}
+  html[data-visual-page="owner-cuba-energy"]{--uv-image:url('/media/native/cuba/owner-cuba-energy-mobile.webp')}
+  html[data-visual-page="owner-cuba-fuels"]{--uv-image:url('/media/native/cuba/owner-cuba-fuels-mobile.webp')}
+  html[data-visual-page="owner-cuba-logistics"]{--uv-image:url('/media/native/cuba/owner-cuba-logistics-mobile.webp')}
+  html[data-visual-page="owner-cuba-mipymes"]{--uv-image:url('/media/native/cuba/owner-cuba-mipymes-mobile.webp')}
+  html[data-visual-page="owner-cuba-partners"]{--uv-image:url('/media/native/cuba/owner-cuba-partners-mobile.webp')}
+  html[data-visual-page="private-sector-cuba"]{--uv-image:url('/media/native/cuba/private-sector-cuba-mobile.webp')}
+  html.sahjony-ultra-visuals .sahjony-visual-badge{right:12px;top:12px}
+}
+@media(prefers-reduced-data:reduce){html.sahjony-ultra-visuals body::before,html.sahjony-ultra-visuals .sahjony-photo-hero::before{background-image:none!important}}
+@media(prefers-reduced-motion:reduce){html.sahjony-ultra-visuals .sahjony-photo-hero::before{transform:none}}

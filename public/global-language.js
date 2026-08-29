@@ -100,6 +100,47 @@
 })();
 
 (()=>{
+  'use strict';
+  const path=(location.pathname||'/').toLowerCase();
+  const routes=[
+    ['energy',/(energy|fuel|crude|oil|power|solar|battery)/],
+    ['logistics',/(shipping|shipment|logistics|freight|import|incoterm)/],
+    ['marketplace',/(marketplace|supplier|product|merchandising|order|quote)/],
+    ['communications',/(communication|email|telegram|whatsapp|voice|call|chat)/],
+    ['finance',/(payment|finance|pricing|revenue|profit|capital)/],
+    ['compliance',/(compliance|trust|legal|document|data-control)/],
+    ['intelligence',/(ai-brain|intelligence|strategy|lead-search|lead-scout)/],
+    ['government',/(government|contracting|public-sector)/],
+    ['partners',/(partner|affiliate|introducer)/],
+    ['cuba',/(cuba|mipyme)/],
+    ['people',/(crm|contact|prospect|customer|consumer|login)/],
+    ['manufacturing',/(manufacturer|industrial|factory)/]
+  ];
+  const sector=(routes.find(([,pattern])=>pattern.test(path))||['global'])[0];
+  const routeName=(path.split('/').filter(Boolean).pop()||'').replace(/\.html$/,'');
+  const ownerRoute=path.startsWith('/owner/')?`owner-${routeName}`:routeName;
+  const pageAliases={'owner-cuba-us-desk':'cuba-us-desk','cuba-consumers':'cuba-individual-consumers'};
+  const visualPage=pageAliases[ownerRoute]||ownerRoute;
+  document.documentElement.dataset.visualSector=sector;
+  if(/cuba|mipyme/.test(visualPage))document.documentElement.dataset.visualPage=visualPage;
+  document.documentElement.classList.add('sahjony-ultra-visuals');
+  if(!document.querySelector('link[data-sahjony-ultra-visuals]')){
+    const stylesheet=document.createElement('link');stylesheet.rel='stylesheet';stylesheet.href='/ultra-visuals.css';stylesheet.dataset.sahjonyUltraVisuals='true';document.head.appendChild(stylesheet);
+  }
+  function mountVisual(){
+    const candidates=['.hero','.command-hero','.module-hero','.postcard','.route-card','.shell','.wrap>main>section:first-child','main>section:first-child','body>main','#root'];
+    const target=candidates.map(selector=>document.querySelector(selector)).find(Boolean);
+    if(!target||target.querySelector('.heroMedia,.trade-room,.livePanel,[data-native-visual]'))return;
+    target.classList.add('sahjony-photo-hero');
+    if(!target.querySelector('.sahjony-visual-badge')){
+      const badge=document.createElement('span');badge.className='sahjony-visual-badge';badge.setAttribute('aria-hidden','true');badge.setAttribute('data-no-translate','true');badge.textContent=sector==='global'?'GLOBAL VISUAL NETWORK':sector.toUpperCase()+' · VISUAL INTELLIGENCE';target.appendChild(badge);
+    }
+  }
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',mountVisual,{once:true});else mountVisual();
+  setTimeout(mountVisual,0);
+})();
+
+(()=>{
   function mountIntentLauncher(){
     if(document.querySelector('.sahjony-intent-launcher'))return;
     const style=document.createElement('style');

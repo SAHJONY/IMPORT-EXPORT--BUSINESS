@@ -26,6 +26,13 @@ const modules:Record<ModuleKey,ModuleConfig>={
 const ownerGroups:[string,ModuleKey[]][]=[['Command',['dashboard']],['Commercial',['crm']],['Trade',['global-sourcing','managed-trade','us-import','intermediary']],['Operations',['documents','shipping','messages']],['Risk & Compliance',['compliance','countries']],['Finance',['finance']],['Intelligence',['ai-brain']],['Administration',['readiness','business-email']]];
 const employeeGroups:[string,ModuleKey[]][]=[['Daily Operations',['dashboard','crm']],['Trade Work',['global-sourcing','managed-trade','us-import','intermediary']],['Controls',['compliance','documents','shipping','messages','countries']],['Intelligence',['ai-brain']]];
 const customerGroups:[string,ModuleKey[]][]=[['Workspace',['dashboard','messages','documents','shipping','compliance']]];
+const publicCapabilities=[
+ ['01','INTELLIGENCE','Discover verified supply','Research manufacturers, distributors and wholesalers across qualified global corridors.'],
+ ['02','COMMERCE','Structure the opportunity','Compare product fit, terms, landed economics and the commercial path before execution.'],
+ ['03','CONTROL','Protect every release','Keep compliance, documents, counterparties, payments and approvals tied to evidence.'],
+ ['04','DELIVERY','Command the movement','Track logistics, exceptions and final reconciliation from one operating record.']
+] as const;
+const publicStages=['Business request','Qualification','Global sourcing','Due diligence','Commercial terms','Release controls','Shipment','Reconciliation'] as const;
 
 const groupsFor=(role:Role)=>role==='owner'?ownerGroups:role==='employee'?employeeGroups:customerGroups;
 const rolePath=(role:Role,section:ModuleKey='dashboard')=>`/${role}${section==='dashboard'?'':'/'+section}`;
@@ -55,9 +62,38 @@ export default function App(){
  return <Portal key={r.role} role={r.role} section={r.section}/>;
 }
 
-function Brand(){return <button className="brand-button" onClick={()=>nav('/')}><span className="brand-symbol">S</span><span className="brand-copy"><strong>SAHJONY</strong><small>GLOBAL TRADE</small></span></button>}
+function Brand(){return <button className="brand-button" onClick={()=>nav('/')} aria-label="SAHJONY LLC home"><span className="brand-symbol" aria-hidden="true"><i/></span><span className="brand-copy"><strong>SAHJONY LLC</strong><small>GLOBAL TRADE OS</small></span></button>}
 
-function PublicSite(){return <div className="public-site institutional-public"><header className="public-nav"><Brand/><nav className="public-links"><a href="#solutions">Solutions</a><a href="#process">How It Works</a><a href="/cuba-private-sector">Cuba Private Sector</a><a className="text-link" href="/owner-login">Sign In</a><a className="primary-link" href="/start">Start a Request</a></nav></header><main><section className="public-hero"><div className="hero-copy"><div className="eyebrow gold">GLOBAL TRADE INFRASTRUCTURE</div><h1>From business need to <span>controlled delivery.</span></h1><p>SAHJONY coordinates supplier discovery, commercial terms, compliance, documentation, logistics, payments and reconciliation through one governed operating system.</p><div className="hero-actions"><a className="primary-link large" href="/start">Start a sourcing request</a><a className="secondary-link large" href="#process">See how it works</a></div><div className="trust-row"><span>Worldwide sourcing</span><span>Case-based execution</span><span>Fail-closed controls</span><span>Owner-governed releases</span></div></div><div className="global-orbit"><div className="orbit-core"><span>SAHJONY</span><strong>TRADE OS</strong></div><div className="orbit-ring ring-a"/><div className="orbit-ring ring-b"/><div className="orbit-node n1">SOURCE</div><div className="orbit-node n2">VERIFY</div><div className="orbit-node n3">MOVE</div><div className="orbit-node n4">RECONCILE</div></div></section><section id="solutions" className="public-kpis institutional-kpis"><article><small>COMMERCIAL</small><strong>Qualify demand</strong><p>Capture need and commercial fit before committing sourcing resources.</p></article><article><small>SUPPLY</small><strong>Source worldwide</strong><p>Compare suppliers, MOQ, lead time, terms and landed economics.</p></article><article><small>CONTROL</small><strong>Release with evidence</strong><p>Compliance, documents, payment and logistics gates remain fail-closed.</p></article><article><small>EXECUTION</small><strong>Track to reconciliation</strong><p>Coordinate delivery, exceptions and final transaction economics.</p></article></section><section id="process" className="institutional-section"><div><div className="eyebrow gold">ONE CONTROLLED WORKFLOW</div><h2>Need → source → qualify → execute → deliver.</h2><p>Every qualified opportunity becomes a case with one source of truth across the trade lifecycle.</p></div><div className="process-rail">{['Business request','Qualification','Global sourcing','Due diligence','Commercial terms','Release controls','Shipment','Reconciliation'].map((x,i)=><div className="process-node" key={x}><span>{String(i+1).padStart(2,'0')}</span><strong>{x}</strong></div>)}</div></section></main><footer><span>© SAHJONY · Global Trade Operating System</span><span>www.sahjony.com</span></footer></div>}
+function PublicSite(){
+ return <div className="public-site institutional-public">
+  <div className="signal-strip"><span><i/>GLOBAL TRADE NETWORK</span><strong>Human-led. AI-powered. Evidence-controlled.</strong><span>SAHJONY LLC · UNITED STATES</span></div>
+  <header className="public-nav"><Brand/><nav className="public-links" aria-label="Primary navigation"><a href="#solutions">Capabilities</a><a href="/industrial-marketplace">Marketplace</a><a href="#process">Process</a><a href="/cuba-private-sector">Cuba Desk</a><a className="text-link" href="/owner-login">Sign in</a><a className="primary-link" href="/start">Start a request <span aria-hidden="true">↗</span></a></nav></header>
+  <main>
+   <section className="public-hero ultra-hero">
+    <div className="hero-copy">
+     <div className="eyebrow gold"><span>01</span> GLOBAL TRADE, REENGINEERED</div>
+     <h1>Move products across borders. <span>Without losing control.</span></h1>
+     <p>SAHJONY LLC brings sourcing, deal intelligence, compliance, documentation, logistics and commercial execution into one premium global trade experience.</p>
+     <div className="hero-actions"><a className="primary-link large" href="/start">Launch a sourcing request <span aria-hidden="true">↗</span></a><a className="secondary-link large" href="/industrial-marketplace">Explore the marketplace</a></div>
+     <div className="trust-row" aria-label="Platform capabilities"><span><i/>Worldwide sourcing</span><span><i/>Case-based execution</span><span><i/>Governed releases</span></div>
+    </div>
+    <div className="trade-room" aria-label="SAHJONY trade control room preview">
+     <div className="trade-room-media"><div className="media-top"><span>LIVE OPERATING LAYER</span><strong><i/> ONLINE</strong></div><div className="media-caption"><small>GLOBAL CORRIDOR</small><strong>Origin → SAHJONY → Destination</strong></div></div>
+     <div className="trade-room-console">
+      <div className="console-title"><div><small>CONTROL ROOM</small><strong>Every deal. One source of truth.</strong></div><span>TRADE OS / 26</span></div>
+      <div className="console-grid"><div><small>01 · DISCOVER</small><strong>Source</strong><span>Worldwide supply intelligence</span></div><div><small>02 · VALIDATE</small><strong>Verify</strong><span>Commercial and compliance evidence</span></div><div><small>03 · EXECUTE</small><strong>Move</strong><span>Documents, payment and logistics</span></div></div>
+      <div className="next-move"><span>AI NEXT MOVE</span><p>Qualify demand → compare supply → protect margin → release with evidence.</p><a href="/owner/deals" aria-label="Open deal command center">OPEN COMMAND <b aria-hidden="true">↗</b></a></div>
+     </div>
+    </div>
+   </section>
+   <section className="brand-marquee" aria-label="Trade platform scope"><span>GLOBAL SOURCING</span><i/> <span>MANAGED TRADE</span><i/> <span>INDUSTRIAL COMMERCE</span><i/> <span>AI INTELLIGENCE</span><i/> <span>LOGISTICS CONTROL</span></section>
+   <section id="solutions" className="capability-showcase"><div className="section-intro"><div><div className="eyebrow gold"><span>02</span> ONE OPERATING LAYER</div><h2>Built for the full deal — not one fragment of it.</h2></div><p>From the first business need to final reconciliation, every critical decision stays visible, attributable and controlled.</p></div><div className="capability-grid">{publicCapabilities.map(([n,kicker,title,text])=><article key={n}><div className="capability-index"><span>{n}</span><small>{kicker}</small></div><div><strong>{title}</strong><p>{text}</p></div><b aria-hidden="true">↗</b></article>)}</div></section>
+   <section id="process" className="institutional-section premium-process"><div className="process-copy"><div className="eyebrow gold"><span>03</span> CONTROLLED EXECUTION</div><h2>One fluid path from need to delivered value.</h2><p>Qualified opportunities become governed trade cases with a shared operational record across the complete lifecycle.</p><a className="secondary-link large" href="/start">Build your trade request</a></div><div className="process-rail">{publicStages.map((x,i)=><div className="process-node" key={x}><span>{String(i+1).padStart(2,'0')}</span><strong>{x}</strong><i aria-hidden="true">→</i></div>)}</div></section>
+   <section className="final-cta"><div><small>YOUR NEXT GLOBAL OPPORTUNITY STARTS HERE</small><h2>Tell us what the business needs. We coordinate the world around it.</h2></div><a className="primary-link large" href="/start">Start now <span aria-hidden="true">↗</span></a></section>
+  </main>
+  <footer><span>© SAHJONY LLC · Global Trade Operating System</span><nav aria-label="Footer navigation"><a href="/trust-center">Trust center</a><a href="/partners">Partners</a><a href="/government-contracting">Government contracting</a></nav><span>www.sahjony.com</span></footer>
+ </div>
+}
 
 function StatePage({title,text,path}:{title:string;text:string;path:string}){return <div className="route-state"><Brand/><div className="route-card"><div className="eyebrow gold">SAHJONY GLOBAL TRADE</div><h1>{title}</h1><p>{text}</p><button className="primary-button" onClick={()=>nav(path)}>Continue</button></div></div>}
 
