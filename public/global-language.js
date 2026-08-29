@@ -132,3 +132,14 @@
   }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',enforceOwnerPrivacy,{once:true});else enforceOwnerPrivacy();
 })();
+
+(()=>{
+  const path=location.pathname.replace(/\/+$/,'');
+  if(path!=='/cuba-order'&&path!=='/cuba-order.html')return;
+  if(document.querySelector('script[data-cuba-product-transparency]'))return;
+  const script=document.createElement('script');
+  script.src='/cuba-product-transparency.js';
+  script.defer=true;
+  script.dataset.cubaProductTransparency='true';
+  document.head.appendChild(script);
+})();
