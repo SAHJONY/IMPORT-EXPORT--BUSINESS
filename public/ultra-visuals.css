@@ -49,16 +49,17 @@ html.sahjony-ultra-visuals body::after{
 html.sahjony-ultra-visuals body>*{position:relative;z-index:1}
 
 html.sahjony-ultra-visuals .sahjony-photo-hero{
-  position:relative;isolation:isolate;overflow:hidden;border-color:rgba(255,255,255,.14)
+  position:relative;isolation:isolate;overflow:hidden;border-color:rgba(255,255,255,.14);
+  background:
+    linear-gradient(90deg,rgba(4,7,10,.98) 0%,rgba(4,7,10,.9) 43%,rgba(4,7,10,.38) 74%,rgba(4,7,10,.58) 100%),
+    linear-gradient(180deg,rgba(3,5,7,.08),rgba(3,5,7,.72) 100%),
+    var(--uv-image) var(--uv-focus)/cover no-repeat!important
 }
 html.sahjony-ultra-visuals .sahjony-photo-hero::before{
-  content:'';position:absolute;z-index:0;inset:0 0 0 46%;pointer-events:none;
-  background:var(--uv-image) var(--uv-focus)/cover no-repeat;
-  filter:saturate(.82) contrast(1.08);transform:scale(1.015)
+  content:none
 }
 html.sahjony-ultra-visuals .sahjony-photo-hero::after{
-  content:'';position:absolute;z-index:1;inset:-1px;pointer-events:none;
-  background:linear-gradient(90deg,rgba(4,7,10,1) 0%,rgba(4,7,10,.95) 43%,rgba(4,7,10,.42) 74%,rgba(4,7,10,.7) 100%),linear-gradient(180deg,transparent 42%,rgba(3,5,7,.78) 100%)
+  content:none
 }
 html.sahjony-ultra-visuals .sahjony-photo-hero>*,html.sahjony-ultra-visuals .sahjony-photo-hero>section{position:relative;z-index:2}
 html.sahjony-ultra-visuals .sahjony-photo-hero :is(.panel,.card,.console,.status,.summary,.side,.desk){backdrop-filter:blur(18px) saturate(120%)}
@@ -73,8 +74,7 @@ html.sahjony-ultra-visuals .sahjony-visual-badge::before{content:'';width:5px;he
 
 @media(max-width:900px){
   :root{--uv-opacity:.14}
-  html.sahjony-ultra-visuals .sahjony-photo-hero::before{inset:0;opacity:.42}
-  html.sahjony-ultra-visuals .sahjony-photo-hero::after{background:linear-gradient(180deg,rgba(3,6,9,.58),rgba(3,6,9,.94) 68%,#030609)}
+  html.sahjony-ultra-visuals .sahjony-photo-hero{background:linear-gradient(180deg,rgba(3,6,9,.5),rgba(3,6,9,.92) 70%,#030609),var(--uv-image) var(--uv-focus)/cover no-repeat!important}
 }
 @media(max-width:600px){
   :root{--uv-image:url('/media/native/global-logistics-mobile.webp');--uv-opacity:.1}
