@@ -92,7 +92,7 @@
 (()=>{
   if(document.querySelector('script[data-cuba-merchandising]'))return;
   const script=document.createElement('script');
-  script.src='/cuba-merchandising.js';
+  script.src='/cuba-merchandising.js?v=20260829b';
   script.defer=true;
   script.dataset.cubaMerchandising='true';
   document.head.appendChild(script);
