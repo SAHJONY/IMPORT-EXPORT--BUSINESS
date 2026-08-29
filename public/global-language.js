@@ -98,3 +98,17 @@
   }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
 })();
+
+(()=>{
+  function mountIntentLauncher(){
+    if(document.querySelector('.sahjony-intent-launcher'))return;
+    const style=document.createElement('style');
+    style.textContent='.sahjony-intent-launcher{position:fixed;left:16px;bottom:16px;z-index:2147482999;font:800 12px Inter,system-ui,sans-serif}.sahjony-intent-launcher a{display:flex;align-items:center;gap:8px;padding:11px 14px;border-radius:999px;background:#f4f8fb;color:#07111d;text-decoration:none;box-shadow:0 12px 40px rgba(0,0,0,.28);border:1px solid rgba(255,255,255,.4)}.sahjony-intent-launcher a:hover{transform:translateY(-1px)}@media(max-width:600px){.sahjony-intent-launcher{position:relative;left:auto;bottom:auto;width:calc(100% - 20px);margin:10px auto 0}.sahjony-intent-launcher a{justify-content:center;border-radius:12px}}';
+    document.head.appendChild(style);
+    const root=document.createElement('div');root.className='sahjony-intent-launcher';root.setAttribute('data-no-translate','true');
+    const isEs=(document.documentElement.lang||'').toLowerCase().startsWith('es');
+    root.innerHTML='<a href="/actions.html" aria-label="Quick actions">'+(isEs?'¿Qué desea hacer?':'What do you need?')+' <span aria-hidden="true">→</span></a>';
+    document.body.appendChild(root);
+  }
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',mountIntentLauncher,{once:true});else mountIntentLauncher();
+})();
