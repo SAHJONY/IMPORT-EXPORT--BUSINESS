@@ -70,4 +70,12 @@
     o.observe(document.body,{childList:true,subtree:true});
     setTimeout(()=>o.disconnect(),10000);
   }
+
+  if(!document.querySelector('script[data-cuba-incoterms]')){
+    const inc=document.createElement('script');
+    inc.src='/cuba-incoterms.js?v=20260829c';
+    inc.defer=true;
+    inc.dataset.cubaIncoterms='true';
+    document.head.appendChild(inc);
+  }
 })();
