@@ -1,5 +1,7 @@
 User-agent: *
 Allow: /
+Disallow: /owner-login
+Disallow: /owner
 Disallow: /owner/
 Disallow: /owner-
 Disallow: /api/
