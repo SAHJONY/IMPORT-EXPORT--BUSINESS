@@ -1,20 +1,32 @@
-"""Runtime network compatibility hooks for SAHJONY Global Trade.
+"""Runtime connection guards for SAHJONY Global Trade.
 
-Vercel's Python runtime may resolve a dual-stack Neon endpoint to IPv6 even when
-that invocation cannot open an IPv6 socket.  Keep the canonical DATABASE_URL
-unchanged, preserve the hostname for TLS/SNI, and provide libpq an IPv4
-``hostaddr`` when one is available.
-
-This module is imported automatically by Python's site initialization when it is
-present on sys.path.  The patch is intentionally narrow: Vercel runtime +
-Neon-hosted Postgres only.  No credentials or connection-string values are
-logged or exposed.
+This module is imported automatically by Python site initialization. It keeps
+HTTP(S) Supabase API URLs away from psycopg/libpq while preserving the existing
+Vercel + Neon IPv4 compatibility hook for genuine PostgreSQL DSNs.
 """
 from __future__ import annotations
 
 import os
 import socket
 from urllib.parse import urlsplit
+
+
+_POSTGRES_ENV_NAMES = (
+    "DATABASE_URL",
+    "POSTGRES_URL",
+    "NEON_DATABASE_URL",
+    "NEON_POSTGRES_URL",
+    "POSTGRES_PRISMA_URL",
+)
+
+
+def _sanitize_postgres_environment() -> None:
+    """Only allow real PostgreSQL URI schemes in SQL connection variables."""
+    for name in _POSTGRES_ENV_NAMES:
+        value = os.getenv(name, "").strip()
+        if value and not value.lower().startswith(("postgresql://", "postgres://")):
+            # SUPABASE_URL is an HTTPS REST endpoint, never a psycopg DSN.
+            os.environ.pop(name, None)
 
 
 def _install_neon_ipv4_preference() -> None:
@@ -46,7 +58,7 @@ def _install_neon_ipv4_preference() -> None:
                     if addresses:
                         kwargs["hostaddr"] = addresses[0][4][0]
             except Exception:
-                # Fail closed to the normal driver path; never mutate DATABASE_URL.
+                # Fall back to the normal driver path without exposing secrets.
                 pass
         return original_connect(conninfo, *args, **kwargs)
 
@@ -54,4 +66,5 @@ def _install_neon_ipv4_preference() -> None:
     psycopg.connect = connect_with_ipv4_preference
 
 
+_sanitize_postgres_environment()
 _install_neon_ipv4_preference()
