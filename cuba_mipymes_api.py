@@ -10,11 +10,12 @@ from datetime import datetime, timezone
 from xml.etree import ElementTree as ET
 
 import httpx
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
+from pypdf import PdfReader
 
 from insforge_backend import get_backend
 
-app = FastAPI(title="SAHJONY Cuba Private Sector CRM", version="1.8.0", docs_url=None, redoc_url=None)
+app = FastAPI(title="SAHJONY Cuba Private Sector CRM", version="1.9.0", docs_url=None, redoc_url=None)
 ORG_ID = "org_sahjony_global_trade"
 TARGET_TOTAL = 15000
 ACCUMULATED_XLSX_URL = (
@@ -22,13 +23,13 @@ ACCUMULATED_XLSX_URL = (
     "Listado-de-Nuevos-Actores-Econ%C3%B3micos-aprobados-mayo-2024.xlsx"
 )
 OFFICIAL_MEP_ARCHIVE = "https://t.me/actores_economicos_cuba"
+MINJUS_PRONTUARIO = "https://www.minjus.gob.cu/es/publicaciones/prontuario"
+MINJUS_2026_02_PDF = (
+    "https://www.minjus.gob.cu/sites/default/files/archivos/publicacion/2026-03/"
+    "Febrero%203.2026%20Relaci%C3%B3n%20MIPYMES%20Y%20CNA%20%203.02.26%20.pdf"
+)
 
-_PRIVATE_ACTOR_TYPES = {
-    "MIPYME_PRIVADA",
-    "CNA",
-    "EMPRESA_PRIVADA",
-    "OTHER_NON_STATE_VERIFIED",
-}
+_PRIVATE_ACTOR_TYPES = {"MIPYME_PRIVADA", "CNA", "EMPRESA_PRIVADA", "OTHER_NON_STATE_VERIFIED"}
 
 
 def _norm(value: object) -> str:
@@ -37,32 +38,27 @@ def _norm(value: object) -> str:
     return re.sub(r"[^a-z0-9]+", " ", text.casefold()).strip()
 
 
+def _clean(value: object) -> str:
+    return re.sub(r"\s+", " ", str(value or "")).strip(" \t\r\n,;:-")
+
+
 def _is_mipyme(row: dict) -> bool:
-    src = " ".join([
-        str(row.get("source_platform") or ""),
-        str(row.get("source_type") or ""),
-        str(row.get("source_name") or ""),
-        str(row.get("source_provenance") or ""),
-        str(row.get("external_reference") or ""),
-        str(row.get("evidence_summary") or ""),
-    ]).lower()
+    src = " ".join(str(row.get(k) or "") for k in (
+        "source_platform", "source_type", "source_name", "source_provenance", "external_reference", "evidence_summary"
+    )).lower()
     name = str(row.get("buyer_company") or row.get("company_name") or row.get("business_name") or "").strip()
     actor_type = str(row.get("actor_type") or "").upper().strip()
     if not name:
         return False
-    lowered_name = name.lower()
-    if lowered_name.startswith("minjus registro mercantil") or lowered_name.startswith("public mipyme/cna registry"):
+    lowered = name.lower()
+    if lowered.startswith("minjus registro mercantil") or lowered.startswith("public mipyme/cna registry"):
         return False
     if actor_type in _PRIVATE_ACTOR_TYPES:
         return True
     return (
-        "minjus" in src
-        or "registro mercantil" in src
-        or "ministerio de economía y planificación" in src
-        or "ministerio de economia y planificacion" in src
-        or "mep public" in src
-        or "actores económicos" in src
-        or "actores economicos" in src
+        "minjus" in src or "registro mercantil" in src or "ministerio de economía y planificación" in src
+        or "ministerio de economia y planificacion" in src or "mep public" in src
+        or "actores económicos" in src or "actores economicos" in src
         or str(row.get("external_reference") or "").upper().startswith("RM-")
     )
 
@@ -79,15 +75,12 @@ def _public_record(row: dict) -> dict:
         normalized["destination"] = ", ".join(part for part in (municipality, province, "Cuba") if part)
     normalized.setdefault("buyer_contact", row.get("public_phone") or row.get("phone") or row.get("contact"))
     allowed = [
-        "id", "prospect_id", "external_reference", "buyer_company", "buyer_name",
-        "buyer_country", "buyer_contact", "public_email", "public_phone", "website",
-        "whatsapp", "whatsapp_status", "facebook", "instagram", "linkedin", "telegram",
-        "social_media", "social_media_status", "actor_type", "province", "municipality",
-        "opportunity_title", "product_category", "product_description", "destination",
-        "source_type", "source_platform", "source_name", "source_provenance", "source_url",
-        "verification_status", "registry_status", "verification_date", "qualification_stage",
-        "risk_level", "import_export_relevance", "evidence_summary", "next_action",
-        "created_at", "updated_at",
+        "id", "prospect_id", "external_reference", "buyer_company", "buyer_name", "buyer_country", "buyer_contact",
+        "public_email", "public_phone", "website", "whatsapp", "whatsapp_status", "facebook", "instagram", "linkedin",
+        "telegram", "social_media", "social_media_status", "actor_type", "province", "municipality", "opportunity_title",
+        "product_category", "product_description", "destination", "source_type", "source_platform", "source_name",
+        "source_provenance", "source_url", "verification_status", "registry_status", "verification_date",
+        "qualification_stage", "risk_level", "import_export_relevance", "evidence_summary", "next_action", "created_at", "updated_at"
     ]
     return {k: normalized.get(k) for k in allowed}
 
@@ -102,27 +95,19 @@ def _supabase_config() -> tuple[str, str]:
 
 async def _supabase_rows() -> list[dict]:
     base_url, service_key = _supabase_config()
-    headers = {
-        "apikey": service_key,
-        "Authorization": f"Bearer {service_key}",
-        "Accept": "application/json",
-    }
+    headers = {"apikey": service_key, "Authorization": f"Bearer {service_key}", "Accept": "application/json"}
     rows: list[dict] = []
     page_size = 1000
     offset = 0
     async with httpx.AsyncClient(timeout=30) as client:
         while True:
-            params = {
-                "logical_table": "eq.external_trade_prospects",
-                "select": "data",
-                "order": "record_key.asc",
-                "limit": str(page_size),
-                "offset": str(offset),
-            }
             response = await client.get(
                 f"{base_url}/rest/v1/sahjony_trade_records",
                 headers=headers,
-                params=params,
+                params={
+                    "logical_table": "eq.external_trade_prospects", "select": "data", "order": "record_key.asc",
+                    "limit": str(page_size), "offset": str(offset),
+                },
             )
             response.raise_for_status()
             payload = response.json() if response.content else []
@@ -138,6 +123,27 @@ async def _supabase_rows() -> list[dict]:
     return rows
 
 
+async def _bulk_upsert(records: list[dict]) -> int:
+    if not records:
+        return 0
+    base_url, service_key = _supabase_config()
+    headers = {
+        "apikey": service_key, "Authorization": f"Bearer {service_key}", "Content-Type": "application/json",
+        "Prefer": "resolution=merge-duplicates,return=minimal",
+    }
+    written = 0
+    async with httpx.AsyncClient(timeout=60) as client:
+        for start in range(0, len(records), 200):
+            chunk = records[start:start + 200]
+            response = await client.post(
+                f"{base_url}/rest/v1/sahjony_trade_records",
+                params={"on_conflict": "logical_table,record_key"}, headers=headers, json=chunk,
+            )
+            response.raise_for_status()
+            written += len(chunk)
+    return written
+
+
 def _xlsx_rows(content: bytes) -> list[list[str]]:
     ns = {"m": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
     with zipfile.ZipFile(io.BytesIO(content)) as zf:
@@ -148,7 +154,7 @@ def _xlsx_rows(content: bytes) -> list[list[str]]:
                 shared.append("".join(t.text or "" for t in si.iterfind(".//m:t", ns)))
         sheet_path = "xl/worksheets/sheet1.xml"
         if sheet_path not in zf.namelist():
-            candidates = sorted(name for name in zf.namelist() if name.startswith("xl/worksheets/sheet") and name.endswith(".xml"))
+            candidates = sorted(n for n in zf.namelist() if n.startswith("xl/worksheets/sheet") and n.endswith(".xml"))
             if not candidates:
                 raise ValueError("No worksheet found in XLSX")
             sheet_path = candidates[0]
@@ -165,8 +171,8 @@ def _xlsx_rows(content: bytes) -> list[list[str]]:
                 for ch in letters.group(0):
                     col = col * 26 + (ord(ch) - 64)
                 col -= 1
-                cell_type = cell.attrib.get("t")
                 value = ""
+                cell_type = cell.attrib.get("t")
                 if cell_type == "inlineStr":
                     value = "".join(t.text or "" for t in cell.iterfind(".//m:t", ns))
                 else:
@@ -182,16 +188,13 @@ def _xlsx_rows(content: bytes) -> list[list[str]]:
                             value = raw
                 cells[col] = value.strip()
             if cells:
-                width = max(cells) + 1
-                rows.append([cells.get(i, "") for i in range(width)])
+                rows.append([cells.get(i, "") for i in range(max(cells) + 1)])
         return rows
 
 
 def _find_columns(rows: list[list[str]]) -> tuple[int, dict[str, int]]:
     aliases = {
-        "name": ("denominacion", "nombre"),
-        "province": ("provincia",),
-        "municipality": ("municipio",),
+        "name": ("denominacion", "nombre"), "province": ("provincia",), "municipality": ("municipio",),
         "type": ("tipo de sujeto", "tipo sujeto", "sujeto"),
         "activity": ("actividad principal", "actividad economica principal", "actividad"),
     }
@@ -223,29 +226,80 @@ def _private_actor(actor_type_raw: str) -> tuple[bool, str]:
     return False, ""
 
 
-async def _bulk_upsert(records: list[dict]) -> int:
-    if not records:
-        return 0
-    base_url, service_key = _supabase_config()
-    headers = {
-        "apikey": service_key,
-        "Authorization": f"Bearer {service_key}",
-        "Content-Type": "application/json",
-        "Prefer": "resolution=merge-duplicates,return=minimal",
-    }
-    written = 0
-    async with httpx.AsyncClient(timeout=60) as client:
-        for start in range(0, len(records), 200):
-            chunk = records[start:start + 200]
-            response = await client.post(
-                f"{base_url}/rest/v1/sahjony_trade_records",
-                params={"on_conflict": "logical_table,record_key"},
-                headers=headers,
-                json=chunk,
-            )
-            response.raise_for_status()
-            written += len(chunk)
-    return written
+def _province_from_page(text: str) -> str | None:
+    match = re.search(r"REGISTRO\s+MERCANTIL\s+([A-ZÁÉÍÓÚÜÑ][A-ZÁÉÍÓÚÜÑ .'-]{2,40}?)\s+\d{1,2}[./]\d{1,2}[./]\d{2,4}", text, re.I)
+    return _clean(match.group(1)).title() if match else None
+
+
+def _extract_minjus_name(block: str) -> str | None:
+    compact = _clean(block)
+    patterns = [
+        r"denominad[ao]\s+(.+?)(?=\s+[IVXLCDM]{1,10}\s+\d{1,4}\s+\d{1,6}\s+\d{1,2}[./]\d{1,2}[./]\d{2,4})",
+        r"^\d{1,5}\s+(.+?)(?=\s+[IVXLCDM]{1,10}\s+\d{1,4}\s+\d{1,6}\s+\d{1,2}[./]\d{1,2}[./]\d{2,4})",
+    ]
+    for pattern in patterns:
+        m = re.search(pattern, compact, re.I)
+        if not m:
+            continue
+        name = _clean(m.group(1))
+        name = re.sub(r"^(?:Sociedad Mercantil\s+)?(?:Estatal,?\s+)?(?:bajo la forma de\s+)?(?:Sociedad\s+)?(?:Unipersonal\s+)?(?:de\s+Responsabilidad\s+Limitada,?\s+)?(?:de nacionalidad cubana,?\s+)?(?:en su forma abreviada\s+)?", "", name, flags=re.I)
+        name = _clean(name)
+        if 2 <= len(name) <= 160 and re.search(r"[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]", name):
+            return name
+    return None
+
+
+def _extract_minjus_activity(block: str) -> str | None:
+    compact = _clean(block)
+    m = re.search(r"\d{1,2}[./]\d{1,2}[./]\d{2,4}\s+(.+?)(?=\s+Domicilio(?:\s+Social)?\b|\s+DOMICILIO\s+SOCIAL\b)", compact, re.I)
+    if not m:
+        return None
+    activity = _clean(m.group(1))
+    return activity[:1400] if activity else None
+
+
+def _extract_minjus_candidates(content: bytes) -> tuple[list[dict], int]:
+    reader = PdfReader(io.BytesIO(content))
+    candidates: list[dict] = []
+    seen: set[str] = set()
+    for page_no, page in enumerate(reader.pages, start=1):
+        try:
+            text = page.extract_text(extraction_mode="layout") or page.extract_text() or ""
+        except TypeError:
+            text = page.extract_text() or ""
+        province = _province_from_page(text)
+        starts = list(re.finditer(r"(?m)^\s*(\d{1,5})\s+(?=\S)", text))
+        for idx, match in enumerate(starts):
+            block = text[match.start(): starts[idx + 1].start() if idx + 1 < len(starts) else len(text)]
+            lowered = _norm(block[:500])
+            if not any(token in lowered for token in ("s r l", "s u r l", "srl", "surl", "sociedad mercantil", "cna", "cooperativa")):
+                continue
+            if "estatal" in lowered and "privada" not in lowered:
+                continue
+            name = _extract_minjus_name(block)
+            if not name:
+                continue
+            key = _norm(name)
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            email_match = re.search(r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", block, re.I)
+            phones = re.findall(r"(?<!\d)(?:\+?53\s*)?(\d{8,10})(?!\d)", block)
+            actor_type = "CNA" if ("cna" in lowered or "cooperativa no agropecuaria" in lowered) else "MIPYME_PRIVADA"
+            candidates.append({
+                "registry_number": match.group(1), "name": name, "province": province, "page": page_no,
+                "actor_type": actor_type, "activity": _extract_minjus_activity(block),
+                "public_email": email_match.group(0) if email_match else None,
+                "public_phone": phones[-1] if phones else None,
+            })
+    return candidates, len(reader.pages)
+
+
+async def _download(url: str, timeout: int = 90) -> bytes:
+    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+        response = await client.get(url, headers={"User-Agent": "SAHJONY-CRM-Ingestion/1.1"})
+        response.raise_for_status()
+        return response.content
 
 
 async def _records() -> list[dict]:
@@ -256,17 +310,12 @@ async def _records() -> list[dict]:
         rows = []
     if not rows:
         backend = get_backend()
-        rows = await backend.select(
-            "external_trade_prospects",
-            params={"organization_id": f"eq.{ORG_ID}", "order": "created_at.desc", "limit": "20000"},
-        ) or []
-    filtered = []
+        rows = await backend.select("external_trade_prospects", params={"organization_id": f"eq.{ORG_ID}", "order": "created_at.desc", "limit": "20000"}) or []
+    filtered: list[dict] = []
     seen: set[str] = set()
     for r in rows:
         row = dict(r)
-        if str(row.get("organization_id") or ORG_ID) != ORG_ID:
-            continue
-        if not _is_mipyme(row):
+        if str(row.get("organization_id") or ORG_ID) != ORG_ID or not _is_mipyme(row):
             continue
         name_key = _norm(row.get("buyer_company") or row.get("company_name") or row.get("business_name"))
         if not name_key or name_key in seen:
@@ -280,105 +329,114 @@ async def _records() -> list[dict]:
 @app.get("/crm/internal/ingest-cuba-actors-3000")
 async def ingest_cuba_actors_3000():
     existing_rows = await _supabase_rows()
-    existing_names = {
-        _norm(row.get("buyer_company") or row.get("company_name") or row.get("business_name"))
-        for row in existing_rows
-        if _norm(row.get("buyer_company") or row.get("company_name") or row.get("business_name"))
-    }
+    existing_names = {_norm(r.get("buyer_company") or r.get("company_name") or r.get("business_name")) for r in existing_rows}
+    existing_names.discard("")
     current_count = len(existing_names)
     if current_count >= TARGET_TOTAL:
         return {"status": "already_complete", "current_unique": current_count, "target": TARGET_TOTAL, "inserted": 0}
-
-    async with httpx.AsyncClient(timeout=60, follow_redirects=True) as client:
-        response = await client.get(ACCUMULATED_XLSX_URL, headers={"User-Agent": "SAHJONY-CRM-Ingestion/1.0"})
-        response.raise_for_status()
-        content = response.content
-    rows = _xlsx_rows(content)
+    rows = _xlsx_rows(await _download(ACCUMULATED_XLSX_URL, 60))
     header_idx, cols = _find_columns(rows)
     now = datetime.now(timezone.utc).isoformat()
     today = datetime.now(timezone.utc).date().isoformat()
     pending: list[dict] = []
     seen = set(existing_names)
-    skipped_state = 0
-    skipped_duplicate = 0
-    skipped_invalid = 0
-
+    skipped_state = skipped_duplicate = skipped_invalid = 0
     for row in rows[header_idx + 1:]:
-        name = _cell(row, cols.get("name"))
-        actor_type_raw = _cell(row, cols.get("type"))
-        activity = _cell(row, cols.get("activity"))
-        province = _cell(row, cols.get("province"))
-        municipality = _cell(row, cols.get("municipality"))
+        name = _cell(row, cols.get("name")); actor_type_raw = _cell(row, cols.get("type")); activity = _cell(row, cols.get("activity"))
+        province = _cell(row, cols.get("province")); municipality = _cell(row, cols.get("municipality"))
         is_private, actor_type = _private_actor(actor_type_raw)
         if not is_private:
-            if "estatal" in _norm(actor_type_raw):
-                skipped_state += 1
+            if "estatal" in _norm(actor_type_raw): skipped_state += 1
             continue
         name_key = _norm(name)
         if not name_key or len(name_key) < 2:
-            skipped_invalid += 1
-            continue
+            skipped_invalid += 1; continue
         if name_key in seen:
-            skipped_duplicate += 1
-            continue
+            skipped_duplicate += 1; continue
         seen.add(name_key)
-        record_hash = hashlib.sha1(f"{name_key}|{_norm(province)}".encode("utf-8")).hexdigest()[:20]
-        record_key = f"mep_accumulated_may2024:{record_hash}"
+        record_hash = hashlib.sha1(f"{name_key}|{_norm(province)}".encode()).hexdigest()[:20]
         destination = ", ".join(part for part in (municipality, province, "Cuba") if part)
         data = {
-            "organization_id": ORG_ID,
-            "buyer_company": name,
-            "company_name": name,
-            "business_name": name,
-            "buyer_country": "CU",
-            "country": "Cuba",
-            "province": province or None,
-            "municipality": municipality or None,
-            "destination": destination,
-            "actor_type": actor_type,
-            "primary_activity": activity or None,
-            "activity": activity or None,
-            "product_category": activity or None,
-            "product_description": activity or None,
-            "source_type": "OFFICIAL_ACTOR_LIST_EXTRACTION",
-            "source_platform": "MEP official actor-list archive",
+            "organization_id": ORG_ID, "buyer_company": name, "company_name": name, "business_name": name,
+            "buyer_country": "CU", "country": "Cuba", "province": province or None, "municipality": municipality or None,
+            "destination": destination, "actor_type": actor_type, "primary_activity": activity or None,
+            "activity": activity or None, "product_category": activity or None, "product_description": activity or None,
+            "source_type": "OFFICIAL_ACTOR_LIST_EXTRACTION", "source_platform": "MEP official actor-list archive",
             "source_name": "Listado acumulado de Nuevos Actores Económicos aprobados desde 2021 hasta mayo 2024",
-            "source_url": OFFICIAL_MEP_ARCHIVE,
-            "extraction_url": ACCUMULATED_XLSX_URL,
-            "source_provenance": "Name-level extraction from the downloadable accumulated approved-actors Excel; official MEP actor-list archive is retained as canonical approval provenance.",
-            "verification_status": "RESEARCH",
-            "registry_status": "VERIFY",
-            "verification_date": today,
-            "outreach_status": "DO_NOT_AUTO_SEND",
-            "qualification_stage": "RESEARCH",
-            "evidence_summary": "Public approved-actor listing provides business name, actor type, activity and territorial fields. Approval/listing does not prove current ACTIVE status or buyer demand.",
+            "source_url": OFFICIAL_MEP_ARCHIVE, "extraction_url": ACCUMULATED_XLSX_URL,
+            "source_provenance": "Name-level extraction from the downloadable accumulated approved-actors Excel.",
+            "verification_status": "RESEARCH", "registry_status": "VERIFY", "verification_date": today,
+            "outreach_status": "DO_NOT_AUTO_SEND", "qualification_stage": "RESEARCH",
+            "evidence_summary": "Public approved-actor listing provides business name, actor type, activity and territorial fields.",
             "next_action": "Corroborate current status in MINJUS/INAENE and enrich public business contacts",
-            "created_at": now,
-            "updated_at": now,
+            "created_at": now, "updated_at": now,
         }
-        pending.append({
-            "logical_table": "external_trade_prospects",
-            "record_key": record_key,
-            "data": data,
-            "created_at": now,
-            "updated_at": now,
-        })
+        pending.append({"logical_table": "external_trade_prospects", "record_key": f"mep_accumulated_may2024:{record_hash}", "data": data, "created_at": now, "updated_at": now})
         if current_count + len(pending) >= TARGET_TOTAL:
             break
-
     written = await _bulk_upsert(pending)
-    final_unique = current_count + written
     return {
-        "status": "ok",
-        "source_rows": len(rows),
-        "current_before": current_count,
-        "target": TARGET_TOTAL,
-        "inserted": written,
-        "current_after": final_unique,
-        "duplicates_skipped": skipped_duplicate,
-        "state_entities_skipped": skipped_state,
-        "invalid_skipped": skipped_invalid,
-        "source": ACCUMULATED_XLSX_URL,
+        "status": "ok", "source_rows": len(rows), "current_before": current_count, "target": TARGET_TOTAL,
+        "inserted": written, "current_after": current_count + written, "duplicates_skipped": skipped_duplicate,
+        "state_entities_skipped": skipped_state, "invalid_skipped": skipped_invalid, "source": ACCUMULATED_XLSX_URL,
+    }
+
+
+@app.get("/crm/cuba-mipymes/internal/preview-minjus-2026")
+async def preview_minjus_2026():
+    candidates, pages = _extract_minjus_candidates(await _download(MINJUS_2026_02_PDF))
+    existing = {_norm(r.get("buyer_company") or r.get("company_name") or r.get("business_name")) for r in await _supabase_rows()}
+    new_candidates = [c for c in candidates if _norm(c["name"]) not in existing]
+    return {
+        "status": "ok", "source": MINJUS_2026_02_PDF, "official_index": MINJUS_PRONTUARIO,
+        "pages": pages, "parsed_unique": len(candidates), "new_vs_crm": len(new_candidates),
+        "sample": new_candidates[:25],
+    }
+
+
+@app.get("/crm/cuba-mipymes/internal/ingest-minjus-2026")
+async def ingest_minjus_2026():
+    existing_rows = await _supabase_rows()
+    existing_names = {_norm(r.get("buyer_company") or r.get("company_name") or r.get("business_name")) for r in existing_rows}
+    existing_names.discard("")
+    current_count = len(existing_names)
+    if current_count >= TARGET_TOTAL:
+        return {"status": "already_complete", "current_unique": current_count, "target": TARGET_TOTAL, "inserted": 0}
+    candidates, pages = _extract_minjus_candidates(await _download(MINJUS_2026_02_PDF))
+    now = datetime.now(timezone.utc).isoformat(); today = datetime.now(timezone.utc).date().isoformat()
+    pending: list[dict] = []
+    seen = set(existing_names)
+    duplicates = 0
+    for c in candidates:
+        key = _norm(c["name"])
+        if not key or key in seen:
+            duplicates += 1; continue
+        seen.add(key)
+        record_hash = hashlib.sha1(f"{key}|{c.get('registry_number')}|{c.get('province')}".encode()).hexdigest()[:20]
+        activity = c.get("activity")
+        data = {
+            "organization_id": ORG_ID, "buyer_company": c["name"], "company_name": c["name"], "business_name": c["name"],
+            "buyer_country": "CU", "country": "Cuba", "province": c.get("province"), "destination": ", ".join(x for x in (c.get("province"), "Cuba") if x),
+            "actor_type": c.get("actor_type") or "MIPYME_PRIVADA", "primary_activity": activity, "activity": activity,
+            "product_category": activity, "product_description": activity, "public_email": c.get("public_email"),
+            "public_phone": c.get("public_phone"), "buyer_contact": c.get("public_phone") or c.get("public_email"),
+            "external_reference": f"RM-{c.get('province') or 'CU'}-{c.get('registry_number')}",
+            "source_type": "OFFICIAL_REGISTRY_EXTRACTION", "source_platform": "MINJUS Registro Mercantil",
+            "source_name": "Relación CNA-MIPYMES Registro Mercantil 03.02.2026", "source_url": MINJUS_2026_02_PDF,
+            "source_provenance": f"Name-level extraction from official MINJUS Registro Mercantil PDF, page {c.get('page')}.",
+            "verification_status": "PUBLIC_REGISTRY", "registry_status": "REGISTERED", "verification_date": today,
+            "outreach_status": "DO_NOT_AUTO_SEND", "qualification_stage": "RESEARCH",
+            "evidence_summary": "Official Registro Mercantil listing provides company identity and may provide public representative contact and business activity. Registration does not prove current buyer demand.",
+            "next_action": "Enrich and qualify for import-export relevance before outreach", "created_at": now, "updated_at": now,
+        }
+        pending.append({"logical_table": "external_trade_prospects", "record_key": f"minjus_rm_20260203:{record_hash}", "data": data, "created_at": now, "updated_at": now})
+        if current_count + len(pending) >= TARGET_TOTAL:
+            break
+    written = await _bulk_upsert(pending)
+    return {
+        "status": "ok", "source_pages": pages, "parsed_unique": len(candidates), "current_before": current_count,
+        "target": TARGET_TOTAL, "inserted": written, "current_after": current_count + written,
+        "duplicates_skipped": duplicates, "source": MINJUS_2026_02_PDF,
     }
 
 
@@ -386,13 +444,7 @@ async def ingest_cuba_actors_3000():
 @app.get("/crm/cuba-mipymes/health")
 async def health():
     records = await _records()
-    return {
-        "status": "ok",
-        "service": "cuba-private-sector-read-only-crm",
-        "record_count": len(records),
-        "source_scope": "public_registry_and_official_actor_lists_research",
-        "binding_actions": False,
-    }
+    return {"status": "ok", "service": "cuba-private-sector-read-only-crm", "record_count": len(records), "source_scope": "public_registry_and_official_actor_lists_research", "binding_actions": False}
 
 
 @app.get("/cuba-mipymes-api/list")
@@ -400,10 +452,4 @@ async def health():
 @app.get("/crm/cuba-mipymes/list")
 async def list_mipymes():
     records = await _records()
-    return {
-        "status": "ok",
-        "count": len(records),
-        "records": records,
-        "classification": "RESEARCH / VERIFIED PUBLIC SOURCE",
-        "notice": "A listed or registered private-sector actor is not a qualified buyer or current RFQ unless separately verified.",
-    }
+    return {"status": "ok", "count": len(records), "records": records, "classification": "RESEARCH / VERIFIED PUBLIC SOURCE", "notice": "A listed or registered private-sector actor is not a qualified buyer or current RFQ unless separately verified."}
