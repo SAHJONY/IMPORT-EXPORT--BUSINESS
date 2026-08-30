@@ -14,9 +14,9 @@ from fastapi import FastAPI, HTTPException
 
 from insforge_backend import get_backend
 
-app = FastAPI(title="SAHJONY Cuba Private Sector CRM", version="1.7.1", docs_url=None, redoc_url=None)
+app = FastAPI(title="SAHJONY Cuba Private Sector CRM", version="1.7.2", docs_url=None, redoc_url=None)
 ORG_ID = "org_sahjony_global_trade"
-TARGET_TOTAL = 5000
+TARGET_TOTAL = 6000
 ACCUMULATED_XLSX_URL = (
     "https://www.ipscuba.net/especial/nuevos-actores-economicos/assets/store/files/"
     "Listado-de-Nuevos-Actores-Econ%C3%B3micos-aprobados-mayo-2024.xlsx"
