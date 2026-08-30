@@ -10,7 +10,8 @@ Recover SAHJONY Global Trade production deployment when Git-triggered Vercel bui
 ## Policy
 - Do not evade Vercel account, billing, security, abuse, or quota controls.
 - Use `.github/workflows/vercel-recovery-deploy.yml`; do not reproduce its commands ad hoc.
-- Keep automatic Git deployments disabled in `vercel.json`. The GitHub workflow is the sole production build path.
+- Keep automatic Git deployments restricted to `main` until the recovery workflow has a tested `VERCEL_TOKEN`.
+- Run the prebuilt workflow manually during a build-rate incident; do not create repeated trigger commits.
 - Never commit Vercel credentials. Use the GitHub Actions secret `VERCEL_TOKEN`.
 - Production project is `prj_XmlR9SuaYKEE9siBC7lrsjLzYjb9` under team `team_Me3fB0D0J6He10CgJlJ44Xaq`.
 - Canonical production URL is `https://www.sahjony.com`.
@@ -18,7 +19,7 @@ Recover SAHJONY Global Trade production deployment when Git-triggered Vercel bui
 
 ## Recovery sequence
 1. Confirm `main` is the intended release SHA and the repository doctors pass.
-2. Run the `Vercel Prebuilt Production` GitHub Action or let its debounced `main` push trigger finish.
+2. Run the `Vercel Prebuilt Production` GitHub Action manually.
 3. The action pulls production environment configuration, builds `.vercel/output` in GitHub Actions, and sends one prebuilt immutable artifact to Vercel.
 4. Verify `/`, `/supabase-login.html`, and `/health` on the immutable URL before promoting it; then repeat the checks on the canonical production URL.
 5. For voice releases, verify inbound status and perform an authorized outbound test from Owner OS before declaring the phone system operational.

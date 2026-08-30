@@ -1,0 +1,9 @@
+[submodule "gstack"]
+	path = gstack
+	url = https://github.com/garrytan/gstack.git
+[submodule "superpowers"]
+	path = superpowers
+	url = https://github.com/obra/superpowers.git
+[submodule "ui-ux-pro-max-skill"]
+	path = ui-ux-pro-max-skill
+	url = https://github.com/nextlevelbuilder/ui-ux-pro-max-skill.git

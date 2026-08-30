@@ -7,9 +7,6 @@ on:
         description: Release reason
         required: false
         default: Manual production release
-  push:
-    branches: [main]
-
 concurrency:
   group: vercel-production-prebuilt
   cancel-in-progress: true

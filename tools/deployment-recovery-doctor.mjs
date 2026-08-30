@@ -21,9 +21,13 @@ const config = JSON.parse(read('vercel.json'));
 const workflow = read('.github/workflows/vercel-recovery-deploy.yml');
 const script = read('scripts/vercel_deploy_recovery.sh');
 const skill = read('skills/deployment-recovery/SKILL.md');
+const submodules = read('.gitmodules');
 
-check(config.git?.deploymentEnabled === false, 'Automatic Vercel Git deployments are disabled');
-check(workflow.includes('branches: [main]'), 'Prebuilt workflow targets main');
+check(
+  config.git?.deploymentEnabled?.main === true && config.git?.deploymentEnabled?.['*'] === false,
+  'Automatic Vercel Git deployments are restricted to main',
+);
+check(workflow.includes('workflow_dispatch:'), 'Prebuilt recovery requires an intentional manual release');
 check(workflow.includes('cancel-in-progress: true'), 'Duplicate production workflows are coalesced');
 check(workflow.includes('npm install --no-audit --no-fund'), 'Application dependencies are installed before validation');
 check(workflow.includes('secrets.VERCEL_TOKEN'), 'Deployment credential comes from GitHub Secrets');
@@ -33,6 +37,10 @@ check(script.includes('promote "$DEPLOY_URL"'), 'Production is promoted only aft
 check(script.includes('MODE="${1:-deploy}"'), 'Recovery script supports deterministic validation mode');
 check(script.includes('https://www.sahjony.com'), 'Canonical production URL is verified');
 check(skill.startsWith('---\nname: deployment-recovery\n'), 'Recovery skill has valid frontmatter');
+check(
+  ['gstack', 'superpowers', 'ui-ux-pro-max-skill'].every((path) => submodules.includes(`path = ${path}`)),
+  'Git submodule pointers have complete metadata',
+);
 
 console.log(`\nSummary: ${passes} passed, ${failures} failed`);
 if (failures) process.exit(1);
