@@ -1,0 +1,1 @@
+Force a clean Vercel production deployment after fixing the Supabase login locale runtime guard.
