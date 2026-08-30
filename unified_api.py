@@ -4,7 +4,7 @@ import secrets
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
 
-from auth import decode_neon_jwt, neon_auth_jwks_url, neon_auth_url, verify_employee_neon_token
+from auth import decode_supabase_jwt, supabase_auth_jwks_url, supabase_auth_url, verify_employee_neon_token
 from insforge_backend import PersistentBackendConfigurationError, get_backend, persistent_backend_status
 from activation_api import app as activation_app, activation_health
 from telegram_api import app as telegram_app
@@ -74,10 +74,10 @@ from fastapi_server import app as core_app
 _RUNTIME_EMPLOYEE_BRIDGE_TOKEN = os.getenv("EMPLOYEE_TOKEN", "").strip() or secrets.token_urlsafe(48)
 os.environ.setdefault("EMPLOYEE_TOKEN", _RUNTIME_EMPLOYEE_BRIDGE_TOKEN)
 
-app = FastAPI(title="SAHJONY LLC Unified Trade API", version="6.12.1", docs_url=None, redoc_url=None)
+app = FastAPI(title="SAHJONY LLC Unified Trade API", version="7.0.0", docs_url=None, redoc_url=None)
 
 @app.middleware("http")
-async def neon_identity_bridge(request: Request, call_next):
+async def supabase_identity_bridge(request: Request, call_next):
     role = request.headers.get("X-Role", "").strip().lower()
     authorization = request.headers.get("Authorization", "")
     if role == "employee" and authorization.startswith("Bearer "):
@@ -94,20 +94,40 @@ async def neon_identity_bridge(request: Request, call_next):
 @app.exception_handler(PersistentBackendConfigurationError)
 async def persistent_backend_configuration_error(_request: Request, exc: PersistentBackendConfigurationError):
     status = persistent_backend_status()
-    return JSONResponse(status_code=503, content={"detail":"Durable trade persistence is not configured for this deployment.","code":"PERSISTENT_BACKEND_NOT_CONFIGURED","service":"trade-persistence","provider":status["provider"],"accepted_backends":["neon_postgres","insforge"],"required_any_of":[["DATABASE_URL"],["POSTGRES_URL"],["NEON_DATABASE_URL"],["INSFORGE_BASE_URL","INSFORGE_API_KEY"]],"fail_closed":True})
+    return JSONResponse(status_code=503, content={
+        "detail":"Supabase trade persistence is not configured for this deployment.",
+        "code":"SUPABASE_BACKEND_NOT_CONFIGURED",
+        "service":"trade-persistence",
+        "provider":status["provider"],
+        "canonical_backend":"supabase",
+        "required_any_of":[["SUPABASE_URL","SUPABASE_SERVICE_ROLE_KEY"],["SUPABASE_URL","SUPABASE_SECRET_KEY"]],
+        "fail_closed":True,
+    })
 
 @app.get("/identity/health")
 async def identity_health():
-    return {"status":"ok","service":"sahjony-identity","provider":"neon_auth","auth_url_configured":bool(neon_auth_url()),"jwks_url_configured":bool(neon_auth_jwks_url()),"customer_self_signup":True,"employee_requires_approved_role":True,"owner_uses_separate_restricted_gate":True,"fail_closed":True}
+    configured = bool(supabase_auth_url()) and bool(os.getenv("SUPABASE_SERVICE_ROLE_KEY", "").strip() or os.getenv("SUPABASE_SECRET_KEY", "").strip() or os.getenv("SUPABASE_KEY", "").strip())
+    return {
+        "status":"ok" if configured else "configuration_required",
+        "service":"sahjony-identity",
+        "provider":"supabase_auth",
+        "auth_url_configured":bool(supabase_auth_url()),
+        "jwks_url_configured":bool(supabase_auth_jwks_url()),
+        "membership_authorization":True,
+        "customer_self_signup":True,
+        "employee_requires_approved_membership":True,
+        "owner_requires_approved_membership":True,
+        "fail_closed":True,
+    }
 
 @app.get("/identity/session")
 async def identity_session(x_role: str | None = Header(None, alias="X-Role"), authorization: str | None = Header(None, alias="Authorization")):
     if x_role not in {"customer", "employee"}: raise HTTPException(400, "X-Role must be customer or employee")
     if not authorization or not authorization.startswith("Bearer "): raise HTTPException(401, "Missing Authorization")
     token = authorization.removeprefix("Bearer ").strip()
-    claims = verify_employee_neon_token(token) if x_role == "employee" else decode_neon_jwt(token)
-    if not claims: raise HTTPException(403, "Neon identity is invalid or this account is not approved for the requested role")
-    return {"status":"authenticated","role":x_role,"user_id":claims.get("sub"),"email":claims.get("email"),"name":claims.get("name"),"identity_provider":"neon_auth"}
+    claims = verify_employee_neon_token(token) if x_role == "employee" else decode_supabase_jwt(token)
+    if not claims: raise HTTPException(403, "Supabase identity is invalid or this account is not approved for the requested role")
+    return {"status":"authenticated","role":x_role,"user_id":claims.get("sub"),"email":claims.get("email"),"name":claims.get("name"),"identity_provider":"supabase_auth"}
 
 @app.get("/backend/health")
 async def backend_health():
@@ -122,13 +142,21 @@ async def backend_health():
 @app.get("/crm/health")
 async def crm_runtime_health():
     status = persistent_backend_status()
-    return {"status":"ok" if status["configured"] else "configuration_required","service":"customer-crm","public_intake":True,"fail_closed_promotion":True,"country_segmentation":True,"cuba_department_permanent":True,"global_lead_search_control_plane":True,"energy_vertical_connected":True,"external_trade_prospects":True,"external_trade_prospects_research_only":True,"profit_machine_control_plane":True,"zero_own_capital_gate":True,"fee_protection_gate":True,"cash_collected_primary_metric":True,"persistence":status["provider"],"backend_configured":status["configured"],"operational":status["configured"],"database_url_configured":status["database_url_configured"],"insforge_configured":status["insforge_configured"]}
+    return {
+        "status":"ok" if status["configured"] else "configuration_required",
+        "service":"customer-crm","public_intake":True,"fail_closed_promotion":True,"country_segmentation":True,
+        "cuba_department_permanent":True,"global_lead_search_control_plane":True,"energy_vertical_connected":True,
+        "external_trade_prospects":True,"external_trade_prospects_research_only":True,"profit_machine_control_plane":True,
+        "zero_own_capital_gate":True,"fee_protection_gate":True,"cash_collected_primary_metric":True,
+        "persistence":status["provider"],"canonical_backend":"supabase","backend_configured":status["configured"],
+        "supabase_configured":status.get("supabase_configured",False),"operational":status["configured"],
+    }
 
 @app.get("/health")
 async def platform_health():
     activation = await activation_health()
     cloudflare_crawler_configured = bool(os.getenv("CLOUDFLARE_ACCOUNT_ID", "").strip()) and bool(os.getenv("CLOUDFLARE_API_TOKEN", "").strip())
-    return {"status":"ok","service":"sahjony-llc-global-trade-intelligence-os","version":"6.12.1","release_policy":"fail-closed","production_ready":activation["production_ready"],"readiness_score":activation["readiness_score"],"passed_gates":activation["passed_gates"],"total_gates":activation["total_gates"],"blocker_count":activation["blocker_count"],"release_gate":activation["release_gate"],"identity_provider":activation["providers"]["identity"]["provider"],"persistence_provider":activation["providers"]["persistence"]["provider"],"persistence_configured":activation["providers"]["persistence"]["configured"],"openai_configured":activation["providers"]["ai"]["openai_configured"],"anthropic_configured":activation["providers"]["ai"]["anthropic_configured"],"translation_configured":activation["providers"]["translation"]["configured"],"frontier_agentic_trade_engine":True,"dual_frontier_consensus":True,"autonomous_internal_research":True,"external_commitments_fail_closed":True,"global_industrial_marketplace":True,"marketplace_zero_own_inventory":True,"marketplace_rfq_first":True,"email_agent_control_plane":True,"native_gmail_transport_control_plane":True,"communication_os_control_plane":True,"communication_os_conversation_graph":True,"communication_os_private_human_webrtc":True,"communication_os_ai_consent_gate":True,"communication_os_contact_360":True,"communication_os_agentic_missions":True,"communication_os_agentic_mcp_tools":True,"communication_os_binding_tools_exposed":False,"communication_platform_industry_agnostic":True,"communication_platform_core_plus_industry_packs":True,"communication_platform_generic_context_graph":True,"communication_platform_workspace_policy_engine":True,"communication_platform_binding_tools_exposed":False,"communication_platform_regulated_tools_exposed":False,"communication_os_video_vision":True,"communication_os_screen_share":True,"communication_os_human_takeover":True,"communication_os_room_token_guard":True,"communication_os_direct_text":True,"communication_os_autonomous_notifications":True,"communication_os_free_wifi_control_plane":True,"communication_os_local_lan_mode":True,"communication_os_free_to_end_user_wifi_supported":True,"communication_os_internet_backhaul_fail_closed":True,"cuba_communications_department":True,"cuba_starlink_optional_gate":True,"cuba_free_wifi_program":True,"voice_agent_control_plane":True,"voice_provider":"openai_realtime","voice_direct_webrtc":True,"voice_autonomous_24x7":True,"voice_whatsapp_unified":True,"voice_legacy_bland_ai_runtime":False,"tmobile_byon_control_plane":True,"trade_agent_control_plane":True,"trade_workflow_certification_monitor":True,"country_segmented_crm":True,"cuba_crm_department":True,"cuba_mipymes_crm":True,"global_lead_search_control_plane":True,"external_trade_prospects":True,"external_trade_prospects_research_only":True,"profit_machine_control_plane":True,"zero_own_capital_gate":True,"fee_protection_gate":True,"cash_collected_primary_metric":True,"cloudflare_research_crawler":True,"cloudflare_research_crawler_configured":cloudflare_crawler_configured,"energy_crude_oil_os":True,"energy_autonomous_origination":True,"energy_origination_markets":21,"energy_market_intelligence":True,"energy_autonomous_matching":True,"energy_provider_hub":True,"energy_provider_normalization":True,"energy_authoritative_provider_catalog":True,"energy_ofac_authoritative_screening":True,"energy_ofac_complete_legacy_series":True,"energy_eia_native_adapter":True,"energy_eia_profile_driven":True,"energy_buyer_requirement_ingestion":True,"energy_seller_offer_ingestion":True,"energy_autonomous_matching_v2":True,"energy_deal_room_agent":True,"energy_revenue_intelligence":True,"energy_probability_weighted_pipeline":True,"energy_portfolio_prioritization":True,"energy_next_action_engine":True,"energy_fail_closed_release":True,"blockers":activation["blockers"]}
+    return {"status":"ok","service":"sahjony-llc-global-trade-intelligence-os","version":"7.0.0","canonical_platform":"supabase","release_policy":"fail-closed","production_ready":activation["production_ready"],"readiness_score":activation["readiness_score"],"passed_gates":activation["passed_gates"],"total_gates":activation["total_gates"],"blocker_count":activation["blocker_count"],"release_gate":activation["release_gate"],"identity_provider":activation["providers"]["identity"]["provider"],"persistence_provider":activation["providers"]["persistence"]["provider"],"persistence_configured":activation["providers"]["persistence"]["configured"],"openai_configured":activation["providers"]["ai"]["openai_configured"],"anthropic_configured":activation["providers"]["ai"]["anthropic_configured"],"translation_configured":activation["providers"]["translation"]["configured"],"frontier_agentic_trade_engine":True,"dual_frontier_consensus":True,"autonomous_internal_research":True,"external_commitments_fail_closed":True,"global_industrial_marketplace":True,"marketplace_zero_own_inventory":True,"marketplace_rfq_first":True,"email_agent_control_plane":True,"native_gmail_transport_control_plane":True,"communication_os_control_plane":True,"communication_os_conversation_graph":True,"communication_os_private_human_webrtc":True,"communication_os_ai_consent_gate":True,"communication_os_contact_360":True,"communication_os_agentic_missions":True,"communication_os_agentic_mcp_tools":True,"communication_os_binding_tools_exposed":False,"communication_platform_industry_agnostic":True,"communication_platform_core_plus_industry_packs":True,"communication_platform_generic_context_graph":True,"communication_platform_workspace_policy_engine":True,"communication_platform_binding_tools_exposed":False,"communication_platform_regulated_tools_exposed":False,"communication_os_video_vision":True,"communication_os_screen_share":True,"communication_os_human_takeover":True,"communication_os_room_token_guard":True,"communication_os_direct_text":True,"communication_os_autonomous_notifications":True,"communication_os_free_wifi_control_plane":True,"communication_os_local_lan_mode":True,"communication_os_free_to_end_user_wifi_supported":True,"communication_os_internet_backhaul_fail_closed":True,"cuba_communications_department":True,"cuba_starlink_optional_gate":True,"cuba_free_wifi_program":True,"voice_agent_control_plane":True,"voice_provider":"openai_realtime","voice_direct_webrtc":True,"voice_autonomous_24x7":True,"voice_whatsapp_unified":True,"voice_legacy_bland_ai_runtime":False,"tmobile_byon_control_plane":True,"trade_agent_control_plane":True,"trade_workflow_certification_monitor":True,"country_segmented_crm":True,"cuba_crm_department":True,"cuba_mipymes_crm":True,"global_lead_search_control_plane":True,"external_trade_prospects":True,"external_trade_prospects_research_only":True,"profit_machine_control_plane":True,"zero_own_capital_gate":True,"fee_protection_gate":True,"cash_collected_primary_metric":True,"cloudflare_research_crawler":True,"cloudflare_research_crawler_configured":cloudflare_crawler_configured,"energy_crude_oil_os":True,"energy_autonomous_origination":True,"energy_origination_markets":21,"energy_market_intelligence":True,"energy_autonomous_matching":True,"energy_provider_hub":True,"energy_provider_normalization":True,"energy_authoritative_provider_catalog":True,"energy_ofac_authoritative_screening":True,"energy_ofac_complete_legacy_series":True,"energy_eia_native_adapter":True,"energy_eia_profile_driven":True,"energy_buyer_requirement_ingestion":True,"energy_seller_offer_ingestion":True,"energy_autonomous_matching_v2":True,"energy_deal_room_agent":True,"energy_revenue_intelligence":True,"energy_probability_weighted_pipeline":True,"energy_portfolio_prioritization":True,"energy_next_action_engine":True,"energy_fail_closed_release":True,"blockers":activation["blockers"]}
 
 for subapp in (
     activation_app, telegram_app, business_email_app, email_agent_app, gmail_transport_app, owner_auth_app, core_app, customer_crm_app, external_trade_prospects_app, profit_machine_app, country_crm_app, global_lead_search_app, cloudflare_crawler_app, worldwide_connect_app, cuba_private_fuels_app, cuba_mipymes_app,
