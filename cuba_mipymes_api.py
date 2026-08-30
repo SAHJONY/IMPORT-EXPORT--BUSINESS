@@ -14,9 +14,9 @@ from fastapi import FastAPI, HTTPException
 
 from insforge_backend import get_backend
 
-app = FastAPI(title="SAHJONY Cuba Private Sector CRM", version="1.5.0", docs_url=None, redoc_url=None)
+app = FastAPI(title="SAHJONY Cuba Private Sector CRM", version="1.6.0", docs_url=None, redoc_url=None)
 ORG_ID = "org_sahjony_global_trade"
-TARGET_TOTAL = 5000
+TARGET_TOTAL = 3000
 ACCUMULATED_XLSX_URL = (
     "https://www.ipscuba.net/especial/nuevos-actores-economicos/assets/store/files/"
     "Listado-de-Nuevos-Actores-Econ%C3%B3micos-aprobados-mayo-2024.xlsx"
@@ -257,8 +257,8 @@ async def _records() -> list[dict]:
     return filtered
 
 
-@app.get("/crm/internal/ingest-cuba-actors-5000")
-async def ingest_cuba_actors_5000():
+@app.get("/crm/internal/ingest-cuba-actors-3000")
+async def ingest_cuba_actors_3000():
     existing_rows = await _supabase_rows()
     existing_names = {
         _norm(row.get("buyer_company") or row.get("company_name") or row.get("business_name"))
