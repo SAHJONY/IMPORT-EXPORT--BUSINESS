@@ -1,0 +1,4 @@
+Production deployment trigger for Cuba CRM rollout.
+Includes backend pagination commit 773c4906eb57e04eacfee9e272cef565dfc578ff and UI scaling commit 5d10998997a1f8ac8e141d6b500e4c31325c3102.
+Verified canonical Supabase unique Cuba private-sector actors at trigger time: 11193.
+Target: 15000+ evidence-backed unique actors; no fabricated or duplicate records.
