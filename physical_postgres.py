@@ -33,7 +33,7 @@ def _database_url() -> str:
         value = os.getenv(name, "").strip()
         if value:
             return value
-    raise RuntimeError("A Neon/Postgres database URL is required for governed physical ledgers")
+    raise RuntimeError("A Postgres database URL is required for governed physical ledgers")
 
 
 def _table(name: str) -> sql.Identifier:
@@ -43,7 +43,16 @@ def _table(name: str) -> sql.Identifier:
 
 
 def _connect():
-    return psycopg.connect(_database_url(), autocommit=True, connect_timeout=10, row_factory=dict_row)
+    # Supabase Transaction Pooler is the canonical serverless connection path.
+    # Disable psycopg server-side prepared statements: transaction poolers do not
+    # guarantee session affinity and prepared statements can fail across requests.
+    return psycopg.connect(
+        _database_url(),
+        autocommit=True,
+        connect_timeout=10,
+        row_factory=dict_row,
+        prepare_threshold=None,
+    )
 
 
 async def insert_row(table: str, row: dict[str, Any]) -> dict[str, Any]:
