@@ -14,9 +14,9 @@ from fastapi import FastAPI, HTTPException
 
 from insforge_backend import get_backend
 
-app = FastAPI(title="SAHJONY Cuba Private Sector CRM", version="1.7.2", docs_url=None, redoc_url=None)
+app = FastAPI(title="SAHJONY Cuba Private Sector CRM", version="1.8.0", docs_url=None, redoc_url=None)
 ORG_ID = "org_sahjony_global_trade"
-TARGET_TOTAL = 6000
+TARGET_TOTAL = 15000
 ACCUMULATED_XLSX_URL = (
     "https://www.ipscuba.net/especial/nuevos-actores-economicos/assets/store/files/"
     "Listado-de-Nuevos-Actores-Econ%C3%B3micos-aprobados-mayo-2024.xlsx"
@@ -107,20 +107,34 @@ async def _supabase_rows() -> list[dict]:
         "Authorization": f"Bearer {service_key}",
         "Accept": "application/json",
     }
-    params = {
-        "logical_table": "eq.external_trade_prospects",
-        "select": "data",
-        "limit": "10000",
-    }
-    async with httpx.AsyncClient(timeout=30) as client:
-        response = await client.get(f"{base_url}/rest/v1/sahjony_trade_records", headers=headers, params=params)
-        response.raise_for_status()
-        payload = response.json() if response.content else []
     rows: list[dict] = []
-    for item in payload:
-        data = item.get("data") if isinstance(item, dict) else None
-        if isinstance(data, dict):
-            rows.append(data)
+    page_size = 1000
+    offset = 0
+    async with httpx.AsyncClient(timeout=30) as client:
+        while True:
+            params = {
+                "logical_table": "eq.external_trade_prospects",
+                "select": "data",
+                "order": "record_key.asc",
+                "limit": str(page_size),
+                "offset": str(offset),
+            }
+            response = await client.get(
+                f"{base_url}/rest/v1/sahjony_trade_records",
+                headers=headers,
+                params=params,
+            )
+            response.raise_for_status()
+            payload = response.json() if response.content else []
+            if not payload:
+                break
+            for item in payload:
+                data = item.get("data") if isinstance(item, dict) else None
+                if isinstance(data, dict):
+                    rows.append(data)
+            if len(payload) < page_size:
+                break
+            offset += len(payload)
     return rows
 
 
@@ -244,15 +258,21 @@ async def _records() -> list[dict]:
         backend = get_backend()
         rows = await backend.select(
             "external_trade_prospects",
-            params={"organization_id": f"eq.{ORG_ID}", "order": "created_at.desc", "limit": "10000"},
+            params={"organization_id": f"eq.{ORG_ID}", "order": "created_at.desc", "limit": "20000"},
         ) or []
     filtered = []
+    seen: set[str] = set()
     for r in rows:
         row = dict(r)
         if str(row.get("organization_id") or ORG_ID) != ORG_ID:
             continue
-        if _is_mipyme(row):
-            filtered.append(_public_record(row))
+        if not _is_mipyme(row):
+            continue
+        name_key = _norm(row.get("buyer_company") or row.get("company_name") or row.get("business_name"))
+        if not name_key or name_key in seen:
+            continue
+        seen.add(name_key)
+        filtered.append(_public_record(row))
     filtered.sort(key=lambda r: (str(r.get("buyer_company") or "").casefold(), str(r.get("external_reference") or "")))
     return filtered
 
