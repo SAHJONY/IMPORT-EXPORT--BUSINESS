@@ -6,7 +6,7 @@ from collections import Counter, defaultdict
 import httpx
 from fastapi import FastAPI, HTTPException
 
-app = FastAPI(title="SAHJONY Supabase Record Registry", version="1.0.0", docs_url=None, redoc_url=None)
+app = FastAPI(title="SAHJONY Supabase Record Registry", version="1.1.0", docs_url=None, redoc_url=None)
 
 
 def _supabase_config() -> tuple[str, str]:
@@ -44,7 +44,7 @@ def _domain(logical_table: str) -> str:
     return "other_operational_records"
 
 
-@app.get("/record-registry/summary")
+@app.get("/crm/record-registry/summary")
 async def summary():
     base, key = _supabase_config()
     if not base or not key:
