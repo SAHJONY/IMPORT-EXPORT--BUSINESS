@@ -1,0 +1,42 @@
+{
+  "schema_version": "1.0",
+  "bureau_id": "CU",
+  "country": "Cuba",
+  "country_code": "CU",
+  "name": "SAHJONY Cuba Bureau",
+  "display_name_es": "Buró Cuba de SAHJONY",
+  "status": "active-foundation",
+  "default_locale": "es",
+  "supported_locales": ["es", "en-US"],
+  "currency_context": ["USD", "EUR", "CUP"],
+  "mission": "Country operating layer for lawful Cuba-related import/export opportunities, buyer and supplier coordination, RFQs, logistics, documentation, compliance review and deal execution.",
+  "departments": [
+    {"id":"trade-desk","name":"Trade Desk","name_es":"Mesa de Comercio","functions":["RFQs","buyer demand","supplier matching","quotations","deal pipeline"]},
+    {"id":"mipyme-desk","name":"MIPYME & Private Enterprise Desk","name_es":"Mesa MIPYME y Empresa Privada","functions":["business onboarding","lead qualification","commercial profiles","demand capture"]},
+    {"id":"supplier-desk","name":"Supplier Desk","name_es":"Mesa de Proveedores","functions":["supplier sourcing","manufacturer matching","pricing","terms","product verification"]},
+    {"id":"food-agri","name":"Food & Agriculture","name_es":"Alimentos y Agricultura","functions":["food commodities","agricultural inputs","packaged foods","cold-chain opportunities"]},
+    {"id":"energy-fuels","name":"Energy & Fuels","name_es":"Energía y Combustibles","functions":["lawful energy opportunities","fuel inquiries","lubricants","energy equipment"]},
+    {"id":"construction","name":"Construction & Industrial","name_es":"Construcción e Industria","functions":["construction materials","machinery","industrial supplies","hardware"]},
+    {"id":"logistics","name":"Logistics & Ports","name_es":"Logística y Puertos","functions":["container planning","freight","ports","shipping documents","delivery milestones"]},
+    {"id":"compliance","name":"Compliance & Trade Controls","name_es":"Cumplimiento y Controles Comerciales","functions":["counterparty screening","sanctions review","export controls","restricted-party checks","transaction escalation"]},
+    {"id":"documents","name":"Documentation Desk","name_es":"Mesa de Documentación","functions":["proforma invoices","commercial invoices","packing lists","certificates","deal files"]},
+    {"id":"finance","name":"Trade Finance Desk","name_es":"Mesa de Finanzas Comerciales","functions":["payment terms","trade finance coordination","commercial economics","margin controls"]},
+    {"id":"customer-success","name":"Customer & Partner Desk","name_es":"Mesa de Clientes y Partners","functions":["customer support","partner onboarding","deal updates","multilingual communications"]},
+    {"id":"market-intelligence","name":"Market Intelligence","name_es":"Inteligencia de Mercado","functions":["demand intelligence","pricing intelligence","sector opportunities","public-source research"]}
+  ],
+  "workflow": ["lead","qualification","compliance","RFQ","supplier-match","quotation","negotiation","documentation","payment-coordination","logistics","delivery","closeout"],
+  "controls": {
+    "compliance_gate_required": true,
+    "no_transaction_bypass": true,
+    "public_or_authorized_data_only": true,
+    "language_consistency_required": true,
+    "audit_trail_required": true
+  },
+  "ui": {
+    "route": "/countries/cuba",
+    "short_route": "/cuba",
+    "navigation_group": "Country Bureaus",
+    "country_selector_enabled": true,
+    "inherit_global_language": true
+  }
+}
