@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import secrets
 from datetime import datetime, timezone
@@ -12,20 +13,21 @@ from pydantic import BaseModel, Field
 
 from auth import (
     OWNER_SESSION_TTL_SECONDS,
+    _membership,
     decode_owner_session,
+    decode_supabase_jwt,
     issue_owner_session,
     owner_email,
     owner_mfa_required,
     owner_password_configured,
     owner_totp_configured,
-    verify_owner_password,
     verify_owner_totp,
 )
 from insforge_backend import _matches, _safe_table, get_backend
 from governance_policy import AUDIT_RETENTION_DAYS
 
 
-app = FastAPI(title="SAHJONY Owner Authentication", version="1.2.0", docs_url=None, redoc_url=None)
+app = FastAPI(title="SAHJONY Owner Authentication", version="2.0.0", docs_url=None, redoc_url=None)
 
 
 class OwnerLoginRequest(BaseModel):
@@ -71,6 +73,7 @@ IMMUTABLE_TABLES = {
 COMMON_DATASETS = [
     {"table": "crm_intakes", "label": "CRM leads / intakes"},
     {"table": "customer_intakes", "label": "Customer intakes"},
+    {"table": "external_trade_prospects", "label": "External trade prospects / Cuba CRM"},
     {"table": "global_leads", "label": "Global research leads"},
     {"table": "country_leads", "label": "Country CRM leads"},
     {"table": "business_events", "label": "Messages / business events"},
@@ -84,6 +87,18 @@ COMMON_DATASETS = [
     {"table": "shipments", "label": "Shipment records"},
     {"table": "system_integrations", "label": "System integration configuration (protected)"},
 ]
+
+
+def _supabase_url() -> str:
+    return os.getenv("SUPABASE_URL", "").strip().rstrip("/")
+
+
+def _supabase_key() -> str:
+    return (
+        os.getenv("SUPABASE_SERVICE_ROLE_KEY", "").strip()
+        or os.getenv("SUPABASE_SECRET_KEY", "").strip()
+        or os.getenv("SUPABASE_KEY", "").strip()
+    )
 
 
 def _owner_session_payload(authorization: str | None) -> dict[str, Any]:
@@ -141,6 +156,10 @@ async def _delete_records(table: str, filters: dict[str, str]) -> int:
         import asyncio
         return await asyncio.to_thread(run)
 
+    if hasattr(backend, "delete"):
+        result = await backend.delete(table, params=filters)  # type: ignore[attr-defined]
+        return len(result) if isinstance(result, list) else (1 if result else 0)
+
     headers = {**backend.headers, "Prefer": "return=representation"}  # type: ignore[attr-defined]
     async with httpx.AsyncClient(timeout=30) as client:
         response = await client.delete(backend._records_url(table), headers=headers, params=filters)  # type: ignore[attr-defined]
@@ -154,10 +173,11 @@ async def _delete_records(table: str, filters: dict[str, str]) -> int:
 @app.get("/owner-auth/health")
 def owner_auth_health():
     return {
-        "status": "ok",
+        "status": "ok" if owner_password_configured() else "configuration_required",
         "service": "owner-auth",
+        "identity_provider": "supabase_auth",
         "owner_email": owner_email(),
-        "password_configured": owner_password_configured(),
+        "supabase_auth_configured": owner_password_configured(),
         "mfa_required": owner_mfa_required(),
         "mfa_configured": owner_totp_configured(),
         "session_ttl_seconds": OWNER_SESSION_TTL_SECONDS,
@@ -172,17 +192,42 @@ def owner_auth_health():
 @app.post("/owner-auth/login")
 def owner_login(payload: OwnerLoginRequest):
     normalized_email = payload.email.strip().lower()
-    if normalized_email != owner_email():
+    configured_owner = owner_email()
+    if configured_owner and normalized_email != configured_owner:
         raise HTTPException(status_code=401, detail="Invalid owner credentials")
-    if not owner_password_configured():
-        raise HTTPException(status_code=503, detail="Owner password is not configured in the production environment")
-    if not verify_owner_password(payload.password):
+
+    base = _supabase_url()
+    key = _supabase_key()
+    if not base or not key:
+        raise HTTPException(status_code=503, detail="Supabase Auth is not configured in the production environment")
+
+    try:
+        response = httpx.post(
+            f"{base}/auth/v1/token",
+            params={"grant_type": "password"},
+            headers={"apikey": key, "Content-Type": "application/json"},
+            json={"email": normalized_email, "password": payload.password},
+            timeout=15,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Supabase Auth is temporarily unreachable") from exc
+
+    if response.status_code != 200:
         raise HTTPException(status_code=401, detail="Invalid owner credentials")
+    auth_payload = response.json() if response.content else {}
+    access_token = str(auth_payload.get("access_token") or "")
+    claims = decode_supabase_jwt(access_token)
+    if not claims:
+        raise HTTPException(status_code=401, detail="Supabase owner session could not be verified")
+
+    membership = _membership(str(claims.get("sub") or ""), {"owner"})
+    if not membership:
+        raise HTTPException(status_code=403, detail="This Supabase account is not authorized as owner")
 
     mfa_verified = False
     if owner_mfa_required():
         if not owner_totp_configured():
-            raise HTTPException(status_code=503, detail="Owner MFA is required but OWNER_TOTP_SECRET is not configured")
+            raise HTTPException(status_code=503, detail="Owner MFA is required but the application TOTP secret is not configured")
         if not payload.mfa_code or not verify_owner_totp(payload.mfa_code):
             raise HTTPException(status_code=401, detail="Invalid owner MFA code")
         mfa_verified = True
@@ -191,11 +236,13 @@ def owner_login(payload: OwnerLoginRequest):
         token = issue_owner_session(normalized_email, mfa_verified=mfa_verified)
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+
     return {
         "status": "authenticated",
         "role": "owner",
         "email": normalized_email,
         "scope": "owner:full",
+        "identity_provider": "supabase_auth",
         "mfa_verified": mfa_verified,
         "token": token,
         "expires_in": OWNER_SESSION_TTL_SECONDS,
@@ -208,10 +255,11 @@ def owner_session(authorization: str | None = Header(None, alias="Authorization"
     return {
         "status": "authenticated",
         "role": "owner",
-        "email": payload["email"],
-        "scope": payload["scope"],
+        "email": payload.get("email"),
+        "scope": payload.get("scope", "owner:full"),
+        "identity_provider": payload.get("identity_provider", "supabase_auth"),
         "mfa_verified": payload.get("mfa_verified") is True,
-        "expires_at": payload["exp"],
+        "expires_at": payload.get("exp"),
     }
 
 
