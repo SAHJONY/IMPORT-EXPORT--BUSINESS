@@ -1,9 +1,9 @@
 import {useMemo,useState} from 'react';
-import {createAuthClient} from '@neondatabase/auth';
+import {createClient} from '@supabase/supabase-js';
 
-const DEFAULT_AUTH_URL='https://ep-empty-shadow-ayfporoz.neonauth.c-5.us-east-2.aws.neon.tech/neondb/auth';
-const authUrl=((import.meta as any).env?.VITE_NEON_AUTH_URL||DEFAULT_AUTH_URL).replace(/\/$/,'');
-const auth:any=createAuthClient(authUrl);
+const supabaseUrl=String((import.meta as any).env?.VITE_SUPABASE_URL||(import.meta as any).env?.SUPABASE_URL||'').replace(/\/$/,'');
+const supabaseKey=String((import.meta as any).env?.VITE_SUPABASE_PUBLISHABLE_KEY||(import.meta as any).env?.VITE_SUPABASE_ANON_KEY||'');
+const supabase=supabaseUrl&&supabaseKey?createClient(supabaseUrl,supabaseKey,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}}):null;
 
 type AppRole='customer'|'employee';
 
@@ -26,9 +26,15 @@ export default function NeonAuthPage(){
   const [busy,setBusy]=useState(false);
   const [message,setMessage]=useState('');
 
-  async function finish(){
-    const jwtToken=await auth.getJWTToken?.();
-    if(!jwtToken)throw new Error('Neon Auth did not return an application JWT. Please sign in again.');
+  async function finish(accessToken?:string){
+    if(!supabase)throw new Error('Supabase frontend configuration is not active.');
+    let jwtToken=accessToken;
+    if(!jwtToken){
+      const {data,error}=await supabase.auth.getSession();
+      if(error)throw error;
+      jwtToken=data.session?.access_token;
+    }
+    if(!jwtToken)throw new Error('Supabase Auth did not return an application session. Please sign in again.');
     const check=await fetch('/identity/session',{headers:{Authorization:`Bearer ${jwtToken}`,'X-Role':role}});
     const body=await check.json().catch(()=>({detail:`HTTP ${check.status}`}));
     if(!check.ok)throw new Error(body.detail||'This identity is not approved for this workspace.');
@@ -40,15 +46,18 @@ export default function NeonAuthPage(){
   async function submit(e:React.FormEvent){
     e.preventDefault();setBusy(true);setMessage('');
     try{
+      if(!supabase)throw new Error('Supabase frontend configuration is not active.');
       if(mode==='signup'){
         if(role==='employee')throw new Error('Employee accounts must be approved by SAHJONY. Public employee signup is disabled.');
-        const result=await auth.signUp.email({name:name.trim()||email.split('@')[0],email:email.trim(),password});
-        if(result?.error)throw new Error(result.error.message||'Unable to create account');
+        const {data,error}=await supabase.auth.signUp({email:email.trim(),password,options:{data:{name:name.trim()||email.split('@')[0]}}});
+        if(error)throw error;
+        if(!data.session){setMessage('Account created. Check your email to confirm the account, then sign in.');return;}
+        await finish(data.session.access_token);
       }else{
-        const result=await auth.signIn.email({email:email.trim(),password});
-        if(result?.error)throw new Error(result.error.message||'Unable to sign in');
+        const {data,error}=await supabase.auth.signInWithPassword({email:email.trim(),password});
+        if(error)throw error;
+        await finish(data.session?.access_token);
       }
-      await finish();
     }catch(error:any){setMessage(error?.message||'Authentication failed.');}
     finally{setBusy(false)}
   }
@@ -56,9 +65,9 @@ export default function NeonAuthPage(){
   return <main style={{minHeight:'100vh',background:'radial-gradient(circle at 15% 0,rgba(90,216,255,.15),transparent 30%),#050b13',color:'#f5f9ff',fontFamily:'Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif',display:'grid',placeItems:'center',padding:20}}>
     <section style={{width:'min(100%,520px)',border:'1px solid rgba(255,255,255,.13)',borderRadius:24,background:'linear-gradient(180deg,#0d1d2c,#081522)',padding:28,boxShadow:'0 35px 100px rgba(0,0,0,.35)'}}>
       <a href="/" style={{color:'#9eb5c8',textDecoration:'none',fontSize:12}}>← Back to Home</a>
-      <div style={{marginTop:28,fontSize:10,fontWeight:900,letterSpacing:'.18em',color:'#6ed7ff'}}>SAHJONY GLOBAL TRADE · NEON AUTH</div>
+      <div style={{marginTop:28,fontSize:10,fontWeight:900,letterSpacing:'.18em',color:'#6ed7ff'}}>SAHJONY GLOBAL TRADE · SUPABASE AUTH</div>
       <h1 style={{fontSize:42,lineHeight:.96,letterSpacing:'-.045em',margin:'12px 0 10px'}}>{role==='employee'?'Employee access':'Customer access'}</h1>
-      <p style={{color:'#9fb4c6',lineHeight:1.6,marginBottom:22}}>{role==='employee'?'Sign in with an approved SAHJONY employee identity. A normal public account cannot enter employee operations.':'Create or sign in to your secure trade workspace. Authentication is managed by Neon Auth and your application access is verified by SAHJONY.'}</p>
+      <p style={{color:'#9fb4c6',lineHeight:1.6,marginBottom:22}}>{role==='employee'?'Sign in with an approved SAHJONY employee identity. A normal public account cannot enter employee operations.':'Create or sign in to your secure trade workspace. Authentication and application data are managed by Supabase and access is verified by SAHJONY.'}</p>
       <form onSubmit={submit} style={{display:'grid',gap:12}}>
         {mode==='signup'&&<input value={name} onChange={e=>setName(e.target.value)} placeholder="Full name" required style={inputStyle}/>} 
         <input value={email} onChange={e=>setEmail(e.target.value)} type="email" placeholder="Email" required autoComplete="email" style={inputStyle}/>
