@@ -1,0 +1,7 @@
+SAHJONY LLC Global Trade OS
+Full Supabase backend/frontend activation deployment trigger.
+Auth: Supabase Auth
+Data: Supabase Postgres/Data API
+Security: RLS + app_memberships
+Frontend: @supabase/supabase-js
+Timestamp: 2026-08-29T20:47:00-05:00
