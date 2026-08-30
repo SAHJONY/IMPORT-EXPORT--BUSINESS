@@ -1,0 +1,1 @@
+Production retry after fixing global language runtime on public/supabase-login.html.
