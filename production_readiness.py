@@ -71,6 +71,12 @@ def evaluate_production_readiness(
     schema = persistence_schema_evidence or {}
     schema_ok = bool(schema.get("verified"))
     rls_ok = bool(schema.get("rls_verified"))
+    schema_provider = str(schema.get("provider") or "supabase")
+    schema_evidence = (
+        f"{schema_provider} schema verified directly; public tables={schema.get('present_table_count', 0)}"
+        if schema_ok
+        else f"{schema_provider} schema verification failed: {schema.get('reason') or 'no verified platform evidence'}"
+    )
     storage = storage_configuration_status()
     storage_configured = bool(storage.get("configured")) and storage.get("provider") == "supabase_storage"
 
@@ -98,7 +104,7 @@ def evaluate_production_readiness(
         ReadinessGate("persistent_backend", supabase_backend_ok, True, f"Canonical provider={persistence.get('provider')}; Supabase configured={persistence.get('supabase_configured')}", "Configure SUPABASE_URL plus SUPABASE_SERVICE_ROLE_KEY or SUPABASE_SECRET_KEY."),
         ReadinessGate("production_identity", identity_ok, True, "Supabase Auth selected with legacy local auth disabled", "Set AUTH_PROVIDER=supabase_auth and configure Supabase server credentials."),
         ReadinessGate("persistence_isolation_verified", rls_ok, True, f"Supabase RLS evidence: {schema.get('rls_enabled_table_count', 0)}/{schema.get('rls_required_table_count', schema.get('present_table_count', 0))} public tables", "Enable RLS on every public application table and verify through sahjony_platform_evidence()."),
-        ReadinessGate("persistence_schema_verified", schema_ok, True, f"Supabase platform evidence verified={schema_ok}; public tables={schema.get('present_table_count', 0)}", "Apply the canonical Supabase schema and verify the platform evidence RPC."),
+        ReadinessGate("persistence_schema_verified", schema_ok, True, schema_evidence, "Apply the canonical Supabase schema and verify the platform evidence RPC."),
         ReadinessGate("owner_mfa", owner_mfa_ok, True, "Owner Supabase identity is additionally protected by application TOTP MFA", "Set OWNER_MFA_REQUIRED=true and configure OWNER_TOTP_SECRET in production secrets."),
         ReadinessGate("ai_brain_providers", ai_ok, True, "OpenAI + Anthropic + AI Brain E2E", "Configure both AI providers and run governed E2E verification."),
         ReadinessGate("restricted_party_screening", screening_ok, True, "Authoritative sanctions screening connector", "Configure/restore authoritative screening connectivity."),

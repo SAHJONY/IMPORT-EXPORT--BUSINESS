@@ -5,13 +5,11 @@ from trade_connectors import TradeConnectorRegistry
 
 
 FULL_READY_ENV = {
-    "INSFORGE_BASE_URL": "https://example.insforge.app",
-    "INSFORGE_API_KEY": "ik_test",
-    "INSFORGE_ANON_KEY": "anon_test",
-    "AUTH_PROVIDER": "insforge",
+    "SUPABASE_URL": "https://example.supabase.co",
+    "SUPABASE_SERVICE_ROLE_KEY": "service-role-test",
+    "SUPABASE_STORAGE_BUCKET": "trade-documents",
+    "AUTH_PROVIDER": "supabase_auth",
     "ALLOW_LEGACY_LOCAL_AUTH": "false",
-    "INSFORGE_RLS_VERIFIED": "true",
-    "INSFORGE_SCHEMAS_APPLIED": "true",
     "OWNER_MFA_REQUIRED": "true",
     "OWNER_TOTP_SECRET": "JBSWY3DPEHPK3PXP",
     "OPENAI_API_KEY": "openai_test",
@@ -20,11 +18,6 @@ FULL_READY_ENV = {
     "ANTHROPIC_FRONTIER_MODEL": "anthropic-test-model",
     "ANTHROPIC_AGENT_MODEL": "anthropic-agent-test-model",
     "AI_BRAIN_E2E_VERIFIED": "true",
-    "INSFORGE_STORAGE_ENABLED": "true",
-    "INSFORGE_S3_ENDPOINT": "https://example.insforge.app/storage/v1/s3",
-    "INSFORGE_S3_ACCESS_KEY_ID": "access-test",
-    "INSFORGE_S3_SECRET_ACCESS_KEY": "secret-test",
-    "INSFORGE_STORAGE_BUCKET": "trade-documents",
     "SIGNED_DOCUMENT_STORAGE_VERIFIED": "true",
     "TRANSLATION_PROVIDER": "azure",
     "AZURE_TRANSLATOR_ENDPOINT": "https://api.cognitive.microsofttranslator.com",
@@ -48,6 +41,15 @@ FULL_READY_ENV = {
     "VERCEL_MONITORING_ENABLED": "true",
     "FIRST_LIVE_TRADE_CERTIFIED": "true",
     "E2E_TRADE_WORKFLOW_VERIFIED": "true",
+}
+
+SUPABASE_SCHEMA_EVIDENCE = {
+    "verified": True,
+    "provider": "supabase",
+    "present_table_count": 10,
+    "rls_verified": True,
+    "rls_enabled_table_count": 10,
+    "rls_required_table_count": 10,
 }
 
 
@@ -82,6 +84,7 @@ def test_ecb_reference_cross_rate_without_network(monkeypatch):
 def test_readiness_accepts_only_live_screening_health(monkeypatch):
     for key, value in FULL_READY_ENV.items():
         monkeypatch.setenv(key, value)
+    monkeypatch.setattr("production_readiness._safe_evidence", lambda *_: {"verified": True})
 
     health = {
         "by_name": {
@@ -91,11 +94,19 @@ def test_readiness_accepts_only_live_screening_health(monkeypatch):
             "fx_execution": {"configured": True, "reachable": True},
         }
     }
-    result = evaluate_production_readiness(runtime_ok=True, connector_health=health)
+    result = evaluate_production_readiness(
+        runtime_ok=True,
+        connector_health=health,
+        persistence_schema_evidence=SUPABASE_SCHEMA_EVIDENCE,
+    )
     assert result["score"] == 100
     assert result["production_ready"] is True
 
     health["by_name"]["ofac_sanctions_data"]["reachable"] = False
-    blocked = evaluate_production_readiness(runtime_ok=True, connector_health=health)
+    blocked = evaluate_production_readiness(
+        runtime_ok=True,
+        connector_health=health,
+        persistence_schema_evidence=SUPABASE_SCHEMA_EVIDENCE,
+    )
     assert blocked["production_ready"] is False
     assert "restricted_party_screening" in blocked["blockers"]

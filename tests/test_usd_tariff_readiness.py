@@ -49,7 +49,11 @@ def test_measured_schema_evidence_closes_schema_gate(monkeypatch):
     monkeypatch.delenv("INSFORGE_SCHEMAS_APPLIED", raising=False)
     evidence = {
         "verified": True,
-        "provider": "neon_postgres",
+        "provider": "supabase",
+        "present_table_count": 4,
+        "rls_verified": True,
+        "rls_enabled_table_count": 4,
+        "rls_required_table_count": 4,
         "required_tables": [
             "cuba_partner_accounts",
             "cuba_partner_referrals",

@@ -13,7 +13,7 @@ class FakeBackend:
 
     async def select(self, table, *, params=None):
         if table == "global_sourcing_requests":
-            return [{"sourcing_request_id": "gsr_test", "product_need": "Industrial pump"}]
+            return [{"sourcing_request_id": "gsr_test", "product_need": "Industrial pump", "destination_country": "CU"}]
         if table == "global_supplier_candidates":
             return [self.candidate]
         return []

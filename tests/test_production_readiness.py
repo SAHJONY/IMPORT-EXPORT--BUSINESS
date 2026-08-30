@@ -2,13 +2,11 @@ from production_readiness import evaluate_production_readiness
 
 
 REQUIRED_ENV = {
-    "INSFORGE_BASE_URL": "https://example.insforge.app",
-    "INSFORGE_API_KEY": "ik_test",
-    "INSFORGE_ANON_KEY": "anon_test",
-    "AUTH_PROVIDER": "insforge",
+    "SUPABASE_URL": "https://example.supabase.co",
+    "SUPABASE_SERVICE_ROLE_KEY": "service-role-test",
+    "SUPABASE_STORAGE_BUCKET": "trade-documents",
+    "AUTH_PROVIDER": "supabase_auth",
     "ALLOW_LEGACY_LOCAL_AUTH": "false",
-    "INSFORGE_RLS_VERIFIED": "true",
-    "INSFORGE_SCHEMAS_APPLIED": "true",
     "OWNER_MFA_REQUIRED": "true",
     "OWNER_TOTP_SECRET": "JBSWY3DPEHPK3PXP",
     "OPENAI_API_KEY": "openai_test",
@@ -19,11 +17,6 @@ REQUIRED_ENV = {
     "LOGISTICS_DATA_PROVIDER": "live-test-provider",
     "CARRIER_E2E_VERIFIED": "true",
     "FX_EXECUTION_PROVIDER": "live-test-provider",
-    "INSFORGE_STORAGE_ENABLED": "true",
-    "INSFORGE_S3_ENDPOINT": "https://example.insforge.app/storage/v1/s3",
-    "INSFORGE_S3_ACCESS_KEY_ID": "access-test",
-    "INSFORGE_S3_SECRET_ACCESS_KEY": "secret-test",
-    "INSFORGE_STORAGE_BUCKET": "trade-documents",
     "SIGNED_DOCUMENT_STORAGE_VERIFIED": "true",
     "TRANSLATION_PROVIDER": "azure",
     "AZURE_TRANSLATOR_ENDPOINT": "https://api.cognitive.microsofttranslator.com",
@@ -48,6 +41,15 @@ REQUIRED_ENV = {
     "E2E_TRADE_WORKFLOW_VERIFIED": "true",
 }
 
+SUPABASE_SCHEMA_EVIDENCE = {
+    "verified": True,
+    "provider": "supabase",
+    "present_table_count": 10,
+    "rls_verified": True,
+    "rls_enabled_table_count": 10,
+    "rls_required_table_count": 10,
+}
+
 
 def test_readiness_fails_closed_without_external_dependencies(monkeypatch):
     for key in REQUIRED_ENV:
@@ -64,7 +66,8 @@ def test_readiness_fails_closed_without_external_dependencies(monkeypatch):
 def test_readiness_reaches_100_only_when_every_critical_gate_is_explicit(monkeypatch):
     for key, value in REQUIRED_ENV.items():
         monkeypatch.setenv(key, value)
-    result = evaluate_production_readiness(runtime_ok=True)
+    monkeypatch.setattr("production_readiness._safe_evidence", lambda *_: {"verified": True})
+    result = evaluate_production_readiness(runtime_ok=True, persistence_schema_evidence=SUPABASE_SCHEMA_EVIDENCE)
     assert result["score"] == 100
     assert result["production_ready"] is True
     assert result["release_gate"] == "READY"
@@ -74,30 +77,31 @@ def test_readiness_reaches_100_only_when_every_critical_gate_is_explicit(monkeyp
 def test_runtime_failure_blocks_release_even_with_all_dependencies(monkeypatch):
     for key, value in REQUIRED_ENV.items():
         monkeypatch.setenv(key, value)
-    result = evaluate_production_readiness(runtime_ok=False)
+    monkeypatch.setattr("production_readiness._safe_evidence", lambda *_: {"verified": True})
+    result = evaluate_production_readiness(runtime_ok=False, persistence_schema_evidence=SUPABASE_SCHEMA_EVIDENCE)
     assert result["production_ready"] is False
     assert "production_runtime" in result["blockers"]
 
 
-def test_neon_auth_is_accepted_as_production_identity(monkeypatch):
+def test_legacy_neon_auth_is_not_accepted_as_production_identity(monkeypatch):
     for key in REQUIRED_ENV:
         monkeypatch.delenv(key, raising=False)
     monkeypatch.setenv("AUTH_PROVIDER", "neon_auth")
     monkeypatch.setenv("ALLOW_LEGACY_LOCAL_AUTH", "false")
     result = evaluate_production_readiness(runtime_ok=True)
     gate = next(g for g in result["gates"] if g["name"] == "production_identity")
-    assert gate["passed"] is True
-    assert result["identity_provider"] == "neon_auth"
+    assert gate["passed"] is False
+    assert result["identity_provider"] == "supabase_auth"
 
 
-def test_neon_database_url_satisfies_persistent_backend_gate(monkeypatch):
-    monkeypatch.delenv("INSFORGE_BASE_URL", raising=False)
-    monkeypatch.delenv("INSFORGE_API_KEY", raising=False)
+def test_legacy_neon_database_url_does_not_satisfy_canonical_backend_gate(monkeypatch):
+    monkeypatch.delenv("SUPABASE_URL", raising=False)
+    monkeypatch.delenv("SUPABASE_SERVICE_ROLE_KEY", raising=False)
     monkeypatch.setenv("DATABASE_URL", "postgresql://user:pass@example.neon.tech/neondb?sslmode=require")
     result = evaluate_production_readiness(runtime_ok=True)
     gate = next(g for g in result["gates"] if g["name"] == "persistent_backend")
-    assert gate["passed"] is True
-    assert "Neon/Postgres" in gate["evidence"]
+    assert gate["passed"] is False
+    assert "Supabase configured=False" in gate["evidence"]
 
 
 def test_owner_mfa_gate_requires_real_totp_secret(monkeypatch):
