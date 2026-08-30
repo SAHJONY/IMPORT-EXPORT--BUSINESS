@@ -1,0 +1,17 @@
+{
+  "schema_version": "1.0",
+  "system": "SAHJONY Country Bureaus",
+  "strategy": "One standardized operating bureau per country, inheriting global language, CRM, trade, compliance, supplier, logistics and deal workflows while allowing country-specific controls.",
+  "default_departments": ["Trade Desk","Supplier Desk","Compliance & Trade Controls","Documentation Desk","Trade Finance Desk","Logistics & Ports","Customer & Partner Desk","Market Intelligence"],
+  "countries": [
+    {"code":"CU","country":"Cuba","status":"active-foundation","config":"/config/country-bureaus/cuba.json","route":"/countries/cuba"}
+  ],
+  "expansion_policy": {
+    "template_driven": true,
+    "global_language_inheritance": true,
+    "country_specific_compliance": true,
+    "shared_crm": true,
+    "shared_supplier_network": true,
+    "shared_deal_pipeline": true
+  }
+}
