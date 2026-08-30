@@ -14,9 +14,9 @@ from fastapi import FastAPI, HTTPException
 
 from insforge_backend import get_backend
 
-app = FastAPI(title="SAHJONY Cuba Private Sector CRM", version="1.7.0", docs_url=None, redoc_url=None)
+app = FastAPI(title="SAHJONY Cuba Private Sector CRM", version="1.7.1", docs_url=None, redoc_url=None)
 ORG_ID = "org_sahjony_global_trade"
-TARGET_TOTAL = 15000
+TARGET_TOTAL = 5000
 ACCUMULATED_XLSX_URL = (
     "https://www.ipscuba.net/especial/nuevos-actores-economicos/assets/store/files/"
     "Listado-de-Nuevos-Actores-Econ%C3%B3micos-aprobados-mayo-2024.xlsx"
@@ -110,7 +110,7 @@ async def _supabase_rows() -> list[dict]:
     params = {
         "logical_table": "eq.external_trade_prospects",
         "select": "data",
-        "limit": "20000",
+        "limit": "10000",
     }
     async with httpx.AsyncClient(timeout=30) as client:
         response = await client.get(f"{base_url}/rest/v1/sahjony_trade_records", headers=headers, params=params)
@@ -244,7 +244,7 @@ async def _records() -> list[dict]:
         backend = get_backend()
         rows = await backend.select(
             "external_trade_prospects",
-            params={"organization_id": f"eq.{ORG_ID}", "order": "created_at.desc", "limit": "20000"},
+            params={"organization_id": f"eq.{ORG_ID}", "order": "created_at.desc", "limit": "10000"},
         ) or []
     filtered = []
     for r in rows:
