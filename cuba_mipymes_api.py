@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import os
+
+import httpx
 from fastapi import FastAPI
 
 from insforge_backend import get_backend
 
-app = FastAPI(title="SAHJONY Cuba Private Sector CRM", version="1.2.0", docs_url=None, redoc_url=None)
+app = FastAPI(title="SAHJONY Cuba Private Sector CRM", version="1.3.0", docs_url=None, redoc_url=None)
 ORG_ID = "org_sahjony_global_trade"
 
 _PRIVATE_ACTOR_TYPES = {
@@ -59,24 +62,65 @@ def _public_record(row: dict) -> dict:
     allowed = [
         "id", "prospect_id", "external_reference", "buyer_company", "buyer_name",
         "buyer_country", "buyer_contact", "public_email", "public_phone", "website",
-        "actor_type", "province", "municipality", "opportunity_title", "product_category",
-        "product_description", "destination", "source_type", "source_platform", "source_name",
-        "source_provenance", "source_url", "verification_status", "registry_status",
-        "verification_date", "qualification_stage", "risk_level", "import_export_relevance",
-        "evidence_summary", "next_action", "created_at", "updated_at",
+        "whatsapp", "whatsapp_status", "facebook", "instagram", "linkedin", "telegram",
+        "social_media", "social_media_status", "actor_type", "province", "municipality",
+        "opportunity_title", "product_category", "product_description", "destination",
+        "source_type", "source_platform", "source_name", "source_provenance", "source_url",
+        "verification_status", "registry_status", "verification_date", "qualification_stage",
+        "risk_level", "import_export_relevance", "evidence_summary", "next_action",
+        "created_at", "updated_at",
     ]
     return {k: normalized.get(k) for k in allowed}
 
 
+async def _supabase_rows() -> list[dict]:
+    base_url = os.getenv("SUPABASE_URL", "").rstrip("/")
+    service_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "").strip()
+    if not base_url or not service_key:
+        return []
+    headers = {
+        "apikey": service_key,
+        "Authorization": f"Bearer {service_key}",
+        "Accept": "application/json",
+    }
+    params = {
+        "logical_table": "eq.external_trade_prospects",
+        "select": "data",
+        "limit": "5000",
+    }
+    async with httpx.AsyncClient(timeout=20) as client:
+        response = await client.get(f"{base_url}/rest/v1/sahjony_trade_records", headers=headers, params=params)
+        response.raise_for_status()
+        payload = response.json() if response.content else []
+    rows: list[dict] = []
+    for item in payload:
+        data = item.get("data") if isinstance(item, dict) else None
+        if isinstance(data, dict):
+            rows.append(data)
+    return rows
+
+
 async def _records() -> list[dict]:
-    backend = get_backend()
-    rows = await backend.select(
-        "external_trade_prospects",
-        params={"organization_id": f"eq.{ORG_ID}", "order": "created_at.desc", "limit": "5000"},
-    ) or []
-    records = [_public_record(dict(r)) for r in rows if _is_mipyme(dict(r))]
-    records.sort(key=lambda r: (str(r.get("buyer_company") or "").casefold(), str(r.get("external_reference") or "")))
-    return records
+    rows: list[dict] = []
+    try:
+        rows = await _supabase_rows()
+    except Exception:
+        rows = []
+    if not rows:
+        backend = get_backend()
+        rows = await backend.select(
+            "external_trade_prospects",
+            params={"organization_id": f"eq.{ORG_ID}", "order": "created_at.desc", "limit": "5000"},
+        ) or []
+    filtered = []
+    for r in rows:
+        row = dict(r)
+        if str(row.get("organization_id") or ORG_ID) != ORG_ID:
+            continue
+        if _is_mipyme(row):
+            filtered.append(_public_record(row))
+    filtered.sort(key=lambda r: (str(r.get("buyer_company") or "").casefold(), str(r.get("external_reference") or "")))
+    return filtered
 
 
 @app.get("/cuba-mipymes-api/health")
