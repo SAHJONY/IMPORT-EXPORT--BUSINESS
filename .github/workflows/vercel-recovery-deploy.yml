@@ -1,17 +1,18 @@
-name: Vercel Recovery Deploy
+name: Vercel Prebuilt Production
 
 on:
   workflow_dispatch:
+    inputs:
+      reason:
+        description: Release reason
+        required: false
+        default: Manual production release
   push:
     branches: [main]
-    paths:
-      - 'scripts/vercel_deploy_recovery.sh'
-      - '.github/workflows/vercel-recovery-deploy.yml'
-      - 'skills/deployment-recovery/**'
 
 concurrency:
-  group: vercel-production-recovery
-  cancel-in-progress: false
+  group: vercel-production-prebuilt
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -24,7 +25,7 @@ jobs:
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
       VERCEL_ORG_ID: team_Me3fB0D0J6He10CgJlJ44Xaq
       VERCEL_PROJECT_ID: prj_XmlR9SuaYKEE9siBC7lrsjLzYjb9
-      PRODUCTION_URL: https://import-export-business.vercel.app
+      PRODUCTION_URL: https://www.sahjony.com
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

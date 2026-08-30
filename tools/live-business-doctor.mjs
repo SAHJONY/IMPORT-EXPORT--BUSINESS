@@ -26,7 +26,8 @@ if(exists('vercel.json')){
   route('/owner-payments(.*)','payment_api.py')?pass('Owner Payments API route configured'):fail('Owner Payments API route missing');
   route('/consumer-marketplace(.*)','cuba_consumer_marketplace_api.py')?pass('Consumer API route configured'):fail('Consumer API route missing');
   const dep=cfg.git?.deploymentEnabled;
-  if(dep && dep.main===true && dep['*']===false) pass('Vercel auto-deployment restricted to main');
+  if(dep===false) pass('Vercel automatic Git deployments disabled for guarded prebuilt releases');
+  else if(dep && dep.main===true && dep['*']===false) pass('Vercel auto-deployment restricted to main');
   else warn('Vercel branch deployment restriction is not explicitly main-only');
 }
 
