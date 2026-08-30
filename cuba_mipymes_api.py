@@ -15,7 +15,7 @@ from pypdf import PdfReader
 
 from insforge_backend import get_backend
 
-app = FastAPI(title="SAHJONY Cuba Private Sector CRM", version="1.9.0", docs_url=None, redoc_url=None)
+app = FastAPI(title="SAHJONY Cuba Private Sector CRM", version="2.0.0", docs_url=None, redoc_url=None)
 ORG_ID = "org_sahjony_global_trade"
 TARGET_TOTAL = 15000
 ACCUMULATED_XLSX_URL = (
@@ -74,13 +74,33 @@ def _public_record(row: dict) -> dict:
         province = str(row.get("province") or "").strip()
         normalized["destination"] = ", ".join(part for part in (municipality, province, "Cuba") if part)
     normalized.setdefault("buyer_contact", row.get("public_phone") or row.get("phone") or row.get("contact"))
+
+    has_explicit_owner = bool(
+        normalized.get("legal_owners") or normalized.get("legal_owner")
+        or normalized.get("beneficial_owners") or normalized.get("beneficial_owner")
+        or normalized.get("ubo") or normalized.get("shareholders") or normalized.get("partners")
+    )
+    normalized.setdefault(
+        "ownership_verification_status",
+        "PUBLIC_SOURCE_VERIFIED" if has_explicit_owner else "NOT_PUBLICLY_VERIFIED",
+    )
+    if not has_explicit_owner:
+        normalized.setdefault(
+            "ownership_note",
+            "No public source currently linked to this CRM record establishes legal or beneficial ownership. A public representative is not treated as an owner unless the source explicitly establishes ownership.",
+        )
+
     allowed = [
         "id", "prospect_id", "external_reference", "buyer_company", "buyer_name", "buyer_country", "buyer_contact",
         "public_email", "public_phone", "website", "whatsapp", "whatsapp_status", "facebook", "instagram", "linkedin",
         "telegram", "social_media", "social_media_status", "actor_type", "province", "municipality", "opportunity_title",
         "product_category", "product_description", "destination", "source_type", "source_platform", "source_name",
         "source_provenance", "source_url", "verification_status", "registry_status", "verification_date",
-        "qualification_stage", "risk_level", "import_export_relevance", "evidence_summary", "next_action", "created_at", "updated_at"
+        "qualification_stage", "risk_level", "import_export_relevance", "evidence_summary", "next_action",
+        "legal_owner", "legal_owners", "beneficial_owner", "beneficial_owners", "ubo", "partners", "shareholders",
+        "ownership_percentage", "public_representative", "representative_role", "ownership_source_url",
+        "ownership_source_reference", "ownership_verification_status", "ownership_note", "ownership_verified_at",
+        "created_at", "updated_at"
     ]
     return {k: normalized.get(k) for k in allowed}
 
@@ -105,7 +125,7 @@ async def _supabase_rows() -> list[dict]:
                 f"{base_url}/rest/v1/sahjony_trade_records",
                 headers=headers,
                 params={
-                    "logical_table": "eq.external_trade_prospects", "select": "data", "order": "record_key.asc",
+                    "logical_table": "eq.external_trade_prospects", "select": "record_key,data", "order": "record_key.asc",
                     "limit": str(page_size), "offset": str(offset),
                 },
             )
@@ -116,7 +136,9 @@ async def _supabase_rows() -> list[dict]:
             for item in payload:
                 data = item.get("data") if isinstance(item, dict) else None
                 if isinstance(data, dict):
-                    rows.append(data)
+                    row = dict(data)
+                    row["_record_key"] = item.get("record_key")
+                    rows.append(row)
             if len(payload) < page_size:
                 break
             offset += len(payload)
@@ -258,6 +280,23 @@ def _extract_minjus_activity(block: str) -> str | None:
     return activity[:1400] if activity else None
 
 
+def _extract_minjus_representative(block: str) -> str | None:
+    compact = _clean(block)
+    patterns = [
+        r"Representante(?:\s+Legal)?\s*[:.-]?\s*([A-ZÁÉÍÓÚÜÑ][A-ZÁÉÍÓÚÜÑáéíóúüñ .'-]{4,100}?)(?=\s+(?:Tel[eé]fono|M[oó]vil|Correo|Email|E-mail|Domicilio|Actividad|Objeto|$))",
+        r"REPRESENTANTE(?:\s+LEGAL)?\s*[:.-]?\s*([A-ZÁÉÍÓÚÜÑ][A-ZÁÉÍÓÚÜÑ .'-]{4,100}?)(?=\s+(?:TEL[EÉ]FONO|M[ÓO]VIL|CORREO|EMAIL|DOMICILIO|ACTIVIDAD|OBJETO|$))",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, compact, re.I)
+        if not match:
+            continue
+        candidate = _clean(match.group(1))
+        words = re.findall(r"[A-Za-zÁÉÍÓÚÜÑáéíóúüñ'-]+", candidate)
+        if 2 <= len(words) <= 8 and len(candidate) <= 100:
+            return candidate
+    return None
+
+
 def _extract_minjus_candidates(content: bytes) -> tuple[list[dict], int]:
     reader = PdfReader(io.BytesIO(content))
     candidates: list[dict] = []
@@ -291,13 +330,14 @@ def _extract_minjus_candidates(content: bytes) -> tuple[list[dict], int]:
                 "actor_type": actor_type, "activity": _extract_minjus_activity(block),
                 "public_email": email_match.group(0) if email_match else None,
                 "public_phone": phones[-1] if phones else None,
+                "public_representative": _extract_minjus_representative(block),
             })
     return candidates, len(reader.pages)
 
 
 async def _download(url: str, timeout: int = 90) -> bytes:
     async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
-        response = await client.get(url, headers={"User-Agent": "SAHJONY-CRM-Ingestion/1.1"})
+        response = await client.get(url, headers={"User-Agent": "SAHJONY-CRM-Ingestion/2.0"})
         response.raise_for_status()
         return response.content
 
@@ -366,9 +406,11 @@ async def ingest_cuba_actors_3000():
             "source_url": OFFICIAL_MEP_ARCHIVE, "extraction_url": ACCUMULATED_XLSX_URL,
             "source_provenance": "Name-level extraction from the downloadable accumulated approved-actors Excel.",
             "verification_status": "RESEARCH", "registry_status": "VERIFY", "verification_date": today,
+            "ownership_verification_status": "NOT_PUBLICLY_VERIFIED",
+            "ownership_note": "The MEP accumulated actor list does not establish legal or beneficial ownership for this record.",
             "outreach_status": "DO_NOT_AUTO_SEND", "qualification_stage": "RESEARCH",
             "evidence_summary": "Public approved-actor listing provides business name, actor type, activity and territorial fields.",
-            "next_action": "Corroborate current status in MINJUS/INAENE and enrich public business contacts",
+            "next_action": "Corroborate current status in MINJUS/INAENE and enrich public business contacts and ownership evidence",
             "created_at": now, "updated_at": now,
         }
         pending.append({"logical_table": "external_trade_prospects", "record_key": f"mep_accumulated_may2024:{record_hash}", "data": data, "created_at": now, "updated_at": now})
@@ -390,6 +432,7 @@ async def preview_minjus_2026():
     return {
         "status": "ok", "source": MINJUS_2026_02_PDF, "official_index": MINJUS_PRONTUARIO,
         "pages": pages, "parsed_unique": len(candidates), "new_vs_crm": len(new_candidates),
+        "representatives_found": sum(1 for c in candidates if c.get("public_representative")),
         "sample": new_candidates[:25],
     }
 
@@ -414,20 +457,26 @@ async def ingest_minjus_2026():
         seen.add(key)
         record_hash = hashlib.sha1(f"{key}|{c.get('registry_number')}|{c.get('province')}".encode()).hexdigest()[:20]
         activity = c.get("activity")
+        representative = c.get("public_representative")
         data = {
             "organization_id": ORG_ID, "buyer_company": c["name"], "company_name": c["name"], "business_name": c["name"],
             "buyer_country": "CU", "country": "Cuba", "province": c.get("province"), "destination": ", ".join(x for x in (c.get("province"), "Cuba") if x),
             "actor_type": c.get("actor_type") or "MIPYME_PRIVADA", "primary_activity": activity, "activity": activity,
             "product_category": activity, "product_description": activity, "public_email": c.get("public_email"),
             "public_phone": c.get("public_phone"), "buyer_contact": c.get("public_phone") or c.get("public_email"),
+            "public_representative": representative, "representative_role": "PUBLIC_REGISTRY_REPRESENTATIVE" if representative else None,
+            "ownership_verification_status": "NOT_PUBLICLY_VERIFIED",
+            "ownership_note": "MINJUS may identify a public representative, but this does not establish legal or beneficial ownership unless ownership is explicitly stated by the source.",
+            "ownership_source_url": MINJUS_2026_02_PDF if representative else None,
+            "ownership_source_reference": f"page {c.get('page')}" if representative else None,
             "external_reference": f"RM-{c.get('province') or 'CU'}-{c.get('registry_number')}",
             "source_type": "OFFICIAL_REGISTRY_EXTRACTION", "source_platform": "MINJUS Registro Mercantil",
             "source_name": "Relación CNA-MIPYMES Registro Mercantil 03.02.2026", "source_url": MINJUS_2026_02_PDF,
             "source_provenance": f"Name-level extraction from official MINJUS Registro Mercantil PDF, page {c.get('page')}.",
             "verification_status": "PUBLIC_REGISTRY", "registry_status": "REGISTERED", "verification_date": today,
             "outreach_status": "DO_NOT_AUTO_SEND", "qualification_stage": "RESEARCH",
-            "evidence_summary": "Official Registro Mercantil listing provides company identity and may provide public representative contact and business activity. Registration does not prove current buyer demand.",
-            "next_action": "Enrich and qualify for import-export relevance before outreach", "created_at": now, "updated_at": now,
+            "evidence_summary": "Official Registro Mercantil listing provides company identity and may provide a public representative, contact and business activity. Registration does not prove current buyer demand or ownership.",
+            "next_action": "Enrich and qualify for import-export relevance; verify ownership separately before treating any person as owner/UBO", "created_at": now, "updated_at": now,
         }
         pending.append({"logical_table": "external_trade_prospects", "record_key": f"minjus_rm_20260203:{record_hash}", "data": data, "created_at": now, "updated_at": now})
         if current_count + len(pending) >= TARGET_TOTAL:
@@ -440,11 +489,59 @@ async def ingest_minjus_2026():
     }
 
 
+@app.get("/crm/cuba-mipymes/internal/enrich-minjus-ownership-2026")
+async def enrich_minjus_ownership_2026():
+    existing_rows = await _supabase_rows()
+    existing_by_name = {
+        _norm(r.get("buyer_company") or r.get("company_name") or r.get("business_name")): r
+        for r in existing_rows
+        if _norm(r.get("buyer_company") or r.get("company_name") or r.get("business_name"))
+    }
+    candidates, pages = _extract_minjus_candidates(await _download(MINJUS_2026_02_PDF))
+    now = datetime.now(timezone.utc).isoformat()
+    pending: list[dict] = []
+    matched = representatives_found = already_enriched = 0
+    for c in candidates:
+        existing = existing_by_name.get(_norm(c.get("name")))
+        if not existing:
+            continue
+        matched += 1
+        representative = c.get("public_representative")
+        if not representative:
+            continue
+        representatives_found += 1
+        if _norm(existing.get("public_representative")) == _norm(representative):
+            already_enriched += 1
+            continue
+        record_key = existing.get("_record_key")
+        if not record_key:
+            continue
+        merged = {k: v for k, v in existing.items() if k != "_record_key"}
+        merged.update({
+            "public_representative": representative,
+            "representative_role": "PUBLIC_REGISTRY_REPRESENTATIVE",
+            "ownership_verification_status": merged.get("ownership_verification_status") or "NOT_PUBLICLY_VERIFIED",
+            "ownership_note": merged.get("ownership_note") or "A public representative is not treated as an owner unless an authoritative source explicitly establishes ownership.",
+            "ownership_source_url": MINJUS_2026_02_PDF,
+            "ownership_source_reference": f"page {c.get('page')}",
+            "updated_at": now,
+        })
+        pending.append({"logical_table": "external_trade_prospects", "record_key": record_key, "data": merged, "created_at": merged.get("created_at") or now, "updated_at": now})
+    written = await _bulk_upsert(pending)
+    return {
+        "status": "ok", "source": MINJUS_2026_02_PDF, "source_pages": pages,
+        "registry_candidates": len(candidates), "matched_existing": matched,
+        "representatives_found": representatives_found, "already_enriched": already_enriched,
+        "records_enriched": written,
+        "ownership_policy": "Representative identity is stored separately and never promoted to legal/beneficial owner without explicit ownership evidence.",
+    }
+
+
 @app.get("/cuba-mipymes-api/health")
 @app.get("/crm/cuba-mipymes/health")
 async def health():
     records = await _records()
-    return {"status": "ok", "service": "cuba-private-sector-read-only-crm", "record_count": len(records), "source_scope": "public_registry_and_official_actor_lists_research", "binding_actions": False}
+    return {"status": "ok", "service": "cuba-private-sector-read-only-crm", "version": "2.0.0", "record_count": len(records), "source_scope": "public_registry_and_official_actor_lists_research", "ownership_policy": "evidence_only", "binding_actions": False}
 
 
 @app.get("/cuba-mipymes-api/list")
@@ -452,4 +549,4 @@ async def health():
 @app.get("/crm/cuba-mipymes/list")
 async def list_mipymes():
     records = await _records()
-    return {"status": "ok", "count": len(records), "records": records, "classification": "RESEARCH / VERIFIED PUBLIC SOURCE", "notice": "A listed or registered private-sector actor is not a qualified buyer or current RFQ unless separately verified."}
+    return {"status": "ok", "count": len(records), "records": records, "classification": "RESEARCH / VERIFIED PUBLIC SOURCE", "notice": "A listed or registered private-sector actor is not a qualified buyer or current RFQ. Public representatives are not owners unless ownership is separately evidenced."}
