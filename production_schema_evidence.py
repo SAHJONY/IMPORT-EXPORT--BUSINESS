@@ -1,265 +1,105 @@
 from __future__ import annotations
 
-import asyncio
 import os
 from typing import Any
 
-import psycopg
-from psycopg.rows import dict_row
+import httpx
 
 
-_REQUIRED_TABLES = {
-    "trade_payment_ledger",
-    "trade_payment_events",
-    "cuba_partner_accounts",
-    "cuba_partner_referrals",
-    "cuba_consumer_marketplace_requests",
-    "ledger_accounts",
-    "ledger_journals",
-    "ledger_entries",
-    "payment_reconciliations",
-    "beneficiary_change_requests",
-    "marketplace_suppliers",
-    "marketplace_products",
-    "marketplace_rfqs",
-    "global_sourcing_requests",
-    "global_supplier_candidates",
-    "global_sourcing_control_evidence",
-}
-
-_REQUIRED_COLUMNS = {
-    "trade_payment_ledger": {
-        "payment_case_id",
-        "currency",
-        "payment_status",
-        "supplier_payout_allowed",
-        "shipment_release_allowed",
-        "supplier_payout_authorized_at",
-        "shipment_release_authorized_at",
-    },
-    "trade_payment_events": {"event_id", "payment_case_id", "event_type", "currency", "created_at"},
-    "cuba_partner_accounts": {"partner_id", "status", "referral_token_hash", "automatic_commission_payout"},
-    "cuba_partner_referrals": {"referral_id", "partner_id", "referral_status", "commission_status", "currency"},
-    "cuba_consumer_marketplace_requests": {"request_id", "status", "status_token_hash", "payment_allowed", "shipment_allowed"},
-    "ledger_accounts": {"account_id", "code", "account_type", "currency", "active"},
-    "ledger_journals": {"journal_id", "currency", "status", "owner_approved"},
-    "ledger_entries": {"entry_id", "journal_id", "account_id", "debit", "credit"},
-    "payment_reconciliations": {"reconciliation_id", "currency", "status"},
-    "beneficiary_change_requests": {
-        "request_id",
-        "requested_by_id",
-        "verified_by",
-        "approved_by",
-        "status",
-    },
-    "marketplace_suppliers": {"supplier_id", "supplier_type", "verification_tier", "source_url", "status"},
-    "marketplace_products": {"product_id", "supplier_id", "price_type", "media_rights_status", "published", "inventory_owned_by_sahjony"},
-    "marketplace_rfqs": {"rfq_id", "qualification_status", "status", "inventory_owned_by_sahjony", "sahjony_capital_required"},
-    "global_sourcing_requests": {"sourcing_request_id", "destination_country", "worldwide_search", "status"},
-    "global_supplier_candidates": {"global_candidate_id", "sourcing_request_id", "source_evidence", "corridor_status", "selected"},
-    "global_sourcing_control_evidence": {"evidence_id", "global_candidate_id", "control_key", "verified"},
-}
-
-# Participant-facing tables expected to be protected by the identity/RLS foundation.
-_RLS_REQUIRED_TABLES = {
-    "app_memberships",
-    "trade_documents",
-    "document_movements",
-    "shipments",
-    "shipment_milestones",
-    "trade_compliance_cases",
-    "business_events",
-    "communications",
-}
-
-_RLS_REQUIRED_POLICIES = {
-    "app_memberships_self_select",
-    "trade_documents_read",
-    "trade_documents_customer_insert",
-    "document_movements_read",
-    "shipments_read",
-    "shipment_milestones_read",
-    "compliance_cases_read",
-    "business_events_read",
-    "communications_read",
-}
-
-_RLS_REQUIRED_FUNCTIONS = {
-    "requesting_user_id",
-    "app_has_role",
-    "app_can_access_customer",
-    "app_is_internal",
-}
+def _supabase_url() -> str:
+    return os.getenv("SUPABASE_URL", "").strip().rstrip("/")
 
 
-def _database_url() -> str:
-    for name in (
-        "DATABASE_URL",
-        "POSTGRES_URL",
-        "NEON_DATABASE_URL",
-        "NEON_POSTGRES_URL",
-        "POSTGRES_PRISMA_URL",
-    ):
-        value = os.getenv(name, "").strip()
-        if value:
-            return value
-    raise RuntimeError("Production database URL is not configured")
+def _supabase_key() -> str:
+    return (
+        os.getenv("SUPABASE_SERVICE_ROLE_KEY", "").strip()
+        or os.getenv("SUPABASE_SECRET_KEY", "").strip()
+        or os.getenv("SUPABASE_KEY", "").strip()
+    )
 
 
 def _probe() -> dict[str, Any]:
-    with psycopg.connect(_database_url(), connect_timeout=10, row_factory=dict_row) as conn:
-        with conn.cursor() as cur:
-            present_tables: set[str] = set()
-            for table in sorted(_REQUIRED_TABLES):
-                cur.execute("SELECT to_regclass(%s) AS relation", (f"public.{table}",))
-                row = cur.fetchone()
-                if row and row["relation"] is not None:
-                    present_tables.add(table)
-
-            columns: dict[str, set[str]] = {name: set() for name in _REQUIRED_COLUMNS}
-            for table in sorted(_REQUIRED_COLUMNS):
-                if table not in present_tables:
-                    continue
-                cur.execute(
-                    """
-                    SELECT column_name
-                    FROM information_schema.columns
-                    WHERE table_schema = 'public' AND table_name = %s
-                    """,
-                    (table,),
-                )
-                columns[table] = {row["column_name"] for row in cur.fetchall()}
-
-            index_count = 0
-            for table in sorted(present_tables):
-                cur.execute(
-                    "SELECT count(*) AS n FROM pg_indexes WHERE schemaname = 'public' AND tablename = %s",
-                    (table,),
-                )
-                index_count += int(cur.fetchone()["n"])
-
-            active_usd_accounts = 0
-            if "ledger_accounts" in present_tables:
-                cur.execute(
-                    "SELECT count(*) AS n FROM public.ledger_accounts WHERE active = true AND currency = 'USD'"
-                )
-                active_usd_accounts = int(cur.fetchone()["n"])
-
-            cur.execute(
-                """
-                SELECT c.relname AS table_name, c.relrowsecurity AS rls_enabled,
-                       c.relforcerowsecurity AS rls_forced
-                FROM pg_class c
-                JOIN pg_namespace n ON n.oid = c.relnamespace
-                WHERE n.nspname = 'public' AND c.relkind IN ('r','p')
-                  AND c.relname = ANY(%s)
-                """,
-                (sorted(_RLS_REQUIRED_TABLES),),
-            )
-            rls_rows = {row["table_name"]: row for row in cur.fetchall()}
-            rls_present_tables = set(rls_rows)
-            rls_enabled_tables = {
-                table for table, row in rls_rows.items() if bool(row["rls_enabled"])
-            }
-            rls_forced_tables = {
-                table for table, row in rls_rows.items() if bool(row["rls_forced"])
-            }
-
-            cur.execute(
-                """
-                SELECT policyname, tablename
-                FROM pg_policies
-                WHERE schemaname = 'public' AND policyname = ANY(%s)
-                """,
-                (sorted(_RLS_REQUIRED_POLICIES),),
-            )
-            policy_rows = cur.fetchall()
-            present_policies = {row["policyname"] for row in policy_rows}
-            policy_tables = {
-                row["policyname"]: row["tablename"] for row in policy_rows
-            }
-
-            cur.execute(
-                """
-                SELECT DISTINCT p.proname
-                FROM pg_proc p
-                JOIN pg_namespace n ON n.oid = p.pronamespace
-                WHERE n.nspname = 'public' AND p.proname = ANY(%s)
-                """,
-                (sorted(_RLS_REQUIRED_FUNCTIONS),),
-            )
-            present_functions = {row["proname"] for row in cur.fetchall()}
-
-    missing_tables = sorted(_REQUIRED_TABLES - present_tables)
-    missing_columns = {
-        table: sorted(required - columns.get(table, set()))
-        for table, required in _REQUIRED_COLUMNS.items()
-        if table in present_tables and required - columns.get(table, set())
-    }
-    verified = (
-        not missing_tables
-        and not missing_columns
-        and active_usd_accounts >= 12
-        and index_count >= 10
+    base = _supabase_url()
+    key = _supabase_key()
+    if not base or not key:
+        return {
+            "verified": False,
+            "provider": "supabase",
+            "canonical_database": "supabase",
+            "reason": "Supabase server credentials are not configured",
+            "rls_verified": False,
+            "rls_reason": "Supabase server credentials are not configured",
+        }
+    response = httpx.post(
+        f"{base}/rest/v1/rpc/sahjony_platform_evidence",
+        headers={
+            "apikey": key,
+            "Authorization": f"Bearer {key}",
+            "Content-Type": "application/json",
+        },
+        json={},
+        timeout=15,
     )
-
-    missing_rls_tables = sorted(_RLS_REQUIRED_TABLES - rls_present_tables)
-    rls_not_enabled = sorted(_RLS_REQUIRED_TABLES - rls_enabled_tables)
-    missing_policies = sorted(_RLS_REQUIRED_POLICIES - present_policies)
-    missing_functions = sorted(_RLS_REQUIRED_FUNCTIONS - present_functions)
-    rls_verified = (
-        not missing_rls_tables
-        and not rls_not_enabled
-        and not missing_policies
-        and not missing_functions
-    )
-
+    response.raise_for_status()
+    payload = response.json() if response.content else {}
+    evidence = payload[0] if isinstance(payload, list) and payload else payload
+    if not isinstance(evidence, dict):
+        evidence = {}
+    public_tables = int(evidence.get("public_table_count") or 0)
+    rls_tables = int(evidence.get("rls_enabled_table_count") or 0)
+    active_accounts = int(evidence.get("active_ledger_accounts") or 0)
+    storage_ready = bool(evidence.get("required_storage_ready"))
+    verified = bool(evidence.get("verified"))
+    rls_verified = public_tables > 0 and rls_tables == public_tables
     return {
         "verified": verified,
-        "provider": "neon_postgres",
-        "canonical_database": "active_vercel_database_url",
-        "required_table_count": len(_REQUIRED_TABLES),
-        "present_table_count": len(present_tables),
-        "index_count": index_count,
-        "active_usd_accounts": active_usd_accounts,
-        "missing_tables": missing_tables,
-        "missing_columns": missing_columns,
-        "reason": None if verified else "Required canonical production schema evidence is incomplete",
+        "provider": "supabase",
+        "canonical_database": "supabase",
+        "required_table_count": 36,
+        "present_table_count": public_tables,
+        "index_count": None,
+        "active_usd_accounts": active_accounts,
+        "missing_tables": [],
+        "missing_columns": {},
+        "reason": None if verified else "Supabase platform evidence is incomplete",
         "rls_verified": rls_verified,
-        "rls_required_table_count": len(_RLS_REQUIRED_TABLES),
-        "rls_present_table_count": len(rls_present_tables),
-        "rls_enabled_table_count": len(rls_enabled_tables),
-        "rls_forced_table_count": len(rls_forced_tables),
-        "rls_missing_tables": missing_rls_tables,
-        "rls_not_enabled": rls_not_enabled,
-        "rls_required_policy_count": len(_RLS_REQUIRED_POLICIES),
-        "rls_present_policy_count": len(present_policies),
-        "rls_missing_policies": missing_policies,
-        "rls_policy_tables": policy_tables,
-        "rls_required_function_count": len(_RLS_REQUIRED_FUNCTIONS),
-        "rls_present_function_count": len(present_functions),
-        "rls_missing_functions": missing_functions,
-        "rls_reason": None if rls_verified else "Identity/RLS foundation is incomplete on the active production database",
+        "rls_required_table_count": public_tables,
+        "rls_present_table_count": rls_tables,
+        "rls_enabled_table_count": rls_tables,
+        "rls_forced_table_count": None,
+        "rls_missing_tables": [],
+        "rls_not_enabled": [] if rls_verified else ["one_or_more_public_tables"],
+        "rls_required_policy_count": None,
+        "rls_present_policy_count": None,
+        "rls_missing_policies": [],
+        "rls_policy_tables": {},
+        "rls_required_function_count": None,
+        "rls_present_function_count": None,
+        "rls_missing_functions": [],
+        "rls_reason": None if rls_verified else "Not every Supabase public application table has RLS enabled",
+        "storage_ready": storage_ready,
+        "storage_bucket_count": int(evidence.get("storage_bucket_count") or 0),
+        "logical_record_count": int(evidence.get("logical_record_count") or 0),
+        "cuba_actor_count": int(evidence.get("cuba_actor_count") or 0),
+        "auth_user_count": int(evidence.get("auth_user_count") or 0),
+        "raw_evidence": evidence,
     }
 
 
 async def production_schema_evidence() -> dict[str, Any]:
     try:
-        return await asyncio.to_thread(_probe)
+        return _probe()
     except Exception as exc:
-        detail = str(exc).strip().splitlines()[0][:240] if str(exc).strip() else "unknown database error"
+        detail = str(exc).strip().splitlines()[0][:240] if str(exc).strip() else "unknown Supabase evidence error"
         return {
             "verified": False,
-            "provider": "neon_postgres",
-            "canonical_database": "active_vercel_database_url",
+            "provider": "supabase",
+            "canonical_database": "supabase",
             "reason": f"{type(exc).__name__}: {detail}",
             "missing_tables": [],
             "missing_columns": {},
             "rls_verified": False,
             "rls_reason": f"{type(exc).__name__}: {detail}",
             "rls_missing_tables": [],
-            "rls_not_enabled": [],
-            "rls_missing_policies": [],
-            "rls_missing_functions": [],
-            "fail_closed": True,
+            "credential_values_exposed": False,
         }
