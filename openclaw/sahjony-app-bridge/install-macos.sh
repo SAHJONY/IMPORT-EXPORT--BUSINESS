@@ -26,13 +26,40 @@ if [[ "$(uname -s)" != "Darwin" ]]; then
 fi
 
 if ! openclaw plugins install --help 2>&1 | grep -Fq -- "--acknowledge-install-policy-warning"; then
-  echo "Updating OpenClaw to a stable release with granular install-policy acknowledgements."
-  openclaw update --channel stable --yes --timeout 1800
+  if node -e '
+    const [major, minor, patch] = process.versions.node.split(".").map(Number);
+    const supported =
+      (major === 22 && (minor > 22 || (minor === 22 && patch >= 3))) ||
+      (major === 24 && minor >= 15) ||
+      (major === 25 && minor >= 9);
+    process.exit(supported ? 0 : 1);
+  '; then
+    echo "Updating OpenClaw to a stable release with granular install-policy acknowledgements."
+    openclaw update --channel stable --yes --timeout 1800 || true
+  fi
+fi
+
+if ! openclaw plugins install --help 2>&1 | grep -Fq -- "--acknowledge-install-policy-warning"; then
+  echo "Installing the official isolated OpenClaw runtime with a supported Node release."
+  OPENCLAW_CLI_INSTALLER="$(mktemp "${TMPDIR:-/tmp}/openclaw-install-cli.XXXXXX")"
+  curl --fail --silent --show-error --location \
+    --proto '=https' \
+    --tlsv1.2 \
+    "https://openclaw.ai/install-cli.sh" \
+    --output "${OPENCLAW_CLI_INSTALLER}"
+  bash -n "${OPENCLAW_CLI_INSTALLER}"
+  bash "${OPENCLAW_CLI_INSTALLER}" \
+    --prefix "${HOME}/.openclaw" \
+    --version latest \
+    --no-onboard
+  rm -f "${OPENCLAW_CLI_INSTALLER}"
+  export PATH="${HOME}/.openclaw/bin:${PATH}"
+  hash -r
 fi
 
 if ! openclaw plugins install --help 2>&1 | grep -Fq -- "--acknowledge-install-policy-warning"; then
   echo "The installed OpenClaw release still lacks granular install-policy acknowledgements." >&2
-  echo "Update OpenClaw from its macOS app, then run this installer again." >&2
+  echo "The official isolated OpenClaw installation did not provide the required policy support." >&2
   exit 1
 fi
 

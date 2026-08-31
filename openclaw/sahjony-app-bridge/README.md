@@ -38,10 +38,13 @@ that reviewed install-policy warning for this plugin only; it does not weaken or
 disable OpenClaw's global plugin security policy.
 
 OpenClaw `2026.4.9` detects the reviewed pattern but does not support granular
-CLI acknowledgement. When necessary, the installer first uses the official
-`openclaw update` stable-channel flow, which preserves the managed gateway state,
-refreshes its `launchd` service, and verifies the restarted gateway before the
-bridge installation continues.
+CLI acknowledgement. When the existing Node runtime is supported, the installer
+first uses the official `openclaw update` stable-channel flow. If the existing
+runtime is too old (including Hermes Node `22.22.2`), it uses OpenClaw's official
+rootless `install-cli.sh` flow to install a supported Node and CLI under
+`~/.openclaw`. That installer verifies the downloaded Node archive with SHA-256.
+The bridge installer then replaces the managed `launchd` service definition with
+the new runtime while preserving the existing state and WhatsApp pairing.
 
 Required OpenClaw configuration:
 
