@@ -99,7 +99,8 @@ launchctl setenv NVIDIA_API_KEY "$NVIDIA_API_KEY"
 export NVIDIA_API_KEY
 
 # Configure native provider-independent failover. Keep explicit model catalog
-# entries so the models are selectable without restricting unrelated models.
+# entries and merge all route models into modelPolicy.allow so OpenClaw is
+# permitted to select every fallback without removing unrelated allowed models.
 python3 - "$CONFIG" "$PRIMARY_MODEL" "$NVIDIA_SUPER" "$NVIDIA_NANO" "$NVIDIA_FLASH" "$OPENAI_FALLBACK" <<'PY'
 import json
 import sys
@@ -107,6 +108,7 @@ from pathlib import Path
 
 config_path = Path(sys.argv[1])
 primary, super_model, nano_model, flash_model, openai_fallback = sys.argv[2:]
+route = [primary, super_model, nano_model, flash_model, openai_fallback]
 d = json.loads(config_path.read_text())
 
 defaults = d.setdefault('agents', {}).setdefault('defaults', {})
@@ -122,15 +124,27 @@ for ref in [primary, openai_fallback]:
     cfg['agentRuntime'] = {'id': 'openclaw'}
 
 # Add NVIDIA model rows to the local selectable catalog. Provider ownership
-# and live availability are still resolved by the NVIDIA provider plugin.
+# and live availability are resolved by the NVIDIA provider.
 for ref in [super_model, nano_model, flash_model]:
     models.setdefault(ref, {})
+
+# OpenClaw's explicit model allowlist lives at agents.defaults.modelPolicy.allow.
+# Merge rather than replace so any pre-existing approved models remain usable.
+policy = defaults.setdefault('modelPolicy', {})
+allow = policy.get('allow', [])
+if not isinstance(allow, list):
+    allow = []
+for ref in route:
+    if ref not in allow:
+        allow.append(ref)
+policy['allow'] = allow
 
 config_path.write_text(json.dumps(d, indent=2) + '\n')
 print('Configured autonomous model route:')
 print('  primary :', primary)
 for idx, ref in enumerate([super_model, nano_model, flash_model, openai_fallback], 1):
     print(f'  fallback {idx}: {ref}')
+print('  allowed route models:', len(route))
 PY
 
 # Validate before touching the running gateway. Roll back config automatically
