@@ -32,21 +32,17 @@ from whatsapp_api import (
 )
 from insforge_backend import persistent_backend_status
 from whatsapp_self_healing import diagnose, repair_plan, record_recovery_event
-from sofia_adaptive_intelligence import adaptive_reply, intelligence_health
+from sofia_adaptive_intelligence import intelligence_health
+from sofia_whatsapp_runtime import generate_sofia_reply
 from whatsapp_backlog_recovery import drain_backlog, find_unanswered
 from sofia_self_marketing import growth_health
 from sofia_self_selling import self_selling_health
 
-app = FastAPI(title="SAHJONY WhatsApp Cloud Primary", version="5.0.0", docs_url=None, redoc_url=None)
+app = FastAPI(title="SAHJONY WhatsApp Cloud Primary", version="5.1.0", docs_url=None, redoc_url=None)
 
-_original_generate_ai_reply = whatsapp_core._generate_ai_reply
-
-
-async def _sofia_generate_ai_reply(text: str, contact_name: str | None) -> str:
-    return await adaptive_reply(_original_generate_ai_reply, text, contact_name)
-
-
-whatsapp_core._generate_ai_reply = _sofia_generate_ai_reply
+# Mandatory inbound reply runtime: the original customer text is preserved for safe
+# contact resolution, then Sofia loads durable history/memory and sales intelligence.
+whatsapp_core._generate_ai_reply = generate_sofia_reply
 
 app.add_api_route("/whatsapp/setup", whatsapp_setup_status, methods=["GET"])
 app.add_api_route("/whatsapp/setup", whatsapp_setup_save, methods=["POST"])
@@ -79,7 +75,7 @@ async def whatsapp_health_cloud_primary() -> dict[str, Any]:
     return {
         "status": "ok" if active != "none" else "configuration_required",
         "service": "whatsapp-transport",
-        "version": "5.0.0",
+        "version": "5.1.0",
         "provider": active,
         "primary_provider": "meta_cloud",
         "business_suite_connection": True,
@@ -111,6 +107,9 @@ async def whatsapp_health_cloud_primary() -> dict[str, Any]:
         "ai_auto_reply_enabled": _ai_auto_reply_enabled(),
         "ai_ready": _openai_ready(),
         "relationship_memory_360": True,
+        "human_conversation_engine": True,
+        "human_conversation_runtime_mandatory": True,
+        "max_new_questions_per_turn": 2,
         "self_healing": True,
         "self_repair": True,
         "automatic_failover": True,
@@ -121,6 +120,7 @@ async def whatsapp_health_cloud_primary() -> dict[str, Any]:
         "recovery_status": recovery,
         "outbound_owner_governed": True,
         "autonomous_reply_release_authority": False,
+        "identity_policy": "truthful_digital_representative",
         "secrets_exposed": False,
         "durable_owner_configuration": True,
     }
@@ -156,7 +156,7 @@ async def whatsapp_recovery_plan() -> dict[str, Any]:
 async def whatsapp_backlog_status(authorization: str | None = Header(None, alias="Authorization")) -> dict[str, Any]:
     _owner(authorization)
     items = await find_unanswered(200)
-    return {"status":"ok","count":len(items),"items":items}
+    return {"status": "ok", "count": len(items), "items": items}
 
 
 @app.post("/whatsapp/recovery/backlog/drain")
