@@ -45,6 +45,10 @@ export default definePluginEntry({
     const secret = String(process.env.SAHJONY_APP_BRIDGE_SECRET || "");
     const accountId = String(config.accountId || "default");
     const pollIntervalMs = Math.max(5_000, Math.min(300_000, Number(config.pollIntervalMs || 30_000)));
+    const openclawBin = String(
+      process.env.OPENCLAW_BIN ||
+      (process.env.HOME ? `${process.env.HOME}/.openclaw/bin/openclaw` : "openclaw")
+    );
     let stopped = false;
     let polling = false;
     let pollTimer: ReturnType<typeof setInterval> | undefined;
@@ -88,10 +92,10 @@ export default definePluginEntry({
       let connected = false;
       let gatewayVersion: string | undefined;
       try {
-        const probe = await api.runtime.system.runCommandWithTimeout("openclaw", ["channels", "status", "--probe"], { timeoutMs: 20_000 });
+        const probe = await api.runtime.system.runCommandWithTimeout(openclawBin, ["channels", "status", "--probe"], { timeoutMs: 20_000 });
         const output = `${probe.stdout || ""}\n${probe.stderr || ""}`;
         connected = /whatsapp[\s\S]{0,400}\bconnected\b/i.test(output) || /\blinked,\s*running,\s*connected\b/i.test(output);
-        const version = await api.runtime.system.runCommandWithTimeout("openclaw", ["--version"], { timeoutMs: 10_000 });
+        const version = await api.runtime.system.runCommandWithTimeout(openclawBin, ["--version"], { timeoutMs: 10_000 });
         gatewayVersion = String(version.stdout || "").trim().slice(0, 80) || undefined;
       } catch (error) {
         api.logger.warn(`SAHJONY gateway probe failed: ${error instanceof Error ? error.message : "unknown error"}`);
@@ -129,7 +133,7 @@ export default definePluginEntry({
         const data = await response.json() as { commands?: OutboxCommand[] };
         for (const command of data.commands || []) {
           try {
-            const sent = await api.runtime.system.runCommandWithTimeout("openclaw", [
+            const sent = await api.runtime.system.runCommandWithTimeout(openclawBin, [
               "message", "send", "--channel", "whatsapp", "--account", command.account_id || accountId,
               "--target", command.recipient, "--message", command.body, "--json",
             ], { timeoutMs: 45_000 });
@@ -214,7 +218,7 @@ export default definePluginEntry({
       await pollOutbox();
       heartbeatTimer = setInterval(() => { void heartbeat(); }, 120_000);
       pollTimer = setInterval(() => { void pollOutbox(); }, pollIntervalMs);
-      api.logger.info("SAHJONY application bridge started");
+      api.logger.info(`SAHJONY application bridge started (openclawBin=${openclawBin})`);
     });
 
     api.on("gateway_stop", async () => {
