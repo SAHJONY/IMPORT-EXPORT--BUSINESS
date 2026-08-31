@@ -66,9 +66,9 @@ def parse_page(text,pno,prov):
   if not nm or not ins: continue
   name,state=get_name(b[:ins.start()])
   if state or not name: continue
-  aft=b[ins.end():]; bd=re.search(r'\b(?:Domicilio(?:\s+Social)?|Municipio|Provincia|Calle|Carretera|Avenida|Ave\.|Reparto|Representante|Tel[eé]fono|Correo)\b',aft,re.I); act=clean(aft[:bd.start()] if bd else aft); act=act[:1200] if len(act)>=4 else None
+  aft=b[ins.end():]; bd=re.search(r'\b(?:Domicilio(?:\s+Social)?|Municipio|Provincia|Calle|Carretera|Avenida|Ave\.|Reparto|Representante|Tel[eé]fono|Correo)\b',aft,re.I); spill=re.search(r'\s+\d{1,5}\s+[A-ZÁÉÍÓÚÜÑ][A-Za-zÁÉÍÓÚÜÑáéíóúüñ .&´’\'-]{2,80}\s+[IVXLCDM]{1,10}\s+\d{1,4}\s+\d{1,6}\s+\d{1,2}[./]\d{1,2}[./]\d{2,4}',aft); cut=min([m.start() for m in (bd,spill) if m] or [len(aft)]); act=clean(aft[:cut]); act=act[:1200] if len(act)>=4 else None
   mm=re.search(r'\bMunicipio\s+([A-ZÁÉÍÓÚÜÑa-záéíóúüñ .\'-]{2,45}?)(?=\s+(?:Provincia|provincia|Cuba|República|Republica|$))',b); em=re.search(r'[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}',b,re.I); ph=re.findall(r'(?<!\d)(?:\+?53\s*)?(\d{8,10})(?!\d)',b)
-  out.append({'n':nm.group(1),'name':name,'province':prov,'municipality':clean(mm.group(1)).title() if mm else None,'page':pno,'actor_type':'CNA' if ('cooperativa no agropecuaria' in norm(b[:500]) or re.search(r'\bcna\b',norm(b[:500]))) else 'MIPYME_PRIVADA','activity':act,'email':em.group(0) if em else None,'phone':ph[-1] if ph else None,'reg':f'{ins.group(1).upper()}-{ins.group(2)}-{ins.group(3)}','date':ins.group(4)})
+  out.append({'n':nm.group(1),'name':name,'province':prov,'municipality':clean(mm.group(1)).title() if mm else None,'page':pno,'actor_type':'CNA' if ('cooperativa no agropecuaria' in norm(b[:ins.start()]) or 'cooperativa' in norm(b[:ins.start()])) else 'MIPYME_PRIVADA','activity':act,'email':em.group(0) if em else None,'phone':ph[-1] if ph else None,'reg':f'{ins.group(1).upper()}-{ins.group(2)}-{ins.group(3)}','date':ins.group(4)})
  return out
 def parse(content):
  r=PdfReader(io.BytesIO(content)); texts=[p.extract_text() or '' for p in r.pages]; ps=[province(t) for t in texts]; last=None
@@ -113,15 +113,16 @@ async def ingest_source(sid):
   local.add(k); inc=data(c,sid,SOURCES[sid],now,today); ex=by.get(k)
   if ex:
    merged={a:b for a,b in ex.items() if a!='_record_key'}; changed=False
-   for f in ('province','municipality','destination','actor_type','primary_activity','activity','product_category','product_description','public_email','public_phone','buyer_contact','external_reference','registry_reference','registry_number','registry_date'):
+   for f in ('province','municipality','destination','primary_activity','activity','product_category','product_description','public_email','public_phone','buyer_contact','external_reference','registry_reference','registry_number','registry_date'):
     if inc.get(f) and not merged.get(f):merged[f]=inc[f];changed=True
+   if inc.get('actor_type') and merged.get('actor_type')!=inc['actor_type']: merged['actor_type']=inc['actor_type']; changed=True
    for f in ('source_type','source_platform','source_name','source_url','source_provenance','verification_status','registry_status','verification_date','evidence_summary','next_action','import_export_relevance'):
     if inc.get(f) and merged.get(f)!=inc[f]:merged[f]=inc[f];changed=True
    if not changed or not ex.get('_record_key'):dup+=1;continue
    merged['updated_at']=now; pending.append({'logical_table':'external_trade_prospects','record_key':ex['_record_key'],'data':merged,'created_at':merged.get('created_at') or now,'updated_at':now});upd+=1
   else:
    rk='minjus:'+hashlib.sha1(f"{k}|{inc['external_reference']}".encode()).hexdigest()[:24]; pending.append({'logical_table':'external_trade_prospects','record_key':rk,'data':inc,'created_at':now,'updated_at':now}); by[k]={**inc,'_record_key':rk};ins+=1
- await upsert(pending); after={norm(r.get('buyer_company') or r.get('company_name') or r.get('business_name')) for r in await rows() if is_private(r)}
+ await upsert(pending); after=private_before|{norm(c['name']) for c in cand if norm(c.get('name'))}
  return {'status':'ok','source_id':sid,'source':SOURCES[sid][1],'source_pages':pages,'parsed_unique':len(cand),'rejected_or_duplicate_in_source':reject,'inserted':ins,'updated':upd,'duplicates_skipped':dup,'current_before':len(private_before),'current_unique':len(after),'target':TARGET,'remaining_shortfall':max(TARGET-len(after),0),'classification':'RESEARCH / VERIFIED PUBLIC SOURCE'}
 
 @app.get('/crm/cuba-mipymes/internal/sources')
