@@ -6,8 +6,10 @@ import sys
 import time
 
 MARKER = "/* SAHJONY_OPENCLAW_INBOUND_DEBOUNCE_COMPAT */"
-OLD = "const admission = flush.admission.catch(reportOnce);\n    const completion = flush.completion.catch(reportOnce);"
-NEW = "const completionSource = flush?.completion ?? (typeof flush?.then === \"function\" ? flush : Promise.resolve());\n    const admissionSource = flush?.admission ?? completionSource;\n    const admission = Promise.resolve(admissionSource).catch(reportOnce); /* SAHJONY_OPENCLAW_INBOUND_DEBOUNCE_COMPAT */\n    const completion = Promise.resolve(completionSource).catch(reportOnce);"
+ADMISSION_OLD = "flush.admission.catch(reportOnce)"
+COMPLETION_OLD = "flush.completion.catch(reportOnce)"
+ADMISSION_NEW = "Promise.resolve(flush?.admission ?? flush?.completion ?? flush).catch(reportOnce) /* SAHJONY_OPENCLAW_INBOUND_DEBOUNCE_COMPAT */"
+COMPLETION_NEW = "Promise.resolve(flush?.completion ?? flush).catch(reportOnce)"
 
 
 def main() -> int:
@@ -22,7 +24,7 @@ def main() -> int:
 
     patched: list[str] = []
     already: list[str] = []
-    candidates: list[str] = []
+    partial: list[str] = []
 
     for path in sorted(dist.rglob("*.js")):
         try:
@@ -34,15 +36,19 @@ def main() -> int:
             already.append(str(path.relative_to(dist)))
             continue
 
-        if "flush.admission.catch(reportOnce)" in text:
-            candidates.append(str(path.relative_to(dist)))
-
-        if OLD not in text:
+        has_admission = ADMISSION_OLD in text
+        has_completion = COMPLETION_OLD in text
+        if not has_admission and not has_completion:
+            continue
+        if not (has_admission and has_completion):
+            partial.append(str(path.relative_to(dist)))
             continue
 
         backup = path.with_suffix(path.suffix + f".backup.{int(time.time())}")
         shutil.copy2(path, backup)
-        path.write_text(text.replace(OLD, NEW, 1), encoding="utf-8")
+        new_text = text.replace(ADMISSION_OLD, ADMISSION_NEW, 1)
+        new_text = new_text.replace(COMPLETION_OLD, COMPLETION_NEW, 1)
+        path.write_text(new_text, encoding="utf-8")
         patched.append(str(path.relative_to(dist)))
 
     if patched:
@@ -51,8 +57,8 @@ def main() -> int:
     if already:
         print("ALREADY_PATCHED:" + ",".join(already))
         return 0
-    if candidates:
-        print("CANDIDATE_PATTERN_DIFFERENT:" + ",".join(candidates))
+    if partial:
+        print("PARTIAL_SIGNATURE:" + ",".join(partial))
         return 4
 
     print("SIGNATURE_NOT_FOUND")
