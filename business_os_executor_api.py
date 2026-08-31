@@ -8,10 +8,11 @@ from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
 
 from auth import verify_owner_token
+from business_os_department_adapters import execute_department_adapter
 from communication_agentic_api import _mcp_follow_up, _mcp_handoff, _mcp_note
 from insforge_backend import get_backend, persistent_backend_status
 
-app = FastAPI(title="SAHJONY Business OS Mission Executor", version="1.0.1", docs_url=None, redoc_url=None)
+app = FastAPI(title="SAHJONY Business OS Mission Executor", version="1.1.0", docs_url=None, redoc_url=None)
 
 
 def _now() -> str:
@@ -143,6 +144,8 @@ async def execute_mission_internal(mission_id: str) -> dict[str, Any]:
     trade_case_id = str(mission.get("trade_case_id") or context.get("trade_case_id") or "").strip() or None
     priority = str(mission.get("priority") or "normal").lower()
 
+    adapter_result = await execute_department_adapter(mission)
+
     communication_mission_id = await _create_child_communication_mission(
         objective=objective,
         contact_id=contact_id,
@@ -180,8 +183,9 @@ async def execute_mission_internal(mission_id: str) -> dict[str, Any]:
         execution_id=execution_id,
         state="executing",
         step="execute_reversible_work",
-        summary="Created a child communication mission, queued a non-binding follow-up action and recorded an execution note. Optional handoff was requested only when explicitly present in mission context.",
+        summary="Executed the assigned department adapter, created a child communication mission, queued a non-binding follow-up action and recorded an execution note.",
         evidence={
+            "department_adapter": adapter_result,
             "communication_mission_id": communication_mission_id,
             "note": note,
             "follow_up": follow_up,
@@ -194,7 +198,8 @@ async def execute_mission_internal(mission_id: str) -> dict[str, Any]:
     action_rows = await get_backend().select("communication_action_queue", params={"action_id": f"eq.{action_id}", "limit": "1"}) if action_id else []
     note_rows = await get_backend().select("communication_agent_notes", params={"note_id": f"eq.{note_id}", "limit": "1"}) if note_id else []
     child_rows = await get_backend().select("communication_missions", params={"mission_id": f"eq.{communication_mission_id}", "limit": "1"})
-    verified = bool(action_rows) and bool(note_rows) and bool(child_rows)
+    adapter_verified = bool(adapter_result.get("persisted")) if isinstance(adapter_result, dict) else False
+    verified = bool(action_rows) and bool(note_rows) and bool(child_rows) and adapter_verified
 
     ts = _now()
     await get_backend().patch(
@@ -209,8 +214,10 @@ async def execute_mission_internal(mission_id: str) -> dict[str, Any]:
         execution_id=execution_id,
         state=state,
         step="verify_and_close_loop",
-        summary="Mission execution evidence verified in the durable communication mission, action queue and agent-note store." if verified else "Mission execution could not verify all durable evidence; retry or operator review is required.",
+        summary="Department adapter, communication mission, action queue and agent-note evidence were verified durably." if verified else "Mission execution could not verify all durable evidence; retry or operator review is required.",
         evidence={
+            "department_adapter": adapter_result,
+            "adapter_persisted": adapter_verified,
             "communication_mission_id": communication_mission_id,
             "communication_mission_persisted": bool(child_rows),
             "action_id": action_id,
@@ -224,6 +231,7 @@ async def execute_mission_internal(mission_id: str) -> dict[str, Any]:
     return {
         "status": state,
         "mission_id": mission_id,
+        "department_adapter": adapter_result,
         "communication_mission_id": communication_mission_id,
         "execution_id": execution_id,
         "verified": verified,
@@ -244,8 +252,10 @@ async def executor_health() -> dict[str, Any]:
     return {
         "status": "ok" if persistence.get("configured") else "configuration_required",
         "service": "sahjony-business-os-mission-executor",
-        "version": "1.0.1",
+        "version": "1.1.0",
         "state_machine": ["planned", "executing", "verified", "completed", "governance_required", "failed"],
+        "department_adapters": ["revenue_pipeline", "sourcing_rfq", "operations_milestone", "finance_analysis", "compliance_research", "application_ops", "general_operations"],
+        "durable_department_evidence": True,
         "durable_child_communication_mission": True,
         "durable_action_queue": True,
         "durable_execution_evidence": True,
