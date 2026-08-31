@@ -1,14 +1,21 @@
 from __future__ import annotations
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Header
 
 from business_email_registry import DEPARTMENTS, CANONICAL_DOMAIN
 from business_communications_director_api import app as communications_director_app
 from google_calendar_transport_api import app as calendar_transport_app
 from whatsapp_sales_channel_api import app as whatsapp_sales_app
-from business_os_api import app as business_os_app
+from business_os_api import (
+    app as business_os_app,
+    MissionCreate,
+    business_os_health,
+    business_os_policy,
+    create_business_mission,
+    business_os_command_center,
+)
 
-app = FastAPI(title="SAHJONY Global Trade Email Agent", version="2.1.0", docs_url=None, redoc_url=None)
+app = FastAPI(title="SAHJONY Global Trade Email Agent", version="2.2.0", docs_url=None, redoc_url=None)
 
 AUTO_ACTIONS = [
     "triage and classify inbound business email",
@@ -40,7 +47,7 @@ def email_agent_health():
     return {
         "status": "ok",
         "service": "sahjony-global-trade-email-agent",
-        "version": "2.1.0",
+        "version": "2.2.0",
         "canonical_domain": CANONICAL_DOMAIN,
         "departments": len(DEPARTMENTS),
         "mode": "24_7_agentic_business_communications",
@@ -71,6 +78,28 @@ def email_agent_policy():
         "channels": ["email", "whatsapp", "voice", "calendar", "web", "internal"],
         "principle": "Autonomously manage routine business communications, scheduling and reversible operations; fail closed before financial, contractual, legal, compliance-release, destructive or other binding commitments.",
     }
+
+
+# Stable aliases under an already-routed Vercel namespace. These avoid creating
+# another serverless function or requiring a new top-level route on Hobby.
+@app.get("/email-agent/business-os/health")
+async def email_agent_business_os_health():
+    return await business_os_health()
+
+
+@app.get("/email-agent/business-os/policy")
+def email_agent_business_os_policy():
+    return business_os_policy()
+
+
+@app.post("/email-agent/business-os/missions")
+async def email_agent_business_os_mission(payload: MissionCreate, authorization: str | None = Header(None, alias="Authorization")):
+    return await create_business_mission(payload, authorization)
+
+
+@app.get("/email-agent/business-os/command-center")
+async def email_agent_business_os_command_center(authorization: str | None = Header(None, alias="Authorization"), limit: int = 100):
+    return await business_os_command_center(authorization, limit)
 
 
 # Mount advanced communication and enterprise-orchestration capabilities inside the
