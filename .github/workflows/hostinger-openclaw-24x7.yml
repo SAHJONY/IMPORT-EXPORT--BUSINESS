@@ -23,6 +23,11 @@ concurrency:
   group: hostinger-openclaw-production
   cancel-in-progress: false
 
+env:
+  HOSTINGER_CONFIRMED_HOST: "69.62.68.67"
+  HOSTINGER_CONFIRMED_USER: "root"
+  HOSTINGER_CONFIRMED_HOSTNAME: "srv767852.hstgr.cloud"
+
 jobs:
   preflight:
     runs-on: ubuntu-latest
@@ -34,8 +39,6 @@ jobs:
       - id: check
         name: Detect Hostinger connection and recovery readiness
         env:
-          HOST: ${{ secrets.HOSTINGER_SSH_HOST }}
-          USER: ${{ secrets.HOSTINGER_SSH_USER }}
           KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
           DOMAIN: ${{ secrets.OPENCLAW_HOSTINGER_DOMAIN }}
           EMAIL: ${{ secrets.LETSENCRYPT_EMAIL }}
@@ -45,7 +48,7 @@ jobs:
           https_ready=false
           recovery_required=true
 
-          if [[ -n "$HOST" && -n "$USER" && -n "$KEY" ]]; then
+          if [[ -n "$HOSTINGER_CONFIRMED_HOST" && -n "$HOSTINGER_CONFIRMED_USER" && -n "$KEY" ]]; then
             ready=true
           fi
           if [[ "$ready" == true && -n "$DOMAIN" && -n "$EMAIL" ]]; then
@@ -61,10 +64,11 @@ jobs:
           echo "https_ready=$https_ready" >> "$GITHUB_OUTPUT"
           echo "recovery_required=$recovery_required" >> "$GITHUB_OUTPUT"
 
+          echo "HOSTINGER_TARGET=$HOSTINGER_CONFIRMED_USER@$HOSTINGER_CONFIRMED_HOST ($HOSTINGER_CONFIRMED_HOSTNAME)"
           if [[ "$ready" == true ]]; then
             echo "HOSTINGER_OPENCLAW_PREFLIGHT=READY"
           else
-            echo "HOSTINGER_OPENCLAW_PREFLIGHT=WAITING_FOR_SSH_SECRETS"
+            echo "HOSTINGER_OPENCLAW_PREFLIGHT=WAITING_FOR_SSH_PRIVATE_KEY_ONLY"
           fi
           if [[ "$https_ready" == true ]]; then
             echo "HOSTINGER_OPENCLAW_HTTPS_PREFLIGHT=READY"
@@ -85,24 +89,21 @@ jobs:
     steps:
       - name: Configure SSH
         env:
-          HOST: ${{ secrets.HOSTINGER_SSH_HOST }}
           KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
         run: |
           set -euo pipefail
           install -m 700 -d ~/.ssh
           printf '%s\n' "$KEY" > ~/.ssh/hostinger
           chmod 600 ~/.ssh/hostinger
-          ssh-keyscan -H "$HOST" >> ~/.ssh/known_hosts
+          ssh-keyscan -H "$HOSTINGER_CONFIRMED_HOST" >> ~/.ssh/known_hosts
 
       - name: Run Hostinger authorization recovery agent
         env:
-          HOST: ${{ secrets.HOSTINGER_SSH_HOST }}
-          USER: ${{ secrets.HOSTINGER_SSH_USER }}
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           VERCEL_SCOPE: ${{ secrets.VERCEL_SCOPE }}
         run: |
           set -euo pipefail
-          ssh -o BatchMode=yes -o ConnectTimeout=15 -i ~/.ssh/hostinger "$USER@$HOST" \
+          ssh -o BatchMode=yes -o ConnectTimeout=15 -i ~/.ssh/hostinger "$HOSTINGER_CONFIRMED_USER@$HOSTINGER_CONFIRMED_HOST" \
             "sudo env VERCEL_TOKEN='$VERCEL_TOKEN' VERCEL_SCOPE='${VERCEL_SCOPE:-juan-gonzalezs-projects-94b6dfe9}' bash -s" <<'REMOTE'
           set -euo pipefail
           tmp="$(mktemp -d)"
@@ -115,13 +116,11 @@ jobs:
       - name: Configure HTTPS when credentials are available
         if: ${{ (github.event_name == 'workflow_dispatch' && inputs.configure_https) || needs.preflight.outputs.https_ready == 'true' }}
         env:
-          HOST: ${{ secrets.HOSTINGER_SSH_HOST }}
-          USER: ${{ secrets.HOSTINGER_SSH_USER }}
           DOMAIN: ${{ secrets.OPENCLAW_HOSTINGER_DOMAIN }}
           EMAIL: ${{ secrets.LETSENCRYPT_EMAIL }}
         run: |
           set -euo pipefail
-          ssh -o BatchMode=yes -o ConnectTimeout=15 -i ~/.ssh/hostinger "$USER@$HOST" \
+          ssh -o BatchMode=yes -o ConnectTimeout=15 -i ~/.ssh/hostinger "$HOSTINGER_CONFIRMED_USER@$HOSTINGER_CONFIRMED_HOST" \
             "sudo env OPENCLAW_DOMAIN='$DOMAIN' LETSENCRYPT_EMAIL='$EMAIL' bash /opt/sahjony-openclaw/repo/openclaw/hostinger-24x7/configure-https.sh"
 
       - name: Verify SAHJONY cloud health
