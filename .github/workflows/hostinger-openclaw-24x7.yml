@@ -8,6 +8,11 @@ on:
         required: false
         default: false
         type: boolean
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/hostinger-openclaw-24x7.yml"
+      - "openclaw/hostinger-24x7/**"
 
 permissions:
   contents: read
@@ -17,21 +22,49 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  deploy:
+  preflight:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    outputs:
+      ready: ${{ steps.check.outputs.ready }}
+      https_ready: ${{ steps.check.outputs.https_ready }}
     steps:
-      - name: Validate required Hostinger connection secrets
+      - id: check
+        name: Detect Hostinger connection readiness
         env:
           HOST: ${{ secrets.HOSTINGER_SSH_HOST }}
           USER: ${{ secrets.HOSTINGER_SSH_USER }}
           KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+          DOMAIN: ${{ secrets.OPENCLAW_HOSTINGER_DOMAIN }}
+          EMAIL: ${{ secrets.LETSENCRYPT_EMAIL }}
         run: |
           set -euo pipefail
-          test -n "$HOST" || { echo "HOSTINGER_SSH_HOST is not configured"; exit 1; }
-          test -n "$USER" || { echo "HOSTINGER_SSH_USER is not configured"; exit 1; }
-          test -n "$KEY" || { echo "HOSTINGER_SSH_PRIVATE_KEY is not configured"; exit 1; }
+          ready=false
+          https_ready=false
+          if [[ -n "$HOST" && -n "$USER" && -n "$KEY" ]]; then
+            ready=true
+          fi
+          if [[ "$ready" == true && -n "$DOMAIN" && -n "$EMAIL" ]]; then
+            https_ready=true
+          fi
+          echo "ready=$ready" >> "$GITHUB_OUTPUT"
+          echo "https_ready=$https_ready" >> "$GITHUB_OUTPUT"
+          if [[ "$ready" == true ]]; then
+            echo "HOSTINGER_OPENCLAW_PREFLIGHT=READY"
+          else
+            echo "HOSTINGER_OPENCLAW_PREFLIGHT=WAITING_FOR_SSH_SECRETS"
+          fi
+          if [[ "$https_ready" == true ]]; then
+            echo "HOSTINGER_OPENCLAW_HTTPS_PREFLIGHT=READY"
+          else
+            echo "HOSTINGER_OPENCLAW_HTTPS_PREFLIGHT=OPTIONAL_NOT_READY"
+          fi
 
+  deploy:
+    needs: preflight
+    if: ${{ needs.preflight.outputs.ready == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
       - name: Configure SSH
         env:
           HOST: ${{ secrets.HOSTINGER_SSH_HOST }}
@@ -51,7 +84,7 @@ jobs:
           VERCEL_SCOPE: ${{ secrets.VERCEL_SCOPE }}
         run: |
           set -euo pipefail
-          ssh -i ~/.ssh/hostinger "$USER@$HOST" \
+          ssh -o BatchMode=yes -o ConnectTimeout=15 -i ~/.ssh/hostinger "$USER@$HOST" \
             "sudo env VERCEL_TOKEN='$VERCEL_TOKEN' VERCEL_SCOPE='${VERCEL_SCOPE:-juan-gonzalezs-projects-94b6dfe9}' bash -s" <<'REMOTE'
           set -euo pipefail
           tmp="$(mktemp -d)"
@@ -60,8 +93,8 @@ jobs:
           bash "$tmp/repo/openclaw/hostinger-24x7/bootstrap-existing-openclaw.sh"
           REMOTE
 
-      - name: Configure HTTPS
-        if: ${{ inputs.configure_https }}
+      - name: Configure HTTPS when credentials are available
+        if: ${{ (github.event_name == 'workflow_dispatch' && inputs.configure_https) || needs.preflight.outputs.https_ready == 'true' }}
         env:
           HOST: ${{ secrets.HOSTINGER_SSH_HOST }}
           USER: ${{ secrets.HOSTINGER_SSH_USER }}
@@ -69,9 +102,7 @@ jobs:
           EMAIL: ${{ secrets.LETSENCRYPT_EMAIL }}
         run: |
           set -euo pipefail
-          test -n "$DOMAIN" || { echo "OPENCLAW_HOSTINGER_DOMAIN is not configured"; exit 1; }
-          test -n "$EMAIL" || { echo "LETSENCRYPT_EMAIL is not configured"; exit 1; }
-          ssh -i ~/.ssh/hostinger "$USER@$HOST" \
+          ssh -o BatchMode=yes -o ConnectTimeout=15 -i ~/.ssh/hostinger "$USER@$HOST" \
             "sudo env OPENCLAW_DOMAIN='$DOMAIN' LETSENCRYPT_EMAIL='$EMAIL' bash /opt/sahjony-openclaw/repo/openclaw/hostinger-24x7/configure-https.sh"
 
       - name: Verify SAHJONY cloud health
