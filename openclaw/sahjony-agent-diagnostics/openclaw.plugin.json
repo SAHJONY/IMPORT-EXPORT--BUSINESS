@@ -1,0 +1,10 @@
+{
+  "id": "sahjony-agent-diagnostics",
+  "name": "SAHJONY Agent Diagnostics",
+  "description": "Passive diagnostics for model execution and WhatsApp reply delivery. Does not modify prompts, replies, tools, or dispatch.",
+  "activation": { "onStartup": true },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false
+  }
+}
