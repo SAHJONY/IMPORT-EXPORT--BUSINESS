@@ -59,9 +59,11 @@ cd "${REPO_ROOT}"
 npx --yes vercel@59.10.0 link \
   --yes \
   --project "${VERCEL_PROJECT}" \
-  --team "${VERCEL_SCOPE}"
+  --scope "${VERCEL_SCOPE}"
 
-openclaw plugins install "${SCRIPT_DIR}" --force
+openclaw plugins install "${SCRIPT_DIR}" \
+  --force \
+  --acknowledge-install-policy-warning
 openclaw plugins enable sahjony-app-bridge
 openclaw config set channels.whatsapp.accounts.default.pluginHooks.messageReceived true --strict-json
 openclaw config set plugins.entries.sahjony-app-bridge.enabled true --strict-json

@@ -32,6 +32,11 @@ gateway, and redeploys the current Production build. It also prevents system
 sleep while the Mac is connected to power, while preserving normal battery
 sleep and display locking. It never prints the secret.
 
+The plugin intentionally reads its dedicated bridge secret and sends signed
+events only to the configured SAHJONY application URL. The installer acknowledges
+that reviewed install-policy warning for this plugin only; it does not weaken or
+disable OpenClaw's global plugin security policy.
+
 Required OpenClaw configuration:
 
 ```json5
