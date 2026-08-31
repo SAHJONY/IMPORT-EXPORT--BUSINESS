@@ -1,0 +1,20 @@
+{
+  "name": "@sahjony/openclaw-app-bridge",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "peerDependencies": {
+    "openclaw": ">=2026.4.9 <2027"
+  },
+  "openclaw": {
+    "extensions": ["./index.ts"],
+    "compat": {
+      "pluginApi": ">=2026.4.9",
+      "minGatewayVersion": "2026.4.9"
+    },
+    "build": {
+      "openclawVersion": "2026.4.9",
+      "pluginSdkVersion": "2026.4.9"
+    }
+  }
+}

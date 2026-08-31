@@ -1,0 +1,19 @@
+{
+  "id": "sahjony-app-bridge",
+  "name": "SAHJONY Application Bridge",
+  "description": "Synchronizes the trusted WhatsApp Business gateway with the SAHJONY application and CRM.",
+  "activation": {
+    "onStartup": true
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "appUrl": { "type": "string" },
+      "accountId": { "type": "string" },
+      "businessNumber": { "type": "string" },
+      "businessName": { "type": "string" },
+      "pollIntervalMs": { "type": "integer", "minimum": 5000, "maximum": 300000 }
+    }
+  }
+}

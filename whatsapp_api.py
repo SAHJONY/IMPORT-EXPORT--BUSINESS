@@ -6,8 +6,8 @@ import hmac
 import json
 import os
 import secrets
-from datetime import datetime, timezone
-from typing import Any
+from datetime import datetime, timedelta, timezone
+from typing import Any, Literal
 
 import httpx
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -17,7 +17,7 @@ from pydantic import BaseModel, Field
 from auth import verify_owner_token
 from insforge_backend import get_backend, persistent_backend_status
 
-app = FastAPI(title="SAHJONY WhatsApp Transport", version="3.0.0", docs_url=None, redoc_url=None)
+app = FastAPI(title="SAHJONY WhatsApp Transport", version="3.1.0", docs_url=None, redoc_url=None)
 
 PROVIDER = os.getenv("WHATSAPP_PROVIDER", "meta_cloud").strip().lower() or "meta_cloud"
 CONFIG_TABLE = "system_integrations"
@@ -58,8 +58,73 @@ class ManualWhatsAppConfig(BaseModel):
     graph_api_version: str = Field(min_length=2, max_length=32)
 
 
+class OpenClawBridgeEvent(BaseModel):
+    event_id: str = Field(min_length=3, max_length=256)
+    direction: Literal["inbound", "outbound"]
+    message_id: str | None = Field(default=None, max_length=512)
+    sender_id: str | None = Field(default=None, max_length=160)
+    recipient_id: str | None = Field(default=None, max_length=160)
+    thread_id: str | None = Field(default=None, max_length=512)
+    contact_name: str | None = Field(default=None, max_length=256)
+    content: str = Field(default="", max_length=4096)
+    message_type: str = Field(default="text", max_length=80)
+    account_id: str = Field(default="default", max_length=160)
+    status: str | None = Field(default=None, max_length=80)
+    timestamp: str | None = Field(default=None, max_length=80)
+    media: list[dict[str, Any]] = Field(default_factory=list, max_length=20)
+
+
+class OpenClawHeartbeat(BaseModel):
+    gateway_id: str = Field(default="default", min_length=1, max_length=160)
+    account_id: str = Field(default="default", min_length=1, max_length=160)
+    channel_connected: bool
+    business_number: str | None = Field(default=None, max_length=32)
+    business_name: str | None = Field(default=None, max_length=256)
+    model: str | None = Field(default=None, max_length=256)
+    gateway_version: str | None = Field(default=None, max_length=80)
+
+
+class OpenClawAck(BaseModel):
+    command_id: str = Field(min_length=3, max_length=256)
+    lease_token: str = Field(min_length=12, max_length=256)
+    status: Literal["sent", "failed"]
+    provider_message_id: str | None = Field(default=None, max_length=512)
+    error: str | None = Field(default=None, max_length=1000)
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _provider() -> str:
+    return os.getenv("WHATSAPP_PROVIDER", PROVIDER).strip().lower() or "meta_cloud"
+
+
+def _openclaw_bridge_secret() -> str:
+    return os.getenv("OPENCLAW_APP_BRIDGE_SECRET", "").strip()
+
+
+def _openclaw_bridge_configured() -> bool:
+    return len(_openclaw_bridge_secret()) >= 24
+
+
+def _verify_openclaw_signature(raw: bytes, timestamp: str | None, signature: str | None) -> None:
+    secret = _openclaw_bridge_secret()
+    if len(secret) < 24:
+        raise HTTPException(status_code=503, detail="OpenClaw application bridge is not configured")
+    try:
+        request_time = int(timestamp or "")
+    except ValueError as exc:
+        raise HTTPException(status_code=401, detail="Invalid OpenClaw bridge timestamp") from exc
+    if abs(int(datetime.now(timezone.utc).timestamp()) - request_time) > 300:
+        raise HTTPException(status_code=401, detail="Expired OpenClaw bridge request")
+    expected = "sha256=" + hmac.new(
+        secret.encode("utf-8"),
+        (str(request_time) + ".").encode("utf-8") + raw,
+        hashlib.sha256,
+    ).hexdigest()
+    if not signature or not hmac.compare_digest(expected, signature):
+        raise HTTPException(status_code=401, detail="Invalid OpenClaw bridge signature")
 
 
 def _owner(authorization: str | None) -> None:
@@ -246,10 +311,13 @@ async def _record_outbound(
     customer_id: str | None = None,
     source_url: str | None = None,
     autonomous: bool = False,
+    provider: str = "meta_whatsapp_cloud",
+    delivery_status: str = "submitted",
+    notification_id: str | None = None,
 ) -> None:
     try:
         await get_backend().insert("outbound_notifications", {
-            "notification_id": f"ntf_{secrets.token_urlsafe(16)}",
+            "notification_id": notification_id or f"ntf_{secrets.token_urlsafe(16)}",
             "event_id": None,
             "recipient_role": "customer" if customer_id else "lead",
             "recipient_id": customer_id or lead_id or "external",
@@ -257,8 +325,8 @@ async def _record_outbound(
             "destination": _normalize_phone(to),
             "subject": "WhatsApp AI reply" if autonomous else "WhatsApp outreach",
             "body": body,
-            "delivery_status": "submitted",
-            "provider": "meta_whatsapp_cloud",
+            "delivery_status": delivery_status,
+            "provider": provider,
             "provider_message_id": provider_message_id,
             "source_url": source_url,
             "autonomous": autonomous,
@@ -328,16 +396,18 @@ async def _register_inbound_message(
     message_type: str,
     text: str,
     contact_name: str | None,
+    provider: str = "meta_whatsapp_cloud",
+    direction: str = "inbound",
 ) -> None:
     try:
         await get_backend().insert("whatsapp_messages", {
             "message_id": message_id or f"wam_{secrets.token_urlsafe(16)}",
-            "direction": "inbound",
+            "direction": direction,
             "phone": phone,
             "contact_name": contact_name,
             "message_type": message_type,
             "text": text[:4096],
-            "provider": "meta_whatsapp_cloud",
+            "provider": provider,
             "received_at": _now(),
         })
     except Exception:
@@ -370,7 +440,15 @@ async def _upsert_whatsapp_lead(phone: str, text: str, contact_name: str | None,
     return lead_id
 
 
-async def _record_inbound_event(phone: str | None, message_id: str | None, text: str, message_type: str, lead_id: str | None) -> None:
+async def _record_inbound_event(
+    phone: str | None,
+    message_id: str | None,
+    text: str,
+    message_type: str,
+    lead_id: str | None,
+    *,
+    provider: str = "meta_whatsapp_cloud",
+) -> None:
     try:
         await get_backend().insert("business_events", {
             "event_id": f"evt_{secrets.token_urlsafe(16)}",
@@ -389,12 +467,86 @@ async def _record_inbound_event(phone: str | None, message_id: str | None, text:
             "action_label": "Review WhatsApp conversation",
             "priority": "high",
             "event_status": "open",
-            "payload": {"phone": phone, "provider": "meta_whatsapp_cloud", "raw_type": message_type},
+            "payload": {"phone": phone, "provider": provider, "raw_type": message_type},
             "created_at": _now(),
             "updated_at": _now(),
         })
     except Exception:
         pass
+
+
+async def _openclaw_gateway_state() -> dict[str, Any]:
+    try:
+        rows = await get_backend().select(
+            "whatsapp_openclaw_gateways",
+            params={"gateway_id": "eq.default", "limit": "1"},
+        ) or []
+    except Exception:
+        rows = []
+    row = rows[0] if rows else {}
+    last_seen = str(row.get("last_seen_at") or "")
+    fresh = False
+    if last_seen:
+        try:
+            seen_at = datetime.fromisoformat(last_seen.replace("Z", "+00:00"))
+            fresh = datetime.now(timezone.utc) - seen_at.astimezone(timezone.utc) <= timedelta(minutes=5)
+        except ValueError:
+            fresh = False
+    connected = bool(row.get("channel_connected")) and fresh
+    return {
+        "configured": _openclaw_bridge_configured(),
+        "connected": connected,
+        "heartbeat_fresh": fresh,
+        "last_seen_at": last_seen or None,
+        "business_number": row.get("business_number"),
+        "business_name": row.get("business_name"),
+        "model": row.get("model"),
+        "gateway_version": row.get("gateway_version"),
+    }
+
+
+async def _enqueue_openclaw_message(payload: WhatsAppSend) -> dict[str, Any]:
+    if not _openclaw_bridge_configured():
+        raise HTTPException(status_code=503, detail="OpenClaw application bridge is not configured")
+    recipient = _normalize_phone(payload.to)
+    command_id = f"waq_{secrets.token_urlsafe(18)}"
+    row = {
+        "command_id": command_id,
+        "channel": "whatsapp",
+        "account_id": "default",
+        "recipient": recipient,
+        "body": payload.body[:4096],
+        "preview_url": payload.preview_url,
+        "lead_id": payload.lead_id,
+        "customer_id": payload.customer_id,
+        "source_url": payload.source_url,
+        "status": "queued",
+        "attempts": 0,
+        "lease_token": None,
+        "lease_expires_at": None,
+        "provider_message_id": None,
+        "last_error": None,
+        "created_at": _now(),
+        "updated_at": _now(),
+    }
+    await get_backend().insert("whatsapp_openclaw_outbox", row)
+    await _record_outbound(
+        to=recipient,
+        body=payload.body[:4096],
+        provider_message_id=None,
+        lead_id=payload.lead_id,
+        customer_id=payload.customer_id,
+        source_url=payload.source_url,
+        provider="openclaw_whatsapp",
+        delivery_status="queued",
+        notification_id=command_id,
+    )
+    return {
+        "status": "queued",
+        "provider": "openclaw_whatsapp",
+        "command_id": command_id,
+        "recipient": recipient,
+    }
 
 
 def _opt_out(text: str) -> bool:
@@ -497,10 +649,39 @@ async def _process_inbound(
 async def whatsapp_health() -> dict[str, Any]:
     cfg = await _config()
     persistence = persistent_backend_status()
+    provider = _provider()
+    openclaw = await _openclaw_gateway_state()
+    if provider == "openclaw":
+        return {
+            "status": "ok" if openclaw["connected"] else "configuration_required",
+            "service": "whatsapp-transport",
+            "version": "3.1.0",
+            "provider": "openclaw",
+            "send_ready": openclaw["connected"],
+            "webhook_ready": openclaw["configured"],
+            "bridge_configured": openclaw["configured"],
+            "gateway_connected": openclaw["connected"],
+            "heartbeat_fresh": openclaw["heartbeat_fresh"],
+            "last_seen_at": openclaw["last_seen_at"],
+            "business_number": openclaw["business_number"],
+            "business_name": openclaw["business_name"],
+            "reasoning_model": openclaw["model"],
+            "gateway_version": openclaw["gateway_version"],
+            "durable_backend_configured": persistence["configured"],
+            "durable_backend_provider": persistence["provider"],
+            "lead_capture_enabled": persistence["configured"],
+            "webhook_idempotency_enabled": persistence["configured"],
+            "ai_auto_reply_enabled": True,
+            "ai_ready": _openai_ready(),
+            "outbound_owner_governed": True,
+            "autonomous_reply_release_authority": False,
+            "secrets_exposed": False,
+            "durable_owner_configuration": True,
+        }
     return {
         "status": "ok" if _configured(cfg) else "configuration_required",
         "service": "whatsapp-transport",
-        "version": "3.0.0",
+        "version": "3.1.0",
         "provider": "meta_cloud",
         "send_ready": _send_ready(cfg),
         "webhook_ready": _webhook_ready(cfg),
@@ -646,6 +827,8 @@ async def whatsapp_setup_test(authorization: str | None = Header(None, alias="Au
 @app.post("/whatsapp/send")
 async def whatsapp_send(payload: WhatsAppSend, authorization: str | None = Header(None, alias="Authorization")) -> dict[str, Any]:
     _owner(authorization)
+    if _provider() == "openclaw":
+        return await _enqueue_openclaw_message(payload)
     cfg = await _config()
     return await _send_text(
         cfg,
@@ -657,6 +840,176 @@ async def whatsapp_send(payload: WhatsAppSend, authorization: str | None = Heade
         source_url=payload.source_url,
         autonomous=False,
     )
+
+
+@app.post("/whatsapp/openclaw/heartbeat")
+async def openclaw_heartbeat(
+    request: Request,
+    x_sahjony_timestamp: str | None = Header(None, alias="X-SAHJONY-Timestamp"),
+    x_sahjony_signature: str | None = Header(None, alias="X-SAHJONY-Signature"),
+) -> dict[str, Any]:
+    raw = await request.body()
+    _verify_openclaw_signature(raw, x_sahjony_timestamp, x_sahjony_signature)
+    try:
+        heartbeat = OpenClawHeartbeat.model_validate_json(raw)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Invalid OpenClaw heartbeat") from exc
+    await get_backend().insert("whatsapp_openclaw_gateways", {
+        "gateway_id": heartbeat.gateway_id,
+        "account_id": heartbeat.account_id,
+        "channel_connected": heartbeat.channel_connected,
+        "business_number": heartbeat.business_number,
+        "business_name": heartbeat.business_name,
+        "model": heartbeat.model,
+        "gateway_version": heartbeat.gateway_version,
+        "last_seen_at": _now(),
+        "updated_at": _now(),
+    })
+    return {"status": "accepted", "gateway_id": heartbeat.gateway_id, "secrets_exposed": False}
+
+
+@app.post("/whatsapp/openclaw/events")
+async def openclaw_event(
+    request: Request,
+    x_sahjony_timestamp: str | None = Header(None, alias="X-SAHJONY-Timestamp"),
+    x_sahjony_signature: str | None = Header(None, alias="X-SAHJONY-Signature"),
+) -> dict[str, Any]:
+    raw = await request.body()
+    _verify_openclaw_signature(raw, x_sahjony_timestamp, x_sahjony_signature)
+    try:
+        event = OpenClawBridgeEvent.model_validate_json(raw)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Invalid OpenClaw bridge event") from exc
+    message_id = event.message_id or event.event_id
+    if await _message_seen(message_id):
+        return {"status": "duplicate", "event_id": event.event_id}
+    phone = event.sender_id if event.direction == "inbound" else event.recipient_id
+    normalized_phone = ""
+    if phone:
+        try:
+            normalized_phone = _normalize_phone(phone)
+        except HTTPException:
+            normalized_phone = ""
+    await _register_inbound_message(
+        phone=normalized_phone or phone,
+        message_id=message_id,
+        message_type=event.message_type,
+        text=event.content,
+        contact_name=event.contact_name,
+        provider="openclaw_whatsapp",
+        direction=event.direction,
+    )
+    if event.direction == "inbound":
+        lead_id = await _upsert_whatsapp_lead(
+            normalized_phone,
+            event.content,
+            event.contact_name,
+            opted_out=_opt_out(event.content),
+        ) if normalized_phone else None
+        await _record_inbound_event(
+            normalized_phone or phone,
+            message_id,
+            event.content,
+            event.message_type,
+            lead_id,
+            provider="openclaw_whatsapp",
+        )
+    return {"status": "accepted", "event_id": event.event_id, "message_id": message_id}
+
+
+@app.get("/whatsapp/openclaw/outbox")
+async def openclaw_outbox(
+    limit: int = Query(10, ge=1, le=25),
+    x_sahjony_timestamp: str | None = Header(None, alias="X-SAHJONY-Timestamp"),
+    x_sahjony_signature: str | None = Header(None, alias="X-SAHJONY-Signature"),
+) -> dict[str, Any]:
+    _verify_openclaw_signature(b"", x_sahjony_timestamp, x_sahjony_signature)
+    rows = await get_backend().select(
+        "whatsapp_openclaw_outbox",
+        params={"limit": "100", "order": "created_at.asc"},
+    ) or []
+    now = datetime.now(timezone.utc)
+    commands: list[dict[str, Any]] = []
+    for row in rows:
+        status = str(row.get("status") or "")
+        expired = False
+        if status == "dispatching" and row.get("lease_expires_at"):
+            try:
+                lease_until = datetime.fromisoformat(str(row["lease_expires_at"]).replace("Z", "+00:00"))
+                expired = lease_until.astimezone(timezone.utc) <= now
+            except ValueError:
+                expired = True
+        if status != "queued" and not expired:
+            continue
+        lease_token = secrets.token_urlsafe(24)
+        lease_expires_at = (now + timedelta(minutes=2)).isoformat()
+        claimed = {
+            **row,
+            "status": "dispatching",
+            "attempts": int(row.get("attempts") or 0) + 1,
+            "lease_token": lease_token,
+            "lease_expires_at": lease_expires_at,
+            "updated_at": _now(),
+        }
+        await get_backend().insert("whatsapp_openclaw_outbox", claimed)
+        commands.append({
+            "command_id": claimed["command_id"],
+            "account_id": claimed.get("account_id") or "default",
+            "recipient": claimed["recipient"],
+            "body": claimed["body"],
+            "lease_token": lease_token,
+            "lease_expires_at": lease_expires_at,
+        })
+        if len(commands) >= limit:
+            break
+    return {"status": "ok", "commands": commands, "count": len(commands)}
+
+
+@app.post("/whatsapp/openclaw/outbox/ack")
+async def openclaw_outbox_ack(
+    request: Request,
+    x_sahjony_timestamp: str | None = Header(None, alias="X-SAHJONY-Timestamp"),
+    x_sahjony_signature: str | None = Header(None, alias="X-SAHJONY-Signature"),
+) -> dict[str, Any]:
+    raw = await request.body()
+    _verify_openclaw_signature(raw, x_sahjony_timestamp, x_sahjony_signature)
+    try:
+        ack = OpenClawAck.model_validate_json(raw)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Invalid OpenClaw outbox acknowledgement") from exc
+    rows = await get_backend().select(
+        "whatsapp_openclaw_outbox",
+        params={"command_id": f"eq.{ack.command_id}", "limit": "1"},
+    ) or []
+    if not rows:
+        raise HTTPException(status_code=404, detail="OpenClaw command not found")
+    row = rows[0]
+    if not hmac.compare_digest(str(row.get("lease_token") or ""), ack.lease_token):
+        raise HTTPException(status_code=409, detail="OpenClaw command lease mismatch")
+    await get_backend().insert("whatsapp_openclaw_outbox", {
+        **row,
+        "status": ack.status,
+        "provider_message_id": ack.provider_message_id,
+        "last_error": ack.error,
+        "lease_token": None,
+        "lease_expires_at": None,
+        "completed_at": _now(),
+        "updated_at": _now(),
+    })
+    try:
+        await get_backend().patch(
+            "outbound_notifications",
+            {
+                "delivery_status": ack.status,
+                "provider_message_id": ack.provider_message_id,
+                "last_error": ack.error,
+                "updated_at": _now(),
+            },
+            params={"notification_id": f"eq.{ack.command_id}"},
+        )
+    except Exception:
+        pass
+    return {"status": "accepted", "command_id": ack.command_id, "delivery_status": ack.status}
 
 
 @app.get("/whatsapp/webhook")
