@@ -1,0 +1,133 @@
+name: Hostinger API Discovery
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/hostinger-api-discovery.yml"
+
+permissions:
+  contents: read
+
+env:
+  HOSTINGER_API_BASE: "https://developers.hostinger.com"
+  VM_ID: "767852"
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Inventory Hostinger VPS control plane
+        env:
+          API_TOKEN: ${{ secrets.HOSTINGER_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ -n "$API_TOKEN" ]] || { echo "HOSTINGER_API_TOKEN missing" >&2; exit 2; }
+          auth=(-H "Authorization: Bearer $API_TOKEN" -H "Accept: application/json")
+
+          vm="$(curl --fail --silent --show-error "${auth[@]}" "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID")"
+          projects="$(curl --fail --silent --show-error "${auth[@]}" "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/docker" || printf '[]')"
+          attached="$(curl --fail --silent --show-error "${auth[@]}" "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/public-keys" || printf '[]')"
+          firewalls="$(curl --fail --silent --show-error "${auth[@]}" "$HOSTINGER_API_BASE/api/vps/v1/firewall" || printf '[]')"
+
+          VM_JSON="$vm" PROJECTS_JSON="$projects" ATTACHED_JSON="$attached" FIREWALLS_JSON="$firewalls" python3 - <<'PY'
+          import json, os
+
+          def load(name, default):
+              try: return json.loads(os.environ.get(name, ''))
+              except Exception: return default
+
+          vm=load('VM_JSON', {})
+          projects=load('PROJECTS_JSON', [])
+          attached=load('ATTACHED_JSON', [])
+          firewalls=load('FIREWALLS_JSON', [])
+
+          def rows(v):
+              if isinstance(v,list): return v
+              if isinstance(v,dict):
+                  d=v.get('data', [])
+                  return d if isinstance(d,list) else []
+              return []
+
+          def pick(d,*names):
+              if not isinstance(d,dict): return None
+              for n in names:
+                  if n in d and d[n] is not None: return d[n]
+              return None
+
+          print('HOSTINGER_API_DISCOVERY=OK')
+          print('VM_ID=', pick(vm,'id') or 767852, sep='')
+          print('VM_STATUS=', pick(vm,'state','status') or 'unknown', sep='')
+          print('VM_HOSTNAME=', pick(vm,'hostname') or 'unknown', sep='')
+
+          ps=rows(projects)
+          print('DOCKER_PROJECT_COUNT=', len(ps), sep='')
+          for p in ps:
+              name=pick(p,'name','project_name','projectName') or 'unknown'
+              status=pick(p,'status','state') or 'unknown'
+              print(f'DOCKER_PROJECT={name}|status={status}')
+              containers=pick(p,'containers')
+              if isinstance(containers,list):
+                  for c in containers:
+                      cn=pick(c,'name','container_name') or 'unknown'
+                      image=pick(c,'image') or 'unknown'
+                      cs=pick(c,'status','state') or 'unknown'
+                      ports=pick(c,'ports') or []
+                      print(f'CONTAINER={cn}|image={image}|status={cs}|ports={ports}')
+
+          keys=rows(attached)
+          print('ATTACHED_PUBLIC_KEY_COUNT=', len(keys), sep='')
+          print('FIREWALL_GROUP_COUNT=', len(rows(firewalls)), sep='')
+          PY
+
+      - name: Detect OpenClaw Docker project
+        id: openclaw
+        env:
+          API_TOKEN: ${{ secrets.HOSTINGER_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          projects="$(curl --fail --silent --show-error -H "Authorization: Bearer $API_TOKEN" -H "Accept: application/json" "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/docker")"
+          PROJECTS_JSON="$projects" python3 - <<'PY' > /tmp/openclaw_project
+          import json, os
+          doc=json.loads(os.environ['PROJECTS_JSON'])
+          rows=doc if isinstance(doc,list) else doc.get('data',[]) if isinstance(doc,dict) else []
+          hits=[]
+          for p in rows:
+              if not isinstance(p,dict): continue
+              text=json.dumps(p).lower()
+              if 'openclaw' in text:
+                  name=p.get('name') or p.get('project_name') or p.get('projectName')
+                  if name: hits.append(str(name))
+          print(hits[0] if len(hits)==1 else '')
+          PY
+          name="$(cat /tmp/openclaw_project)"
+          if [[ -n "$name" ]]; then
+            echo "OPENCLAW_DOCKER_PROJECT=$name"
+            echo "project=$name" >> "$GITHUB_OUTPUT"
+          else
+            echo "OPENCLAW_DOCKER_PROJECT=NOT_UNIQUELY_DETECTED"
+          fi
+
+      - name: Restart existing OpenClaw project through Hostinger API
+        if: ${{ steps.openclaw.outputs.project != '' }}
+        env:
+          API_TOKEN: ${{ secrets.HOSTINGER_API_TOKEN }}
+          PROJECT: ${{ steps.openclaw.outputs.project }}
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error -X POST \
+            -H "Authorization: Bearer $API_TOKEN" \
+            -H "Accept: application/json" \
+            "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/docker/$PROJECT/restart" >/dev/null
+          echo "OPENCLAW_DOCKER_API_RESTART_REQUESTED=1"
+          sleep 12
+          containers="$(curl --fail --silent --show-error -H "Authorization: Bearer $API_TOKEN" -H "Accept: application/json" "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/docker/$PROJECT/containers")"
+          CONTAINERS_JSON="$containers" python3 - <<'PY'
+          import json, os
+          doc=json.loads(os.environ['CONTAINERS_JSON'])
+          rows=doc if isinstance(doc,list) else doc.get('data',[]) if isinstance(doc,dict) else []
+          for c in rows:
+              if isinstance(c,dict):
+                  print('OPENCLAW_CONTAINER_STATUS=', c.get('status') or c.get('state') or 'unknown', sep='')
+          PY
