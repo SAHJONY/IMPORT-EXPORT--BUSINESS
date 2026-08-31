@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 from auth import verify_owner_token
 from business_email_registry import DEPARTMENTS
 
-app = FastAPI(title="SAHJONY Business Communications Director", version="1.0.0", docs_url=None, redoc_url=None)
+app = FastAPI(title="SAHJONY Business Communications Director", version="1.1.0", docs_url=None, redoc_url=None)
 
 Channel = Literal["email", "whatsapp", "voice", "calendar", "web", "sms", "internal"]
 
@@ -19,6 +19,12 @@ DEPARTMENT_KEYWORDS: dict[str, tuple[str, ...]] = {
     "compliance": ("ofac", "sanction", "compliance", "customs", "aduana", "export control", "license", "permit"),
     "finance": ("invoice", "payment", "wire", "bank", "refund", "finance", "factura", "pago"),
     "logistics": ("freight", "shipment", "container", "carrier", "port", "delivery", "shipping", "logistics", "flete"),
+    "customer_success": ("onboarding", "support", "help", "service", "retention", "follow up", "post-sale", "customer success"),
+    "partnerships": ("partner", "partnership", "referral", "affiliate", "alliance", "strategic", "channel partner"),
+    "marketing": ("marketing", "campaign", "social media", "press", "media", "content", "advertising", "brand"),
+    "energy": ("crude", "fuel", "diesel", "gasoline", "jet fuel", "energy", "petroleum", "isotank", "barrel"),
+    "cuba": ("cuba", "mipyme", "havana", "habana", "mincex", "mincin", "cuban", "cubano", "cubana"),
+    "executive": ("executive", "ceo", "chairman", "administration", "escalation", "board", "strategic decision"),
 }
 
 ROUTINE_AUTONOMOUS_ACTIONS = [
@@ -29,7 +35,7 @@ ROUTINE_AUTONOMOUS_ACTIONS = [
     "send non-binding status updates",
     "schedule, reschedule and coordinate routine business meetings",
     "send meeting confirmations and reminders",
-    "route conversations to Sales, Sourcing, Operations, Compliance, Finance or Logistics",
+    "route conversations across every active SAHJONY business department",
     "maintain thread context across WhatsApp, email, voice and calendar",
     "draft and send routine follow-ups when a business thread is waiting for a response",
 ]
@@ -96,7 +102,7 @@ def communications_director_health() -> dict[str, Any]:
     return {
         "status": "ok",
         "service": "sahjony-business-communications-director",
-        "version": "1.0.0",
+        "version": "1.1.0",
         "mode": "24_7_omnichannel_agentic",
         "channels": ["email", "whatsapp", "voice", "calendar", "web", "internal"],
         "departments": [d["key"] for d in DEPARTMENTS],
