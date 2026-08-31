@@ -19,7 +19,6 @@ cp "$CONFIG" "$BACKUP_DIR/openclaw.json.nvidia-probe.$stamp"
 
 if [[ -f "$ENV_FILE" ]]; then
   set -a
-  # shellcheck disable=SC1090
   source "$ENV_FILE"
   set +a
 fi
@@ -38,22 +37,8 @@ http_code="$(curl -sS -o "$MODELS_JSON" -w '%{http_code}' --max-time 30 \
 
 if [[ "$http_code" != "200" ]]; then
   echo "ERROR: NVIDIA /models probe failed with HTTP $http_code" >&2
-  python3 - "$MODELS_JSON" <<'PY'
-import json, sys
-try:
-    d=json.load(open(sys.argv[1]))
-    print(json.dumps(d, indent=2)[:2000])
-except Exception:
-    pass
-PY
   exit 3
 fi
-
-mapfile_compat() {
-  while IFS= read -r line; do
-    [[ -n "$line" ]] && printf '%s\n' "$line"
-  done
-}
 
 available_models="$(python3 - "$MODELS_JSON" <<'PY'
 import json, sys
@@ -77,42 +62,45 @@ for model in "${CANDIDATES[@]}"; do
   fi
 
   body="$(mktemp)"
-  code="$(curl -sS -o "$body" -w '%{http_code}' --max-time 45 \
+  code="$(curl -sS -o "$body" -w '%{http_code}' --max-time 90 \
     "$NVIDIA_BASE_URL/chat/completions" \
     -H "Authorization: Bearer $NVIDIA_API_KEY" \
     -H "Content-Type: application/json" \
-    -d "{\"model\":\"$model\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply exactly NVIDIA_OK\"}],\"max_tokens\":16,\"temperature\":0}")" || code="curl-error"
+    -d "{\"model\":\"$model\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply exactly NVIDIA_OK. Do not explain.\"}],\"max_tokens\":256,\"temperature\":0}")" || code="curl-error"
 
-  ok="$(python3 - "$body" "$code" <<'PY'
+  result="$(python3 - "$body" "$code" <<'PY'
 import json, sys
 path, code = sys.argv[1], sys.argv[2]
 try:
     d=json.load(open(path))
 except Exception:
     d={}
-text=''
-try:
-    text=d['choices'][0]['message']['content'] or ''
-except Exception:
-    pass
-if code == '200' and text.strip():
-    print('yes')
-else:
-    print('no')
+choices=d.get('choices') or []
+choice=choices[0] if choices and isinstance(choices[0], dict) else {}
+msg=choice.get('message') or {}
+content=msg.get('content') or choice.get('text') or d.get('output_text') or ''
+if isinstance(content, list):
+    content=''.join((x.get('text') or x.get('content') or '') if isinstance(x, dict) else str(x) for x in content)
+reasoning=msg.get('reasoning_content') or msg.get('reasoning') or ''
+finish=choice.get('finish_reason')
+usage=d.get('usage') or {}
+# For WhatsApp failover, require visible final text, not only reasoning/envelope.
+ok = code == '200' and bool(str(content).strip())
+print(('yes' if ok else 'no') + '\t' + str(content)[:120].replace('\n',' ') + '\t' + str(finish) + '\t' + str(usage.get('completion_tokens','unknown')) + '\t' + ('reasoning' if reasoning else ''))
 PY
 )"
 
+  IFS=$'\t' read -r ok preview finish tokens reasoning_flag <<<"$result"
   if [[ "$ok" == "yes" ]]; then
-    echo "PASS $model"
+    echo "PASS $model — finish=$finish completion_tokens=$tokens response=${preview:-[nonempty]}"
     healthy+=("$model")
   else
-    echo "FAIL $model — HTTP $code"
+    echo "FAIL $model — HTTP $code finish=$finish completion_tokens=$tokens ${reasoning_flag:+reasoning-only}"
     python3 - "$body" <<'PY'
 import json, sys
 try:
     d=json.load(open(sys.argv[1]))
-    err=d.get('error', d)
-    print('  response:', json.dumps(err, ensure_ascii=False)[:800])
+    print('  response:', json.dumps(d, ensure_ascii=False)[:1000])
 except Exception:
     pass
 PY
@@ -122,11 +110,10 @@ PY
 done
 
 if [[ ${#healthy[@]} -eq 0 ]]; then
-  echo "ERROR: No NVIDIA fallback model passed direct inference. Config was not changed." >&2
+  echo "ERROR: No NVIDIA fallback model produced visible final text. Config was not changed." >&2
   exit 4
 fi
 
-# Convert NVIDIA API model ids to OpenClaw model refs by prefixing provider name.
 refs=()
 for model in "${healthy[@]}"; do
   refs+=("nvidia/$model")
@@ -144,7 +131,6 @@ if isinstance(model, str):
     model={'primary':model,'fallbacks':[]}
     defaults['model']=model
 primary=model.get('primary','openai/gpt-5.6-sol')
-# Keep one OpenAI fallback last, but make healthy NVIDIA routes first.
 existing=model.get('fallbacks',[]) or []
 openai_tail=[]
 for ref in existing:
@@ -153,7 +139,6 @@ for ref in existing:
 if 'openai/gpt-5.4' not in openai_tail and primary != 'openai/gpt-5.4':
     openai_tail.append('openai/gpt-5.4')
 model['fallbacks']=list(nvidia_refs)+openai_tail
-
 policy=defaults.setdefault('modelPolicy',{})
 allow=policy.get('allow') or []
 merged=[]
@@ -161,14 +146,12 @@ for ref in list(allow)+[primary]+list(nvidia_refs)+openai_tail:
     if ref and ref not in merged:
         merged.append(ref)
 policy['allow']=merged
-
 models=defaults.setdefault('models',{})
 for ref in [primary]+list(nvidia_refs)+openai_tail:
     models.setdefault(ref,{})
 for ref in [primary]+openai_tail:
     if ref.startswith('openai/'):
         models.setdefault(ref,{})['agentRuntime']={'id':'openclaw'}
-
 p.write_text(json.dumps(d, indent=2)+'\n')
 print('Repaired fallback chain:')
 print(' primary:', primary)
