@@ -30,6 +30,10 @@ var index_default = definePluginEntry({
     const secret = String(process.env.SAHJONY_APP_BRIDGE_SECRET || "");
     const accountId = String(config.accountId || "default");
     const pollIntervalMs = Math.max(5e3, Math.min(3e5, Number(config.pollIntervalMs || 3e4)));
+    const openclawBin = String(
+      process.env.OPENCLAW_BIN ||
+      (process.env.HOME ? `${process.env.HOME}/.openclaw/bin/openclaw` : "openclaw")
+    );
     let stopped = false;
     let polling = false;
     let pollTimer;
@@ -72,10 +76,10 @@ var index_default = definePluginEntry({
       let connected = false;
       let gatewayVersion;
       try {
-        const probe = await api.runtime.system.runCommandWithTimeout("openclaw", ["channels", "status", "--probe"], { timeoutMs: 2e4 });
+        const probe = await api.runtime.system.runCommandWithTimeout(openclawBin, ["channels", "status", "--probe"], { timeoutMs: 2e4 });
         const output = `${probe.stdout || ""}\n${probe.stderr || ""}`;
         connected = /whatsapp[\s\S]{0,400}\bconnected\b/i.test(output) || /\blinked,\s*running,\s*connected\b/i.test(output);
-        const version = await api.runtime.system.runCommandWithTimeout("openclaw", ["--version"], { timeoutMs: 1e4 });
+        const version = await api.runtime.system.runCommandWithTimeout(openclawBin, ["--version"], { timeoutMs: 1e4 });
         gatewayVersion = String(version.stdout || "").trim().slice(0, 80) || void 0;
       } catch (error) {
         api.logger.warn(`SAHJONY gateway probe failed: ${error instanceof Error ? error.message : "unknown error"}`);
@@ -113,7 +117,7 @@ var index_default = definePluginEntry({
         const data = await response.json();
         for (const command of data.commands || []) {
           try {
-            const sent = await api.runtime.system.runCommandWithTimeout("openclaw", [
+            const sent = await api.runtime.system.runCommandWithTimeout(openclawBin, [
               "message", "send", "--channel", "whatsapp", "--account", command.account_id || accountId,
               "--target", command.recipient, "--message", command.body, "--json"
             ], { timeoutMs: 45e3 });
@@ -154,9 +158,6 @@ var index_default = definePluginEntry({
       });
     });
 
-    // OpenClaw 2026.8.x runs this hook on the actual user turn before the model.
-    // It is a second, durable synchronization path for WhatsApp inbound messages
-    // so CRM capture does not depend only on the observer-style message_received hook.
     api.on("before_agent_reply", async (event, ctx) => {
       const sessionKey = String(ctx.sessionKey || "");
       if (!sessionKey.includes(":whatsapp:")) return;
@@ -176,7 +177,6 @@ var index_default = definePluginEntry({
         timestamp: new Date().toISOString(),
         media: []
       });
-      // Returning no handled result preserves the normal OpenClaw model reply.
       return void 0;
     }, { eligibleTriggers: ["user"], timeoutMs: 12e3 });
 
@@ -202,7 +202,7 @@ var index_default = definePluginEntry({
       await pollOutbox();
       heartbeatTimer = setInterval(() => { void heartbeat(); }, 12e4);
       pollTimer = setInterval(() => { void pollOutbox(); }, pollIntervalMs);
-      api.logger.info("SAHJONY application bridge started");
+      api.logger.info(`SAHJONY application bridge started (openclawBin=${openclawBin})`);
     });
 
     api.on("gateway_stop", async () => {
