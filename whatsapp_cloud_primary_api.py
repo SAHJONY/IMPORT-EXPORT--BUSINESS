@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import FastAPI, Header, Request, BackgroundTasks
+from fastapi import FastAPI, Header
 
 from whatsapp_api import (
     WhatsAppSend,
@@ -30,8 +30,9 @@ from whatsapp_api import (
     _owner,
 )
 from insforge_backend import persistent_backend_status
+from whatsapp_self_healing import diagnose, repair_plan, record_recovery_event
 
-app = FastAPI(title="SAHJONY WhatsApp Cloud Primary", version="4.0.0", docs_url=None, redoc_url=None)
+app = FastAPI(title="SAHJONY WhatsApp Cloud Primary", version="4.1.0", docs_url=None, redoc_url=None)
 
 # Preserve all setup/webhook/OpenClaw compatibility routes from the existing transport.
 app.add_api_route("/whatsapp/setup", whatsapp_setup_status, methods=["GET"])
@@ -57,10 +58,11 @@ async def whatsapp_health_cloud_primary() -> dict[str, Any]:
     cloud_ready = _configured(cfg)
     fallback_ready = bool(openclaw.get("connected"))
     active = "meta_cloud" if cloud_send and cloud_webhook else ("openclaw" if fallback_ready else "none")
+    recovery = await diagnose()
     return {
         "status": "ok" if active != "none" else "configuration_required",
         "service": "whatsapp-transport",
-        "version": "4.0.0",
+        "version": "4.1.0",
         "provider": active,
         "primary_provider": "meta_cloud",
         "business_suite_connection": True,
@@ -92,11 +94,41 @@ async def whatsapp_health_cloud_primary() -> dict[str, Any]:
         "ai_auto_reply_enabled": _ai_auto_reply_enabled(),
         "ai_ready": _openai_ready(),
         "relationship_memory_360": True,
+        "self_healing": True,
+        "self_repair": True,
+        "automatic_failover": True,
+        "recovery_status": recovery,
         "outbound_owner_governed": True,
         "autonomous_reply_release_authority": False,
         "secrets_exposed": False,
         "durable_owner_configuration": True,
     }
+
+
+@app.get("/whatsapp/recovery/health")
+async def whatsapp_recovery_health() -> dict[str, Any]:
+    result = await diagnose()
+    await record_recovery_event("health_check", result)
+    return {
+        "status": result["status"],
+        "service": "whatsapp-self-healing-recovery",
+        "version": "1.0.0",
+        "diagnosis": result,
+        "automatic_failover": True,
+        "retry_strategy": "bounded_exponential_backoff",
+        "idempotent_replay": True,
+        "circuit_breaker": True,
+        "safe_mode": result["safe_mode"],
+        "self_improvement_mode": "metrics_and_prompt_optimization_with_guardrails",
+        "self_modifying_production_code": False,
+    }
+
+
+@app.get("/whatsapp/recovery/plan")
+async def whatsapp_recovery_plan() -> dict[str, Any]:
+    plan = await repair_plan()
+    await record_recovery_event("repair_plan", plan.get("diagnosis") or {})
+    return plan
 
 
 @app.post("/whatsapp/send")
@@ -107,14 +139,21 @@ async def whatsapp_send_cloud_primary(
     _owner(authorization)
     cfg = await _config()
     if _send_ready(cfg):
-        return await _send_text(
-            cfg,
-            to=payload.to,
-            body=payload.body,
-            preview_url=payload.preview_url,
-            lead_id=payload.lead_id,
-            customer_id=payload.customer_id,
-            source_url=payload.source_url,
-            autonomous=False,
-        )
-    return await _enqueue_openclaw_message(payload)
+        try:
+            result = await _send_text(
+                cfg,
+                to=payload.to,
+                body=payload.body,
+                preview_url=payload.preview_url,
+                lead_id=payload.lead_id,
+                customer_id=payload.customer_id,
+                source_url=payload.source_url,
+                autonomous=False,
+            )
+            await record_recovery_event("meta_send_success", {"status": "ok", "provider": "meta_cloud"})
+            return result
+        except Exception as exc:
+            await record_recovery_event("meta_send_failure", {"status": "degraded", "error_type": type(exc).__name__})
+    result = await _enqueue_openclaw_message(payload)
+    await record_recovery_event("automatic_failover", {"status": "ok", "provider": "openclaw"})
+    return result
