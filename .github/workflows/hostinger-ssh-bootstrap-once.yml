@@ -1,0 +1,113 @@
+name: Hostinger SSH Bootstrap Once
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/hostinger-ssh-bootstrap-once.yml"
+
+permissions:
+  contents: read
+
+env:
+  HOSTINGER_API_BASE: "https://developers.hostinger.com"
+  VM_ID: "767852"
+  HOST: "69.62.68.67"
+  USER: "root"
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - id: key
+        name: Provision ephemeral Hostinger SSH key
+        env:
+          API_TOKEN: ${{ secrets.HOSTINGER_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ -n "$API_TOKEN" ]] || { echo "HOSTINGER_API_TOKEN missing" >&2; exit 2; }
+          install -m 700 -d ~/.ssh
+          ssh-keygen -q -t ed25519 -N '' -f ~/.ssh/hostinger -C "sahjony-bootstrap-${GITHUB_RUN_ID}"
+          PUB="$(cat ~/.ssh/hostinger.pub)"
+          payload="$(jq -n --arg name "SAHJONY bootstrap ${GITHUB_RUN_ID}" --arg key "$PUB" '{name:$name,key:$key}')"
+          created="$(curl --fail --silent --show-error -X POST \
+            -H "Authorization: Bearer $API_TOKEN" -H "Content-Type: application/json" -H "Accept: application/json" \
+            --data "$payload" "$HOSTINGER_API_BASE/api/vps/v1/public-keys")"
+          KEY_ID="$(jq -r '.id // .data.id // empty' <<<"$created")"
+          [[ "$KEY_ID" =~ ^[0-9]+$ ]] || { echo "No valid Hostinger public-key id returned" >&2; exit 3; }
+          echo "key_id=$KEY_ID" >> "$GITHUB_OUTPUT"
+          attach="$(jq -n --argjson id "$KEY_ID" '{ids:[$id]}')"
+          curl --fail --silent --show-error -X POST \
+            -H "Authorization: Bearer $API_TOKEN" -H "Content-Type: application/json" -H "Accept: application/json" \
+            --data "$attach" "$HOSTINGER_API_BASE/api/vps/v1/public-keys/attach/$VM_ID" >/dev/null
+          echo "HOSTINGER_EPHEMERAL_KEY_ATTACHED=1"
+          sleep 15
+
+      - id: ssh
+        name: Establish root SSH session
+        run: |
+          set -euo pipefail
+          connected=false
+          for attempt in $(seq 1 10); do
+            echo "SSH attempt $attempt/10"
+            if out="$(ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=8 \
+              -o ServerAliveInterval=5 -i ~/.ssh/hostinger "$USER@$HOST" \
+              'printf SAHJONY_HOSTINGER_SSH_OK' 2>&1)"; then
+              if grep -q SAHJONY_HOSTINGER_SSH_OK <<<"$out"; then
+                connected=true
+                break
+              fi
+            else
+              printf '%s\n' "$out" | tail -n 2 | sed -E 's/(Permission denied).*/\1/'
+            fi
+            sleep 8
+          done
+          echo "connected=$connected" >> "$GITHUB_OUTPUT"
+          [[ "$connected" == true ]] || { echo "HOSTINGER_SSH_UNREACHABLE_AFTER_KEY_ATTACH=1" >&2; exit 5; }
+          echo "HOSTINGER_SSH_AUTHORIZED=1"
+
+      - name: Bootstrap existing OpenClaw 24x7
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_SCOPE: ${{ secrets.VERCEL_SCOPE }}
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=12 -i ~/.ssh/hostinger "$USER@$HOST" \
+            "env VERCEL_TOKEN='$VERCEL_TOKEN' VERCEL_SCOPE='${VERCEL_SCOPE:-juan-gonzalezs-projects-94b6dfe9}' bash -s" <<'REMOTE'
+          set -euo pipefail
+          if ! command -v git >/dev/null 2>&1; then
+            apt-get update -y >/dev/null
+            apt-get install -y git curl ca-certificates >/dev/null
+          fi
+          tmp="$(mktemp -d)"
+          trap 'rm -rf "$tmp"' EXIT
+          git clone --depth 1 --branch main https://github.com/SAHJONY/IMPORT-EXPORT--BUSINESS.git "$tmp/repo"
+          chmod +x "$tmp/repo/openclaw/hostinger-24x7/bootstrap-existing-openclaw.sh"
+          bash "$tmp/repo/openclaw/hostinger-24x7/bootstrap-existing-openclaw.sh"
+          REMOTE
+
+      - name: Verify production health
+        run: |
+          sleep 12
+          curl --fail --silent --show-error https://www.sahjony.com/whatsapp/health | python3 -m json.tool
+
+      - name: Remove ephemeral key from VPS and Hostinger
+        if: ${{ always() }}
+        env:
+          API_TOKEN: ${{ secrets.HOSTINGER_API_TOKEN }}
+          KEY_ID: ${{ steps.key.outputs.key_id }}
+        run: |
+          set +e
+          if [[ -f ~/.ssh/hostinger.pub && -f ~/.ssh/hostinger ]]; then
+            PUB_B64="$(base64 -w0 ~/.ssh/hostinger.pub)"
+            ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=8 -i ~/.ssh/hostinger "$USER@$HOST" \
+              "PUB_B64='$PUB_B64' python3 -c \"import base64,os,pathlib; p=pathlib.Path('/root/.ssh/authorized_keys'); target=base64.b64decode(os.environ['PUB_B64']).decode().strip(); lines=p.read_text().splitlines() if p.exists() else []; p.write_text('\\n'.join(x for x in lines if x.strip()!=target)+('\\n' if lines else ''))\"" >/dev/null 2>&1
+          fi
+          if [[ "$KEY_ID" =~ ^[0-9]+$ ]]; then
+            curl --silent --show-error -X DELETE -H "Authorization: Bearer $API_TOKEN" -H "Accept: application/json" \
+              "$HOSTINGER_API_BASE/api/vps/v1/public-keys/$KEY_ID" >/dev/null
+          fi
+          rm -f ~/.ssh/hostinger ~/.ssh/hostinger.pub
+          echo "HOSTINGER_EPHEMERAL_KEY_CLEANUP_COMPLETE=1"
