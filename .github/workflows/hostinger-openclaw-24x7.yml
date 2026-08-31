@@ -13,6 +13,8 @@ on:
     paths:
       - ".github/workflows/hostinger-openclaw-24x7.yml"
       - "openclaw/hostinger-24x7/**"
+  schedule:
+    - cron: "17 * * * *"
 
 permissions:
   contents: read
@@ -27,9 +29,10 @@ jobs:
     outputs:
       ready: ${{ steps.check.outputs.ready }}
       https_ready: ${{ steps.check.outputs.https_ready }}
+      recovery_required: ${{ steps.check.outputs.recovery_required }}
     steps:
       - id: check
-        name: Detect Hostinger connection readiness
+        name: Detect Hostinger connection and recovery readiness
         env:
           HOST: ${{ secrets.HOSTINGER_SSH_HOST }}
           USER: ${{ secrets.HOSTINGER_SSH_USER }}
@@ -40,14 +43,24 @@ jobs:
           set -euo pipefail
           ready=false
           https_ready=false
+          recovery_required=true
+
           if [[ -n "$HOST" && -n "$USER" && -n "$KEY" ]]; then
             ready=true
           fi
           if [[ "$ready" == true && -n "$DOMAIN" && -n "$EMAIL" ]]; then
             https_ready=true
           fi
+
+          health="$(curl -fsS --max-time 15 https://www.sahjony.com/whatsapp/health 2>/dev/null || true)"
+          if [[ -n "$health" ]] && grep -q '"openclaw_fallback":{"configured":true,"connected":true' <<<"$health"; then
+            recovery_required=false
+          fi
+
           echo "ready=$ready" >> "$GITHUB_OUTPUT"
           echo "https_ready=$https_ready" >> "$GITHUB_OUTPUT"
+          echo "recovery_required=$recovery_required" >> "$GITHUB_OUTPUT"
+
           if [[ "$ready" == true ]]; then
             echo "HOSTINGER_OPENCLAW_PREFLIGHT=READY"
           else
@@ -58,10 +71,15 @@ jobs:
           else
             echo "HOSTINGER_OPENCLAW_HTTPS_PREFLIGHT=OPTIONAL_NOT_READY"
           fi
+          if [[ "$recovery_required" == true ]]; then
+            echo "HOSTINGER_OPENCLAW_RECOVERY=REQUIRED"
+          else
+            echo "HOSTINGER_OPENCLAW_RECOVERY=HEALTHY_NO_ACTION"
+          fi
 
   deploy:
     needs: preflight
-    if: ${{ needs.preflight.outputs.ready == 'true' }}
+    if: ${{ needs.preflight.outputs.ready == 'true' && (github.event_name != 'schedule' || needs.preflight.outputs.recovery_required == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
