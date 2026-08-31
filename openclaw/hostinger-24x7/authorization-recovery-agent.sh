@@ -8,7 +8,7 @@ set -euo pipefail
 log(){ printf '[hostinger-recovery] %s\n' "$*"; }
 
 OPENCLAW_HEALTH_URL="${OPENCLAW_HEALTH_URL:-https://www.sahjony.com/whatsapp/health}"
-REPO_DIR="${REPO_DIR:-/opt/sahjony/import-export-business}"
+REPO_DIR="${REPO_DIR:-/opt/sahjony-openclaw/repo}"
 
 probe_health(){
   curl -fsS --max-time 15 "$OPENCLAW_HEALTH_URL" 2>/dev/null || true
@@ -45,9 +45,9 @@ main(){
   existing="$(find_existing_openclaw)"
   if [ -n "$existing" ]; then
     log "existing OpenClaw runtime detected"
-    if [ -x "$REPO_DIR/openclaw/hostinger-24x7/bootstrap-hostinger-openclaw.sh" ]; then
+    if [ -x "$REPO_DIR/openclaw/hostinger-24x7/bootstrap-existing-openclaw.sh" ]; then
       log "running non-destructive bootstrap"
-      exec "$REPO_DIR/openclaw/hostinger-24x7/bootstrap-hostinger-openclaw.sh"
+      exec "$REPO_DIR/openclaw/hostinger-24x7/bootstrap-existing-openclaw.sh"
     fi
     log "bootstrap script not present at expected path"
     exit 20
