@@ -34,42 +34,47 @@ echo "OpenClaw dist: $DIST_DIR"
 
 PATCH_RESULT="$(python3 - "$DIST_DIR" <<'PY'
 from __future__ import annotations
-import pathlib, re, shutil, sys, time
+import pathlib
+import re
+import shutil
+import sys
+import time
 
 dist = pathlib.Path(sys.argv[1])
-files = sorted(dist.glob('kernel-*.js'))
+files = sorted(dist.glob("kernel-*.js"))
 if not files:
-    print('NO_KERNEL')
+    print("NO_KERNEL")
     raise SystemExit(0)
 
 needle = re.compile(
-    r'if\s*\(\s*!lifecycle\s*\)\s*throw\s+new\s+Error\(\s*["\']runChannelInboundEvent prepared turns must declare runDispatchLifecycle when creating runDispatch["\']\s*\)\s*;?'
+    r'''if\s*\(\s*!lifecycle\s*\)\s*throw\s+new\s+Error\(\s*["']runChannelInboundEvent prepared turns must declare runDispatchLifecycle when creating runDispatch["']\s*\)\s*;?'''
 )
-patched = []
-already = []
+marker = "/* SAHJONY_OPENCLAW_DISPATCH_COMPAT */"
+patched: list[str] = []
+already: list[str] = []
+
 for path in files:
-    text = path.read_text(encoding='utf-8')
-    marker = '/* SAHJONY_OPENCLAW_DISPATCH_COMPAT */'
+    text = path.read_text(encoding="utf-8")
     if marker in text:
         already.append(path.name)
         continue
-    new, count = needle.subn(
-        'if (!lifecycle) { /* SAHJONY_OPENCLAW_DISPATCH_COMPAT */ return; }',
+    new_text, count = needle.subn(
+        "if (!lifecycle) { /* SAHJONY_OPENCLAW_DISPATCH_COMPAT */ return; }",
         text,
         count=1,
     )
     if count:
-        backup = path.with_suffix(path.suffix + f'.backup.{int(time.time())}')
+        backup = path.with_suffix(path.suffix + f".backup.{int(time.time())}")
         shutil.copy2(path, backup)
-        path.write_text(new, encoding='utf-8')
+        path.write_text(new_text, encoding="utf-8")
         patched.append(path.name)
 
 if patched:
-    print('PATCHED:' + ','.join(patched))
+    print("PATCHED:" + ",".join(patched))
 elif already:
-    print('ALREADY_PATCHED:' + ','.join(already))
+    print("ALREADY_PATCHED:" + ",".join(already))
 else:
-    print('SIGNATURE_NOT_FOUND')
+    print("SIGNATURE_NOT_FOUND")
 PY
 )"
 
@@ -85,6 +90,10 @@ case "$PATCH_RESULT" in
     ;;
   SIGNATURE_NOT_FOUND)
     echo "The exact upstream lifecycle assertion is not present in this build; no core files were modified."
+    ;;
+  NO_KERNEL)
+    echo "No kernel bundle matched; plugin alignment completed but no core workaround was applied." >&2
+    exit 2
     ;;
   *)
     echo "Kernel compatibility patch could not be verified." >&2
