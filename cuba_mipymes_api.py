@@ -4,15 +4,17 @@ import httpx
 from fastapi import FastAPI, HTTPException, Query
 from pypdf import PdfReader
 
-app=FastAPI(title='SAHJONY Cuba Private Sector CRM',version='3.1.0',docs_url=None,redoc_url=None)
+app=FastAPI(title='SAHJONY Cuba Private Sector CRM',version='3.1.1',docs_url=None,redoc_url=None)
 ORG='org_sahjony_global_trade'; TARGET=15600; INDEX='https://www.minjus.gob.cu/es/publicaciones/prontuario'
 SOURCES={
 '2026-02-03':('Relación CNA-MIPYMES Registro Mercantil 03.02.2026','https://www.minjus.gob.cu/sites/default/files/archivos/publicacion/2026-03/Febrero%203.2026%20Relaci%C3%B3n%20MIPYMES%20Y%20CNA%20%203.02.26%20.pdf'),
 '2026-01-29':('Relación CNA-MIPYMES Registro Mercantil 29.01.2026','https://www.minjus.gob.cu/sites/default/files/archivos/publicacion/2026-03/Enero%202026%20Relaci%C3%B3n%20MIPYMES%20Y%20CNA%20%2029.01.26%20.pdf'),
 '2025-12-26':('Relación CNA-MIPYMES Registro Mercantil 26.12.2025','https://www.minjus.gob.cu/sites/default/files/archivos/publicacion/2026-03/Diciembre%202025%20Relaci%C3%B3n%20MIPYMES%20Y%20CNA%2026.12.25%20.pdf'),
+'2025-11-26':('Relación CNA-MIPYMES Registro Mercantil 26.11.2025','https://www.minjus.gob.cu/sites/default/files/archivos/publicacion/2025-11/Relaci%C3%B3n%20MIPYMES%20Y%20CNA%2026.11.25.pdf'),
 '2025-11-06':('Relación CNA-MIPYMES Registro Mercantil 06.11.2025','https://www.minjus.gob.cu/sites/default/files/archivos/publicacion/2026-03/Noviembre%202025%20Relaci%C3%B3n%20MIPYMES%20Y%20CNA%206.11.25%20.pdf'),
-'2025-10-30':('Relación CNA-MIPYMES Registro Mercantil 30.10.2025','https://www.minjus.gob.cu/sites/default/files/archivos/publicacion/2026-03/Octubre%20Relaci%C3%B3n%20MIPYMES%20Y%20CNA%2030.10.25.pdf')}
-PRIVATE={'MIPYME_PRIVADA','CNA','EMPRESA_PRIVADA','OTHER_NON_STATE_VERIFIED'}
+'2025-10-30':('Relación CNA-MIPYMES Registro Mercantil 30.10.2025','https://www.minjus.gob.cu/sites/default/files/archivos/publicacion/2026-03/Octubre%20Relaci%C3%B3n%20MIPYMES%20Y%20CNA%2030.10.25.pdf'),
+'2024-08-01':('Relación CNA-MIPYMES Registro Mercantil 01.08.2024','https://www.minjus.gob.cu/sites/default/files/archivos/publicacion/2024-08/Relaci%C3%B3n%20MIPYMES%20Y%20CNA%201.08.24%20_3.pdf')}
+PRIVATE={'MIPYME_PRIVADA','EMPRESA_PRIVADA','OTHER_NON_STATE_VERIFIED'}
 BAD=('actividad principal','objeto social','domicilio','comercializar','brindar servicios','municipio ','provincia ','república de cuba','republica de cuba','artículo ','articulo ','calle ','carretera ','avenida ')
 
 def norm(v):
@@ -90,7 +92,7 @@ def parse(content):
 def is_private(r):
  name=r.get('buyer_company') or r.get('company_name') or r.get('business_name'); typ=str(r.get('actor_type') or '').upper(); src=' '.join(str(r.get(k) or '') for k in ('source_platform','source_name','source_type','source_provenance','external_reference')).casefold()
  status=str(r.get('registry_status') or '').upper()
- if not norm(name) or 'ESTATAL' in typ or status in {'DISSOLVED','DISSUELTA','CANCELLED','CANCELED','CANCELADA','BAJA'}: return False
+ if not norm(name) or 'ESTATAL' in typ or typ=='CNA' or status in {'DISSOLVED','DISSUELTA','CANCELLED','CANCELED','CANCELADA','BAJA'}: return False
  return bool(typ in PRIVATE or 'minjus' in src or 'registro mercantil' in src or 'mep' in src or str(r.get('external_reference') or '').upper().startswith('RM-'))
 def data(c,sid,src,now,today):
  act=c.get('activity'); prov=c.get('province'); muni=c.get('municipality'); ref=f"RM-{norm(prov or 'CU').replace(' ','-').upper()}-{c['n']}-{c['reg']}"
@@ -122,7 +124,7 @@ async def ingest_source(sid):
    merged['updated_at']=now; pending.append({'logical_table':'external_trade_prospects','record_key':ex['_record_key'],'data':merged,'created_at':merged.get('created_at') or now,'updated_at':now});upd+=1
   else:
    rk='minjus:'+hashlib.sha1(f"{k}|{inc['external_reference']}".encode()).hexdigest()[:24]; pending.append({'logical_table':'external_trade_prospects','record_key':rk,'data':inc,'created_at':now,'updated_at':now}); by[k]={**inc,'_record_key':rk};ins+=1
- await upsert(pending); after=private_before|{norm(c['name']) for c in cand if norm(c.get('name'))}
+ await upsert(pending); after=private_before|{norm(c['name']) for c in cand if norm(c.get('name')) and c.get('actor_type')!='CNA'}
  return {'status':'ok','source_id':sid,'source':SOURCES[sid][1],'source_pages':pages,'parsed_unique':len(cand),'rejected_or_duplicate_in_source':reject,'inserted':ins,'updated':upd,'duplicates_skipped':dup,'current_before':len(private_before),'current_unique':len(after),'target':TARGET,'remaining_shortfall':max(TARGET-len(after),0),'classification':'RESEARCH / VERIFIED PUBLIC SOURCE'}
 
 @app.get('/crm/cuba-mipymes/internal/sources')
@@ -137,11 +139,11 @@ async def old_preview(): return await preview_source('2026-02-03')
 async def old_ingest(): return await ingest_source('2026-02-03')
 @app.get('/crm/internal/ingest-cuba-actors-3000')
 async def mep_ceiling():
- cur=len({norm(r.get('buyer_company') or r.get('company_name') or r.get('business_name')) for r in await rows() if is_private(r)}); return {'status':'source_ceiling','source':'MEP accumulated list through May 2024','inserted':0,'updated':0,'duplicates_skipped':cur,'current_unique':cur,'target':TARGET,'remaining_shortfall':max(TARGET-cur,0),'next_source':'MINJUS Registro Mercantil 2025-2026'}
+ cur=len({norm(r.get('buyer_company') or r.get('company_name') or r.get('business_name')) for r in await rows() if is_private(r)}); return {'status':'source_ceiling','source':'MEP accumulated list through May 2024','inserted':0,'updated':0,'duplicates_skipped':cur,'current_unique':cur,'target':TARGET,'remaining_shortfall':max(TARGET-cur,0),'next_source':'MINJUS Registro Mercantil 2024-2026'}
 @app.get('/cuba-mipymes-api/health')
 @app.get('/crm/cuba-mipymes/health')
 async def health():
- cur=len({norm(r.get('buyer_company') or r.get('company_name') or r.get('business_name')) for r in await rows() if is_private(r)}); return {'status':'ok','service':'cuba-private-sector-read-only-crm','version':'3.1.0','record_count':cur,'target':TARGET,'remaining_shortfall':max(TARGET-cur,0),'source_scope':'public_registry_and_official_actor_lists_research','ownership_policy':'evidence_only','binding_actions':False}
+ cur=len({norm(r.get('buyer_company') or r.get('company_name') or r.get('business_name')) for r in await rows() if is_private(r)}); return {'status':'ok','service':'cuba-private-sector-read-only-crm','version':'3.1.1','record_count':cur,'target':TARGET,'remaining_shortfall':max(TARGET-cur,0),'source_scope':'public_registry_and_official_actor_lists_research','ownership_policy':'evidence_only','binding_actions':False}
 @app.get('/cuba-mipymes-api/list')
 @app.get('/crm/cuba-mipymes')
 @app.get('/crm/cuba-mipymes/list')
