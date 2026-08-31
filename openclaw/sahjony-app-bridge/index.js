@@ -14,12 +14,6 @@ function compactMedia(media) {
   });
 }
 
-function senderFromSessionKey(sessionKey) {
-  const value = String(sessionKey || "");
-  const match = value.match(/:whatsapp:(?:direct|group):([^:]+)$/i);
-  return match ? match[1] : void 0;
-}
-
 var index_default = definePluginEntry({
   id: "sahjony-app-bridge",
   name: "SAHJONY Application Bridge",
@@ -88,9 +82,6 @@ var index_default = definePluginEntry({
           throw new Error(`unusable OpenClaw version probe (code=${version.code})`);
         }
       } catch (error) {
-        // The independent macOS health sidecar is authoritative when the plugin
-        // sandbox cannot execute the CLI. Never overwrite a fresh true sidecar
-        // heartbeat with a synthetic false/null state from a failed probe.
         api.logger.warn(`SAHJONY gateway probe unavailable; heartbeat deferred to sidecar: ${error instanceof Error ? error.message : "unknown error"}`);
         return;
       }
@@ -167,28 +158,6 @@ var index_default = definePluginEntry({
         media: compactMedia(event.media)
       });
     });
-
-    api.on("before_agent_reply", async (event, ctx) => {
-      const sessionKey = String(ctx.sessionKey || "");
-      if (!sessionKey.includes(":whatsapp:")) return;
-      const content = String(event.cleanedBody || "").trim().slice(0, 4096);
-      if (!content) return;
-      const sender = senderFromSessionKey(sessionKey);
-      const fingerprint = crypto.createHash("sha256").update(`${ctx.runId || ""}|${sessionKey}|${content}`).digest("hex").slice(0, 32);
-      await postEvent({
-        event_id: `turn:${fingerprint}`,
-        direction: "inbound",
-        message_id: `turn:${fingerprint}`,
-        sender_id: sender,
-        thread_id: sessionKey,
-        content,
-        message_type: "text",
-        account_id: accountId,
-        timestamp: new Date().toISOString(),
-        media: []
-      });
-      return void 0;
-    }, { eligibleTriggers: ["user"], timeoutMs: 12e3 });
 
     api.on("message_sent", async (event, ctx) => {
       if (ctx.channel !== "whatsapp" && ctx.messageProvider !== "whatsapp") return;
