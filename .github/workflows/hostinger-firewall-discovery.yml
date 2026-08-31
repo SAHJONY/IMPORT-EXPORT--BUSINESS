@@ -1,0 +1,68 @@
+name: Hostinger Firewall Discovery
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/hostinger-firewall-discovery.yml"
+
+permissions:
+  contents: read
+
+env:
+  HOSTINGER_API_BASE: "https://developers.hostinger.com"
+  VM_ID: "767852"
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Inspect VPS and Hostinger firewalls
+        env:
+          API_TOKEN: ${{ secrets.HOSTINGER_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ -n "$API_TOKEN" ]] || { echo "HOSTINGER_API_TOKEN missing" >&2; exit 2; }
+          auth=(-H "Authorization: Bearer $API_TOKEN" -H "Accept: application/json")
+          vm="$(curl --fail --silent --show-error "${auth[@]}" "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID")"
+          fwlist="$(curl --fail --silent --show-error "${auth[@]}" "$HOSTINGER_API_BASE/api/vps/v1/firewall")"
+
+          VM_JSON="$vm" FW_JSON="$fwlist" python3 - <<'PY' > /tmp/fw_ids
+          import json, os
+          vm=json.loads(os.environ['VM_JSON'])
+          fw=json.loads(os.environ['FW_JSON'])
+          rows=fw if isinstance(fw,list) else fw.get('data',[]) if isinstance(fw,dict) else []
+          print('HOSTINGER_FIREWALL_DISCOVERY=OK', file=open('/dev/stderr','w'))
+          print('VM_ID='+str(vm.get('id','unknown')), file=open('/dev/stderr','a'))
+          for k,v in vm.items():
+              if 'firewall' in k.lower():
+                  print(f'VM_{k.upper()}={v}', file=open('/dev/stderr','a'))
+          for item in rows:
+              if not isinstance(item,dict): continue
+              fid=item.get('id')
+              if fid is None: continue
+              print(fid)
+              print(f'FIREWALL_SUMMARY id={fid} name={item.get("name","unknown")} synced={item.get("is_synced","unknown")} active={item.get("is_active",item.get("active","unknown"))}', file=open('/dev/stderr','a'))
+          PY
+
+          while read -r fid; do
+            [[ "$fid" =~ ^[0-9]+$ ]] || continue
+            detail="$(curl --fail --silent --show-error "${auth[@]}" "$HOSTINGER_API_BASE/api/vps/v1/firewall/$fid")"
+            DETAIL="$detail" VM_ID="$VM_ID" python3 - <<'PY'
+          import json, os
+          d=json.loads(os.environ['DETAIL'])
+          vm_id=int(os.environ['VM_ID'])
+          print(f'FIREWALL_DETAIL id={d.get("id")} name={d.get("name")} synced={d.get("is_synced","unknown")}')
+          for key,val in d.items():
+              kl=key.lower()
+              if any(x in kl for x in ('virtual','machine','server','active','assigned')) and key!='rules':
+                  print(f'  {key}={val}')
+          rules=d.get('rules') or []
+          print(f'  RULE_COUNT={len(rules)}')
+          for r in rules:
+              if not isinstance(r,dict): continue
+              print('  RULE id={id} action={action} protocol={protocol} port={port} source={source} source_detail={source_detail}'.format(
+                  id=r.get('id'), action=r.get('action'), protocol=r.get('protocol'), port=r.get('port'), source=r.get('source'), source_detail=r.get('source_detail')))
+          PY
+          done < /tmp/fw_ids
