@@ -9,10 +9,12 @@ from pydantic import BaseModel, Field
 
 from auth import verify_owner_token
 from insforge_backend import get_backend, persistent_backend_status
+from whatsapp_sales_brain import analyze_sales_conversation, frontier_status
 
-app = FastAPI(title="SAHJONY WhatsApp Sales Channel", version="1.0.0", docs_url=None, redoc_url=None)
+app = FastAPI(title="SAHJONY WhatsApp Agentic Sales Channel", version="2.0.0", docs_url=None, redoc_url=None)
 
 Stage = Literal["NEW","ENGAGED","QUALIFYING","QUALIFIED","RFQ_READY","SOURCING","QUOTED","NEGOTIATING","WON","LOST","OPTED_OUT"]
+BINDING_STAGES = {"QUOTED", "NEGOTIATING", "WON"}
 
 
 def _now() -> str:
@@ -31,6 +33,7 @@ class StageUpdate(BaseModel):
     next_action: str | None = Field(default=None, max_length=1000)
     notes: str | None = Field(default=None, max_length=4000)
     priority: Literal["low","normal","high","urgent"] = "high"
+    evidence_verified: bool = False
 
 
 class QualificationUpdate(BaseModel):
@@ -44,6 +47,11 @@ class QualificationUpdate(BaseModel):
     target_delivery_date: str | None = Field(default=None, max_length=200)
     preferred_incoterm: str | None = Field(default=None, max_length=100)
     notes: str | None = Field(default=None, max_length=4000)
+
+
+class BrainRun(BaseModel):
+    complexity: Literal["normal","complex","critical","negotiation","rfq","sourcing","compliance","quote"] = "normal"
+    auto_advance_non_binding: bool = True
 
 
 async def _stage_events(lead_id: str | None = None) -> list[dict[str, Any]]:
@@ -64,7 +72,7 @@ def _latest_stage(events: list[dict[str, Any]]) -> str:
     return "NEW"
 
 
-async def _record_sales_event(*, lead_id: str, title: str, summary: str, stage: str | None = None, payload: dict[str, Any] | None = None, priority: str = "high", action_required: bool = True, action_label: str = "Advance WhatsApp sales opportunity") -> dict[str, Any]:
+async def _record_sales_event(*, lead_id: str, title: str, summary: str, stage: str | None = None, payload: dict[str, Any] | None = None, priority: str = "high", action_required: bool = True, action_label: str = "Advance WhatsApp sales opportunity", actor_role: str = "owner", actor_id: str = "owner") -> dict[str, Any]:
     row = {
         "event_id": f"evt_{secrets.token_urlsafe(16)}",
         "event_type": "sales_stage" if stage else "sales_note",
@@ -73,8 +81,8 @@ async def _record_sales_event(*, lead_id: str, title: str, summary: str, stage: 
         "trade_case_id": None,
         "customer_id": None,
         "lead_id": lead_id,
-        "actor_role": "owner",
-        "actor_id": "owner",
+        "actor_role": actor_role,
+        "actor_id": actor_id,
         "visibility": "internal",
         "title": title,
         "summary": summary[:4000],
@@ -87,6 +95,28 @@ async def _record_sales_event(*, lead_id: str, title: str, summary: str, stage: 
     }
     await get_backend().insert("business_events", row)
     return row
+
+
+def _transcript(messages: list[dict[str, Any]]) -> str:
+    parts=[]
+    for m in messages[-60:]:
+        role="customer" if m.get("direction")=="inbound" else "sahjony"
+        body=str(m.get("text") or m.get("body") or m.get("content") or "").strip()
+        if body:
+            parts.append(f"{role}: {body[:1600]}")
+    return "\n".join(parts)
+
+
+async def _lead_bundle(lead_id: str) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]]]:
+    backend=get_backend()
+    rows=await backend.select("whatsapp_leads",params={"lead_id":f"eq.{lead_id}","limit":"1"}) or []
+    if not rows:
+        raise HTTPException(status_code=404,detail="WhatsApp lead not found")
+    lead=rows[0]
+    phone=str(lead.get("phone") or "")
+    messages=await backend.select("whatsapp_messages",params={"phone":f"eq.{phone}","order":"created_at.asc","limit":"1000"}) or []
+    events=await _stage_events(lead_id)
+    return lead,messages,events
 
 
 @app.get("/whatsapp/sales/health")
@@ -103,8 +133,8 @@ async def sales_health():
         counts["sales_events"] = len(await _stage_events())
     return {
         "status":"ok" if persistence["configured"] else "configuration_required",
-        "service":"whatsapp-sales-channel",
-        "version":"1.0.0",
+        "service":"whatsapp-agentic-sales-channel",
+        "version":"2.0.0",
         "pipeline_enabled":True,
         "lead_capture":True,
         "conversation_history":True,
@@ -112,7 +142,12 @@ async def sales_health():
         "rfq_readiness":True,
         "owner_stage_control":True,
         "outbound_traceability":True,
+        "agentic_sales_brain":True,
+        "next_best_action_engine":True,
+        "autonomous_non_binding_progression":True,
         "autonomous_binding_quotes":False,
+        "verified_quote_gate":True,
+        "frontier":frontier_status(),
         "counts":counts,
         "persistence":persistence["provider"],
     }
@@ -144,12 +179,15 @@ async def sales_inbox(limit: int = Query(100, ge=1, le=500), authorization: str 
         inbound=sum(1 for m in conversation if m.get("direction")=="inbound")
         outbound=sum(1 for m in conversation if m.get("direction")=="outbound")
         stage=_latest_stage(ev)
+        brain_event=next((x for x in ev if (x.get("payload") or {}).get("brain")),None)
+        brain=(brain_event.get("payload") or {}).get("brain") if brain_event else None
         items.append({
             "lead":lead,
             "stage":stage,
+            "opportunity_score":(brain or {}).get("opportunity_score"),
             "conversation":{"inbound":inbound,"outbound":outbound,"recent":conversation[:12]},
             "latest_sales_event":ev[0] if ev else None,
-            "next_action":((ev[0].get("payload") or {}).get("next_action") if ev else None) or "Qualify trade requirement",
+            "next_action":((ev[0].get("payload") or {}).get("next_action") if ev else None) or (brain or {}).get("next_best_action") or "Run frontier sales brain",
             "attention_required":stage not in {"WON","LOST","OPTED_OUT"},
         })
     return {"status":"ok","count":len(items),"items":items}
@@ -158,24 +196,48 @@ async def sales_inbox(limit: int = Query(100, ge=1, le=500), authorization: str 
 @app.get("/whatsapp/sales/leads/{lead_id}")
 async def sales_lead(lead_id: str, authorization: str | None = Header(None, alias="Authorization")):
     _owner(authorization)
-    backend=get_backend()
-    rows=await backend.select("whatsapp_leads",params={"lead_id":f"eq.{lead_id}","limit":"1"}) or []
-    if not rows:
-        raise HTTPException(status_code=404,detail="WhatsApp lead not found")
-    lead=rows[0]
+    lead,messages,events=await _lead_bundle(lead_id)
     phone=str(lead.get("phone") or "")
-    messages=await backend.select("whatsapp_messages",params={"phone":f"eq.{phone}","order":"created_at.asc","limit":"1000"}) or []
-    events=await _stage_events(lead_id)
     try:
-        outbound=await backend.select("outbound_notifications",params={"channel":"eq.whatsapp","destination":f"eq.{phone}","order":"created_at.desc","limit":"250"}) or []
+        outbound=await get_backend().select("outbound_notifications",params={"channel":"eq.whatsapp","destination":f"eq.{phone}","order":"created_at.desc","limit":"250"}) or []
     except Exception:
         outbound=[]
-    return {"lead":lead,"stage":_latest_stage(events),"messages":messages,"sales_events":events,"outbound":outbound}
+    brain_event=next((x for x in events if (x.get("payload") or {}).get("brain")),None)
+    return {"lead":lead,"stage":_latest_stage(events),"messages":messages,"sales_events":events,"outbound":outbound,"latest_brain":((brain_event.get("payload") or {}).get("brain") if brain_event else None)}
+
+
+@app.post("/whatsapp/sales/leads/{lead_id}/brain")
+async def run_sales_brain(lead_id: str, p: BrainRun, authorization: str | None = Header(None, alias="Authorization")):
+    _owner(authorization)
+    lead,messages,events=await _lead_bundle(lead_id)
+    current=_latest_stage(events)
+    brain=await analyze_sales_conversation(transcript=_transcript(messages),current_stage=current,complexity=p.complexity)
+    recommended=str(brain.get("recommended_stage") or current).upper()
+    if recommended in BINDING_STAGES:
+        recommended="RFQ_READY"
+    stage=current
+    if p.auto_advance_non_binding and recommended not in BINDING_STAGES and recommended != current:
+        stage=recommended
+    event=await _record_sales_event(
+        lead_id=lead_id,
+        title=f"Frontier sales brain · {brain.get('model') or brain.get('engine')}",
+        summary=str(brain.get("next_best_action") or "Sales brain analysis completed"),
+        stage=stage if stage != current else None,
+        payload={"brain":brain,"next_action":brain.get("next_best_action"),"recommended_stage":recommended,"previous_stage":current},
+        priority="urgent" if int(brain.get("opportunity_score") or 0)>=80 else "high",
+        action_required=stage not in {"WON","LOST","OPTED_OUT"},
+        action_label=str(brain.get("next_best_action") or "Advance opportunity"),
+        actor_role="ai_agent",
+        actor_id=str(brain.get("model") or "frontier-sales-brain"),
+    )
+    return {"status":"analyzed","lead_id":lead_id,"stage":stage,"brain":brain,"event":event}
 
 
 @app.post("/whatsapp/sales/leads/{lead_id}/stage")
 async def set_sales_stage(lead_id: str, p: StageUpdate, authorization: str | None = Header(None, alias="Authorization")):
     _owner(authorization)
+    if p.stage in BINDING_STAGES and not p.evidence_verified:
+        raise HTTPException(status_code=409,detail="Verified commercial evidence is required before QUOTED, NEGOTIATING or WON")
     backend=get_backend()
     rows=await backend.select("whatsapp_leads",params={"lead_id":f"eq.{lead_id}","limit":"1"}) or []
     if not rows:
@@ -186,7 +248,7 @@ async def set_sales_stage(lead_id: str, p: StageUpdate, authorization: str | Non
         title=f"WhatsApp sales stage → {p.stage}",
         summary=p.notes or p.next_action or f"Lead advanced to {p.stage}",
         stage=p.stage,
-        payload={"next_action":p.next_action,"notes":p.notes},
+        payload={"next_action":p.next_action,"notes":p.notes,"evidence_verified":p.evidence_verified},
         priority=p.priority,
         action_required=not terminal,
         action_label=p.next_action or ("Sales cycle closed" if terminal else "Advance WhatsApp sales opportunity"),
@@ -207,7 +269,7 @@ async def qualify_sales_lead(lead_id: str, p: QualificationUpdate, authorization
         title="WhatsApp trade requirement qualified",
         summary=f"Qualified demand: {p.product_need}",
         stage="QUALIFIED",
-        payload={**payload,"next_action":"Validate suppliers, freight, compliance and landed cost before formal quote"},
+        payload={**payload,"next_action":"Run frontier sales brain, validate suppliers, freight, compliance and landed cost before formal quote"},
         priority="high",
         action_required=True,
         action_label="Prepare RFQ and sourcing package",
@@ -232,4 +294,4 @@ async def sales_pipeline(authorization: str | None = Header(None, alias="Authori
         stage=latest.get(str(lead.get("lead_id") or ""),"NEW")
         stages[stage]=stages.get(stage,0)+1
     active=sum(v for k,v in stages.items() if k not in {"WON","LOST","OPTED_OUT"})
-    return {"status":"ok","total_leads":len(leads),"active_pipeline":active,"stages":stages,"recommended_next_step":"Work QUALIFIED and RFQ_READY leads first, then advance SOURCING and QUOTED opportunities."}
+    return {"status":"ok","total_leads":len(leads),"active_pipeline":active,"stages":stages,"frontier":frontier_status(),"recommended_next_step":"Run the frontier sales brain on NEW/ENGAGED leads, then work QUALIFIED and RFQ_READY opportunities first."}
