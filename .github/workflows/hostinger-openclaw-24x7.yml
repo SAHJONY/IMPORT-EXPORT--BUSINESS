@@ -107,7 +107,13 @@ jobs:
           import json, os, sys
           doc=json.loads(os.environ['VM_JSON'])
           ip=os.environ['TARGET_IP']; hostname=os.environ['TARGET_HOSTNAME']
-          rows=doc.get('data', doc if isinstance(doc,list) else [])
+          if isinstance(doc, list):
+              rows=doc
+          elif isinstance(doc, dict):
+              data=doc.get('data', [])
+              rows=data if isinstance(data, list) else []
+          else:
+              rows=[]
           def contains(obj, target):
               if isinstance(obj, dict): return any(contains(v,target) for v in obj.values())
               if isinstance(obj, list): return any(contains(v,target) for v in obj)
