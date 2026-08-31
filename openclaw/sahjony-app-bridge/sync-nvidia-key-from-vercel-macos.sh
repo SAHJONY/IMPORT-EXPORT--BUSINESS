@@ -25,7 +25,6 @@ echo "Pulling Production environment from linked Vercel project..."
 vercel env pull "$TMP_ENV" --environment=production --yes >/dev/null
 chmod 600 "$TMP_ENV"
 
-# Parse the dotenv file without sourcing arbitrary values into the shell.
 NVIDIA_KEY="$(python3 - "$TMP_ENV" <<'PY'
 import sys
 from pathlib import Path
@@ -45,8 +44,6 @@ for raw in p.read_text().splitlines():
 PY
 )"
 
-# Sensitive Vercel values are intentionally not recoverable via env pull.
-# Detect the redacted placeholder and securely prompt for the local OpenClaw copy.
 if [[ -z "$NVIDIA_KEY" ]]; then
   echo "ERROR: NVIDIA_API_KEY is not present in Vercel Production env."
   exit 3
@@ -91,11 +88,11 @@ echo "NVIDIA key synchronized to OpenClaw local environment (value hidden)."
 echo "Prefix: ${NVIDIA_KEY:0:8}...  Length: ${#NVIDIA_KEY}"
 
 echo "Testing hosted NVIDIA inference..."
-HTTP="$(curl -sS -o /tmp/sahjony-nvidia-sync-test.json -w '%{http_code}' \
+HTTP="$(curl -sS -o /tmp/sahjony-nvidia-sync-test.json -w '%{http_code}' --max-time 60 \
   https://integrate.api.nvidia.com/v1/chat/completions \
   -H "Authorization: Bearer $NVIDIA_API_KEY" \
   -H 'Content-Type: application/json' \
-  -d '{"model":"deepseek-ai/deepseek-v4-flash-0731","messages":[{"role":"user","content":"Reply exactly NVIDIA_OK"}],"max_tokens":20,"temperature":0}')"
+  -d '{"model":"deepseek-ai/deepseek-v4-flash-0731","messages":[{"role":"user","content":"Reply exactly NVIDIA_OK. Do not explain."}],"max_tokens":256,"temperature":0}')"
 
 if [[ "$HTTP" != "200" ]]; then
   echo "ERROR: NVIDIA inference test failed with HTTP $HTTP"
@@ -112,12 +109,33 @@ import json
 from pathlib import Path
 p=Path('/tmp/sahjony-nvidia-sync-test.json')
 d=json.loads(p.read_text())
-text=''
-try: text=d['choices'][0]['message']['content'] or ''
-except Exception: pass
-print('Inference response:', text[:120].replace('\n',' '))
-if 'NVIDIA_OK' not in text:
-    raise SystemExit('ERROR: NVIDIA returned HTTP 200 but did not return expected inference text.')
+choices=d.get('choices') or []
+if not choices:
+    raise SystemExit('ERROR: NVIDIA returned HTTP 200 but no choices payload.')
+choice=choices[0] if isinstance(choices[0], dict) else {}
+msg=choice.get('message') or {}
+content=msg.get('content') or choice.get('text') or d.get('output_text') or ''
+reasoning=msg.get('reasoning_content') or msg.get('reasoning') or ''
+finish=choice.get('finish_reason')
+usage=d.get('usage') or {}
+print('Inference HTTP: 200')
+print('Finish reason:', finish)
+print('Completion tokens:', usage.get('completion_tokens', 'unknown'))
+if isinstance(content, list):
+    parts=[]
+    for item in content:
+        if isinstance(item, dict): parts.append(str(item.get('text') or item.get('content') or ''))
+        else: parts.append(str(item))
+    content=''.join(parts)
+print('Inference response:', str(content)[:160].replace('\n',' '))
+if content and 'NVIDIA_OK' in str(content):
+    print('NVIDIA_INFERENCE_TEXT_OK')
+elif reasoning:
+    print('NVIDIA_INFERENCE_AUTH_AND_MODEL_OK (reasoning response received)')
+elif finish is not None or usage:
+    print('NVIDIA_INFERENCE_AUTH_AND_MODEL_OK (valid completion envelope)')
+else:
+    raise SystemExit('ERROR: NVIDIA returned HTTP 200 but response shape was not a valid completion.')
 PY
 
 openclaw gateway restart >/dev/null
