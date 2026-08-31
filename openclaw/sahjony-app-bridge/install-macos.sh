@@ -133,12 +133,40 @@ npx --yes vercel@59.10.0 redeploy "${PRODUCTION_DEPLOYMENT}" \
 
 openclaw gateway install --force
 openclaw gateway restart
-openclaw gateway status --deep --require-rpc
+
+GATEWAY_READY=0
+for attempt in {1..12}; do
+  if openclaw gateway status --deep --require-rpc; then
+    GATEWAY_READY=1
+    break
+  fi
+  sleep 5
+done
+if [[ "${GATEWAY_READY}" -ne 1 ]]; then
+  echo "OpenClaw gateway did not become RPC-ready within 60 seconds." >&2
+  exit 1
+fi
+
 openclaw plugins inspect sahjony-app-bridge --runtime --json
-openclaw channels status --probe
-sleep 5
-curl --fail --silent --show-error "${APP_URL}/whatsapp/health"
-printf '\n'
+openclaw channels status --probe || true
+
+BRIDGE_READY=0
+for attempt in {1..12}; do
+  HEALTH_RESPONSE="$(curl --fail --silent --show-error "${APP_URL}/whatsapp/health" || true)"
+  if [[ -n "${HEALTH_RESPONSE}" ]]; then
+    printf '%s\n' "${HEALTH_RESPONSE}"
+  fi
+  if [[ "${HEALTH_RESPONSE}" == *'"gateway_connected":true'* ]]; then
+    BRIDGE_READY=1
+    break
+  fi
+  sleep 5
+done
+if [[ "${BRIDGE_READY}" -ne 1 ]]; then
+  echo "The SAHJONY application did not receive a connected gateway heartbeat within 60 seconds." >&2
+  exit 1
+fi
+
 pmset -g custom
 
 echo "SAHJONY OpenClaw bridge installed. Vercel is redeploying with the rotated secret."
