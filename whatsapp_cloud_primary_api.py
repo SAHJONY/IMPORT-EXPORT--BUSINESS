@@ -4,6 +4,7 @@ from typing import Any
 
 from fastapi import FastAPI, Header
 
+import whatsapp_api as whatsapp_core
 from whatsapp_api import (
     WhatsAppSend,
     _ai_auto_reply_enabled,
@@ -31,10 +32,22 @@ from whatsapp_api import (
 )
 from insforge_backend import persistent_backend_status
 from whatsapp_self_healing import diagnose, repair_plan, record_recovery_event
+from sofia_adaptive_intelligence import adaptive_reply, intelligence_health
+from whatsapp_backlog_recovery import drain_backlog, find_unanswered
+from sofia_self_marketing import growth_health
+from sofia_self_selling import self_selling_health
 
-app = FastAPI(title="SAHJONY WhatsApp Cloud Primary", version="4.1.0", docs_url=None, redoc_url=None)
+app = FastAPI(title="SAHJONY WhatsApp Cloud Primary", version="5.0.0", docs_url=None, redoc_url=None)
 
-# Preserve all setup/webhook/OpenClaw compatibility routes from the existing transport.
+_original_generate_ai_reply = whatsapp_core._generate_ai_reply
+
+
+async def _sofia_generate_ai_reply(text: str, contact_name: str | None) -> str:
+    return await adaptive_reply(_original_generate_ai_reply, text, contact_name)
+
+
+whatsapp_core._generate_ai_reply = _sofia_generate_ai_reply
+
 app.add_api_route("/whatsapp/setup", whatsapp_setup_status, methods=["GET"])
 app.add_api_route("/whatsapp/setup", whatsapp_setup_save, methods=["POST"])
 app.add_api_route("/whatsapp/setup/manual", whatsapp_setup_manual, methods=["POST"])
@@ -59,10 +72,14 @@ async def whatsapp_health_cloud_primary() -> dict[str, Any]:
     fallback_ready = bool(openclaw.get("connected"))
     active = "meta_cloud" if cloud_send and cloud_webhook else ("openclaw" if fallback_ready else "none")
     recovery = await diagnose()
+    sofia = await intelligence_health()
+    marketing = await growth_health()
+    selling = await self_selling_health()
+    pending = await find_unanswered(50)
     return {
         "status": "ok" if active != "none" else "configuration_required",
         "service": "whatsapp-transport",
-        "version": "4.1.0",
+        "version": "5.0.0",
         "provider": active,
         "primary_provider": "meta_cloud",
         "business_suite_connection": True,
@@ -97,6 +114,10 @@ async def whatsapp_health_cloud_primary() -> dict[str, Any]:
         "self_healing": True,
         "self_repair": True,
         "automatic_failover": True,
+        "adaptive_sofia": sofia,
+        "self_marketing": marketing,
+        "self_selling": selling,
+        "backlog_recovery": {"enabled": True, "pending_conversations": len(pending)},
         "recovery_status": recovery,
         "outbound_owner_governed": True,
         "autonomous_reply_release_authority": False,
@@ -112,7 +133,7 @@ async def whatsapp_recovery_health() -> dict[str, Any]:
     return {
         "status": result["status"],
         "service": "whatsapp-self-healing-recovery",
-        "version": "1.0.0",
+        "version": "1.1.0",
         "diagnosis": result,
         "automatic_failover": True,
         "retry_strategy": "bounded_exponential_backoff",
@@ -129,6 +150,34 @@ async def whatsapp_recovery_plan() -> dict[str, Any]:
     plan = await repair_plan()
     await record_recovery_event("repair_plan", plan.get("diagnosis") or {})
     return plan
+
+
+@app.get("/whatsapp/recovery/backlog")
+async def whatsapp_backlog_status(authorization: str | None = Header(None, alias="Authorization")) -> dict[str, Any]:
+    _owner(authorization)
+    items = await find_unanswered(200)
+    return {"status":"ok","count":len(items),"items":items}
+
+
+@app.post("/whatsapp/recovery/backlog/drain")
+async def whatsapp_backlog_drain(authorization: str | None = Header(None, alias="Authorization")) -> dict[str, Any]:
+    _owner(authorization)
+    return await drain_backlog(100)
+
+
+@app.get("/whatsapp/sofia/intelligence/health")
+async def sofia_intelligence_health() -> dict[str, Any]:
+    return await intelligence_health()
+
+
+@app.get("/whatsapp/sofia/marketing/health")
+async def sofia_marketing_health() -> dict[str, Any]:
+    return await growth_health()
+
+
+@app.get("/whatsapp/sofia/self-selling/health")
+async def sofia_self_selling_health() -> dict[str, Any]:
+    return await self_selling_health()
 
 
 @app.post("/whatsapp/send")
