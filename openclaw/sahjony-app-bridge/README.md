@@ -46,6 +46,13 @@ rootless `install-cli.sh` flow to install a supported Node and CLI under
 The bridge installer then replaces the managed `launchd` service definition with
 the new runtime while preserving the existing state and WhatsApp pairing.
 
+Managed plugin installs require executable JavaScript rather than a TypeScript-only
+entry point. The package includes `index.js`, compiled for Node 22+, and declares
+that runtime in `package.json`. The installer also repairs the official Codex and
+WhatsApp plugins, accepts their reviewed capabilities, and records
+`whatsapp:+12816628581` as the command owner. Public WhatsApp users remain under
+the restricted messaging tool profile and do not receive owner privileges.
+
 Required OpenClaw configuration:
 
 ```json5

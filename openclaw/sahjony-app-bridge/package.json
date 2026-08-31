@@ -1,13 +1,13 @@
 {
   "name": "sahjony-app-bridge",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "type": "module",
   "peerDependencies": {
     "openclaw": ">=2026.4.9 <2027"
   },
   "openclaw": {
-    "extensions": ["./index.ts"],
+    "extensions": ["./index.js"],
     "compat": {
       "pluginApi": ">=2026.4.9",
       "minGatewayVersion": "2026.4.9"

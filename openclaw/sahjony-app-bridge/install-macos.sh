@@ -99,10 +99,17 @@ npx --yes vercel@59.10.0 link \
   --project "${VERCEL_PROJECT}" \
   --scope "${VERCEL_SCOPE}"
 
+openclaw plugins install @openclaw/codex --force
+openclaw plugins enable codex --accept-capabilities
+openclaw plugins install clawhub:@openclaw/whatsapp --force
+openclaw plugins enable whatsapp --accept-capabilities
 openclaw plugins install "${SCRIPT_DIR}" \
   --force \
   --acknowledge-install-policy-warning
 openclaw plugins enable sahjony-app-bridge
+openclaw config set commands.ownerAllowFrom \
+  '["whatsapp:+12816628581"]' \
+  --strict-json
 openclaw config set channels.whatsapp.accounts.default.pluginHooks.messageReceived true --strict-json
 openclaw config set plugins.entries.sahjony-app-bridge.enabled true --strict-json
 openclaw config set plugins.entries.sahjony-app-bridge.config \
