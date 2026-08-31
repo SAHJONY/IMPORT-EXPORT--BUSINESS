@@ -48,10 +48,17 @@ jobs:
           curl --fail --silent --show-error \
             -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' \
             "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID" > /tmp/vm-before.json
-          ip="$(jq -r '.ipv4 // .ip // .data.ipv4 // empty' /tmp/vm-before.json)"
+          ip="$(jq -r '
+            if (.ipv4? | type) == "array" then (.ipv4[0].address // empty)
+            elif (.ipv4? | type) == "string" then .ipv4
+            elif (.ip? | type) == "string" then .ip
+            elif (.data.ipv4? | type) == "array" then (.data.ipv4[0].address // empty)
+            elif (.data.ipv4? | type) == "string" then .data.ipv4
+            else empty end' /tmp/vm-before.json)"
           state="$(jq -r '.state // .status // .data.state // .data.status // "unknown"' /tmp/vm-before.json)"
           echo "VM state=$state ip=${ip:-unknown}"
-          [[ -z "$ip" || "$ip" == "$HOST" ]] || { echo "VM identity mismatch" >&2; exit 3; }
+          [[ -z "$ip" || "$ip" == "$HOST" ]] || { echo "VM identity mismatch: expected $HOST got $ip" >&2; exit 3; }
+          echo 'HOSTINGER_VM_IDENTITY_VERIFIED=1'
           echo 'HOSTINGER_NETWORK_FIREWALL_UNCHANGED=1'
 
       - name: Start Hostinger recovery mode
