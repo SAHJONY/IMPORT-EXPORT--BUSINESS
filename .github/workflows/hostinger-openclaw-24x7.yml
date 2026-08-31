@@ -94,7 +94,7 @@ jobs:
           chmod 600 ~/.ssh/hostinger
           ssh-keyscan -H "$HOST" >> ~/.ssh/known_hosts
 
-      - name: Bootstrap existing OpenClaw on Hostinger
+      - name: Run Hostinger authorization recovery agent
         env:
           HOST: ${{ secrets.HOSTINGER_SSH_HOST }}
           USER: ${{ secrets.HOSTINGER_SSH_USER }}
@@ -108,7 +108,8 @@ jobs:
           tmp="$(mktemp -d)"
           trap 'rm -rf "$tmp"' EXIT
           git clone --depth 1 --branch main https://github.com/SAHJONY/IMPORT-EXPORT--BUSINESS.git "$tmp/repo"
-          bash "$tmp/repo/openclaw/hostinger-24x7/bootstrap-existing-openclaw.sh"
+          chmod +x "$tmp/repo/openclaw/hostinger-24x7/authorization-recovery-agent.sh" "$tmp/repo/openclaw/hostinger-24x7/bootstrap-existing-openclaw.sh"
+          REPO_DIR="$tmp/repo" "$tmp/repo/openclaw/hostinger-24x7/authorization-recovery-agent.sh"
           REMOTE
 
       - name: Configure HTTPS when credentials are available
