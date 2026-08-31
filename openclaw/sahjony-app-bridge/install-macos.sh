@@ -72,7 +72,7 @@ sudo pmset -c womp 1 tcpkeepalive 1 powernap 1 || true
 mkdir -p "${OPENCLAW_STATE_DIR}"
 chmod 700 "${OPENCLAW_STATE_DIR}"
 
-BRIDGE_SECRET="$(openssl rand -hex 32)"
+BRIDGE_SECRET=""
 TEMP_ENV_FILE="$(mktemp "${TMPDIR:-/tmp}/sahjony-openclaw-env.XXXXXX")"
 cleanup() {
   rm -f "${TEMP_ENV_FILE}"
@@ -81,8 +81,16 @@ cleanup() {
 trap cleanup EXIT
 
 if [[ -f "${OPENCLAW_ENV_FILE}" ]]; then
+  BRIDGE_SECRET="$(sed -n 's/^SAHJONY_APP_BRIDGE_SECRET=//p' "${OPENCLAW_ENV_FILE}" | tail -n 1)"
   cp "${OPENCLAW_ENV_FILE}" "${OPENCLAW_ENV_FILE}.backup.$(date +%Y%m%d%H%M%S)"
   awk '!/^SAHJONY_APP_URL=|^SAHJONY_APP_BRIDGE_SECRET=/' "${OPENCLAW_ENV_FILE}" >"${TEMP_ENV_FILE}"
+fi
+
+if [[ ! "${BRIDGE_SECRET}" =~ ^[0-9a-fA-F]{64}$ ]]; then
+  BRIDGE_SECRET="$(openssl rand -hex 32)"
+  echo "Generated a new SAHJONY bridge secret."
+else
+  echo "Reusing the existing SAHJONY bridge secret."
 fi
 
 {
@@ -99,13 +107,19 @@ npx --yes vercel@59.10.0 link \
   --project "${VERCEL_PROJECT}" \
   --scope "${VERCEL_SCOPE}"
 
-openclaw plugins install @openclaw/codex --force
+if ! openclaw plugins inspect codex --runtime --json >/dev/null 2>&1; then
+  openclaw plugins install @openclaw/codex --force
+fi
 openclaw plugins enable codex --accept-capabilities
-openclaw plugins install clawhub:@openclaw/whatsapp --force
+if ! openclaw plugins inspect whatsapp --runtime --json >/dev/null 2>&1; then
+  openclaw plugins install clawhub:@openclaw/whatsapp --force
+fi
 openclaw plugins enable whatsapp --accept-capabilities
-openclaw plugins install "${SCRIPT_DIR}" \
-  --force \
-  --acknowledge-install-policy-warning
+if ! openclaw plugins inspect sahjony-app-bridge --runtime --json >/dev/null 2>&1; then
+  openclaw plugins install "${SCRIPT_DIR}" \
+    --force \
+    --acknowledge-install-policy-warning
+fi
 openclaw plugins enable sahjony-app-bridge
 openclaw config set commands.ownerAllowFrom \
   '["whatsapp:+12816628581"]' \
@@ -126,10 +140,15 @@ printf '%s' "${BRIDGE_SECRET}" | npx --yes vercel@59.10.0 env add \
   --yes \
   --scope "${VERCEL_SCOPE}"
 
-npx --yes vercel@59.10.0 redeploy "${PRODUCTION_DEPLOYMENT}" \
+DEPLOYMENT_REFRESHED=1
+if ! npx --yes vercel@59.10.0 redeploy "${PRODUCTION_DEPLOYMENT}" \
   --target production \
   --scope "${VERCEL_SCOPE}" \
-  --non-interactive
+  --non-interactive; then
+  DEPLOYMENT_REFRESHED=0
+  echo "Vercel could not refresh production now; continuing with the local gateway." >&2
+  echo "The saved secret will take effect after the next successful production deployment." >&2
+fi
 
 openclaw gateway install --force
 openclaw gateway restart
@@ -163,12 +182,20 @@ for attempt in {1..12}; do
   sleep 5
 done
 if [[ "${BRIDGE_READY}" -ne 1 ]]; then
-  echo "The SAHJONY application did not receive a connected gateway heartbeat within 60 seconds." >&2
-  exit 1
+  if [[ "${DEPLOYMENT_REFRESHED}" -eq 1 ]]; then
+    echo "The SAHJONY application did not receive a connected gateway heartbeat within 60 seconds." >&2
+    exit 1
+  fi
+  echo "Local OpenClaw is ready; the application bridge is waiting for the Vercel deployment limit to reset." >&2
 fi
 
 pmset -g custom
 
-echo "SAHJONY OpenClaw bridge installed. Vercel is redeploying with the rotated secret."
+echo "SAHJONY OpenClaw bridge installed and configured to start automatically."
+if [[ "${DEPLOYMENT_REFRESHED}" -eq 1 ]]; then
+  echo "Vercel production was refreshed with the saved bridge secret."
+else
+  echo "Vercel production refresh is pending because the account deployment limit was reached."
+fi
 echo "Verify after deployment: ${APP_URL}/whatsapp/health"
 echo "Keep a MacBook connected to power with its lid open, or use a supported clamshell setup."
