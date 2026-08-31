@@ -5,6 +5,8 @@ const root = process.cwd();
 const targets = [
   'public/owner-cuba-mipymes.html',
 ];
+const runtimePattern = /src=["']\/global-language\.js["']/i;
+const runtimeTag = '<script src="/global-language.js" defer></script>';
 
 for (const rel of targets) {
   const abs = path.join(root, rel);
@@ -15,20 +17,25 @@ for (const rel of targets) {
   }
 
   let html = fs.readFileSync(abs, 'utf8');
-  if (/src=["']\/global-language\.js["']/i.test(html)) {
-    console.log(`Global language runtime already present: ${rel}`);
-    continue;
-  }
-
-  const runtime = '<script src="/global-language.js" defer></script>';
-  if (/<\/body>/i.test(html)) {
-    html = html.replace(/<\/body>/i, `${runtime}</body>`);
+  if (!runtimePattern.test(html)) {
+    if (/<\/body>/i.test(html)) {
+      html = html.replace(/<\/body>/i, `${runtimeTag}</body>`);
+    } else {
+      html += runtimeTag;
+    }
+    fs.writeFileSync(abs, html);
+    console.log(`Injected global language runtime: ${rel}`);
   } else {
-    html += runtime;
+    console.log(`Global language runtime already present: ${rel}`);
   }
 
-  fs.writeFileSync(abs, html);
-  console.log(`Injected global language runtime: ${rel}`);
+  const verified = fs.readFileSync(abs, 'utf8');
+  if (!runtimePattern.test(verified)) {
+    console.error(`Failed to persist global language runtime: ${rel}`);
+    process.exitCode = 1;
+  } else {
+    console.log(`Verified global language runtime: ${rel}`);
+  }
 }
 
 if (process.exitCode) process.exit(process.exitCode);
