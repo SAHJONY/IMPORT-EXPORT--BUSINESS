@@ -22,7 +22,7 @@ env:
 jobs:
   recover:
     runs-on: ubuntu-24.04
-    timeout-minutes: 35
+    timeout-minutes: 45
     env:
       API_TOKEN: ${{ secrets.HOSTINGER_API_TOKEN }}
     steps:
@@ -61,6 +61,41 @@ jobs:
           echo 'HOSTINGER_VM_IDENTITY_VERIFIED=1'
           echo 'HOSTINGER_NETWORK_FIREWALL_UNCHANGED=1'
 
+      - name: Wait for stable normal VM state
+        id: baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          auth=(-H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json')
+          stable=false
+          stale_recovery_closed=false
+          for attempt in $(seq 1 90); do
+            curl --fail --silent --show-error "${auth[@]}" \
+              "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID" > /tmp/vm-baseline.json
+            state="$(jq -r '.state // .status // .data.state // .data.status // "unknown"' /tmp/vm-baseline.json)"
+            echo "Baseline state $attempt/90: $state"
+
+            if [[ "$state" == "running" ]]; then
+              stable=true
+              break
+            fi
+
+            if [[ "$state" == "recovery" && "$stale_recovery_closed" == false ]]; then
+              echo 'STALE_RECOVERY_MODE_DETECTED=1'
+              curl --silent --show-error -X DELETE "${auth[@]}" \
+                "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/recovery" >/dev/null 2>&1 || true
+              stale_recovery_closed=true
+            fi
+
+            if [[ "$state" == "stopped" || "$state" == "offline" ]]; then
+              echo "VM is $state; refusing to guess a power-on endpoint" >&2
+              exit 35
+            fi
+            sleep 10
+          done
+          [[ "$stable" == true ]] || { echo 'HOSTINGER_VM_DID_NOT_REACH_RUNNING=1' >&2; exit 36; }
+          echo 'HOSTINGER_VM_BASELINE_RUNNING=1'
+
       - name: Start Hostinger recovery mode
         id: recovery_start
         shell: bash
@@ -69,23 +104,35 @@ jobs:
         run: |
           set -euo pipefail
           payload="$(jq -n --arg p "$RECOVERY_PASSWORD" '{root_password:$p}')"
-          curl --fail --silent --show-error -X POST \
+          http="$(curl --silent --show-error -o /tmp/recovery-start.json -w '%{http_code}' -X POST \
             -H "Authorization: Bearer $API_TOKEN" \
             -H 'Content-Type: application/json' -H 'Accept: application/json' \
             --data "$payload" \
-            "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/recovery" > /tmp/recovery-start.json
+            "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/recovery")"
+          echo "Recovery start HTTP=$http"
+          [[ "$http" =~ ^2 ]] || { echo 'HOSTINGER_RECOVERY_START_FAILED=1' >&2; cat /tmp/recovery-start.json >&2 || true; exit 37; }
           echo 'HOSTINGER_RECOVERY_MODE_REQUESTED=1'
 
-      - name: Wait for recovery SSH
+      - name: Wait for recovery state and SSH
         id: recovery_ready
         shell: bash
         run: |
           set -euo pipefail
+          auth=(-H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json')
           reachable=false
           recovery_host="$HOST"
-          for attempt in $(seq 1 60); do
-            echo "Recovery SSH probe $attempt/60 host=$recovery_host"
-            if nc -z -w 4 "$recovery_host" 22 >/dev/null 2>&1; then
+          for attempt in $(seq 1 90); do
+            curl --silent --show-error "${auth[@]}" \
+              "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID" > /tmp/vm-recovery.json || true
+            state="$(jq -r '.state // .status // .data.state // .data.status // "unknown"' /tmp/vm-recovery.json 2>/dev/null || echo unknown)"
+            ip="$(jq -r '
+              if (.ipv4? | type) == "array" then (.ipv4[0].address // empty)
+              elif (.ipv4? | type) == "string" then .ipv4
+              elif (.ip? | type) == "string" then .ip
+              else empty end' /tmp/vm-recovery.json 2>/dev/null || true)"
+            [[ -n "$ip" ]] && recovery_host="$ip"
+            echo "Recovery probe $attempt/90 state=$state host=$recovery_host"
+            if [[ "$state" == "recovery" ]] && nc -z -w 4 "$recovery_host" 22 >/dev/null 2>&1; then
               reachable=true
               break
             fi
@@ -157,8 +204,8 @@ jobs:
         run: |
           set -euo pipefail
           connected=false
-          for attempt in $(seq 1 60); do
-            echo "Normal SSH attempt $attempt/60"
+          for attempt in $(seq 1 90); do
+            echo "Normal SSH attempt $attempt/90"
             if out="$(ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
               -o ConnectTimeout=6 -i ~/.ssh/hostinger-recovery "$USER@$HOST" \
               'printf SAHJONY_NORMAL_SSH_OK' 2>&1)" && grep -q SAHJONY_NORMAL_SSH_OK <<<"$out"; then
