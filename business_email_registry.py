@@ -4,7 +4,7 @@ from typing import Dict, List
 from fastapi import FastAPI
 
 
-app = FastAPI(title="SAHJONY Business Email Registry", version="1.3.0", docs_url=None, redoc_url=None)
+app = FastAPI(title="SAHJONY Business Email Registry", version="2.0.0", docs_url=None, redoc_url=None)
 
 CANONICAL_DOMAIN = os.getenv("BUSINESS_CANONICAL_DOMAIN", "sahjony.com").strip().lower()
 CANONICAL_WEBSITE = os.getenv("BUSINESS_CANONICAL_WEBSITE", "https://www.sahjony.com").strip()
@@ -37,6 +37,12 @@ DEPARTMENTS: List[Dict[str, str]] = [
     {"key": "compliance", "name": "SAHJONY Global Trade — Compliance", "email": _addr("EMAIL_COMPLIANCE", "compliance"), "function": "Sanctions, export/import controls, release gates"},
     {"key": "finance", "name": "SAHJONY Global Trade — Finance", "email": _addr("EMAIL_FINANCE", "finance"), "function": "Invoices, payments, reconciliation"},
     {"key": "logistics", "name": "SAHJONY Global Trade — Logistics", "email": _addr("EMAIL_LOGISTICS", "logistics"), "function": "Freight, carriers, shipment coordination"},
+    {"key": "customer_success", "name": "SAHJONY Global Trade — Customer Success", "email": _addr("EMAIL_CUSTOMER_SUCCESS", "customersuccess"), "function": "Customer onboarding, service questions, retention, post-sale follow-up"},
+    {"key": "partnerships", "name": "SAHJONY Global Trade — Partnerships", "email": _addr("EMAIL_PARTNERSHIPS", "partnerships"), "function": "Partners, referrals, strategic alliances and channel relationships"},
+    {"key": "marketing", "name": "SAHJONY Global Trade — Marketing", "email": _addr("EMAIL_MARKETING", "marketing"), "function": "Campaigns, media, content, brand and demand generation"},
+    {"key": "energy", "name": "SAHJONY Global Trade — Energy", "email": _addr("EMAIL_ENERGY", "energy"), "function": "Crude, fuels, energy products, origination and energy deal coordination"},
+    {"key": "cuba", "name": "SAHJONY Global Trade — Cuba Trade Desk", "email": _addr("EMAIL_CUBA", "cuba"), "function": "Cuba private-sector, MIPYME, consumer, fuels and corridor communications"},
+    {"key": "executive", "name": "SAHJONY LLC — Executive Office", "email": _addr("EMAIL_EXECUTIVE", "executive"), "function": "Executive escalations, administration, cross-department coordination"},
 ]
 
 
@@ -61,14 +67,14 @@ def email_registry_health():
     return {
         "status": "ok",
         "service": "business-email-registry",
-        "version": "1.3.0",
+        "version": "2.0.0",
         "canonical_domain": CANONICAL_DOMAIN,
         "canonical_website": CANONICAL_WEBSITE,
         "trade_os_url": TRADE_OS_URL,
         "operational_mailbox": _mailbox_state(),
         "departments": len(DEPARTMENTS),
         "active_departments": [d["key"] for d in DEPARTMENTS],
-        "routing_mode": "department-aware canonical routing with authenticated transport",
+        "routing_mode": "enterprise department-aware canonical routing with authenticated transport",
     }
 
 
@@ -99,5 +105,5 @@ def email_departments():
         "trade_os_url": TRADE_OS_URL,
         "operational_mailbox": _mailbox_state(),
         "departments": DEPARTMENTS,
-        "note": "Six canonical business departments are active for routing now. Until domain mail hosting is verified, external delivery remains on the authenticated operational mailbox with SAHJONY Global Trade as the customer-facing display identity.",
+        "note": "Canonical enterprise departments are active for agentic routing. Until domain mail hosting is verified, external delivery remains on the authenticated operational mailbox with SAHJONY Global Trade as the customer-facing display identity.",
     }
