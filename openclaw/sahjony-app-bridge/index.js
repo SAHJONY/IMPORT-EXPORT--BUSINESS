@@ -78,11 +78,21 @@ var index_default = definePluginEntry({
       try {
         const probe = await api.runtime.system.runCommandWithTimeout(openclawBin, ["channels", "status", "--probe"], { timeoutMs: 2e4 });
         const output = `${probe.stdout || ""}\n${probe.stderr || ""}`;
-        connected = /whatsapp[\s\S]{0,400}\bconnected\b/i.test(output) || /\blinked,\s*running,\s*connected\b/i.test(output);
+        if (probe.code !== 0 || !/whatsapp/i.test(output)) {
+          throw new Error(`unusable WhatsApp status probe (code=${probe.code})`);
+        }
+        connected = /whatsapp[^\n]*\bconnected\b/i.test(output) || /\blinked,\s*running,\s*connected\b/i.test(output);
         const version = await api.runtime.system.runCommandWithTimeout(openclawBin, ["--version"], { timeoutMs: 1e4 });
         gatewayVersion = String(version.stdout || "").trim().slice(0, 80) || void 0;
+        if (version.code !== 0 || !gatewayVersion) {
+          throw new Error(`unusable OpenClaw version probe (code=${version.code})`);
+        }
       } catch (error) {
-        api.logger.warn(`SAHJONY gateway probe failed: ${error instanceof Error ? error.message : "unknown error"}`);
+        // The independent macOS health sidecar is authoritative when the plugin
+        // sandbox cannot execute the CLI. Never overwrite a fresh true sidecar
+        // heartbeat with a synthetic false/null state from a failed probe.
+        api.logger.warn(`SAHJONY gateway probe unavailable; heartbeat deferred to sidecar: ${error instanceof Error ? error.message : "unknown error"}`);
+        return;
       }
       try {
         await signedRequest("/whatsapp/openclaw/heartbeat", "POST", {
