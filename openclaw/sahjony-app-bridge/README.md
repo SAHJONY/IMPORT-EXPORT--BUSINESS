@@ -37,6 +37,12 @@ events only to the configured SAHJONY application URL. The installer acknowledge
 that reviewed install-policy warning for this plugin only; it does not weaken or
 disable OpenClaw's global plugin security policy.
 
+OpenClaw `2026.4.9` detects the reviewed pattern but does not support granular
+CLI acknowledgement. When necessary, the installer first uses the official
+`openclaw update` stable-channel flow, which preserves the managed gateway state,
+refreshes its `launchd` service, and verifies the restarted gateway before the
+bridge installation continues.
+
 Required OpenClaw configuration:
 
 ```json5

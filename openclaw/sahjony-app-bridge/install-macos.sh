@@ -25,6 +25,17 @@ if [[ "$(uname -s)" != "Darwin" ]]; then
   exit 1
 fi
 
+if ! openclaw plugins install --help 2>&1 | grep -Fq -- "--acknowledge-install-policy-warning"; then
+  echo "Updating OpenClaw to a stable release with granular install-policy acknowledgements."
+  openclaw update --channel stable --yes --timeout 1800
+fi
+
+if ! openclaw plugins install --help 2>&1 | grep -Fq -- "--acknowledge-install-policy-warning"; then
+  echo "The installed OpenClaw release still lacks granular install-policy acknowledgements." >&2
+  echo "Update OpenClaw from its macOS app, then run this installer again." >&2
+  exit 1
+fi
+
 echo "Administrator approval is required to keep this Mac awake while connected to power."
 sudo -v
 sudo pmset -c sleep 0 displaysleep 10
