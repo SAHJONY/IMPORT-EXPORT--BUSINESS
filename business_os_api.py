@@ -10,9 +10,10 @@ from pydantic import BaseModel, Field
 from auth import verify_owner_token
 from business_email_registry import DEPARTMENTS
 from business_communications_director_api import _route_department
+from business_os_executor_api import execute_mission_internal
 from insforge_backend import get_backend, persistent_backend_status
 
-app = FastAPI(title="SAHJONY AI-Operated Business OS", version="1.0.0", docs_url=None, redoc_url=None)
+app = FastAPI(title="SAHJONY AI-Operated Business OS", version="1.1.0", docs_url=None, redoc_url=None)
 
 Priority = Literal["urgent", "high", "normal", "low"]
 
@@ -73,8 +74,8 @@ def _mission_steps(objective: str, department: str, high_risk: bool) -> list[dic
         {"order": 1, "action": "load_context", "autonomous": True, "detail": "Load CRM, conversation, deal, supplier, shipment and application context relevant to the objective."},
         {"order": 2, "action": "analyze", "autonomous": True, "detail": "Analyze objective, evidence, urgency, missing information, expected value and operational risk."},
         {"order": 3, "action": "route", "autonomous": True, "detail": f"Assign primary ownership to {department} and create cross-department handoffs when required."},
-        {"order": 4, "action": "execute_reversible_work", "autonomous": True, "detail": "Execute routine reversible work: research, communications, CRM updates, follow-ups, scheduling, RFQ preparation and status coordination."},
-        {"order": 5, "action": "verify_evidence", "autonomous": True, "detail": "Verify supplier, pricing, logistics, compliance and application-health evidence before advancing material business state."},
+        {"order": 4, "action": "execute_reversible_work", "autonomous": True, "detail": "Execute routine reversible work through durable action queues: research, communications, CRM updates, follow-ups, scheduling, RFQ preparation and status coordination."},
+        {"order": 5, "action": "verify_evidence", "autonomous": True, "detail": "Verify durable execution evidence before advancing mission state."},
     ]
     if high_risk:
         steps.append({"order": 6, "action": "governance_gate", "autonomous": False, "detail": "Stop before binding, financial, legal, compliance-release, destructive or irreversible action and request owner authorization with evidence."})
@@ -100,8 +101,8 @@ async def business_os_health() -> dict[str, Any]:
     return {
         "status": "ok" if persistence.get("configured") else "configuration_required",
         "service": "sahjony-ai-operated-business-os",
-        "version": "1.0.0",
-        "operating_model": "exception_driven_autonomous_operations",
+        "version": "1.1.0",
+        "operating_model": "exception_driven_autonomous_execution",
         "departments": [d["key"] for d in DEPARTMENTS],
         "department_count": len(DEPARTMENTS),
         "autonomous_domains": AUTONOMOUS_DOMAINS,
@@ -116,6 +117,9 @@ async def business_os_health() -> dict[str, Any]:
         "compliance_research": True,
         "application_operations": True,
         "executive_exception_management": True,
+        "mission_executor": True,
+        "auto_execute_low_risk_missions": True,
+        "durable_execution_verification": True,
         "binding_actions_fail_closed": True,
         "persistent_event_log": bool(persistence.get("configured")),
         "persistence_provider": persistence.get("provider"),
@@ -127,7 +131,7 @@ def business_os_policy() -> dict[str, Any]:
     return {
         "autonomous_domains": AUTONOMOUS_DOMAINS,
         "fail_closed_actions": FAIL_CLOSED,
-        "rule": "Autonomously execute routine reversible work and continuously manage next actions; stop before binding, financial, legal, compliance-release, destructive or irreversible actions unless governed authority exists.",
+        "rule": "Autonomously execute routine reversible work through durable queues and verify evidence; stop before binding, financial, legal, compliance-release, destructive or irreversible actions unless governed authority exists.",
     }
 
 
@@ -174,8 +178,16 @@ async def create_business_mission(payload: MissionCreate, authorization: str | N
         "updated_at": ts,
     }
     await get_backend().insert("business_events", row)
+
+    execution: dict[str, Any] | None = None
+    if not high_risk:
+        try:
+            execution = await execute_mission_internal(mission_id)
+        except Exception as exc:
+            execution = {"status": "execution_failed", "error": type(exc).__name__, "retry_available": True}
+
     return {
-        "status": "mission_created",
+        "status": "mission_created_and_executed" if execution and execution.get("status") == "completed" else ("governance_required" if high_risk else "mission_created"),
         "mission_id": mission_id,
         "department": department,
         "department_name": record.get("name"),
@@ -184,6 +196,7 @@ async def create_business_mission(payload: MissionCreate, authorization: str | N
         "owner_governance_required": high_risk,
         "next_action": next_action,
         "plan": steps,
+        "execution": execution,
         "event_id": row["event_id"],
     }
 
@@ -196,14 +209,16 @@ async def business_os_command_center(authorization: str | None = Header(None, al
     communications = await get_backend().select("communication_conversations", params={"order": "updated_at.desc", "limit": "50"})
     handoffs = await get_backend().select("communication_handoffs", params={"status": "eq.REQUESTED", "order": "created_at.desc", "limit": "50"})
     missions = [e for e in (events or []) if e.get("source_type") == "business_os_mission"]
+    executions = [e for e in (events or []) if e.get("source_type") == "business_os_execution"]
     gates = [e for e in (events or []) if bool(e.get("action_required"))]
     return {
         "status": "ok",
         "health": await business_os_health(),
         "missions": missions,
+        "executions": executions,
         "open_governance_gates": gates,
         "recent_business_events": events or [],
         "open_communications": communications or [],
         "requested_handoffs": handoffs or [],
-        "operating_principle": "AI runs routine operations continuously; owner manages exceptions and governed commitments.",
+        "operating_principle": "AI executes routine operations continuously; owner manages exceptions and governed commitments.",
     }
