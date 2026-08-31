@@ -2,11 +2,7 @@
   "id": "sahjony-whatsapp-reply-rescue",
   "name": "SAHJONY WhatsApp Reply Rescue",
   "description": "Fail-safe reply generation for successful WhatsApp turns that produce no visible reply payload.",
-  "version": "1.0.0",
-  "capabilities": {
-    "promptInjection": true,
-    "conversationAccess": true
-  },
+  "activation": { "onStartup": true },
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
