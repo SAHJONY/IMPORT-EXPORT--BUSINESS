@@ -7,8 +7,9 @@ from business_communications_director_api import app as communications_director_
 from google_calendar_transport_api import app as calendar_transport_app
 from whatsapp_sales_channel_api import app as whatsapp_sales_app
 from business_os_api import app as business_os_app
+from business_os_executor_api import app as business_os_executor_app
 
-app = FastAPI(title="SAHJONY Global Trade Email Agent", version="2.1.1", docs_url=None, redoc_url=None)
+app = FastAPI(title="SAHJONY Global Trade Email Agent", version="2.2.0", docs_url=None, redoc_url=None)
 
 AUTO_ACTIONS = [
     "triage and classify inbound business email",
@@ -20,6 +21,8 @@ AUTO_ACTIONS = [
     "coordinate routine meetings, calendar invitations, rescheduling and reminders",
     "carry conversation context across email, WhatsApp, voice and calendar",
     "create and route enterprise missions across business departments",
+    "execute routine reversible business missions through a durable action queue",
+    "verify execution evidence before marking missions complete",
     "manage routine reversible business and application operations until resolution or a governance gate",
 ]
 
@@ -40,7 +43,7 @@ def email_agent_health():
     return {
         "status": "ok",
         "service": "sahjony-global-trade-email-agent",
-        "version": "2.1.1",
+        "version": "2.2.0",
         "canonical_domain": CANONICAL_DOMAIN,
         "departments": len(DEPARTMENTS),
         "mode": "24_7_agentic_business_communications",
@@ -50,7 +53,9 @@ def email_agent_health():
         "calendar_management": True,
         "whatsapp_sales_brain": True,
         "business_os_orchestrator": True,
+        "business_os_executor": True,
         "business_os_route": "/email-agent/business-os",
+        "business_os_executor_route": "/email-agent/business-os/executor",
         "cross_channel_context": True,
         "department_routing": True,
         "high_risk_actions": "owner_approval_required",
@@ -70,7 +75,7 @@ def email_agent_policy():
             for d in DEPARTMENTS
         ],
         "channels": ["email", "whatsapp", "voice", "calendar", "web", "internal"],
-        "principle": "Autonomously manage routine business communications, scheduling and reversible operations; fail closed before financial, contractual, legal, compliance-release, destructive or other binding commitments.",
+        "principle": "Autonomously execute routine reversible work through durable queues and verify evidence; fail closed before financial, contractual, legal, compliance-release, destructive or other binding commitments.",
     }
 
 
@@ -80,3 +85,4 @@ app.include_router(communications_director_app.router)
 app.include_router(calendar_transport_app.router)
 app.include_router(whatsapp_sales_app.router)
 app.include_router(business_os_app.router, prefix="/email-agent")
+app.include_router(business_os_executor_app.router, prefix="/email-agent")
