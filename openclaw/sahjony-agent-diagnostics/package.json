@@ -1,0 +1,12 @@
+{
+  "name": "@sahjony/openclaw-agent-diagnostics",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "peerDependencies": {
+    "openclaw": ">=2026.8.1"
+  },
+  "openclaw": {
+    "extensions": ["./index.js"]
+  }
+}
