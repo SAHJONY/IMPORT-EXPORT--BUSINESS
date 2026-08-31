@@ -27,8 +27,10 @@ bash openclaw/sahjony-app-bridge/install-macos.sh
 The installer generates a fresh bridge secret locally, stores it with mode `600`
 in `~/.openclaw/.env`, saves the same value in Vercel as a sensitive Production
 variable, installs the reviewed local plugin, enables the trusted WhatsApp event
-hook, validates and restarts OpenClaw, and redeploys the current Production build.
-It never prints the secret.
+hook, installs OpenClaw as a macOS `launchd` service, validates and restarts the
+gateway, and redeploys the current Production build. It also prevents system
+sleep while the Mac is connected to power, while preserving normal battery
+sleep and display locking. It never prints the secret.
 
 Required OpenClaw configuration:
 

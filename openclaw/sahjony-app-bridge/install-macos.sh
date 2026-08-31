@@ -25,6 +25,12 @@ if [[ "$(uname -s)" != "Darwin" ]]; then
   exit 1
 fi
 
+echo "Administrator approval is required to keep this Mac awake while connected to power."
+sudo -v
+sudo pmset -c sleep 0 displaysleep 10
+sudo pmset -a autorestart 1 || true
+sudo pmset -c womp 1 tcpkeepalive 1 powernap 1 || true
+
 mkdir -p "${OPENCLAW_STATE_DIR}"
 chmod 700 "${OPENCLAW_STATE_DIR}"
 
@@ -78,12 +84,16 @@ npx --yes vercel@59.10.0 redeploy "${PRODUCTION_DEPLOYMENT}" \
   --scope "${VERCEL_SCOPE}" \
   --non-interactive
 
+openclaw gateway install --force
 openclaw gateway restart
+openclaw gateway status --deep --require-rpc
 openclaw plugins inspect sahjony-app-bridge --runtime --json
 openclaw channels status --probe
 sleep 5
 curl --fail --silent --show-error "${APP_URL}/whatsapp/health"
 printf '\n'
+pmset -g custom
 
 echo "SAHJONY OpenClaw bridge installed. Vercel is redeploying with the rotated secret."
 echo "Verify after deployment: ${APP_URL}/whatsapp/health"
+echo "Keep a MacBook connected to power with its lid open, or use a supported clamshell setup."
