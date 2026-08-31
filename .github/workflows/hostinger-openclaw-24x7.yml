@@ -24,6 +24,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
+  HOSTINGER_API_BASE: "https://developers.hostinger.com"
   HOSTINGER_CONFIRMED_HOST: "69.62.68.67"
   HOSTINGER_CONFIRMED_USER: "root"
   HOSTINGER_CONFIRMED_HOSTNAME: "srv767852.hstgr.cloud"
@@ -35,67 +36,140 @@ jobs:
       ready: ${{ steps.check.outputs.ready }}
       https_ready: ${{ steps.check.outputs.https_ready }}
       recovery_required: ${{ steps.check.outputs.recovery_required }}
+      auth_mode: ${{ steps.check.outputs.auth_mode }}
     steps:
       - id: check
-        name: Detect Hostinger connection and recovery readiness
+        name: Detect Hostinger control path and recovery readiness
         env:
+          API_TOKEN: ${{ secrets.HOSTINGER_API_TOKEN }}
           KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
           DOMAIN: ${{ secrets.OPENCLAW_HOSTINGER_DOMAIN }}
           EMAIL: ${{ secrets.LETSENCRYPT_EMAIL }}
         run: |
           set -euo pipefail
           ready=false
+          auth_mode=none
           https_ready=false
           recovery_required=true
 
-          if [[ -n "$HOSTINGER_CONFIRMED_HOST" && -n "$HOSTINGER_CONFIRMED_USER" && -n "$KEY" ]]; then
+          if [[ -n "$API_TOKEN" ]]; then
             ready=true
+            auth_mode=hostinger_api_ephemeral_ssh
+          elif [[ -n "$KEY" ]]; then
+            ready=true
+            auth_mode=stored_ssh_key
           fi
+
           if [[ "$ready" == true && -n "$DOMAIN" && -n "$EMAIL" ]]; then
             https_ready=true
           fi
 
           health="$(curl -fsS --max-time 15 https://www.sahjony.com/whatsapp/health 2>/dev/null || true)"
-          if [[ -n "$health" ]] && grep -q '"openclaw_fallback":{"configured":true,"connected":true' <<<"$health"; then
+          if [[ -n "$health" ]] && grep -Eq '"gateway_connected"[[:space:]]*:[[:space:]]*true|"openclaw_fallback"[[:space:]]*:[[:space:]]*\{[^}]*"connected"[[:space:]]*:[[:space:]]*true' <<<"$health"; then
             recovery_required=false
           fi
 
           echo "ready=$ready" >> "$GITHUB_OUTPUT"
+          echo "auth_mode=$auth_mode" >> "$GITHUB_OUTPUT"
           echo "https_ready=$https_ready" >> "$GITHUB_OUTPUT"
           echo "recovery_required=$recovery_required" >> "$GITHUB_OUTPUT"
 
           echo "HOSTINGER_TARGET=$HOSTINGER_CONFIRMED_USER@$HOSTINGER_CONFIRMED_HOST ($HOSTINGER_CONFIRMED_HOSTNAME)"
-          if [[ "$ready" == true ]]; then
-            echo "HOSTINGER_OPENCLAW_PREFLIGHT=READY"
-          else
-            echo "HOSTINGER_OPENCLAW_PREFLIGHT=WAITING_FOR_SSH_PRIVATE_KEY_ONLY"
-          fi
-          if [[ "$https_ready" == true ]]; then
-            echo "HOSTINGER_OPENCLAW_HTTPS_PREFLIGHT=READY"
-          else
-            echo "HOSTINGER_OPENCLAW_HTTPS_PREFLIGHT=OPTIONAL_NOT_READY"
-          fi
-          if [[ "$recovery_required" == true ]]; then
-            echo "HOSTINGER_OPENCLAW_RECOVERY=REQUIRED"
-          else
-            echo "HOSTINGER_OPENCLAW_RECOVERY=HEALTHY_NO_ACTION"
-          fi
+          echo "HOSTINGER_CONTROL_MODE=$auth_mode"
+          [[ "$ready" == true ]] && echo "HOSTINGER_OPENCLAW_PREFLIGHT=READY" || echo "HOSTINGER_OPENCLAW_PREFLIGHT=WAITING_FOR_AUTHORIZATION"
+          [[ "$https_ready" == true ]] && echo "HOSTINGER_OPENCLAW_HTTPS_PREFLIGHT=READY" || echo "HOSTINGER_OPENCLAW_HTTPS_PREFLIGHT=OPTIONAL_NOT_READY"
+          [[ "$recovery_required" == true ]] && echo "HOSTINGER_OPENCLAW_RECOVERY=REQUIRED" || echo "HOSTINGER_OPENCLAW_RECOVERY=HEALTHY_NO_ACTION"
 
   deploy:
     needs: preflight
     if: ${{ needs.preflight.outputs.ready == 'true' && (github.event_name != 'schedule' || needs.preflight.outputs.recovery_required == 'true') }}
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 35
     steps:
-      - name: Configure SSH
+      - id: control
+        name: Establish authorized Hostinger SSH control path
         env:
-          KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+          API_TOKEN: ${{ secrets.HOSTINGER_API_TOKEN }}
+          STORED_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
         run: |
           set -euo pipefail
           install -m 700 -d ~/.ssh
-          printf '%s\n' "$KEY" > ~/.ssh/hostinger
+
+          if [[ -n "$API_TOKEN" ]]; then
+            echo "Using official Hostinger API to provision an ephemeral SSH identity."
+
+            vms="$(curl --fail --silent --show-error \
+              -H "Authorization: Bearer $API_TOKEN" \
+              -H "Accept: application/json" \
+              "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines")"
+
+            VM_JSON="$vms" TARGET_IP="$HOSTINGER_CONFIRMED_HOST" TARGET_HOSTNAME="$HOSTINGER_CONFIRMED_HOSTNAME" python3 - <<'PY' > /tmp/vm_id
+          import json, os, sys
+          doc=json.loads(os.environ['VM_JSON'])
+          ip=os.environ['TARGET_IP']; hostname=os.environ['TARGET_HOSTNAME']
+          rows=doc.get('data', doc if isinstance(doc,list) else [])
+          def contains(obj, target):
+              if isinstance(obj, dict): return any(contains(v,target) for v in obj.values())
+              if isinstance(obj, list): return any(contains(v,target) for v in obj)
+              return str(obj)==target
+          matches=[r for r in rows if isinstance(r,dict) and (contains(r,ip) or contains(r,hostname))]
+          if len(matches)!=1:
+              print(f'Expected exactly one Hostinger VPS match, found {len(matches)}', file=sys.stderr)
+              sys.exit(2)
+          vm_id=matches[0].get('id')
+          if not vm_id:
+              print('Matched VPS has no id', file=sys.stderr); sys.exit(3)
+          print(vm_id)
+          PY
+            VM_ID="$(cat /tmp/vm_id)"
+            echo "Verified Hostinger VM id=$VM_ID for confirmed IP/hostname."
+
+            ssh-keygen -q -t ed25519 -N '' -f ~/.ssh/hostinger -C "sahjony-gha-${GITHUB_RUN_ID}"
+            PUB="$(cat ~/.ssh/hostinger.pub)"
+            create_payload="$(jq -n --arg name "SAHJONY GitHub ephemeral ${GITHUB_RUN_ID}" --arg key "$PUB" '{name:$name,key:$key}')"
+            created="$(curl --fail --silent --show-error \
+              -X POST \
+              -H "Authorization: Bearer $API_TOKEN" \
+              -H "Content-Type: application/json" \
+              -H "Accept: application/json" \
+              --data "$create_payload" \
+              "$HOSTINGER_API_BASE/api/vps/v1/public-keys")"
+            KEY_ID="$(jq -r '.id // .data.id // empty' <<<"$created")"
+            [[ "$KEY_ID" =~ ^[0-9]+$ ]] || { echo "Hostinger API did not return a valid public key id" >&2; exit 4; }
+            echo "key_id=$KEY_ID" >> "$GITHUB_OUTPUT"
+            echo "vm_id=$VM_ID" >> "$GITHUB_OUTPUT"
+            echo "ephemeral=true" >> "$GITHUB_OUTPUT"
+
+            attach_payload="$(jq -n --argjson id "$KEY_ID" '{ids:[$id]}')"
+            curl --fail --silent --show-error \
+              -X POST \
+              -H "Authorization: Bearer $API_TOKEN" \
+              -H "Content-Type: application/json" \
+              -H "Accept: application/json" \
+              --data "$attach_payload" \
+              "$HOSTINGER_API_BASE/api/vps/v1/public-keys/attach/$VM_ID" >/dev/null
+          else
+            echo "Using pre-authorized stored SSH identity."
+            printf '%s\n' "$STORED_KEY" > ~/.ssh/hostinger
+            chmod 600 ~/.ssh/hostinger
+            echo "ephemeral=false" >> "$GITHUB_OUTPUT"
+          fi
+
           chmod 600 ~/.ssh/hostinger
-          ssh-keyscan -H "$HOSTINGER_CONFIRMED_HOST" >> ~/.ssh/known_hosts
+          ssh-keyscan -T 10 -H "$HOSTINGER_CONFIRMED_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+
+          connected=false
+          for attempt in $(seq 1 12); do
+            if ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10 -i ~/.ssh/hostinger \
+              "$HOSTINGER_CONFIRMED_USER@$HOSTINGER_CONFIRMED_HOST" 'printf SAHJONY_HOSTINGER_SSH_OK' 2>/dev/null | grep -q SAHJONY_HOSTINGER_SSH_OK; then
+              connected=true
+              break
+            fi
+            echo "Waiting for Hostinger SSH key attachment (attempt $attempt/12)..."
+            sleep 10
+          done
+          [[ "$connected" == true ]] || { echo "Authorized SSH path could not be established" >&2; exit 5; }
+          echo "SAHJONY_HOSTINGER_AUTHORIZED_SSH=READY"
 
       - name: Run Hostinger authorization recovery agent
         env:
@@ -103,11 +177,16 @@ jobs:
           VERCEL_SCOPE: ${{ secrets.VERCEL_SCOPE }}
         run: |
           set -euo pipefail
-          ssh -o BatchMode=yes -o ConnectTimeout=15 -i ~/.ssh/hostinger "$HOSTINGER_CONFIRMED_USER@$HOSTINGER_CONFIRMED_HOST" \
-            "sudo env VERCEL_TOKEN='$VERCEL_TOKEN' VERCEL_SCOPE='${VERCEL_SCOPE:-juan-gonzalezs-projects-94b6dfe9}' bash -s" <<'REMOTE'
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 -i ~/.ssh/hostinger \
+            "$HOSTINGER_CONFIRMED_USER@$HOSTINGER_CONFIRMED_HOST" \
+            "env VERCEL_TOKEN='$VERCEL_TOKEN' VERCEL_SCOPE='${VERCEL_SCOPE:-juan-gonzalezs-projects-94b6dfe9}' bash -s" <<'REMOTE'
           set -euo pipefail
           tmp="$(mktemp -d)"
           trap 'rm -rf "$tmp"' EXIT
+          if ! command -v git >/dev/null 2>&1; then
+            apt-get update -y >/dev/null
+            apt-get install -y git curl ca-certificates >/dev/null
+          fi
           git clone --depth 1 --branch main https://github.com/SAHJONY/IMPORT-EXPORT--BUSINESS.git "$tmp/repo"
           chmod +x "$tmp/repo/openclaw/hostinger-24x7/authorization-recovery-agent.sh" "$tmp/repo/openclaw/hostinger-24x7/bootstrap-existing-openclaw.sh"
           REPO_DIR="$tmp/repo" "$tmp/repo/openclaw/hostinger-24x7/authorization-recovery-agent.sh"
@@ -120,10 +199,42 @@ jobs:
           EMAIL: ${{ secrets.LETSENCRYPT_EMAIL }}
         run: |
           set -euo pipefail
-          ssh -o BatchMode=yes -o ConnectTimeout=15 -i ~/.ssh/hostinger "$HOSTINGER_CONFIRMED_USER@$HOSTINGER_CONFIRMED_HOST" \
-            "sudo env OPENCLAW_DOMAIN='$DOMAIN' LETSENCRYPT_EMAIL='$EMAIL' bash /opt/sahjony-openclaw/repo/openclaw/hostinger-24x7/configure-https.sh"
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 -i ~/.ssh/hostinger \
+            "$HOSTINGER_CONFIRMED_USER@$HOSTINGER_CONFIRMED_HOST" \
+            "env OPENCLAW_DOMAIN='$DOMAIN' LETSENCRYPT_EMAIL='$EMAIL' bash /opt/sahjony-openclaw/repo/openclaw/hostinger-24x7/configure-https.sh"
 
       - name: Verify SAHJONY cloud health
         run: |
           set -euo pipefail
+          sleep 10
           curl --fail --silent --show-error https://www.sahjony.com/whatsapp/health | python3 -m json.tool
+
+      - name: Remove ephemeral SSH access
+        if: ${{ always() && steps.control.outputs.ephemeral == 'true' }}
+        env:
+          API_TOKEN: ${{ secrets.HOSTINGER_API_TOKEN }}
+          KEY_ID: ${{ steps.control.outputs.key_id }}
+        run: |
+          set +e
+          if [[ -f ~/.ssh/hostinger.pub && -f ~/.ssh/hostinger ]]; then
+            PUB_B64="$(base64 -w0 ~/.ssh/hostinger.pub)"
+            ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10 -i ~/.ssh/hostinger \
+              "$HOSTINGER_CONFIRMED_USER@$HOSTINGER_CONFIRMED_HOST" \
+              "PUB_B64='$PUB_B64' python3 - <<'PY'
+          import base64, os
+          from pathlib import Path
+          p=Path('/root/.ssh/authorized_keys')
+          if p.exists():
+              target=base64.b64decode(os.environ['PUB_B64']).decode().strip()
+              lines=p.read_text().splitlines()
+              p.write_text('\\n'.join(x for x in lines if x.strip()!=target) + ('\\n' if lines else ''))
+          PY" >/dev/null 2>&1
+          fi
+          if [[ "$KEY_ID" =~ ^[0-9]+$ && -n "$API_TOKEN" ]]; then
+            curl --silent --show-error -X DELETE \
+              -H "Authorization: Bearer $API_TOKEN" \
+              -H "Accept: application/json" \
+              "$HOSTINGER_API_BASE/api/vps/v1/public-keys/$KEY_ID" >/dev/null
+          fi
+          rm -f ~/.ssh/hostinger ~/.ssh/hostinger.pub
+          echo "SAHJONY_HOSTINGER_EPHEMERAL_ACCESS_REMOVED=1"
