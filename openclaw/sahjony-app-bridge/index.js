@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
+
 function compactMedia(media) {
   if (!Array.isArray(media)) return [];
   return media.slice(0, 20).map((item) => {
@@ -12,6 +13,13 @@ function compactMedia(media) {
     };
   });
 }
+
+function senderFromSessionKey(sessionKey) {
+  const value = String(sessionKey || "");
+  const match = value.match(/:whatsapp:(?:direct|group):([^:]+)$/i);
+  return match ? match[1] : void 0;
+}
+
 var index_default = definePluginEntry({
   id: "sahjony-app-bridge",
   name: "SAHJONY Application Bridge",
@@ -30,6 +38,7 @@ var index_default = definePluginEntry({
       api.logger.error("SAHJONY_APP_BRIDGE_SECRET must contain at least 24 characters; bridge disabled");
       return;
     }
+
     async function signedRequest(path, method, payload) {
       const body = payload === void 0 ? "" : JSON.stringify(payload);
       const timestamp = String(Math.floor(Date.now() / 1e3));
@@ -45,34 +54,31 @@ var index_default = definePluginEntry({
         body: method === "POST" ? body : void 0,
         signal: AbortSignal.timeout(15e3)
       });
-      if (!response.ok) {
-        throw new Error(`SAHJONY bridge HTTP ${response.status}`);
-      }
+      if (!response.ok) throw new Error(`SAHJONY bridge HTTP ${response.status}`);
       return response;
     }
+
     async function postEvent(payload) {
       try {
         await signedRequest("/whatsapp/openclaw/events", "POST", payload);
+        return true;
       } catch (error) {
         api.logger.warn(`SAHJONY event synchronization failed: ${error instanceof Error ? error.message : "unknown error"}`);
+        return false;
       }
     }
+
     async function heartbeat() {
       let connected = false;
       let gatewayVersion;
       try {
-        const probe = await api.runtime.system.runCommandWithTimeout(
-          "openclaw",
-          ["channels", "status", "--probe"],
-          { timeoutMs: 2e4 }
-        );
-        const output = `${probe.stdout || ""}
-${probe.stderr || ""}`;
-        connected = /whatsapp[\s\S]{0,240}\bconnected\b/i.test(output) || /\blinked,\s*running,\s*connected\b/i.test(output);
+        const probe = await api.runtime.system.runCommandWithTimeout("openclaw", ["channels", "status", "--probe"], { timeoutMs: 2e4 });
+        const output = `${probe.stdout || ""}\n${probe.stderr || ""}`;
+        connected = /whatsapp[\s\S]{0,400}\bconnected\b/i.test(output) || /\blinked,\s*running,\s*connected\b/i.test(output);
         const version = await api.runtime.system.runCommandWithTimeout("openclaw", ["--version"], { timeoutMs: 1e4 });
         gatewayVersion = String(version.stdout || "").trim().slice(0, 80) || void 0;
-      } catch {
-        connected = false;
+      } catch (error) {
+        api.logger.warn(`SAHJONY gateway probe failed: ${error instanceof Error ? error.message : "unknown error"}`);
       }
       try {
         await signedRequest("/whatsapp/openclaw/heartbeat", "POST", {
@@ -88,6 +94,7 @@ ${probe.stderr || ""}`;
         api.logger.warn(`SAHJONY heartbeat failed: ${error instanceof Error ? error.message : "unknown error"}`);
       }
     }
+
     async function acknowledge(command, status, providerMessageId, error) {
       await signedRequest("/whatsapp/openclaw/outbox/ack", "POST", {
         command_id: command.command_id,
@@ -97,6 +104,7 @@ ${probe.stderr || ""}`;
         error: error?.slice(0, 1e3)
       });
     }
+
     async function pollOutbox() {
       if (stopped || polling) return;
       polling = true;
@@ -105,26 +113,11 @@ ${probe.stderr || ""}`;
         const data = await response.json();
         for (const command of data.commands || []) {
           try {
-            const sent = await api.runtime.system.runCommandWithTimeout(
-              "openclaw",
-              [
-                "message",
-                "send",
-                "--channel",
-                "whatsapp",
-                "--account",
-                command.account_id || accountId,
-                "--target",
-                command.recipient,
-                "--message",
-                command.body,
-                "--json"
-              ],
-              { timeoutMs: 45e3 }
-            );
-            if (sent.code !== 0) {
-              throw new Error(String(sent.stderr || `OpenClaw exited with ${sent.code}`).slice(0, 1e3));
-            }
+            const sent = await api.runtime.system.runCommandWithTimeout("openclaw", [
+              "message", "send", "--channel", "whatsapp", "--account", command.account_id || accountId,
+              "--target", command.recipient, "--message", command.body, "--json"
+            ], { timeoutMs: 45e3 });
+            if (sent.code !== 0) throw new Error(String(sent.stderr || `OpenClaw exited with ${sent.code}`).slice(0, 1e3));
             let messageId;
             try {
               const parsed = JSON.parse(String(sent.stdout || "{}"));
@@ -143,6 +136,7 @@ ${probe.stderr || ""}`;
         polling = false;
       }
     }
+
     api.on("message_received", async (event, ctx) => {
       if (ctx.channel !== "whatsapp" && ctx.messageProvider !== "whatsapp") return;
       await postEvent({
@@ -155,10 +149,37 @@ ${probe.stderr || ""}`;
         content: String(event.content || "").slice(0, 4096),
         message_type: Array.isArray(event.media) && event.media.length ? "media" : "text",
         account_id: accountId,
-        timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+        timestamp: new Date().toISOString(),
         media: compactMedia(event.media)
       });
     });
+
+    // OpenClaw 2026.8.x runs this hook on the actual user turn before the model.
+    // It is a second, durable synchronization path for WhatsApp inbound messages
+    // so CRM capture does not depend only on the observer-style message_received hook.
+    api.on("before_agent_reply", async (event, ctx) => {
+      const sessionKey = String(ctx.sessionKey || "");
+      if (!sessionKey.includes(":whatsapp:")) return;
+      const content = String(event.cleanedBody || "").trim().slice(0, 4096);
+      if (!content) return;
+      const sender = senderFromSessionKey(sessionKey);
+      const fingerprint = crypto.createHash("sha256").update(`${ctx.runId || ""}|${sessionKey}|${content}`).digest("hex").slice(0, 32);
+      await postEvent({
+        event_id: `turn:${fingerprint}`,
+        direction: "inbound",
+        message_id: `turn:${fingerprint}`,
+        sender_id: sender,
+        thread_id: sessionKey,
+        content,
+        message_type: "text",
+        account_id: accountId,
+        timestamp: new Date().toISOString(),
+        media: []
+      });
+      // Returning no handled result preserves the normal OpenClaw model reply.
+      return void 0;
+    }, { eligibleTriggers: ["user"], timeoutMs: 12e3 });
+
     api.on("message_sent", async (event, ctx) => {
       if (ctx.channel !== "whatsapp" && ctx.messageProvider !== "whatsapp") return;
       await postEvent({
@@ -171,21 +192,19 @@ ${probe.stderr || ""}`;
         message_type: "text",
         account_id: accountId,
         status: event.success === false ? "failed" : "sent",
-        timestamp: (/* @__PURE__ */ new Date()).toISOString()
+        timestamp: new Date().toISOString()
       });
     });
+
     api.on("gateway_start", async () => {
       stopped = false;
       await heartbeat();
       await pollOutbox();
-      heartbeatTimer = setInterval(() => {
-        void heartbeat();
-      }, 12e4);
-      pollTimer = setInterval(() => {
-        void pollOutbox();
-      }, pollIntervalMs);
+      heartbeatTimer = setInterval(() => { void heartbeat(); }, 12e4);
+      pollTimer = setInterval(() => { void pollOutbox(); }, pollIntervalMs);
       api.logger.info("SAHJONY application bridge started");
     });
+
     api.on("gateway_stop", async () => {
       stopped = true;
       if (heartbeatTimer) clearInterval(heartbeatTimer);
@@ -194,6 +213,4 @@ ${probe.stderr || ""}`;
     });
   }
 });
-export {
-  index_default as default
-};
+export { index_default as default };
