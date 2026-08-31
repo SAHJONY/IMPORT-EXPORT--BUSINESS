@@ -7,11 +7,12 @@ from business_communications_director_api import app as communications_director_
 from google_calendar_transport_api import app as calendar_transport_app
 from whatsapp_sales_channel_api import app as whatsapp_sales_app
 from whatsapp_rfq_execution_api import app as whatsapp_rfq_execution_app
+from whatsapp_relationship_memory_api import app as whatsapp_relationship_memory_app
 from business_os_api import app as business_os_app
 from business_os_executor_api import app as business_os_executor_app
 from global_deal_decision_api import app as global_deal_decision_app
 
-app = FastAPI(title="SAHJONY Global Trade Email Agent", version="2.4.0", docs_url=None, redoc_url=None)
+app = FastAPI(title="SAHJONY Global Trade Email Agent", version="2.5.0", docs_url=None, redoc_url=None)
 
 AUTO_ACTIONS = [
     "triage and classify inbound business email",
@@ -22,6 +23,8 @@ AUTO_ACTIONS = [
     "route messages to the appropriate SAHJONY business department",
     "coordinate routine meetings, calendar invitations, rescheduling and reminders",
     "carry conversation context across email, WhatsApp, voice and calendar",
+    "maintain durable relationship memory for WhatsApp contacts and suppress repeated discovery questions",
+    "use progressive discovery with no more than two missing questions per conversational turn",
     "create and route enterprise missions across business departments",
     "execute routine reversible business missions through a durable action queue",
     "verify execution evidence before marking missions complete",
@@ -47,7 +50,7 @@ def email_agent_health():
     return {
         "status": "ok",
         "service": "sahjony-global-trade-email-agent",
-        "version": "2.4.0",
+        "version": "2.5.0",
         "canonical_domain": CANONICAL_DOMAIN,
         "departments": len(DEPARTMENTS),
         "mode": "24_7_agentic_business_communications",
@@ -56,6 +59,10 @@ def email_agent_health():
         "autonomous_follow_up": True,
         "calendar_management": True,
         "whatsapp_sales_brain": True,
+        "whatsapp_relationship_memory_360": True,
+        "whatsapp_progressive_discovery": True,
+        "whatsapp_repeat_question_suppression": True,
+        "whatsapp_relationship_memory_route": "/whatsapp/relationship-memory",
         "whatsapp_rfq_execution": True,
         "rfq_execution_route": "/whatsapp/sales/leads/{lead_id}/rfq/execute",
         "business_os_orchestrator": True,
@@ -85,7 +92,7 @@ def email_agent_policy():
             for d in DEPARTMENTS
         ],
         "channels": ["email", "whatsapp", "voice", "calendar", "web", "internal"],
-        "principle": "Autonomously execute routine reversible work through durable queues, verified RFQ workstreams and GO/HOLD/BLOCK evidence gates; fail closed before financial, contractual, legal, compliance-release, destructive or other binding commitments.",
+        "principle": "Autonomously execute routine reversible work through durable queues, relationship memory, progressive discovery, verified RFQ workstreams and GO/HOLD/BLOCK evidence gates; fail closed before financial, contractual, legal, compliance-release, destructive or other binding commitments.",
     }
 
 
@@ -95,6 +102,7 @@ app.include_router(communications_director_app.router)
 app.include_router(calendar_transport_app.router)
 app.include_router(whatsapp_sales_app.router)
 app.include_router(whatsapp_rfq_execution_app.router)
+app.include_router(whatsapp_relationship_memory_app.router)
 app.include_router(global_deal_decision_app.router)
 app.include_router(business_os_app.router, prefix="/email-agent")
 app.include_router(business_os_executor_app.router, prefix="/email-agent")
