@@ -6,8 +6,9 @@ from business_email_registry import DEPARTMENTS, CANONICAL_DOMAIN
 from business_communications_director_api import app as communications_director_app
 from google_calendar_transport_api import app as calendar_transport_app
 from whatsapp_sales_channel_api import app as whatsapp_sales_app
+from business_os_api import app as business_os_app
 
-app = FastAPI(title="SAHJONY Global Trade Email Agent", version="2.0.0", docs_url=None, redoc_url=None)
+app = FastAPI(title="SAHJONY Global Trade Email Agent", version="2.1.0", docs_url=None, redoc_url=None)
 
 AUTO_ACTIONS = [
     "triage and classify inbound business email",
@@ -18,6 +19,8 @@ AUTO_ACTIONS = [
     "route messages to the appropriate SAHJONY business department",
     "coordinate routine meetings, calendar invitations, rescheduling and reminders",
     "carry conversation context across email, WhatsApp, voice and calendar",
+    "create and route enterprise missions across business departments",
+    "manage routine reversible business and application operations until resolution or a governance gate",
 ]
 
 OWNER_APPROVAL_REQUIRED = [
@@ -27,6 +30,7 @@ OWNER_APPROVAL_REQUIRED = [
     "supplier selection or commitment that creates legal or financial obligation",
     "country, compliance, sanctions, import/export or shipment release",
     "legal determinations or admissions",
+    "critical production deletion or security-control bypass",
     "credentials, API keys, passwords or other secrets",
 ]
 
@@ -36,7 +40,7 @@ def email_agent_health():
     return {
         "status": "ok",
         "service": "sahjony-global-trade-email-agent",
-        "version": "2.0.0",
+        "version": "2.1.0",
         "canonical_domain": CANONICAL_DOMAIN,
         "departments": len(DEPARTMENTS),
         "mode": "24_7_agentic_business_communications",
@@ -45,6 +49,7 @@ def email_agent_health():
         "autonomous_follow_up": True,
         "calendar_management": True,
         "whatsapp_sales_brain": True,
+        "business_os_orchestrator": True,
         "cross_channel_context": True,
         "department_routing": True,
         "high_risk_actions": "owner_approval_required",
@@ -64,12 +69,13 @@ def email_agent_policy():
             for d in DEPARTMENTS
         ],
         "channels": ["email", "whatsapp", "voice", "calendar", "web", "internal"],
-        "principle": "Autonomously manage routine business communications and scheduling; fail closed before financial, contractual, legal, compliance-release or other binding commitments.",
+        "principle": "Autonomously manage routine business communications, scheduling and reversible operations; fail closed before financial, contractual, legal, compliance-release, destructive or other binding commitments.",
     }
 
 
-# Mount advanced communication capabilities inside the already-deployed unified API
-# so Vercel Hobby remains within its 12-function deployment limit.
+# Mount advanced communication and enterprise-orchestration capabilities inside the
+# already-deployed unified API so Vercel Hobby remains within its 12-function limit.
 app.include_router(communications_director_app.router)
 app.include_router(calendar_transport_app.router)
 app.include_router(whatsapp_sales_app.router)
+app.include_router(business_os_app.router)
