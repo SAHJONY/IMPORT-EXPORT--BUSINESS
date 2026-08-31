@@ -45,14 +45,25 @@ for raw in p.read_text().splitlines():
 PY
 )"
 
+# Sensitive Vercel values are intentionally not recoverable via env pull.
+# Detect the redacted placeholder and securely prompt for the local OpenClaw copy.
 if [[ -z "$NVIDIA_KEY" ]]; then
   echo "ERROR: NVIDIA_API_KEY is not present in Vercel Production env."
   exit 3
 fi
 
+if [[ "$NVIDIA_KEY" == \[SENSITIVE* || "$NVIDIA_KEY" == SENSITIVE* || "$NVIDIA_KEY" == *"Sensitive values cannot be read"* ]]; then
+  echo "Vercel confirms NVIDIA_API_KEY exists, but it is Sensitive and cannot be read back."
+  echo "Enter the same NVIDIA NIM key once to synchronize the local OpenClaw runtime."
+  IFS= read -r -s -p "NVIDIA API key (nvapi-...): " NVIDIA_KEY
+  echo
+fi
+
 if [[ "$NVIDIA_KEY" != nvapi-* ]]; then
-  echo "ERROR: Vercel NVIDIA_API_KEY does not look like a hosted NVIDIA NIM key (expected nvapi- prefix)."
-  echo "Detected prefix only: ${NVIDIA_KEY:0:8}"
+  echo "ERROR: NVIDIA_API_KEY does not look like a hosted NVIDIA NIM key (expected nvapi- prefix)."
+  if [[ -n "$NVIDIA_KEY" ]]; then
+    echo "Detected prefix only: ${NVIDIA_KEY:0:8}"
+  fi
   exit 4
 fi
 
