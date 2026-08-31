@@ -1,0 +1,80 @@
+name: Hostinger OpenClaw 24x7
+
+on:
+  workflow_dispatch:
+    inputs:
+      configure_https:
+        description: "Configure HTTPS after bootstrap"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hostinger-openclaw-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Validate required Hostinger connection secrets
+        env:
+          HOST: ${{ secrets.HOSTINGER_SSH_HOST }}
+          USER: ${{ secrets.HOSTINGER_SSH_USER }}
+          KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$HOST" || { echo "HOSTINGER_SSH_HOST is not configured"; exit 1; }
+          test -n "$USER" || { echo "HOSTINGER_SSH_USER is not configured"; exit 1; }
+          test -n "$KEY" || { echo "HOSTINGER_SSH_PRIVATE_KEY is not configured"; exit 1; }
+
+      - name: Configure SSH
+        env:
+          HOST: ${{ secrets.HOSTINGER_SSH_HOST }}
+          KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$KEY" > ~/.ssh/hostinger
+          chmod 600 ~/.ssh/hostinger
+          ssh-keyscan -H "$HOST" >> ~/.ssh/known_hosts
+
+      - name: Bootstrap existing OpenClaw on Hostinger
+        env:
+          HOST: ${{ secrets.HOSTINGER_SSH_HOST }}
+          USER: ${{ secrets.HOSTINGER_SSH_USER }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_SCOPE: ${{ secrets.VERCEL_SCOPE }}
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/hostinger "$USER@$HOST" \
+            "sudo env VERCEL_TOKEN='$VERCEL_TOKEN' VERCEL_SCOPE='${VERCEL_SCOPE:-juan-gonzalezs-projects-94b6dfe9}' bash -s" <<'REMOTE'
+          set -euo pipefail
+          tmp="$(mktemp -d)"
+          trap 'rm -rf "$tmp"' EXIT
+          git clone --depth 1 --branch main https://github.com/SAHJONY/IMPORT-EXPORT--BUSINESS.git "$tmp/repo"
+          bash "$tmp/repo/openclaw/hostinger-24x7/bootstrap-existing-openclaw.sh"
+          REMOTE
+
+      - name: Configure HTTPS
+        if: ${{ inputs.configure_https }}
+        env:
+          HOST: ${{ secrets.HOSTINGER_SSH_HOST }}
+          USER: ${{ secrets.HOSTINGER_SSH_USER }}
+          DOMAIN: ${{ secrets.OPENCLAW_HOSTINGER_DOMAIN }}
+          EMAIL: ${{ secrets.LETSENCRYPT_EMAIL }}
+        run: |
+          set -euo pipefail
+          test -n "$DOMAIN" || { echo "OPENCLAW_HOSTINGER_DOMAIN is not configured"; exit 1; }
+          test -n "$EMAIL" || { echo "LETSENCRYPT_EMAIL is not configured"; exit 1; }
+          ssh -i ~/.ssh/hostinger "$USER@$HOST" \
+            "sudo env OPENCLAW_DOMAIN='$DOMAIN' LETSENCRYPT_EMAIL='$EMAIL' bash /opt/sahjony-openclaw/repo/openclaw/hostinger-24x7/configure-https.sh"
+
+      - name: Verify SAHJONY cloud health
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error https://www.sahjony.com/whatsapp/health | python3 -m json.tool
