@@ -12,8 +12,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 OPENCLAW_STATE_DIR="${OPENCLAW_STATE_DIR:-${HOME}/.openclaw}"
 OPENCLAW_ENV_FILE="${OPENCLAW_STATE_DIR}/.env"
+OPENCLAW_CONFIG="${OPENCLAW_STATE_DIR}/openclaw.json"
 
-for command_name in curl openclaw openssl node npx; do
+for command_name in curl openclaw openssl node npx python3; do
   if ! command -v "${command_name}" >/dev/null 2>&1; then
     echo "Missing required command: ${command_name}" >&2
     exit 1
@@ -59,7 +60,6 @@ fi
 
 if ! openclaw plugins install --help 2>&1 | grep -Fq -- "--acknowledge-install-policy-warning"; then
   echo "The installed OpenClaw release still lacks granular install-policy acknowledgements." >&2
-  echo "The official isolated OpenClaw installation did not provide the required policy support." >&2
   exit 1
 fi
 
@@ -107,20 +107,40 @@ npx --yes vercel@59.10.0 link \
   --project "${VERCEL_PROJECT}" \
   --scope "${VERCEL_SCOPE}"
 
-if ! openclaw plugins inspect codex --runtime --json >/dev/null 2>&1; then
-  openclaw plugins install @openclaw/codex --force
-fi
-openclaw plugins enable codex --accept-capabilities
+# Ensure only the plugins required for the WhatsApp application bridge are allowlisted.
+python3 - "${OPENCLAW_CONFIG}" <<'PY'
+import json, sys
+from pathlib import Path
+p = Path(sys.argv[1])
+d = json.loads(p.read_text()) if p.exists() else {}
+plugins = d.setdefault("plugins", {})
+allow = plugins.get("allow") or []
+if not isinstance(allow, list):
+    allow = []
+for pid in ["whatsapp", "sahjony-app-bridge", "sahjony-agent-diagnostics", "sahjony-whatsapp-reply-rescue"]:
+    if pid not in allow:
+        allow.append(pid)
+plugins["allow"] = allow
+p.write_text(json.dumps(d, indent=2) + "\n")
+print("plugins.allow:", allow)
+PY
+
+# Codex is intentionally NOT required for the bridge. WhatsApp runs on the OpenClaw default runtime.
 if ! openclaw plugins inspect whatsapp --runtime --json >/dev/null 2>&1; then
-  openclaw plugins install clawhub:@openclaw/whatsapp --force
+  openclaw plugins install npm:@openclaw/whatsapp@2026.8.1 \
+    --force \
+    --pin \
+    --acknowledge-install-policy-warning
 fi
 openclaw plugins enable whatsapp --accept-capabilities
+
 if ! openclaw plugins inspect sahjony-app-bridge --runtime --json >/dev/null 2>&1; then
   openclaw plugins install "${SCRIPT_DIR}" \
     --force \
     --acknowledge-install-policy-warning
 fi
 openclaw plugins enable sahjony-app-bridge
+
 openclaw config set commands.ownerAllowFrom \
   '["whatsapp:+12816628581"]' \
   --strict-json
@@ -175,7 +195,7 @@ for attempt in {1..12}; do
   if [[ -n "${HEALTH_RESPONSE}" ]]; then
     printf '%s\n' "${HEALTH_RESPONSE}"
   fi
-  if [[ "${HEALTH_RESPONSE}" == *'"gateway_connected":true'* ]]; then
+  if [[ "${HEALTH_RESPONSE}" == *'"gateway_connected":true'* && "${HEALTH_RESPONSE}" == *'"send_ready":true'* ]]; then
     BRIDGE_READY=1
     break
   fi
@@ -183,7 +203,7 @@ for attempt in {1..12}; do
 done
 if [[ "${BRIDGE_READY}" -ne 1 ]]; then
   if [[ "${DEPLOYMENT_REFRESHED}" -eq 1 ]]; then
-    echo "The SAHJONY application did not receive a connected gateway heartbeat within 60 seconds." >&2
+    echo "The SAHJONY application did not receive a send-ready connected gateway heartbeat within 60 seconds." >&2
     exit 1
   fi
   echo "Local OpenClaw is ready; the application bridge is waiting for the Vercel deployment limit to reset." >&2
@@ -198,4 +218,4 @@ else
   echo "Vercel production refresh is pending because the account deployment limit was reached."
 fi
 echo "Verify after deployment: ${APP_URL}/whatsapp/health"
-echo "Keep a MacBook connected to power with its lid open, or use a supported clamshell setup."
+echo "APP_WHATSAPP_BRIDGE_READY=${BRIDGE_READY}"
