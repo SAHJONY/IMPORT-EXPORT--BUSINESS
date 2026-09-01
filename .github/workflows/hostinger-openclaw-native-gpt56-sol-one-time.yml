@@ -1,0 +1,156 @@
+name: Hostinger OpenClaw Native GPT-5.6 Sol One-Time
+
+on:
+  push:
+    branches:
+      - ops/openclaw-native-gpt56-sol-execute
+    paths:
+      - '.github/workflows/hostinger-openclaw-native-gpt56-sol-one-time.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hostinger-vm-767852-mutation
+  cancel-in-progress: false
+
+jobs:
+  migrate-runtime:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      HOST: '69.62.68.67'
+      USER: root
+      PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+      APP_URL: https://www.sahjony.com
+    steps:
+      - name: Prepare authenticated SSH
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "$PRIVATE_KEY" ]] || { echo HOSTINGER_SSH_PRIVATE_KEY_MISSING=1 >&2; exit 2; }
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/hostinger-native-runtime
+          chmod 600 ~/.ssh/hostinger-native-runtime
+          ssh-keygen -y -f ~/.ssh/hostinger-native-runtime >/dev/null
+          ready=false
+          for i in $(seq 1 24); do
+            if ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=6 -i ~/.ssh/hostinger-native-runtime "$USER@$HOST" 'printf HOSTINGER_NATIVE_RUNTIME_SSH_READY' 2>/dev/null | grep -q HOSTINGER_NATIVE_RUNTIME_SSH_READY; then
+              ready=true
+              break
+            fi
+            echo "ssh_probe=$i/24"
+            sleep 5
+          done
+          [[ "$ready" == true ]] || { echo HOSTINGER_NATIVE_RUNTIME_SSH_UNAVAILABLE=1 >&2; exit 3; }
+
+      - name: Replace Codex harness with native OpenClaw runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 -i ~/.ssh/hostinger-native-runtime "$USER@$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+
+          cid="$(docker ps --format '{{.ID}} {{.Names}} {{.Image}}' | awk 'tolower($0) ~ /openclaw/ {print $1; exit}')"
+          if [[ -z "$cid" ]]; then
+            cid="$(docker ps -a --format '{{.ID}} {{.Names}} {{.Image}}' | awk 'tolower($0) ~ /openclaw/ {print $1; exit}')"
+          fi
+          [[ -n "$cid" ]] || { echo OPENCLAW_CONTAINER_NOT_FOUND=1 >&2; exit 10; }
+
+          cname="$(docker inspect --format '{{.Name}}' "$cid" | sed 's#^/##')"
+          docker inspect -f '{{.State.Running}}' "$cid" | grep -qx true || docker start "$cid" >/dev/null
+          sleep 3
+          docker exec "$cid" sh -lc 'command -v openclaw >/dev/null 2>&1' || { echo OPENCLAW_CLI_NOT_FOUND=1 >&2; exit 11; }
+
+          state_dir=''
+          for path in /root/.openclaw /home/node/.openclaw /home/openclaw/.openclaw; do
+            if docker exec "$cid" sh -lc "test -d '$path'" >/dev/null 2>&1; then state_dir="$path"; break; fi
+          done
+          [[ -n "$state_dir" ]] || state_dir=/root/.openclaw
+
+          install -d -m 700 /opt/sahjony-openclaw/backups
+          stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+          backup="/opt/sahjony-openclaw/backups/pre-native-gpt56-sol-${stamp}.tar.gz"
+          docker exec "$cid" sh -lc "tar -C '$state_dir' -czf - ." > "$backup"
+          chmod 600 "$backup"
+          echo "OPENCLAW_PRECHANGE_BACKUP_CREATED=$backup"
+          echo "OPENCLAW_CONTAINER=$cname"
+
+          echo '=== BEFORE ==='
+          docker exec "$cid" openclaw --version || true
+          docker exec "$cid" openclaw config get agents.defaults.model --json || true
+          docker exec "$cid" openclaw config get models.providers.openai.agentRuntime --json || true
+          docker exec "$cid" openclaw config get agents.defaults.models --json || true
+          docker exec "$cid" openclaw plugins list --enabled || true
+          docker exec "$cid" openclaw models status || true
+
+          # Clean stale legacy runtime/session configuration first.
+          docker exec "$cid" openclaw doctor --fix || true
+
+          # Canonical OpenAI model plus an explicit exact-model native runtime policy.
+          docker exec "$cid" openclaw models set openai/gpt-5.6-sol
+          docker exec "$cid" openclaw config set agents.defaults.models '{"openai/gpt-5.6-sol":{"agentRuntime":{"id":"openclaw"}}}' --strict-json --merge
+
+          # Provider-wide native runtime is a secondary guard; exact model policy above wins.
+          docker exec "$cid" openclaw config set models.providers.openai.agentRuntime '{"id":"openclaw"}' --strict-json || true
+
+          # Explicitly disable Codex. If it is a managed install, remove its persisted registration too.
+          docker exec "$cid" openclaw config set plugins.entries.codex.enabled false --strict-json || true
+          docker exec "$cid" openclaw plugins disable codex || true
+          docker exec "$cid" openclaw plugins uninstall codex --dry-run || true
+          docker exec "$cid" openclaw plugins uninstall codex --force || true
+
+          docker exec "$cid" openclaw config validate
+          docker update --restart unless-stopped "$cid" >/dev/null
+          docker restart "$cid" >/dev/null
+
+          ready=false
+          for i in $(seq 1 24); do
+            if docker exec "$cid" openclaw config validate >/dev/null 2>&1; then ready=true; break; fi
+            echo "gateway_restart_probe=$i/24"
+            sleep 5
+          done
+          [[ "$ready" == true ]] || { echo OPENCLAW_POST_RESTART_NOT_READY=1 >&2; exit 12; }
+
+          echo '=== AFTER ==='
+          docker exec "$cid" openclaw config get agents.defaults.model --json
+          docker exec "$cid" openclaw config get models.providers.openai.agentRuntime --json || true
+          docker exec "$cid" openclaw config get agents.defaults.models --json
+          docker exec "$cid" openclaw plugins list --enabled || true
+          docker exec "$cid" openclaw models status || true
+
+          # Fail closed if the exact GPT-5.6 Sol policy is not native OpenClaw.
+          exact="$(docker exec "$cid" openclaw config get agents.defaults.models --json 2>/dev/null || true)"
+          printf '%s' "$exact" | grep -q 'gpt-5.6-sol' || { echo GPT56_SOL_NOT_CONFIGURED=1 >&2; exit 13; }
+          printf '%s' "$exact" | grep -q '"id"[[:space:]]*:[[:space:]]*"openclaw"' || { echo GPT56_SOL_NATIVE_RUNTIME_NOT_CONFIGURED=1 >&2; exit 14; }
+
+          enabled="$(docker exec "$cid" openclaw plugins list --enabled 2>/dev/null || true)"
+          if printf '%s\n' "$enabled" | grep -Eiq '(^|[^a-z])codex([^a-z]|$)'; then
+            echo CODEX_STILL_ENABLED=1 >&2
+            exit 15
+          fi
+
+          # Internal model turn: no WhatsApp delivery; confirms the selected runtime can answer.
+          set +e
+          test_out="$(docker exec "$cid" openclaw agent --agent main --message 'Reply exactly SAHJONY_NATIVE_RUNTIME_OK' --timeout 120 --json 2>&1)"
+          test_rc=$?
+          set -e
+          printf '%s\n' "$test_out" | tail -n 40
+          if [[ $test_rc -ne 0 ]]; then
+            echo OPENCLAW_NATIVE_AGENT_TEST_FAILED=1 >&2
+            exit 16
+          fi
+          printf '%s' "$test_out" | grep -q 'SAHJONY_NATIVE_RUNTIME_OK' || { echo OPENCLAW_NATIVE_AGENT_TEST_UNEXPECTED_REPLY=1 >&2; exit 17; }
+
+          echo '=== CLOUD HEALTH ==='
+          curl -fsS --max-time 20 https://www.sahjony.com/whatsapp/health || true
+          echo
+          echo SAHJONY_OPENCLAW_NATIVE_GPT56_SOL_READY=1
+          echo CODEX_HARNESS_ACTIVE=0
+          REMOTE
+
+      - name: Cleanup SSH key
+        if: always()
+        shell: bash
+        run: rm -f ~/.ssh/hostinger-native-runtime
