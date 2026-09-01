@@ -1,0 +1,176 @@
+name: Hostinger OpenClaw Stable Upgrade
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_version:
+        description: Exact OpenClaw stable version required
+        required: true
+        default: '2026.8.1'
+        type: string
+      confirm_upgrade:
+        description: Type UPGRADE_OPENCLAW_2026_8_1 to permit mutation
+        required: true
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hostinger-vm-767852-mutation
+  cancel-in-progress: false
+
+env:
+  HOSTINGER_HOST: '69.62.68.67'
+  HOSTINGER_USER: root
+  TARGET_VERSION: '2026.8.1'
+
+jobs:
+  upgrade:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      SSH_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Validate guarded request
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ '${{ inputs.target_version }}' == "$TARGET_VERSION" ]] || {
+            echo "Only exact stable target $TARGET_VERSION is permitted" >&2
+            exit 2
+          }
+          [[ '${{ inputs.confirm_upgrade }}' == UPGRADE_OPENCLAW_2026_8_1 ]] || {
+            echo 'confirm_upgrade must equal UPGRADE_OPENCLAW_2026_8_1' >&2
+            exit 3
+          }
+          [[ -n "$SSH_KEY" ]] || {
+            echo HOSTINGER_SSH_PRIVATE_KEY_MISSING=1 >&2
+            exit 4
+          }
+
+      - name: Prepare SSH
+        shell: bash
+        run: |
+          set -euo pipefail
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/hostinger-openclaw-upgrade
+          chmod 600 ~/.ssh/hostinger-openclaw-upgrade
+
+      - name: Upgrade retained OpenClaw container
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -tt \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            -o ConnectTimeout=12 \
+            -i ~/.ssh/hostinger-openclaw-upgrade \
+            "$HOSTINGER_USER@$HOSTINGER_HOST" \
+            "TARGET_VERSION='$TARGET_VERSION' bash -s" <<'REMOTE'
+          set -euo pipefail
+
+          [[ "$(id -u)" -eq 0 ]] || { echo RUN_AS_ROOT_REQUIRED=1 >&2; exit 10; }
+          command -v docker >/dev/null 2>&1 || { echo DOCKER_MISSING=1 >&2; exit 11; }
+          systemctl is-active --quiet docker.service || { echo DOCKER_INACTIVE=1 >&2; exit 12; }
+
+          mapfile -t ids < <(docker ps -aq | while read -r id; do
+            [[ -n "$id" ]] || continue
+            meta="$(docker inspect "$id" --format '{{.Name}}|{{.Config.Image}}|{{json .Config.Labels}}' 2>/dev/null || true)"
+            grep -Eqi 'openclaw|open[-_ ]?claw|claw' <<<"$meta" && echo "$id" || true
+          done)
+          ((${#ids[@]} == 1)) || {
+            echo "OPENCLAW_CONTAINER_COUNT=${#ids[@]}" >&2
+            docker ps -a --format '{{.ID}}|{{.Names}}|{{.Image}}|{{.Status}}' || true
+            exit 13
+          }
+          cid="${ids[0]}"
+
+          [[ "$(docker inspect "$cid" --format '{{.State.Running}}')" == true ]] || {
+            echo OPENCLAW_CONTAINER_NOT_RUNNING=1 >&2
+            exit 14
+          }
+
+          current="$(docker exec "$cid" sh -lc 'openclaw --version' | tr -d '\r' | tail -n1)"
+          echo "OPENCLAW_VERSION_BEFORE=$current"
+          echo "OPENCLAW_CONTAINER=$cid"
+          docker inspect "$cid" --format 'OPENCLAW_IMAGE={{.Config.Image}} RESTART={{.HostConfig.RestartPolicy.Name}}'
+
+          stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+          backup="/root/openclaw-backups/pre-${TARGET_VERSION}-${stamp}.tgz"
+          docker exec "$cid" sh -lc 'mkdir -p /root/openclaw-backups'
+          docker exec "$cid" sh -lc "tar -czf '$backup' /root/.openclaw /root/.config/openclaw 2>/dev/null || tar -czf '$backup' /root/.openclaw 2>/dev/null || true"
+          docker exec "$cid" sh -lc "test -s '$backup'" || {
+            echo VERIFIED_OPENCLAW_STATE_BACKUP_FAILED=1 >&2
+            exit 15
+          }
+          echo "OPENCLAW_BACKUP=$backup"
+
+          docker exec "$cid" sh -lc 'openclaw update status --json' || true
+          docker exec "$cid" sh -lc 'openclaw update --dry-run --json' || {
+            echo OPENCLAW_UPDATE_DRY_RUN_FAILED=1 >&2
+            exit 16
+          }
+
+          docker exec "$cid" sh -lc 'openclaw update --channel stable --yes --json'
+
+          after_update="$(docker exec "$cid" sh -lc 'openclaw --version' | tr -d '\r' | tail -n1)"
+          echo "OPENCLAW_VERSION_AFTER_UPDATE=$after_update"
+          grep -Fq "$TARGET_VERSION" <<<"$after_update" || {
+            echo "OPENCLAW_VERSION_MISMATCH expected=$TARGET_VERSION actual=$after_update" >&2
+            exit 17
+          }
+
+          docker exec \
+            -e OPENCLAW_SERVICE_REPAIR_POLICY=external \
+            "$cid" sh -lc 'openclaw doctor --fix --non-interactive'
+          docker exec "$cid" sh -lc 'openclaw config validate'
+
+          docker update --restart unless-stopped "$cid" >/dev/null
+          docker restart "$cid" >/dev/null
+          sleep 12
+
+          [[ "$(docker inspect "$cid" --format '{{.State.Running}}')" == true ]] || {
+            echo OPENCLAW_CONTAINER_FAILED_AFTER_RESTART=1 >&2
+            docker logs --tail 200 "$cid" || true
+            exit 18
+          }
+
+          docker exec "$cid" sh -lc 'openclaw gateway status --deep'
+          docker exec "$cid" sh -lc 'openclaw channels status --probe'
+
+          final="$(docker exec "$cid" sh -lc 'openclaw --version' | tr -d '\r' | tail -n1)"
+          grep -Fq "$TARGET_VERSION" <<<"$final" || exit 19
+          restart_policy="$(docker inspect "$cid" --format '{{.HostConfig.RestartPolicy.Name}}')"
+          [[ "$restart_policy" == unless-stopped || "$restart_policy" == always ]] || {
+            echo "BAD_RESTART_POLICY=$restart_policy" >&2
+            exit 20
+          }
+
+          echo "OPENCLAW_VERSION_FINAL=$final"
+          echo "OPENCLAW_RESTART_POLICY=$restart_policy"
+          echo SAHJONY_OPENCLAW_STABLE_UPGRADE=READY
+          REMOTE
+
+      - name: Verify SAHJONY WhatsApp health
+        shell: bash
+        run: |
+          set -euo pipefail
+          body="$(curl -fsS --retry 4 --retry-delay 3 https://www.sahjony.com/whatsapp/health)"
+          printf '%s\n' "$body"
+          python3 - "$body" <<'PY'
+          import json, sys
+          d=json.loads(sys.argv[1])
+          assert d.get('gateway_connected') is True, d
+          assert d.get('heartbeat_fresh') is True, d
+          if 'send_ready' in d:
+              assert d.get('send_ready') is True, d
+          print('SAHJONY_WHATSAPP_HEALTH=READY')
+          PY
+
+      - name: Remove SSH key material
+        if: always()
+        shell: bash
+        run: rm -f ~/.ssh/hostinger-openclaw-upgrade ~/.ssh/hostinger-openclaw-upgrade.pub
