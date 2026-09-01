@@ -17,7 +17,7 @@ concurrency:
 env:
   HOST: '69.62.68.67'
   SSH_USER: root
-  RETEST_REASON: 'classify-secret-format-without-exposure'
+  RETEST_REASON: 'user-updated-private-key-2026-09-01'
 
 jobs:
   test_auth:
