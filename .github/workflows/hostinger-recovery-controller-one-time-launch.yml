@@ -42,6 +42,7 @@ jobs:
           gh workflow run hostinger-recovery-controller.yml \
             --repo "$REPO" \
             --ref main \
-            -f mode=full
+            -f mode=full \
+            -f confirm_mutation=RECOVER
 
           echo "SAHJONY_RECOVERY_CONTROLLER_DISPATCHED=1"
