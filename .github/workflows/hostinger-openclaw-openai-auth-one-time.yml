@@ -1,0 +1,94 @@
+name: Hostinger OpenClaw OpenAI Auth One-Time
+
+on:
+  push:
+    branches:
+      - ops/openclaw-native-gpt56-sol-execute
+    paths:
+      - '.github/workflows/hostinger-openclaw-openai-auth-one-time.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hostinger-vm-767852-mutation
+  cancel-in-progress: false
+
+jobs:
+  configure-auth:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      HOST: '69.62.68.67'
+      USER: root
+      PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+    steps:
+      - name: Require existing secured credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "$PRIVATE_KEY" ]] || { echo HOSTINGER_SSH_PRIVATE_KEY_MISSING=1 >&2; exit 2; }
+          [[ -n "$OPENAI_API_KEY" ]] || { echo OPENAI_API_KEY_GITHUB_SECRET_MISSING=1 >&2; exit 20; }
+          case "$OPENAI_API_KEY" in
+            sk-*) ;;
+            *) echo OPENAI_API_KEY_FORMAT_UNEXPECTED=1 >&2; exit 21 ;;
+          esac
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/hostinger-openai-auth
+          chmod 600 ~/.ssh/hostinger-openai-auth
+          ssh-keygen -y -f ~/.ssh/hostinger-openai-auth >/dev/null
+          umask 077
+          printf '%s\n' "$OPENAI_API_KEY" > /tmp/sahjony-openai-api-key
+
+      - name: Install API-key profile without exposing secret
+        shell: bash
+        run: |
+          set -euo pipefail
+          SSH=(ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 -i ~/.ssh/hostinger-openai-auth)
+          SCP=(scp -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 -i ~/.ssh/hostinger-openai-auth)
+          "${SSH[@]}" "$USER@$HOST" 'printf HOSTINGER_OPENAI_AUTH_SSH_READY'
+          "${SCP[@]}" /tmp/sahjony-openai-api-key "$USER@$HOST:/root/.sahjony-openai-api-key"
+          "${SSH[@]}" "$USER@$HOST" 'chmod 600 /root/.sahjony-openai-api-key && bash -s' <<'REMOTE'
+          set -euo pipefail
+          trap 'rm -f /root/.sahjony-openai-api-key' EXIT
+          cid="$(docker ps --format '{{.ID}} {{.Names}} {{.Image}}' | awk 'tolower($0) ~ /openclaw/ {print $1; exit}')"
+          [[ -n "$cid" ]] || { echo OPENCLAW_CONTAINER_NOT_RUNNING=1 >&2; exit 10; }
+          docker exec "$cid" sh -lc 'command -v openclaw >/dev/null 2>&1' || { echo OPENCLAW_CLI_NOT_FOUND=1 >&2; exit 11; }
+
+          cat /root/.sahjony-openai-api-key | docker exec -i "$cid" openclaw models auth paste-api-key --provider openai --profile-id openai:manual
+          docker exec "$cid" openclaw models auth order set --provider openai openai:manual
+          docker exec "$cid" openclaw models set openai/gpt-5.6-sol
+          docker exec "$cid" openclaw config set agents.defaults.models '{"openai/gpt-5.6-sol":{"agentRuntime":{"id":"openclaw"}}}' --strict-json --merge
+          docker exec "$cid" openclaw config set models.providers.openai.agentRuntime '{"id":"openclaw"}' --strict-json
+          docker exec "$cid" openclaw config set plugins.entries.codex.enabled false --strict-json || true
+          docker exec "$cid" openclaw plugins disable codex || true
+          docker exec "$cid" openclaw config validate
+          docker update --restart unless-stopped "$cid" >/dev/null
+          docker restart "$cid" >/dev/null
+          sleep 10
+
+          echo '=== AUTH METADATA ==='
+          docker exec "$cid" openclaw models auth list --provider openai --json
+          docker exec "$cid" openclaw models status
+
+          set +e
+          test_out="$(docker exec "$cid" openclaw agent --agent main --message 'Reply exactly SAHJONY_NATIVE_RUNTIME_OK' --timeout 120 --json 2>&1)"
+          test_rc=$?
+          set -e
+          printf '%s\n' "$test_out" | tail -n 50
+          [[ $test_rc -eq 0 ]] || { echo OPENAI_NATIVE_AGENT_TEST_FAILED=1 >&2; exit 12; }
+          printf '%s' "$test_out" | grep -q 'SAHJONY_NATIVE_RUNTIME_OK' || { echo OPENAI_NATIVE_AGENT_REPLY_MISMATCH=1 >&2; exit 13; }
+
+          echo SAHJONY_OPENAI_NATIVE_AUTH=READY
+          echo SAHJONY_GPT56_SOL_NATIVE_RUNTIME=READY
+          echo CODEX_HARNESS_ACTIVE=0
+          REMOTE
+
+      - name: Cleanup transient credential files
+        if: always()
+        shell: bash
+        run: |
+          rm -f /tmp/sahjony-openai-api-key ~/.ssh/hostinger-openai-auth
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 -i ~/.ssh/hostinger-openai-auth "$USER@$HOST" 'rm -f /root/.sahjony-openai-api-key' >/dev/null 2>&1 || true
