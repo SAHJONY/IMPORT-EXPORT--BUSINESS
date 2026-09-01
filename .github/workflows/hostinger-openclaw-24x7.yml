@@ -209,21 +209,45 @@ jobs:
             "$HOSTINGER_CONFIRMED_USER@$HOSTINGER_CONFIRMED_HOST" \
             "env OPENCLAW_DOMAIN='$DOMAIN' LETSENCRYPT_EMAIL='$EMAIL' bash /opt/sahjony-openclaw/repo/openclaw/hostinger-24x7/configure-https.sh"
 
-      - name: Verify Hostinger OpenClaw health
+      - name: Verify Hostinger Docker and WhatsApp runtime
         run: |
           set -euo pipefail
-          ready=false
-          for attempt in $(seq 1 18); do
-            body="$(curl -fsS --max-time 20 https://www.sahjony.com/whatsapp/health 2>/dev/null || true)"
-            printf '%s\n' "$body"
-            if grep -Eq '"hostinger_independent_runtime"[[:space:]]*:[[:space:]]*true|"hostinger_openclaw"[[:space:]]*:[[:space:]]*\{[^}]*"connected"[[:space:]]*:[[:space:]]*true' <<<"$body"; then
-              ready=true
-              break
-            fi
-            sleep 10
-          done
-          [[ "$ready" == true ]] || { echo "HOSTINGER_OPENCLAW_HEALTH_NOT_CONFIRMED=1" >&2; exit 6; }
-          echo "SAHJONY_HOSTINGER_OPENCLAW_24X7=READY"
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 -i ~/.ssh/hostinger \
+            "$HOSTINGER_CONFIRMED_USER@$HOSTINGER_CONFIRMED_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cid="$(docker ps -aq | while read -r id; do
+            line="$(docker inspect "$id" --format '{{.Name}}|{{.Config.Image}}' 2>/dev/null || true)"
+            grep -Eqi 'openclaw|claw' <<<"$line" && { echo "$id"; break; }
+          done)"
+          [[ -n "$cid" ]] || { echo 'HOSTINGER_OPENCLAW_CONTAINER_NOT_FOUND=1' >&2; exit 21; }
+          status="$(docker inspect "$cid" --format '{{.State.Status}}')"
+          restart="$(docker inspect "$cid" --format '{{.HostConfig.RestartPolicy.Name}}')"
+          echo "HOSTINGER_OPENCLAW_CONTAINER=$cid status=$status restart=$restart"
+          [[ "$status" == "running" ]] || { echo 'HOSTINGER_OPENCLAW_NOT_RUNNING=1' >&2; exit 22; }
+          [[ "$restart" == "unless-stopped" || "$restart" == "always" ]] || { echo 'HOSTINGER_OPENCLAW_RESTART_POLICY_INVALID=1' >&2; exit 23; }
+          if docker exec "$cid" sh -lc 'command -v openclaw >/dev/null 2>&1'; then
+            probe="$(docker exec "$cid" openclaw channels status --probe 2>&1 || true)"
+            printf '%s\n' "$probe"
+            grep -Eqi 'whatsapp.*connected|linked,.*running,.*connected' <<<"$probe" || { echo 'HOSTINGER_WHATSAPP_NOT_CONNECTED=1' >&2; exit 24; }
+          else
+            echo 'HOSTINGER_OPENCLAW_CLI_NOT_EXPOSED=1' >&2
+            exit 25
+          fi
+          systemctl is-active --quiet sahjony-openclaw-watchdog.timer || { echo 'HOSTINGER_WATCHDOG_NOT_ACTIVE=1' >&2; exit 26; }
+          systemctl is-active --quiet sahjony-openclaw-backup.timer || { echo 'HOSTINGER_BACKUP_TIMER_NOT_ACTIVE=1' >&2; exit 27; }
+          echo 'SAHJONY_HOSTINGER_LOCAL_RUNTIME=READY'
+          REMOTE
+
+      - name: Verify public Hostinger heartbeat when API marker is deployed
+        run: |
+          set -euo pipefail
+          body="$(curl -fsS --max-time 20 https://www.sahjony.com/whatsapp/health 2>/dev/null || true)"
+          printf '%s\n' "$body"
+          if grep -Eq '"hostinger_independent_runtime"[[:space:]]*:[[:space:]]*true|"hostinger_openclaw"[[:space:]]*:[[:space:]]*\{[^}]*"connected"[[:space:]]*:[[:space:]]*true' <<<"$body"; then
+            echo 'SAHJONY_HOSTINGER_PUBLIC_HEARTBEAT=READY'
+          else
+            echo 'SAHJONY_HOSTINGER_PUBLIC_MARKER_PENDING_VERCEL_DEPLOY=1'
+          fi
 
       - name: Remove ephemeral SSH access
         if: ${{ always() && steps.control.outputs.ephemeral == 'true' }}
