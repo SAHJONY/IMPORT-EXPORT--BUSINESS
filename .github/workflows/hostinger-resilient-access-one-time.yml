@@ -1,6 +1,6 @@
 name: Hostinger Resilient Access and OpenClaw Recovery One-Time
 
-# Run marker: normalize/fallback management identity before touching Hostinger.
+# Run marker: corrected broker reporting; normalize/fallback management identity.
 # A malformed durable secret must never block an otherwise authorized Recovery
 # session; the workflow can safely use a per-run ephemeral key and seed it into
 # the mounted Kali filesystem through the canonical Recovery controller.
