@@ -1,0 +1,41 @@
+name: Hostinger OpenClaw 24x7 V2 Reporter
+
+on:
+  workflow_run:
+    workflows:
+      - Hostinger OpenClaw 24x7 V2
+    types: [completed]
+
+permissions:
+  actions: read
+  contents: read
+  issues: write
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish V2 recovery report
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+          CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh api "repos/$REPO/actions/runs/$RUN_ID/jobs?per_page=100" > /tmp/jobs.json
+          {
+            echo '## Hostinger OpenClaw 24x7 V2 report'
+            echo
+            echo "- Run ID: \`$RUN_ID\`"
+            echo "- Run: $RUN_URL"
+            echo "- Conclusion: **$CONCLUSION**"
+            echo '- VPS: `767852` / `69.62.68.67` / `srv767852.hstgr.cloud`'
+            echo
+            echo '### Gates'
+            jq -r '.jobs[] | .name as $job | .steps[] | "- " + $job + " / " + .name + ": **" + (.conclusion // .status // "unknown") + "**"' /tmp/jobs.json
+            echo
+            echo 'No tokens, passwords, SSH private keys, or bridge-secret values are included.'
+          } >/tmp/report.md
+          gh issue comment 54 --repo "$REPO" --body-file /tmp/report.md
