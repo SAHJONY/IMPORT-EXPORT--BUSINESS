@@ -7,6 +7,8 @@ LOG=/var/log/sahjony-whatsapp-guardian.log
 APP_URL="${SAHJONY_APP_URL:-https://www.sahjony.com}"
 APP_URL="${APP_URL%/}"
 GATEWAY_ID="${SAHJONY_GATEWAY_ID:-hostinger-vps}"
+ORCHESTRATOR_SOURCE="$ROOT/whatsapp-24x7-orchestrator.sh"
+ORCHESTRATOR_RAW_URL="${SAHJONY_ORCHESTRATOR_RAW_URL:-https://raw.githubusercontent.com/SAHJONY/IMPORT-EXPORT--BUSINESS/main/openclaw/hostinger-24x7/whatsapp-24x7-orchestrator.sh}"
 
 fail(){ echo "GUARDIAN_INSTALL_FAIL=$*" >&2; exit 1; }
 
@@ -14,7 +16,24 @@ command -v docker >/dev/null 2>&1 || fail docker_missing
 command -v curl >/dev/null 2>&1 || fail curl_missing
 command -v python3 >/dev/null 2>&1 || fail python3_missing
 [[ -r "$ROOT/whatsapp-guardian.sh" ]] || fail guardian_source_missing
-[[ -r "$ROOT/whatsapp-24x7-orchestrator.sh" ]] || fail orchestrator_source_missing
+
+# Canonical V7 historically copied the guardian+installer only. Bootstrap the
+# orchestrator from this repository when it is not included in that older copy
+# step. This bypasses the brittle deployment dependency, not WhatsApp auth.
+if [[ ! -r "$ORCHESTRATOR_SOURCE" ]]; then
+  tmp="$(mktemp)"
+  curl -fsSL --retry 3 --connect-timeout 10 --max-time 30 "$ORCHESTRATOR_RAW_URL" -o "$tmp" || {
+    rm -f "$tmp"
+    fail orchestrator_source_unavailable
+  }
+  grep -q 'SAHJONY LLC WhatsApp 24/7 local orchestrator' "$tmp" || {
+    rm -f "$tmp"
+    fail orchestrator_source_unexpected
+  }
+  install -m 0755 "$tmp" "$ORCHESTRATOR_SOURCE"
+  rm -f "$tmp"
+  echo SAHJONY_WHATSAPP_ORCHESTRATOR_BOOTSTRAPPED=1
+fi
 
 find_openclaw_container(){
   docker ps -aq | while read -r id; do
@@ -75,7 +94,7 @@ grep -Eqi 'whatsapp.*(connected|ready|active|healthy|ok)|(connected|ready|active
   || fail whatsapp_not_connected_after_bridge_config
 
 install -m 0755 "$ROOT/whatsapp-guardian.sh" /usr/local/sbin/sahjony-whatsapp-guardian
-install -m 0755 "$ROOT/whatsapp-24x7-orchestrator.sh" /usr/local/sbin/sahjony-whatsapp-orchestrator
+install -m 0755 "$ORCHESTRATOR_SOURCE" /usr/local/sbin/sahjony-whatsapp-orchestrator
 
 cat >/etc/systemd/system/sahjony-whatsapp-guardian.service <<'EOF'
 [Unit]
