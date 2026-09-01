@@ -33,69 +33,34 @@ jobs:
           printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/hostinger-whatsapp-only
           chmod 600 ~/.ssh/hostinger-whatsapp-only
 
-      - name: Activate only the existing native WhatsApp channel
+      - name: Activate WhatsApp only
         shell: bash
         run: |
           set -euo pipefail
           ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 \
             -i ~/.ssh/hostinger-whatsapp-only "$USER@$HOST" 'bash -s' <<'REMOTE'
           set -euo pipefail
-
           STATE=/var/lib/sahjony-openclaw-state
           CONFIG="$STATE/openclaw.json"
           HOME_DIR=/home/node
 
           oc() {
-            env HOME="$HOME_DIR" \
-              OPENCLAW_HOME="$HOME_DIR" \
-              OPENCLAW_STATE_DIR="$STATE" \
-              OPENCLAW_CONFIG_PATH="$CONFIG" \
-              openclaw "$@"
+            env HOME="$HOME_DIR" OPENCLAW_HOME="$HOME_DIR" OPENCLAW_STATE_DIR="$STATE" OPENCLAW_CONFIG_PATH="$CONFIG" openclaw "$@"
           }
-
           redact() {
             sed -E 's/(token|secret|key|password|authorization)[=:][^[:space:]]+/\1=[REDACTED]/Ig'
           }
-
-          file_value() {
-            local key="$1" file="$2"
-            [[ -r "$file" ]] || return 1
-            python3 - "$key" "$file" <<'PY'
-import pathlib, sys
-key, path = sys.argv[1], pathlib.Path(sys.argv[2])
-for raw in path.read_text(errors='ignore').splitlines():
-    line = raw.strip()
-    if not line or line.startswith('#') or '=' not in line:
-        continue
-    k, v = line.split('=', 1)
-    if k.strip() == key:
-        v = v.strip()
-        if len(v) >= 2 and v[0] == v[-1] and v[0] in ('"', "'"):
-            v = v[1:-1]
-        print(v, end='')
-        raise SystemExit(0)
-raise SystemExit(1)
-PY
-          }
-
-          recover_existing_env_value() {
-            local key="$1" value="" f cid
-            for f in "$STATE/.env" /opt/sahjony-openclaw/.env /root/.openclaw/.env /home/node/.openclaw/.env; do
-              value="$(file_value "$key" "$f" 2>/dev/null || true)"
-              [[ -n "$value" ]] && { printf '%s' "$value"; return 0; }
-            done
-            if command -v docker >/dev/null 2>&1; then
-              cid="$(docker ps -aq 2>/dev/null | while read -r id; do
-                meta="$(docker inspect "$id" --format '{{.Name}}|{{.Config.Image}}' 2>/dev/null || true)"
-                grep -Eqi 'openclaw|open[-_]?claw|claw' <<<"$meta" && { echo "$id"; break; } || true
-              done)"
-              if [[ -n "$cid" ]]; then
-                value="$(docker inspect "$cid" --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null \
-                  | sed -n "s/^${key}=//p" | head -n1)"
-                [[ -n "$value" ]] && { printf '%s' "$value"; return 0; }
-              fi
-            fi
-            return 1
+          old_container_value() {
+            local key="$1" cid value
+            command -v docker >/dev/null 2>&1 || return 1
+            cid="$(docker ps -aq 2>/dev/null | while read -r id; do
+              meta="$(docker inspect "$id" --format '{{.Name}}|{{.Config.Image}}' 2>/dev/null || true)"
+              grep -Eqi 'openclaw|open[-_]?claw|claw' <<<"$meta" && { echo "$id"; break; } || true
+            done)"
+            [[ -n "$cid" ]] || return 1
+            value="$(docker inspect "$cid" --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null | sed -n "s/^${key}=//p" | head -n1)"
+            [[ -n "$value" ]] || return 1
+            printf '%s' "$value"
           }
 
           echo WHATSAPP_ONLY_SCOPE=1
@@ -112,13 +77,13 @@ PY
           cfg_token="$(oc config get gateway.auth.token 2>/dev/null || true)"
           cfg_password="$(oc config get gateway.auth.password 2>/dev/null || true)"
           if [[ "$bind" == "lan" && -z "$cfg_token" && -z "$cfg_password" ]]; then
-            token="$(recover_existing_env_value OPENCLAW_GATEWAY_TOKEN || true)"
+            token="$(old_container_value OPENCLAW_GATEWAY_TOKEN || true)"
             if [[ -n "$token" ]]; then
               oc config set gateway.auth.token "$token" >/dev/null
               unset token
               echo OPENCLAW_EXISTING_GATEWAY_AUTH_RESTORED=token
             else
-              password="$(recover_existing_env_value OPENCLAW_GATEWAY_PASSWORD || true)"
+              password="$(old_container_value OPENCLAW_GATEWAY_PASSWORD || true)"
               if [[ -n "$password" ]]; then
                 oc config set gateway.auth.password "$password" >/dev/null
                 unset password
@@ -150,7 +115,6 @@ PY
 
           after="$(oc channels status --channel whatsapp --probe 2>&1 || true)"
           printf '%s\n' "$after" | redact | tail -n 120
-
           if printf '%s\n' "$after" | grep -Eiq 'whatsapp.*(linked.*running.*connected|connected|ready|healthy)|(linked.*running.*connected).*whatsapp'; then
             echo SAHJONY_WHATSAPP_NATIVE_CONNECTED=1
           elif printf '%s\n' "$after" | grep -Eiq 'not linked|qr required|login required'; then
