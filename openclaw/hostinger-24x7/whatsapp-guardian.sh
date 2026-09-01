@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# SAHJONY WhatsApp 24/7 Guardian — Hostinger/OpenClaw only.
-# Hostinger-local runtime is authoritative; public health is secondary evidence.
-# Repairs only reversible runtime state and never bypasses WhatsApp pairing/2FA/auth.
-# When the local linked session is healthy, publish the signed Hostinger heartbeat
-# expected by the application. The bridge secret is discovered locally and is never
-# printed or persisted by this script.
+# SAHJONY WhatsApp 24/7 Guardian — Hostinger/OpenClaw authoritative.
+# Local linked-device health is the readiness gate. Vercel/public health and
+# heartbeat publication are secondary telemetry only and can never take a
+# healthy Hostinger WhatsApp session offline.
+#
+# This script never bypasses WhatsApp pairing/2FA/auth, never deletes session
+# state, and never creates a replacement OpenClaw container.
 
 LOCK=/run/lock/sahjony-whatsapp-guardian.lock
 STATE_DIR=/var/lib/sahjony-whatsapp-guardian
@@ -21,6 +22,8 @@ BUSINESS_NAME="${SAHJONY_WHATSAPP_BUSINESS_NAME:-SAHJONY LLC}"
 BUSINESS_NUMBER="${SAHJONY_WHATSAPP_BUSINESS_NUMBER:-+12816628581}"
 MODEL="${SAHJONY_REASONING_MODEL:-gpt-5.6-sol}"
 OPENCLAW_ROOT="${SAHJONY_OPENCLAW_ROOT:-/opt/sahjony-openclaw}"
+ORCHESTRATOR="${SAHJONY_WHATSAPP_ORCHESTRATOR:-/usr/local/sbin/sahjony-whatsapp-orchestrator}"
+
 mkdir -p "$STATE_DIR" "$(dirname "$LOCK")"
 exec 9>"$LOCK"
 flock -n 9 || exit 0
@@ -58,7 +61,7 @@ run_openclaw(){
 
 probe_ready(){
   local id="$1" probe
-  probe="$(run_openclaw "$id" channels status --probe 2>&1 || true)"
+  probe="$(run_openclaw "$id" channels status --channel whatsapp --probe 2>&1 || run_openclaw "$id" channels status --probe 2>&1 || true)"
   printf '%s\n' "$probe"
   grep -Eqi 'whatsapp.*(connected|ready|active|healthy|ok)|(connected|ready|active|healthy).*whatsapp|linked,[[:space:]]*running,[[:space:]]*connected' <<<"$probe"
 }
@@ -93,10 +96,16 @@ fi
 
 if [[ "$healthy" == true ]]; then
   date -Is > "$STATE_DIR/last-good"
+  chmod 600 "$STATE_DIR/last-good" 2>/dev/null || true
   echo SAHJONY_HOSTINGER_LOCAL_RUNTIME=READY
 else
   echo SAHJONY_HOSTINGER_LOCAL_RUNTIME=DEGRADED
   exit 2
+fi
+
+# Generate/update the machine-readable local status when the new orchestrator is installed.
+if [[ -x "$ORCHESTRATOR" ]]; then
+  "$ORCHESTRATOR" status || true
 fi
 
 container_env_value(){
@@ -124,28 +133,34 @@ host_env_value(){
   awk -F= -v k="$key" '$1==k{sub(/^[^=]*=/,""); gsub(/^["'"'"']|["'"'"']$/,""); print; exit}' "$file"
 }
 
-BRIDGE_SECRET="${OPENCLAW_APP_BRIDGE_SECRET:-${SAHJONY_APP_BRIDGE_SECRET:-}}"
-if [[ -z "$BRIDGE_SECRET" ]]; then
-  for key in OPENCLAW_APP_BRIDGE_SECRET SAHJONY_APP_BRIDGE_SECRET; do
-    BRIDGE_SECRET="$(container_env_value "$key")"
-    [[ -n "$BRIDGE_SECRET" ]] && break
-    BRIDGE_SECRET="$(container_file_env_value "$key")"
-    [[ -n "$BRIDGE_SECRET" ]] && break
-    BRIDGE_SECRET="$(host_env_value "$key" 2>/dev/null || true)"
-    [[ -n "$BRIDGE_SECRET" ]] && break
+publish_heartbeat(){
+  local bridge_secret='' discovered key gateway_version payload timestamp signature response code
+  bridge_secret="${OPENCLAW_APP_BRIDGE_SECRET:-${SAHJONY_APP_BRIDGE_SECRET:-}}"
+  if [[ -z "$bridge_secret" ]]; then
+    for key in OPENCLAW_APP_BRIDGE_SECRET SAHJONY_APP_BRIDGE_SECRET; do
+      bridge_secret="$(container_env_value "$key")"
+      [[ -n "$bridge_secret" ]] && break
+      bridge_secret="$(container_file_env_value "$key")"
+      [[ -n "$bridge_secret" ]] && break
+      bridge_secret="$(host_env_value "$key" 2>/dev/null || true)"
+      [[ -n "$bridge_secret" ]] && break
+    done
+  fi
+
+  if [[ ${#bridge_secret} -lt 24 ]]; then
+    echo SAHJONY_HOSTINGER_HEARTBEAT=SKIPPED_SECRET_UNAVAILABLE
+    return 0
+  fi
+
+  for key in SAHJONY_WHATSAPP_BUSINESS_NUMBER WHATSAPP_BUSINESS_NUMBER; do
+    discovered="$(container_env_value "$key")"
+    [[ -n "$discovered" ]] || discovered="$(container_file_env_value "$key")"
+    [[ -n "$discovered" ]] || discovered="$(host_env_value "$key" 2>/dev/null || true)"
+    if [[ -n "$discovered" ]]; then BUSINESS_NUMBER="$discovered"; break; fi
   done
-fi
-[[ ${#BRIDGE_SECRET} -ge 24 ]] || fail bridge_secret_unavailable
 
-for key in SAHJONY_WHATSAPP_BUSINESS_NUMBER WHATSAPP_BUSINESS_NUMBER; do
-  discovered="$(container_env_value "$key")"
-  [[ -n "$discovered" ]] || discovered="$(container_file_env_value "$key")"
-  [[ -n "$discovered" ]] || discovered="$(host_env_value "$key" 2>/dev/null || true)"
-  if [[ -n "$discovered" ]]; then BUSINESS_NUMBER="$discovered"; break; fi
-done
-
-GATEWAY_VERSION="$(run_openclaw "$ACTIVE_ID" --version 2>/dev/null | tr -d '\r' | head -n1 | head -c 80 || true)"
-PAYLOAD="$(python3 - "$GATEWAY_ID" "$ACCOUNT_ID" "$BUSINESS_NUMBER" "$BUSINESS_NAME" "$MODEL" "$GATEWAY_VERSION" <<'PY'
+  gateway_version="$(run_openclaw "$ACTIVE_ID" --version 2>/dev/null | tr -d '\r' | sed -n '1p' | cut -c1-80 || true)"
+  payload="$(python3 - "$GATEWAY_ID" "$ACCOUNT_ID" "$BUSINESS_NUMBER" "$BUSINESS_NAME" "$MODEL" "$gateway_version" <<'PY'
 import json, sys
 print(json.dumps({
     "gateway_id": sys.argv[1],
@@ -158,31 +173,35 @@ print(json.dumps({
 }, separators=(",", ":"), ensure_ascii=False))
 PY
 )"
-TIMESTAMP="$(date +%s)"
-SIGNATURE="$(BRIDGE_SECRET="$BRIDGE_SECRET" TIMESTAMP="$TIMESTAMP" PAYLOAD="$PAYLOAD" python3 - <<'PY'
+  timestamp="$(date +%s)"
+  signature="$(BRIDGE_SECRET="$bridge_secret" TIMESTAMP="$timestamp" PAYLOAD="$payload" python3 - <<'PY'
 import hashlib, hmac, os
 secret=os.environ["BRIDGE_SECRET"].encode()
 msg=(os.environ["TIMESTAMP"]+"."+os.environ["PAYLOAD"]).encode()
 print("sha256="+hmac.new(secret,msg,hashlib.sha256).hexdigest())
 PY
 )"
-unset BRIDGE_SECRET
+  unset bridge_secret
 
-response="$STATE_DIR/heartbeat-response.tmp"
-code="$(curl -sS -o "$response" -w '%{http_code}' -X POST "$APP_URL/whatsapp/openclaw/heartbeat" \
-  -H 'Accept: application/json' -H 'Content-Type: application/json' \
-  -H "X-SAHJONY-Timestamp: $TIMESTAMP" -H "X-SAHJONY-Signature: $SIGNATURE" \
-  --data-binary "$PAYLOAD" || true)"
-unset SIGNATURE
-if [[ "$code" != 200 ]]; then
-  echo "HOSTINGER_HEARTBEAT_HTTP=$code"
-  rm -f "$response"
-  exit 3
-fi
-mv "$response" "$STATE_DIR/heartbeat-response.json"
-echo SAHJONY_HOSTINGER_HEARTBEAT=PUBLISHED
+  response="$STATE_DIR/heartbeat-response.tmp"
+  code="$(curl -sS --max-time 15 -o "$response" -w '%{http_code}' -X POST "$APP_URL/whatsapp/openclaw/heartbeat" \
+    -H 'Accept: application/json' -H 'Content-Type: application/json' \
+    -H "X-SAHJONY-Timestamp: $timestamp" -H "X-SAHJONY-Signature: $signature" \
+    --data-binary "$payload" || true)"
+  unset signature
+  if [[ "$code" == 200 ]]; then
+    mv "$response" "$STATE_DIR/heartbeat-response.json"
+    echo SAHJONY_HOSTINGER_HEARTBEAT=PUBLISHED
+  else
+    rm -f "$response"
+    echo "SAHJONY_HOSTINGER_HEARTBEAT=DEFERRED_HTTP_${code:-000}"
+  fi
+  return 0
+}
 
-# Secondary observation: verify the application now recognizes this Hostinger runtime.
+# Telemetry is best effort. Local WhatsApp readiness above remains authoritative.
+publish_heartbeat || true
+
 if curl -fsS --max-time 15 "$APP_URL/whatsapp/health" > "$STATE_DIR/public-health.json.tmp" 2>/dev/null; then
   mv "$STATE_DIR/public-health.json.tmp" "$STATE_DIR/public-health.json"
   if python3 - "$STATE_DIR/public-health.json" <<'PY'
@@ -195,6 +214,11 @@ PY
   then
     echo SAHJONY_HOSTINGER_PUBLIC_GATE=READY
   else
-    echo SAHJONY_HOSTINGER_PUBLIC_GATE=STALE
+    echo SAHJONY_HOSTINGER_PUBLIC_GATE=STALE_SECONDARY_ONLY
   fi
+else
+  rm -f "$STATE_DIR/public-health.json.tmp"
+  echo SAHJONY_HOSTINGER_PUBLIC_GATE=UNREACHABLE_SECONDARY_ONLY
 fi
+
+exit 0
