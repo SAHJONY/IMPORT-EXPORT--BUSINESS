@@ -1,3 +1,4 @@
+# Registered; this commit triggers the one-time repair.
 name: Hostinger Codex Runtime Fix Once
 
 on:
