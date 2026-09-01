@@ -1,5 +1,6 @@
 name: Hostinger WhatsApp Activate Once
 
+# Re-armed after aligning Hostinger with the canonical OPENCLAW_APP_BRIDGE_SECRET.
 on:
   push:
     branches: [main]
