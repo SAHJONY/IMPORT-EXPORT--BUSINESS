@@ -1,0 +1,73 @@
+name: Hostinger Native OpenClaw Preflight One Time
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/hostinger-native-openclaw-preflight-one-time.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hostinger-vm-767852-mutation
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      HOST: '69.62.68.67'
+      USER: root
+      PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Prepare secure SSH
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "$PRIVATE_KEY" ]] || exit 2
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/hostinger-native-preflight
+          chmod 600 ~/.ssh/hostinger-native-preflight
+
+      - name: Audit native migration readiness
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -i ~/.ssh/hostinger-native-preflight "$USER@$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          echo "OS=$( . /etc/os-release; printf '%s-%s' "$ID" "$VERSION_ID" )"
+          echo "ARCH=$(uname -m)"
+          echo "NODE=$(node --version 2>/dev/null || echo missing)"
+          echo "NPM=$(npm --version 2>/dev/null || echo missing)"
+          echo "NATIVE_OPENCLAW_BIN=$(command -v openclaw 2>/dev/null || echo missing)"
+          echo "NATIVE_OPENCLAW_VERSION=$(openclaw --version 2>/dev/null | tail -n1 || echo missing)"
+          echo "NATIVE_SERVICE_ACTIVE=$(systemctl is-active openclaw-gateway.service 2>/dev/null || true)"
+          mapfile -t ids < <(docker ps -aq 2>/dev/null | while read -r id; do
+            name="$(docker inspect "$id" --format '{{.Name}}|{{.Config.Image}}' 2>/dev/null || true)"
+            grep -Eqi 'openclaw|open[-_]?claw|claw' <<<"$name" && echo "$id" || true
+          done)
+          echo "OPENCLAW_CONTAINER_COUNT=${#ids[@]}"
+          ((${#ids[@]} == 1)) || exit 10
+          cid="${ids[0]}"
+          docker inspect "$cid" --format 'OPENCLAW_CONTAINER_NAME={{.Name}}'
+          docker inspect "$cid" --format 'OPENCLAW_CONTAINER_IMAGE={{.Config.Image}}'
+          docker inspect "$cid" --format 'OPENCLAW_CONTAINER_RUNNING={{.State.Running}}'
+          docker inspect "$cid" --format 'OPENCLAW_CONTAINER_RESTART={{.HostConfig.RestartPolicy.Name}}'
+          echo 'OPENCLAW_CONTAINER_MOUNTS_BEGIN'
+          docker inspect "$cid" --format '{{range .Mounts}}{{.Type}}|{{.Source}}|{{.Destination}}{{println}}{{end}}'
+          echo 'OPENCLAW_CONTAINER_MOUNTS_END'
+          echo "CONTAINER_OPENCLAW_VERSION=$(docker exec "$cid" sh -lc 'openclaw --version' | tail -n1)"
+          docker exec "$cid" sh -lc 'openclaw config validate >/dev/null' && echo CONTAINER_CONFIG_VALID=true
+          docker exec "$cid" sh -lc 'openclaw gateway status --deep >/dev/null' && echo CONTAINER_GATEWAY_HEALTHY=true
+          echo "CONTAINER_STATE_DIR=$(docker exec "$cid" sh -lc 'test -d /root/.openclaw && echo present || echo missing')"
+          echo "CONTAINER_CONFIG_DIR=$(docker exec "$cid" sh -lc 'test -d /root/.config/openclaw && echo present || echo missing')"
+          echo SAHJONY_NATIVE_MIGRATION_PREFLIGHT=READY
+          REMOTE
+
+      - name: Cleanup SSH material
+        if: always()
+        shell: bash
+        run: rm -f ~/.ssh/hostinger-native-preflight
