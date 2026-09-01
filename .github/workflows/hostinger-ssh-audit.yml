@@ -12,6 +12,11 @@ on:
         description: Hostinger VPS ID (required only when the account has multiple VPS instances)
         required: false
         type: string
+      ensure_ssh_firewall:
+        description: Add and synchronize a TCP/22 rule on the active Hostinger firewall when missing
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -36,6 +41,7 @@ jobs:
         env:
           REPAIR_ACCESS: ${{ inputs.repair_access }}
           REQUESTED_VM_ID: ${{ inputs.vm_id }}
+          ENSURE_SSH_FIREWALL: ${{ inputs.ensure_ssh_firewall }}
         run: |
           set -euo pipefail
           umask 077
@@ -118,6 +124,50 @@ jobs:
                 "${api_root}/public-keys/attach/${target_vm_id}" >/dev/null
               echo "Registered and attached the GitHub deployment key to Hostinger VPS ${target_vm_id}." >> "${GITHUB_STEP_SUMMARY}"
               sleep 5
+            fi
+          fi
+
+          if [[ "${ENSURE_SSH_FIREWALL}" == "true" ]]; then
+            if [[ -z "${target_vm_id}" ]]; then
+              echo "Multiple VPS instances exist; rerun with an explicit vm_id." >> "${GITHUB_STEP_SUMMARY}"
+              exit 1
+            fi
+            firewall_id="$(jq -r --arg id "${target_vm_id}" '
+              (if type == "array" then . else (.data // []) end)[] |
+              select((.id | tostring) == $id) |
+              .firewall_group_id // empty
+            ' <<<"${vm_response}")"
+            if [[ -n "${firewall_id}" ]]; then
+              firewall_response="$(curl --fail --silent --show-error \
+                --header "${auth_header}" \
+                "${api_root}/firewall/${firewall_id}")"
+              if ! jq -e '
+                (.rules // []) | any(
+                  ((.protocol | ascii_upcase) == "TCP" or (.protocol | ascii_downcase) == "any") and
+                  (.source == "any") and
+                  ((.port == "22") or (.port == "any") or
+                   ((.port | test("^[0-9]+:[0-9]+$")) and
+                    ((.port | split(":")[0] | tonumber) <= 22) and
+                    ((.port | split(":")[1] | tonumber) >= 22)))
+                )
+              ' <<<"${firewall_response}" >/dev/null; then
+                rule_body='{"protocol":"TCP","port":"22","source":"any","source_detail":"any"}'
+                curl --fail --silent --show-error \
+                  --request POST \
+                  --header "${auth_header}" \
+                  --header 'Content-Type: application/json' \
+                  --data "${rule_body}" \
+                  "${api_root}/firewall/${firewall_id}/rules" >/dev/null
+                echo "Added TCP/22 to Hostinger firewall ${firewall_id}." >> "${GITHUB_STEP_SUMMARY}"
+              fi
+              curl --fail --silent --show-error \
+                --request POST \
+                --header "${auth_header}" \
+                "${api_root}/firewall/${firewall_id}/sync/${target_vm_id}" >/dev/null
+              echo "Synchronized Hostinger firewall ${firewall_id} to VPS ${target_vm_id}." >> "${GITHUB_STEP_SUMMARY}"
+              sleep 10
+            else
+              echo "No Hostinger network firewall is active on VPS ${target_vm_id}; TCP/22 is not blocked at the Hostinger firewall layer." >> "${GITHUB_STEP_SUMMARY}"
             fi
           fi
 
