@@ -1,0 +1,48 @@
+name: Hostinger WhatsApp Guardian Install
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hostinger-openclaw-recovery
+  cancel-in-progress: false
+
+jobs:
+  install:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      HOST: 69.62.68.67
+      USER: root
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Require SSH key
+        shell: bash
+        env:
+          HOSTINGER_SSH_PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          [ -n "$HOSTINGER_SSH_PRIVATE_KEY" ] || { echo HOSTINGER_SSH_PRIVATE_KEY_MISSING=1 >&2; exit 2; }
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$HOSTINGER_SSH_PRIVATE_KEY" > ~/.ssh/hostinger
+          chmod 600 ~/.ssh/hostinger
+
+      - name: Verify normal Hostinger SSH
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 -i ~/.ssh/hostinger "$USER@$HOST" 'echo SAHJONY_HOSTINGER_SSH_READY=1'
+
+      - name: Install guardian
+        run: |
+          set -euo pipefail
+          scp -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/hostinger openclaw/hostinger-24x7/whatsapp-guardian.sh openclaw/hostinger-24x7/install-whatsapp-guardian.sh "$USER@$HOST:/root/"
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/hostinger "$USER@$HOST" 'install -d /opt/sahjony/openclaw/hostinger-24x7; mv /root/whatsapp-guardian.sh /root/install-whatsapp-guardian.sh /opt/sahjony/openclaw/hostinger-24x7/; chmod +x /opt/sahjony/openclaw/hostinger-24x7/*.sh; cd /opt/sahjony/openclaw/hostinger-24x7 && ./install-whatsapp-guardian.sh'
+
+      - name: Verify 24x7 gates
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/hostinger "$USER@$HOST" 'systemctl is-active --quiet docker; systemctl is-active --quiet sahjony-whatsapp-guardian.timer; /usr/local/sbin/sahjony-whatsapp-guardian; test -s /var/lib/sahjony-whatsapp-guardian/last-good; echo SAHJONY_WHATSAPP_24X7_GUARDIAN=READY'
