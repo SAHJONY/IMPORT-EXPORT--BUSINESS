@@ -11,7 +11,6 @@ on:
 permissions:
   contents: read
 
-# Share the existing recovery lock so V5/V6 can never modify the VPS concurrently.
 concurrency:
   group: hostinger-recovery-docker-openclaw-v5
   cancel-in-progress: false
@@ -24,7 +23,6 @@ env:
 
 jobs:
   recover:
-    # Automatic successor only for a failed V5 on main from this same repository.
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (github.event.workflow_run.conclusion != 'success' &&
@@ -205,12 +203,12 @@ jobs:
           [[ "$ready" == true ]] || { echo NORMAL_V6_SSH_FAILED=1 >&2; exit 43; }
           echo SAHJONY_NORMAL_SSH_V6_READY=1
 
-      - name: Stabilize OpenClaw and seed persistent guardian
+      - name: Stabilize OpenClaw and seed persistent Hostinger-only guardian
         id: stabilize
         shell: bash
         run: |
           set -euo pipefail
-          GUARDIAN_B64="$(base64 -w0 openclaw/hostinger-24x7/whatsapp-24x7-guardian.sh)"
+          GUARDIAN_B64="$(base64 -w0 openclaw/hostinger-24x7/whatsapp-hostinger-only-guardian.sh)"
           ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/hostinger-recovery-v6 "$USER@$HOST" "GUARDIAN_B64='$GUARDIAN_B64' bash -s" <<'REMOTE'
           set -euo pipefail
           command -v docker >/dev/null 2>&1 || { echo DOCKER_NOT_FOUND=1 >&2; exit 44; }
@@ -221,9 +219,9 @@ jobs:
           [ "$(docker inspect "$cid" --format '{{.State.Running}}')" = true ] || docker start "$cid" >/dev/null
           sleep 8
           install -d -m 700 /opt/sahjony-openclaw
-          printf '%s' "$GUARDIAN_B64" | base64 -d > /opt/sahjony-openclaw/whatsapp-24x7-guardian.sh
-          chmod 700 /opt/sahjony-openclaw/whatsapp-24x7-guardian.sh
-          /opt/sahjony-openclaw/whatsapp-24x7-guardian.sh install || true
+          printf '%s' "$GUARDIAN_B64" | base64 -d > /opt/sahjony-openclaw/whatsapp-hostinger-only-guardian.sh
+          chmod 700 /opt/sahjony-openclaw/whatsapp-hostinger-only-guardian.sh
+          /opt/sahjony-openclaw/whatsapp-hostinger-only-guardian.sh install || true
           probe="$(docker exec "$cid" openclaw channels status --probe 2>&1 || true)"
           printf '%s\n' "$probe"
           if ! grep -Eiq 'whatsapp.*(connected|ready|active|healthy)|(connected|ready|active|healthy).*whatsapp' <<<"$probe"; then
@@ -231,23 +229,23 @@ jobs:
             exit 46
           fi
           docker inspect "$cid" --format 'OPENCLAW name={{.Name}} restart={{.HostConfig.RestartPolicy.Name}} running={{.State.Running}}'
-          systemctl is-active sahjony-whatsapp-24x7-guardian.timer
+          systemctl is-active sahjony-whatsapp-hostinger.timer
           echo SAHJONY_HOSTINGER_WHATSAPP_LOCAL_READY=1
           REMOTE
 
-      - name: Verify public WhatsApp health
+      - name: Verify Hostinger-specific public WhatsApp health
         shell: bash
         run: |
           set -euo pipefail
           ready=false
           for i in $(seq 1 24); do
             body="$(curl -fsS --max-time 20 https://www.sahjony.com/whatsapp/health 2>/dev/null || true)"
-            printf '%s\n' "$body" | jq '{status,provider,primary_provider,gateway_connected,cloud_independent_of_local_mac,hostinger_independent_runtime,hostinger_openclaw,meta_cloud}' 2>/dev/null || true
-            if jq -e '(.hostinger_independent_runtime // false) == true or ((.hostinger_openclaw.connected // false) == true) or (.cloud_independent_of_local_mac // false) == true' >/dev/null 2>&1 <<<"$body"; then ready=true; break; fi
+            printf '%s\n' "$body" | jq '{status,provider,hostinger_independent_runtime,hostinger_openclaw}' 2>/dev/null || true
+            if jq -e '(.hostinger_independent_runtime // false) == true or ((.hostinger_openclaw.connected // false) == true)' >/dev/null 2>&1 <<<"$body"; then ready=true; break; fi
             sleep 10
           done
-          [[ "$ready" == true ]] || { echo PUBLIC_WHATSAPP_HEALTH_NOT_READY=1 >&2; exit 47; }
-          echo SAHJONY_WHATSAPP_24X7=READY
+          [[ "$ready" == true ]] || { echo HOSTINGER_PUBLIC_WHATSAPP_HEALTH_NOT_READY=1 >&2; exit 47; }
+          echo SAHJONY_HOSTINGER_WHATSAPP_24X7=READY
 
       - name: Cleanup ephemeral access
         if: always()
