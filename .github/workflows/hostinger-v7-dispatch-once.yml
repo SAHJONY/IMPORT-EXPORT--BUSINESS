@@ -7,7 +7,7 @@ on:
 
 permissions:
   actions: write
-  contents: read
+  contents: write
 
 jobs:
   dispatch:
@@ -18,38 +18,75 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           WORKFLOW: hostinger-whatsapp-recovery-v7.yml
+          STATUS_PATH: .ops/hostinger-v7-dispatch-status.json
         shell: bash
         run: |
           set -euo pipefail
 
           api="https://api.github.com/repos/$REPO/actions/workflows/$WORKFLOW/runs?per_page=50"
-          runs="$(curl -fsS \
-            -H "Authorization: Bearer $GH_TOKEN" \
-            -H 'Accept: application/vnd.github+json' \
-            -H 'X-GitHub-Api-Version: 2022-11-28' \
-            "$api")"
+          auth=(-H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' -H 'X-GitHub-Api-Version: 2022-11-28')
 
-          active="$(jq '[.workflow_runs[]? | select(.status == "queued" or .status == "in_progress" or .status == "waiting" or .status == "pending" or .status == "requested")] | length' <<<"$runs")"
-          echo "HOSTINGER_V7_ACTIVE_RUNS=$active"
+          write_status() {
+            local status_json="$1"
+            local encoded existing_code existing_sha payload
+            encoded="$(printf '%s' "$status_json" | base64 -w0)"
+            existing_code="$(curl -sS -o /tmp/status-existing.json -w '%{http_code}' "${auth[@]}" "https://api.github.com/repos/$REPO/contents/$STATUS_PATH?ref=main")"
+            if [[ "$existing_code" == 200 ]]; then
+              existing_sha="$(jq -r '.sha' /tmp/status-existing.json)"
+              payload="$(jq -n --arg message 'ops: record Hostinger V7 dispatch state' --arg content "$encoded" --arg sha "$existing_sha" '{message:$message,content:$content,sha:$sha,branch:"main"}')"
+            else
+              payload="$(jq -n --arg message 'ops: record Hostinger V7 dispatch state' --arg content "$encoded" '{message:$message,content:$content,branch:"main"}')"
+            fi
+            curl -fsS -X PUT "${auth[@]}" -H 'Content-Type: application/json' --data "$payload" "https://api.github.com/repos/$REPO/contents/$STATUS_PATH" >/dev/null
+          }
 
-          if [[ "$active" -gt 0 ]]; then
-            jq -r '.workflow_runs[]? | select(.status == "queued" or .status == "in_progress" or .status == "waiting" or .status == "pending" or .status == "requested") | "ACTIVE_V7_RUN id=\(.id) status=\(.status) conclusion=\(.conclusion // \"\") url=\(.html_url)"' <<<"$runs"
+          runs="$(curl -fsS "${auth[@]}" "$api")"
+          newest_before="$(jq -r '.workflow_runs[0].id // 0' <<<"$runs")"
+          active_run="$(jq -c '[.workflow_runs[]? | select(.status == "queued" or .status == "in_progress" or .status == "waiting" or .status == "pending" or .status == "requested")][0] // empty' <<<"$runs")"
+
+          if [[ -n "$active_run" ]]; then
+            run_id="$(jq -r '.id' <<<"$active_run")"
+            run_status="$(jq -r '.status' <<<"$active_run")"
+            run_url="$(jq -r '.html_url' <<<"$active_run")"
+            marker="$(jq -n --arg source 'already_active' --arg workflow "$WORKFLOW" --argjson run_id "$run_id" --arg status "$run_status" --arg url "$run_url" --arg checked_at "$(date -u +%FT%TZ)" '{source:$source,workflow:$workflow,run_id:$run_id,status:$status,url:$url,checked_at:$checked_at}')"
+            write_status "$marker"
+            echo "ACTIVE_V7_RUN id=$run_id status=$run_status url=$run_url"
             echo HOSTINGER_CANONICAL_V7_ALREADY_ACTIVE=1
             exit 0
           fi
 
           code="$(curl -sS -o /tmp/dispatch.json -w '%{http_code}' -X POST \
-            -H "Authorization: Bearer $GH_TOKEN" \
-            -H 'Accept: application/vnd.github+json' \
-            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "${auth[@]}" \
             -H 'Content-Type: application/json' \
             --data '{"ref":"main"}' \
             "https://api.github.com/repos/$REPO/actions/workflows/$WORKFLOW/dispatches")"
 
           echo "HOSTINGER_V7_DISPATCH_HTTP=$code"
           if [[ "$code" != 204 ]]; then
+            marker="$(jq -n --arg source 'dispatch_failed' --arg workflow "$WORKFLOW" --arg http "$code" --arg checked_at "$(date -u +%FT%TZ)" '{source:$source,workflow:$workflow,http_status:$http,checked_at:$checked_at}')"
+            write_status "$marker"
             cat /tmp/dispatch.json || true
             exit 40
+          fi
+
+          discovered=''
+          for i in $(seq 1 20); do
+            sleep 3
+            runs="$(curl -fsS "${auth[@]}" "$api")"
+            discovered="$(jq -c --argjson before "$newest_before" '[.workflow_runs[]? | select(.id > $before)][0] // empty' <<<"$runs")"
+            [[ -n "$discovered" ]] && break
+          done
+
+          if [[ -n "$discovered" ]]; then
+            run_id="$(jq -r '.id' <<<"$discovered")"
+            run_status="$(jq -r '.status' <<<"$discovered")"
+            run_url="$(jq -r '.html_url' <<<"$discovered")"
+            marker="$(jq -n --arg source 'dispatched' --arg workflow "$WORKFLOW" --argjson run_id "$run_id" --arg status "$run_status" --arg url "$run_url" --arg checked_at "$(date -u +%FT%TZ)" '{source:$source,workflow:$workflow,run_id:$run_id,status:$status,url:$url,checked_at:$checked_at}')"
+            write_status "$marker"
+            echo "DISPATCHED_V7_RUN id=$run_id status=$run_status url=$run_url"
+          else
+            marker="$(jq -n --arg source 'dispatched_run_not_yet_visible' --arg workflow "$WORKFLOW" --arg checked_at "$(date -u +%FT%TZ)" '{source:$source,workflow:$workflow,status:"requested",checked_at:$checked_at}')"
+            write_status "$marker"
           fi
 
           echo HOSTINGER_CANONICAL_V7_DISPATCHED=1
