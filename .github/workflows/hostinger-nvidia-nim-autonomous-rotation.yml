@@ -1,0 +1,133 @@
+name: Hostinger NVIDIA NIM Autonomous Rotation
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/hostinger-nvidia-nim-autonomous-rotation.yml'
+      - 'openclaw/hostinger-24x7/nvidia-nim-rotation.sh'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hostinger-vm-767852-mutation
+  cancel-in-progress: false
+
+jobs:
+  install-nim-rotation:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      HOST: '69.62.68.67'
+      USER: root
+      PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+      NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare secure SSH
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "$PRIVATE_KEY" ]] || { echo HOSTINGER_SSH_PRIVATE_KEY_MISSING=1 >&2; exit 2; }
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/hostinger-nim
+          chmod 600 ~/.ssh/hostinger-nim
+          ssh-keygen -y -f ~/.ssh/hostinger-nim >/dev/null
+          for i in $(seq 1 24); do
+            if ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=6 -i ~/.ssh/hostinger-nim "$USER@$HOST" 'printf NVIDIA_NIM_SSH_READY' 2>/dev/null | grep -q NVIDIA_NIM_SSH_READY; then exit 0; fi
+            echo "ssh_probe=$i/24"; sleep 5
+          done
+          echo NVIDIA_NIM_SSH_UNAVAILABLE=1 >&2
+          exit 3
+
+      - name: Install rotation controller
+        shell: bash
+        run: |
+          set -euo pipefail
+          SSH=(ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 -i ~/.ssh/hostinger-nim)
+          SCP=(scp -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 -i ~/.ssh/hostinger-nim)
+          "${SCP[@]}" openclaw/hostinger-24x7/nvidia-nim-rotation.sh "$USER@$HOST:/tmp/sahjony-nvidia-nim-rotation"
+          "${SSH[@]}" "$USER@$HOST" 'set -euo pipefail; install -m 700 /tmp/sahjony-nvidia-nim-rotation /usr/local/sbin/sahjony-nvidia-nim-rotation; rm -f /tmp/sahjony-nvidia-nim-rotation; install -d -m 700 /var/lib/sahjony-nvidia-nim'
+
+      - name: Configure NVIDIA API key when available
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "$NVIDIA_API_KEY" ]]; then
+            echo NVIDIA_NIM_AUTH=AWAITING_NVIDIA_API_KEY_SECRET
+            exit 0
+          fi
+          [[ "$NVIDIA_API_KEY" == nvapi-* ]] || { echo NVIDIA_API_KEY_FORMAT_UNEXPECTED=1 >&2; exit 20; }
+          umask 077
+          printf '%s\n' "$NVIDIA_API_KEY" > "$RUNNER_TEMP/nvidia-api-key"
+          scp -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 -i ~/.ssh/hostinger-nim "$RUNNER_TEMP/nvidia-api-key" "$USER@$HOST:/root/.sahjony-nvidia-api-key"
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 -i ~/.ssh/hostinger-nim "$USER@$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          trap 'rm -f /root/.sahjony-nvidia-api-key' EXIT
+          chmod 600 /root/.sahjony-nvidia-api-key
+          cid="$(docker ps --format '{{.ID}} {{.Names}} {{.Image}}' | awk 'tolower($0) ~ /openclaw/ {print $1; exit}')"
+          [[ -n "$cid" ]] || { echo OPENCLAW_CONTAINER_NOT_RUNNING=1 >&2; exit 21; }
+          docker exec "$cid" openclaw plugins enable nvidia >/dev/null 2>&1 || true
+          cat /root/.sahjony-nvidia-api-key | docker exec -i "$cid" openclaw models auth paste-api-key --provider nvidia --profile-id nvidia:nim >/dev/null
+          docker exec "$cid" openclaw models auth order set --provider nvidia nvidia:nim >/dev/null
+          docker exec "$cid" openclaw config set models.providers.nvidia '{"baseUrl":"https://integrate.api.nvidia.com/v1","api":"openai-completions"}' --strict-json --merge >/dev/null
+          docker exec "$cid" openclaw config validate >/dev/null
+          key="$(tr -d '\r\n' < /root/.sahjony-nvidia-api-key)"
+          body="$(curl -fsS --connect-timeout 10 --max-time 120 -H "Authorization: Bearer $key" -H 'Content-Type: application/json' -d '{"model":"nvidia/nemotron-3.5-lightning-30b-a3b","messages":[{"role":"user","content":"Reply exactly SAHJONY_NIM_AUTH_OK"}],"max_tokens":32,"temperature":0}' https://integrate.api.nvidia.com/v1/chat/completions)"
+          grep -q 'SAHJONY_NIM_AUTH_OK' <<<"$body" || { echo NVIDIA_NIM_AUTH_TEST_FAILED=1 >&2; exit 22; }
+          echo NVIDIA_NIM_AUTH=READY
+          REMOTE
+
+      - name: Install persistent reconciliation timer
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 -i ~/.ssh/hostinger-nim "$USER@$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cat >/etc/systemd/system/sahjony-nvidia-nim-rotation.service <<'EOF'
+          [Unit]
+          Description=SAHJONY autonomous NVIDIA NIM model rotation
+          After=docker.service network-online.target
+          Wants=network-online.target
+          Requires=docker.service
+
+          [Service]
+          Type=oneshot
+          ExecStart=/usr/local/sbin/sahjony-nvidia-nim-rotation
+          TimeoutStartSec=90
+          Nice=10
+          EOF
+
+          cat >/etc/systemd/system/sahjony-nvidia-nim-rotation.timer <<'EOF'
+          [Unit]
+          Description=Refresh SAHJONY NVIDIA NIM fallback pool
+
+          [Timer]
+          OnBootSec=90s
+          OnUnitActiveSec=10min
+          AccuracySec=30s
+          Persistent=true
+
+          [Install]
+          WantedBy=timers.target
+          EOF
+
+          systemctl daemon-reload
+          systemctl enable --now sahjony-nvidia-nim-rotation.timer >/dev/null
+          systemctl start sahjony-nvidia-nim-rotation.service
+          systemctl is-enabled --quiet sahjony-nvidia-nim-rotation.timer
+          systemctl is-active --quiet sahjony-nvidia-nim-rotation.timer
+          test -s /var/lib/sahjony-nvidia-nim/status.json
+          cat /var/lib/sahjony-nvidia-nim/status.json
+          cid="$(docker ps --format '{{.ID}} {{.Names}} {{.Image}}' | awk 'tolower($0) ~ /openclaw/ {print $1; exit}')"
+          docker exec "$cid" openclaw config get agents.defaults.model --json
+          echo SAHJONY_NVIDIA_NIM_ROTATION_TIMER=READY
+          REMOTE
+
+      - name: Cleanup transient credentials
+        if: always()
+        shell: bash
+        run: rm -f ~/.ssh/hostinger-nim "$RUNNER_TEMP/nvidia-api-key"
