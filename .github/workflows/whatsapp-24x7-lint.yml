@@ -8,8 +8,10 @@ on:
       - '.github/workflows/whatsapp-24x7-control-plane.yml'
       - '.github/workflows/hostinger-runtime-recovery-engine.yml'
       - '.github/workflows/hostinger-whatsapp-recovery-v7.yml'
+      - '.github/workflows/hostinger-whatsapp-pair-live.yml'
       - 'openclaw/hostinger-24x7/whatsapp-24x7-control-plane.sh'
       - 'openclaw/hostinger-24x7/whatsapp-hostinger-only-guardian.sh'
+      - 'openclaw/hostinger-24x7/whatsapp-pairing-controller.sh'
       - 'openclaw/hostinger-24x7/hostinger-recovery-controller.sh'
       - 'openclaw/hostinger-24x7/openclaw-runtime-recovery.sh'
       - 'openclaw/hostinger-24x7/runtime-plan-doctor.sh'
@@ -32,6 +34,7 @@ jobs:
           for f in \
             openclaw/hostinger-24x7/whatsapp-24x7-control-plane.sh \
             openclaw/hostinger-24x7/whatsapp-hostinger-only-guardian.sh \
+            openclaw/hostinger-24x7/whatsapp-pairing-controller.sh \
             openclaw/hostinger-24x7/hostinger-recovery-controller.sh \
             openclaw/hostinger-24x7/openclaw-runtime-recovery.sh \
             openclaw/hostinger-24x7/runtime-plan-doctor.sh \
@@ -40,6 +43,27 @@ jobs:
             bash -n "$f"
             echo "OK $f"
           done
+
+      - name: Validate pairing anti-loop invariants
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import pathlib
+          controller = pathlib.Path('openclaw/hostinger-24x7/whatsapp-pairing-controller.sh').read_text()
+          workflow = pathlib.Path('.github/workflows/hostinger-whatsapp-pair-live.yml').read_text()
+          forbidden = ['"force":true', "'force':true", 'force\\":true']
+          for marker in forbidden:
+              if marker in controller or marker in workflow:
+                  raise SystemExit(f'FORCED_REPAIR_FORBIDDEN={marker}')
+          if workflow.count('web.login.start'):
+              raise SystemExit('PAIR_WORKFLOW_MUST_CALL_CONTROLLER_NOT_RAW_LOGIN=1')
+          if 'pair_once' not in workflow or 'mark_client_lock' not in workflow:
+              raise SystemExit('PAIRING_LOCK_MODES_MISSING=1')
+          if 'whatsapp-pairing-controller.sh' not in workflow:
+              raise SystemExit('PAIRING_CONTROLLER_NOT_WIRED=1')
+          print('PAIRING_ANTI_LOOP_POLICY=PASS')
+          PY
 
       - name: Reject unsafe early-exit pipelines in runtime planner
         shell: bash
@@ -72,6 +96,7 @@ jobs:
               pathlib.Path('.github/workflows/whatsapp-24x7-control-plane.yml'),
               pathlib.Path('.github/workflows/hostinger-runtime-recovery-engine.yml'),
               pathlib.Path('.github/workflows/hostinger-whatsapp-recovery-v7.yml'),
+              pathlib.Path('.github/workflows/hostinger-whatsapp-pair-live.yml'),
               pathlib.Path('.github/workflows/whatsapp-24x7-lint.yml'),
           ]
           for path in paths:
