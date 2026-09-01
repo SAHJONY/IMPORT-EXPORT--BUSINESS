@@ -1,0 +1,32 @@
+name: Hostinger VPS State Diagnostic
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/hostinger-vps-state-diagnostic.yml'
+
+permissions:
+  contents: read
+
+env:
+  HOSTINGER_API_BASE: https://developers.hostinger.com
+  VM_ID: '767852'
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      API_TOKEN: ${{ secrets.HOSTINGER_API_TOKEN }}
+    steps:
+      - name: Read VM and recent actions
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "$API_TOKEN" ]] || { echo HOSTINGER_API_TOKEN_MISSING=1; exit 2; }
+          auth=(-H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json')
+          echo '=== VM ==='
+          curl -fsS "${auth[@]}" "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID" | jq '{id,hostname,state,status,firewall_group_id,ipv4,template_id,created_at}'
+          echo '=== RECENT ACTIONS ==='
+          curl -fsS "${auth[@]}" "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/actions?page=1" | jq '(.data // .items // []) | map({id,name,state,created_at,updated_at}) | .[0:15]'
