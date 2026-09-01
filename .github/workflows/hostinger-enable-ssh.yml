@@ -1,0 +1,69 @@
+name: Enable Hostinger SSH firewall
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  enable-ssh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      HOSTINGER_API_TOKEN: ${{ secrets.HOSTINGER_API_TOKEN }}
+    steps:
+      - name: Add and apply TCP 22 rule
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "${HOSTINGER_API_TOKEN}" ]] || { echo "HOSTINGER_API_TOKEN is missing" >&2; exit 1; }
+          api_root="https://developers.hostinger.com/api/vps/v1"
+          auth_header="Authorization: Bearer ${HOSTINGER_API_TOKEN}"
+
+          vms="$(curl --fail --silent --show-error --header "${auth_header}" "${api_root}/virtual-machines")"
+          vm_count="$(jq 'if type == "array" then length else (.data // [] | length) end' <<<"${vms}")"
+          [[ "${vm_count}" -eq 1 ]] || { echo "Expected exactly one Hostinger VPS; found ${vm_count}." >&2; exit 1; }
+          vm_id="$(jq -r '(if type == "array" then . else (.data // []) end)[0].id' <<<"${vms}")"
+          firewall_id="$(jq -r '(if type == "array" then . else (.data // []) end)[0].firewall_group_id // empty' <<<"${vms}")"
+
+          if [[ -z "${firewall_id}" ]]; then
+            create_response="$(curl --fail --silent --show-error \
+              --request POST \
+              --header "${auth_header}" \
+              --header 'Content-Type: application/json' \
+              --data '{"name":"SAHJONY OpenClaw SSH"}' \
+              "${api_root}/firewall")"
+            firewall_id="$(jq -r '.id // .data.id // empty' <<<"${create_response}")"
+            [[ -n "${firewall_id}" ]] || { echo "Hostinger did not return a firewall ID." >&2; exit 1; }
+          fi
+
+          firewall="$(curl --fail --silent --show-error --header "${auth_header}" "${api_root}/firewall/${firewall_id}")"
+          if ! jq -e '
+            (.rules // []) | any(
+              ((.protocol | ascii_upcase) == "TCP") and
+              (.port == "22") and
+              (.source == "any")
+            )
+          ' <<<"${firewall}" >/dev/null; then
+            curl --fail --silent --show-error \
+              --request POST \
+              --header "${auth_header}" \
+              --header 'Content-Type: application/json' \
+              --data '{"protocol":"TCP","port":"22","source":"any","source_detail":"any"}' \
+              "${api_root}/firewall/${firewall_id}/rules" >/dev/null
+          fi
+
+          if [[ -z "$(jq -r '(if type == "array" then . else (.data // []) end)[0].firewall_group_id // empty' <<<"${vms}")" ]]; then
+            curl --fail --silent --show-error \
+              --request POST \
+              --header "${auth_header}" \
+              "${api_root}/firewall/${firewall_id}/activate/${vm_id}" >/dev/null
+          else
+            curl --fail --silent --show-error \
+              --request POST \
+              --header "${auth_header}" \
+              "${api_root}/firewall/${firewall_id}/sync/${vm_id}" >/dev/null
+          fi
+
+          echo "Hostinger VPS ${vm_id}: firewall ${firewall_id} allows inbound TCP/22 and is applied." | tee -a "${GITHUB_STEP_SUMMARY}"
