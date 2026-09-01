@@ -5,7 +5,10 @@ on:
   push:
     branches: [main]
     paths:
+      - '.github/workflows/hostinger-runtime-recovery-engine.yml'
       - 'openclaw/hostinger-24x7/openclaw-runtime-recovery.sh'
+      - 'openclaw/hostinger-24x7/runtime-plan-doctor.sh'
+      - 'openclaw/hostinger-24x7/hostinger-recovery-controller.sh'
 
 permissions:
   contents: read
