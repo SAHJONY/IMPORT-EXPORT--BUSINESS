@@ -1,0 +1,28 @@
+name: Hostinger Action Snapshot
+
+on:
+  push:
+    paths:
+      - '.github/workflows/hostinger-action-snapshot.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-24.04
+    env:
+      API_TOKEN: ${{ secrets.HOSTINGER_API_TOKEN }}
+      HOSTINGER_API_BASE: https://developers.hostinger.com
+      VM_ID: '767852'
+    steps:
+      - name: Read latest VPS actions
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "$API_TOKEN" ]] || exit 2
+          body="$(curl -fsS -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/actions?page=1")"
+          jq -c '[.data[]? | {id,name,state,created_at,updated_at}] | .[0:12]' <<<"$body"
+          busy="$(jq '[.data[]? | select(.state != "success" and .state != "failed" and .state != "failure" and .state != "error" and .state != "cancelled" and .state != "canceled")] | length' <<<"$body")"
+          echo HOSTINGER_ACTIONS_BUSY="$busy"
