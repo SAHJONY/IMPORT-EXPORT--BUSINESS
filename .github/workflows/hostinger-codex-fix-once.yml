@@ -1,4 +1,3 @@
-# Triggered after workflow registration.
 name: Hostinger Codex Runtime Fix Once
 
 on:
@@ -37,7 +36,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          connected=0
+          ok=0
           for attempt in 1 2 3 4; do
             if ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=12 \
               -i ~/.ssh/hostinger-codex-fix "$USER@$HOST" 'bash -s' <<'REMOTE'
@@ -57,32 +56,12 @@ jobs:
           echo CODEX_FIX_SCOPE_ONLY=1
           [[ -f "$CONFIG" ]] || { echo OPENCLAW_CONFIG_MISSING=1 >&2; exit 21; }
           systemctl cat openclaw-gateway.service >/dev/null 2>&1 || { echo OPENCLAW_GATEWAY_SERVICE_MISSING=1 >&2; exit 20; }
-
           echo OPENCLAW_VERSION="$(oc --version 2>/dev/null | tail -n1)"
 
-          oc plugins install npm:@openclaw/codex@2026.8.1 --force --pin
+          oc plugins install @openclaw/codex@2026.8.1 --force --pin
           oc plugins enable codex
-
-          python3 - "$CONFIG" <<'PY'
-import json, os, sys
-p = sys.argv[1]
-with open(p, 'r', encoding='utf-8') as f:
-    d = json.load(f)
-plugins = d.setdefault('plugins', {})
-allow = plugins.get('allow')
-if isinstance(allow, list) and 'codex' not in allow:
-    allow.append('codex')
-    tmp = p + '.codex-fix.tmp'
-    with open(tmp, 'w', encoding='utf-8') as f:
-        json.dump(d, f, indent=2)
-        f.write('\n')
-    os.replace(tmp, p)
-    print('CODEX_ADDED_TO_PLUGIN_ALLOW=1')
-else:
-    print('CODEX_PLUGIN_ALLOW_OK=1')
-PY
-
           oc config validate
+
           systemctl reset-failed openclaw-gateway.service >/dev/null 2>&1 || true
           systemctl restart openclaw-gateway.service
           sleep 12
@@ -93,7 +72,7 @@ PY
           fi
           echo OPENCLAW_GATEWAY_ACTIVE=1
 
-          plugin_status="$(oc plugins list --enabled 2>&1 || true)"
+          plugin_status="$(oc plugins list 2>&1 || true)"
           printf '%s\n' "$plugin_status" | redact | tail -n 120
           printf '%s\n' "$plugin_status" | grep -Eiq 'codex' || { echo CODEX_PLUGIN_NOT_REGISTERED=1 >&2; exit 31; }
           echo CODEX_PLUGIN_REGISTERED=1
@@ -105,16 +84,17 @@ PY
           else
             echo WHATSAPP_STATUS_RECHECK_NEEDED=1
           fi
+
           echo CODEX_RUNTIME_REPAIR_COMPLETE=1
           REMOTE
             then
-              connected=1
+              ok=1
               break
             fi
             echo "SSH_ATTEMPT_${attempt}_FAILED=1" >&2
             sleep $((attempt * 5))
           done
-          [[ "$connected" == "1" ]] || { echo HOSTINGER_SSH_UNREACHABLE=1 >&2; exit 255; }
+          [[ "$ok" == "1" ]] || { echo HOSTINGER_CODEX_FIX_FAILED=1 >&2; exit 255; }
 
       - name: Cleanup SSH
         if: always()
