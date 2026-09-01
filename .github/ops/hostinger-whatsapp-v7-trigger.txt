@@ -1,0 +1,3 @@
+2026-09-01T04:15:00-05:00
+Reason: normal Hostinger SSH credential is unavailable to GitHub Actions; recover the authorized Kali/Docker/OpenClaw runtime through canonical serialized V7.
+Constraints: preserve Docker/OpenClaw/WhatsApp state; no forced WhatsApp pairing; no Meta dependency; no duplicate recovery.
