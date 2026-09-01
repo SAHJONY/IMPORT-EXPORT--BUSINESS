@@ -1,4 +1,4 @@
-name: Hostinger Model Setup Once
+name: Hostinger Model Verify Once
 
 on:
   push:
@@ -10,14 +10,10 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: hostinger-model-setup-once
-  cancel-in-progress: false
-
 jobs:
-  configure-model:
+  verify:
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 8
     env:
       HOST: '69.62.68.67'
       USER: root
@@ -27,45 +23,27 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          [[ -n "${PRIVATE_KEY:-}" ]] || { echo HOSTINGER_SSH_PRIVATE_KEY_MISSING=1 >&2; exit 2; }
           install -d -m 700 ~/.ssh
-          printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/hostinger-model
-          chmod 600 ~/.ssh/hostinger-model
-          ssh-keygen -y -f ~/.ssh/hostinger-model >/dev/null
+          printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/hostinger-verify
+          chmod 600 ~/.ssh/hostinger-verify
+          ssh-keygen -y -f ~/.ssh/hostinger-verify >/dev/null
 
-      - name: Set authenticated NVIDIA NIM as Hostinger Gateway primary
+      - name: Verify Hostinger Gateway, model, and WhatsApp
         shell: bash
         run: |
           set -euo pipefail
           ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=12 \
-            -i ~/.ssh/hostinger-model "$USER@$HOST" 'bash -s' <<'REMOTE'
+            -i ~/.ssh/hostinger-verify "$USER@$HOST" 'bash -s' <<'REMOTE'
           set -euo pipefail
           STATE=/var/lib/sahjony-openclaw-state
           CONFIG="$STATE/openclaw.json"
-          NIM_STATE=/var/lib/sahjony-nvidia-nim
           oc(){ env HOME=/home/node OPENCLAW_HOME=/home/node OPENCLAW_STATE_DIR="$STATE" OPENCLAW_CONFIG_PATH="$CONFIG" openclaw "$@"; }
 
           echo HOSTINGER_VPS_SCOPE_ONLY=1
-          [[ -f "$CONFIG" ]] || { echo OPENCLAW_CONFIG_MISSING=1 >&2; exit 20; }
-          [[ -f "$NIM_STATE/status.json" ]] || { echo NVIDIA_NIM_STATUS_MISSING=1 >&2; exit 21; }
-          python3 - "$NIM_STATE/status.json" <<'PY'
-          import json,sys
-          d=json.load(open(sys.argv[1]))
-          assert d.get('auth_ready') is True, d
-          assert int(d.get('candidate_count',0)) >= 1, d
-          print('NVIDIA_NIM_AUTH_READY=1')
-          PY
-
-          [[ -s "$NIM_STATE/nvidia-order.txt" ]] || /usr/local/sbin/sahjony-nvidia-nim-rotation >/dev/null
-          primary="$(head -n1 "$NIM_STATE/nvidia-order.txt" | tr -d '\r\n')"
-          [[ "$primary" == nvidia/* ]] || { echo NVIDIA_PRIMARY_INVALID=1 >&2; exit 22; }
-
-          oc plugins enable nvidia >/dev/null 2>&1 || true
-          oc config set agents.defaults.model.primary "$primary" >/dev/null
-          oc config validate >/dev/null
-          systemctl restart openclaw-gateway.service
-          sleep 10
           systemctl is-active --quiet openclaw-gateway.service
+          systemctl is-enabled --quiet openclaw-gateway.service
+          echo OPENCLAW_GATEWAY_ACTIVE=1
+          echo OPENCLAW_GATEWAY_24X7=1
 
           raw="$(oc config get agents.defaults.model.primary --json 2>/dev/null || true)"
           configured="$(RAW="$raw" python3 - <<'PY'
@@ -78,21 +56,28 @@ jobs:
               print(raw.strip('"'))
           PY
           )"
-          [[ "$configured" == "$primary" ]] || { echo MODEL_PRIMARY_MISMATCH=1 >&2; echo EXPECTED_MODEL="$primary" >&2; echo CONFIGURED_MODEL="$configured" >&2; exit 23; }
-          echo OPENCLAW_GATEWAY_ACTIVE=1
+          [[ "$configured" == nvidia/* ]] || { echo MODEL_PRIMARY_NOT_NVIDIA=1 >&2; exit 31; }
           echo MODEL_PRIMARY_PROVIDER=NVIDIA_NIM
           echo MODEL_PRIMARY="$configured"
 
+          python3 - /var/lib/sahjony-nvidia-nim/status.json <<'PY'
+          import json,sys
+          d=json.load(open(sys.argv[1]))
+          assert d.get('auth_ready') is True, d
+          print('NVIDIA_NIM_AUTH_READY=1')
+          PY
+
           wa="$(oc channels status --channel whatsapp --probe 2>&1 || true)"
+          printf '%s\n' "$wa" | tail -n 25
           if grep -Eiq 'whatsapp.*(connected|ready|healthy|linked.*running)|linked.*running.*connected' <<<"$wa"; then
             echo WHATSAPP_CONNECTED=1
           else
-            echo WHATSAPP_RECHECK_NEEDED=1
-            printf '%s\n' "$wa" | tail -n 30
+            echo WHATSAPP_CONNECTED=0
+            exit 32
           fi
           REMOTE
 
       - name: Cleanup SSH
         if: always()
         shell: bash
-        run: rm -f ~/.ssh/hostinger-model
+        run: rm -f ~/.ssh/hostinger-verify
