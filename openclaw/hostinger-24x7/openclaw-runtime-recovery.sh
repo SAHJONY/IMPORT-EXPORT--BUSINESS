@@ -9,6 +9,11 @@ set -euo pipefail
 #   plan         Audit plus a human/machine-readable recovery decision.
 #   reconstruct  Recreate ONLY an unambiguous compose runtime backed by retained
 #                durable host state. Requires SAHJONY_ALLOW_OPENCLAW_RECONSTRUCT.
+#
+# Reliability rule:
+#   Bounded discovery pipelines intentionally disable pipefail locally around `head`.
+#   GNU find/sort may receive SIGPIPE once head has enough rows and return 141; that
+#   is normal control flow, not evidence of a failed runtime scan.
 
 MODE="${1:-audit}"
 STATE_DIR="${SAHJONY_OPENCLAW_RECOVERY_STATE_DIR:-/var/lib/sahjony-openclaw-recovery}"
@@ -19,7 +24,26 @@ MIN_SCORE="${SAHJONY_OPENCLAW_MIN_RECOVERY_SCORE:-80}"
 
 log(){ printf '[openclaw-runtime-recovery] %s\n' "$*"; }
 fail(){ log "FAIL: $*" >&2; exit 1; }
-json_escape(){ python3 -c 'import json,sys; print(json.dumps(sys.stdin.read().rstrip("\n")))'; }
+
+# Run a deliberately bounded producer|head pipeline without treating the expected
+# upstream SIGPIPE (141) as a failure. Do not use this wrapper for mutation steps.
+bounded_count_files(){
+  local path="$1" limit="$2" value
+  set +o pipefail
+  value="$(find "$path" -xdev -type f 2>/dev/null | head -n "$limit" | wc -l | tr -d ' ')"
+  local rc=$?
+  set -o pipefail
+  [[ "$rc" == 0 && "$value" =~ ^[0-9]+$ ]] || value=0
+  printf '%s\n' "$value"
+}
+
+has_any_file(){
+  local path="$1" hit
+  set +o pipefail
+  hit="$(find "$path" -xdev -type f -print -quit 2>/dev/null || true)"
+  set -o pipefail
+  [[ -n "$hit" ]]
+}
 
 [[ "$MODE" =~ ^(audit|plan|reconstruct)$ ]] || fail 'mode must be audit, plan, or reconstruct'
 [[ "$(id -u)" -eq 0 ]] || fail 'run as root on the authorized Hostinger Kali VPS'
@@ -42,21 +66,24 @@ STATE_ROOTS=(
 state_evidence=()
 for p in "${STATE_ROOTS[@]}"; do
   if [[ -e "$p" ]]; then
-    count="$(find "$p" -xdev -type f 2>/dev/null | head -n 5000 | wc -l | tr -d ' ')"
+    count="$(bounded_count_files "$p" 5000)"
     bytes="$(du -sb "$p" 2>/dev/null | awk '{print $1}' || echo 0)"
     state_evidence+=("$p|$count|$bytes")
   fi
 done
 
 # Broad artifact search, bounded to likely administration roots and small text files.
+# The local pipefail relaxation prevents a normal SIGPIPE from surfacing as rc=141.
+set +o pipefail
 mapfile -t artifacts < <(
   find /root /opt /srv /etc /usr/local -xdev -type f \
     \( -name 'docker-compose.yml' -o -name 'docker-compose.yaml' -o -name 'compose.yml' -o -name 'compose.yaml' -o -name '*openclaw*.sh' -o -name '*openclaw*.env' -o -name '.env' \) \
     -size -2M 2>/dev/null | sort -u | head -n 500
 )
+set -o pipefail
 
 score_artifact(){
-  local f="$1" score=0 reasons=() bind_sources=() durable=0 service_hint=0
+  local f="$1" score=0 reasons=() bind_sources=() durable=0 service_hint=0 files=0
   local lc
   lc="$(tr '[:upper:]' '[:lower:]' < "$f" 2>/dev/null || true)"
   if grep -Eq 'openclaw|open[ _-]?claw|claw gateway|whatsapp' <<<"$lc"; then score=$((score+35)); reasons+=(openclaw_reference); service_hint=1; fi
@@ -65,15 +92,13 @@ score_artifact(){
   if grep -Eq 'restart:[[:space:]]*(unless-stopped|always)|--restart[ =](unless-stopped|always)' <<<"$lc"; then score=$((score+5)); reasons+=(restart_policy); fi
 
   # Extract likely absolute bind-mount sources from compose and docker-run syntax.
-  # Avoid shell-quote gymnastics: capture absolute paths that immediately precede
-  # a mount separator, then only count paths that actually exist on the host.
+  # Only existing host paths with at least one file are accepted as retained state.
   while IFS= read -r src; do
     [[ -n "$src" ]] || continue
     [[ "$src" == /var/lib/docker* ]] && continue
     if [[ -e "$src" ]]; then
       bind_sources+=("$src")
-      files="$(find "$src" -xdev -type f 2>/dev/null | head -n 2000 | wc -l | tr -d ' ')"
-      if [[ "$files" =~ ^[0-9]+$ ]] && (( files > 0 )); then durable=1; fi
+      if has_any_file "$src"; then durable=1; fi
     fi
   done < <(
     {
@@ -82,8 +107,6 @@ score_artifact(){
     } | sort -u
   )
 
-  # Explicit retained OpenClaw state elsewhere on host boosts confidence, but a
-  # reconstruct action still requires a bind source to prevent empty-volume creation.
   if ((${#state_evidence[@]} > 0)); then score=$((score+10)); reasons+=(host_state_present); fi
   if (( durable == 1 )); then score=$((score+30)); reasons+=(durable_bind_state); fi
   if (( service_hint == 0 )); then score=0; fi
@@ -178,9 +201,7 @@ systemctl is-active --quiet docker.service || systemctl start docker.service
 compose_cmd=()
 if docker compose version >/dev/null 2>&1; then compose_cmd=(docker compose); elif command -v docker-compose >/dev/null 2>&1; then compose_cmd=(docker-compose); else fail 'Docker Compose is unavailable'; fi
 
-# Validate config before any create/start operation.
 "${compose_cmd[@]}" -f "$candidate" config >/tmp/sahjony-openclaw-compose.resolved.yml
-# Re-check that every discovered retained bind source still exists immediately before reconstruction.
 IFS=',' read -ra bind_arr <<<"$binds"
 for src in "${bind_arr[@]}"; do [[ -e "$src" ]] || fail "retained bind source disappeared: $src"; done
 
@@ -192,7 +213,6 @@ mapfile -t after < <(docker ps -a --format '{{.ID}}|{{.Names}}|{{.Image}}|{{.Sta
 cid="${after[0]%%|*}"
 docker update --restart unless-stopped "$cid" >/dev/null
 [[ "$(docker inspect -f '{{.State.Running}}' "$cid")" == true ]] || docker start "$cid" >/dev/null
-# Probe only; never pair/logout here.
 docker exec "$cid" sh -lc 'openclaw channels status --probe'
 echo "OPENCLAW_RECONSTRUCTED_CONTAINER=$cid"
 echo OPENCLAW_RUNTIME_RECONSTRUCTION=READY
