@@ -17,6 +17,11 @@ on:
         required: false
         default: false
         type: boolean
+      exit_emergency_mode:
+        description: Stop Hostinger recovery mode and wait for the normal VPS system
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -24,7 +29,7 @@ permissions:
 jobs:
   audit:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 12
     env:
       HOSTINGER_API_TOKEN: ${{ secrets.HOSTINGER_API_TOKEN }}
       HOSTINGER_SSH_PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
@@ -42,6 +47,7 @@ jobs:
           REPAIR_ACCESS: ${{ inputs.repair_access }}
           REQUESTED_VM_ID: ${{ inputs.vm_id }}
           ENSURE_SSH_FIREWALL: ${{ inputs.ensure_ssh_firewall }}
+          EXIT_EMERGENCY_MODE: ${{ inputs.exit_emergency_mode }}
         run: |
           set -euo pipefail
           umask 077
@@ -83,6 +89,40 @@ jobs:
           fi
           if [[ -z "${target_vm_id}" && "${#vm_ids[@]}" -eq 1 ]]; then
             target_vm_id="${vm_ids[0]}"
+          fi
+
+          if [[ "${EXIT_EMERGENCY_MODE}" == "true" ]]; then
+            if [[ -z "${target_vm_id}" ]]; then
+              echo "Multiple VPS instances exist; rerun with an explicit vm_id." >> "${GITHUB_STEP_SUMMARY}"
+              exit 1
+            fi
+            vm_state="$(jq -r --arg id "${target_vm_id}" '
+              (if type == "array" then . else (.data // []) end)[] |
+              select((.id | tostring) == $id) | .state
+            ' <<<"${vm_response}")"
+            if [[ "${vm_state}" == "recovery" || "${vm_state}" == "stopping_recovery" ]]; then
+              curl --fail --silent --show-error \
+                --request DELETE \
+                --header "${auth_header}" \
+                "${api_root}/virtual-machines/${target_vm_id}/recovery" >/dev/null
+              echo "Requested exit from Hostinger emergency mode for VPS ${target_vm_id}." >> "${GITHUB_STEP_SUMMARY}"
+            fi
+            for attempt in {1..30}; do
+              vm_detail="$(curl --fail --silent --show-error \
+                --header "${auth_header}" \
+                "${api_root}/virtual-machines/${target_vm_id}")"
+              vm_state="$(jq -r '.state // empty' <<<"${vm_detail}")"
+              if [[ "${vm_state}" == "running" ]]; then
+                break
+              fi
+              sleep 10
+            done
+            if [[ "${vm_state}" != "running" ]]; then
+              echo "VPS did not return to normal running state after leaving emergency mode." | tee -a "${GITHUB_STEP_SUMMARY}" >&2
+              exit 1
+            fi
+            echo "Hostinger VPS ${target_vm_id} is running in normal mode." >> "${GITHUB_STEP_SUMMARY}"
+            sleep 15
           fi
 
           if [[ "${REPAIR_ACCESS}" == "true" ]]; then
