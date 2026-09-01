@@ -24,13 +24,13 @@ jobs:
   bootstrap:
     if: ${{ github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, 'bootstrap Hostinger SSH once') }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 20
     env:
       HOSTINGER_API_TOKEN: ${{ secrets.HOSTINGER_API_TOKEN }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Prepare ephemeral provider key
+      - name: Prepare ephemeral provider key and validate resolver tools
         id: key
         shell: bash
         run: |
@@ -38,6 +38,9 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq jq netcat-openbsd openssh-client >/dev/null
           [[ -n "${HOSTINGER_API_TOKEN:-}" ]] || { echo HOSTINGER_API_TOKEN_MISSING=1 >&2; exit 2; }
+          bash -n openclaw/hostinger-24x7/openclaw-runtime-recovery.sh
+          bash -n openclaw/hostinger-24x7/openclaw-runtime-resolver.sh
+          bash -n openclaw/hostinger-24x7/provider-bootstrap-stabilize.sh
           install -d -m 700 ~/.ssh
           ssh-keygen -q -t ed25519 -N '' -f ~/.ssh/sahjony-provider-bootstrap -C "sahjony-provider-bootstrap-${GITHUB_RUN_ID}"
           echo "key_name=SAHJONY Provider Bootstrap ${GITHUB_RUN_ID}" >> "$GITHUB_OUTPUT"
@@ -106,7 +109,7 @@ jobs:
               ;;
           esac
 
-      - name: Authenticate normal Kali without Recovery
+      - name: Authenticate repaired Kali without Recovery
         shell: bash
         run: |
           set -euo pipefail
@@ -127,7 +130,7 @@ jobs:
           done
           [[ "$ready" == true ]] || { echo HOSTINGER_PROVIDER_BOOTSTRAP_SSH=NOT_READY >&2; sed -n '1,20p' /tmp/bootstrap-ssh.err 2>/dev/null || true; exit 9; }
 
-      - name: Stabilize existing Docker OpenClaw and install guardian
+      - name: Resolve OpenClaw runtime and install 24x7 guardian
         shell: bash
         run: |
           set -euo pipefail
@@ -136,9 +139,11 @@ jobs:
           scp "${common[@]}" \
             openclaw/hostinger-24x7/whatsapp-guardian.sh \
             openclaw/hostinger-24x7/install-whatsapp-guardian.sh \
+            openclaw/hostinger-24x7/openclaw-runtime-recovery.sh \
+            openclaw/hostinger-24x7/openclaw-runtime-resolver.sh \
             openclaw/hostinger-24x7/provider-bootstrap-stabilize.sh \
             "$HOSTINGER_USER@$HOSTINGER_HOST:/tmp/"
-          ssh "${common[@]}" "$HOSTINGER_USER@$HOSTINGER_HOST" 'chmod +x /tmp/provider-bootstrap-stabilize.sh && /tmp/provider-bootstrap-stabilize.sh'
+          ssh "${common[@]}" "$HOSTINGER_USER@$HOSTINGER_HOST" 'chmod +x /tmp/provider-bootstrap-stabilize.sh /tmp/openclaw-runtime-recovery.sh /tmp/openclaw-runtime-resolver.sh && /tmp/provider-bootstrap-stabilize.sh'
 
       - name: Remove ephemeral bootstrap keys
         if: always()
