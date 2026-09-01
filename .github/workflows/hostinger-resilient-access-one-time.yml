@@ -1,5 +1,8 @@
 name: Hostinger Resilient Access and OpenClaw Recovery One-Time
 
+# Run marker: after successful read-only Recovery V2 audit, use the resilient
+# broker to seed authenticated Kali access and converge the retained runtime.
+
 on:
   workflow_dispatch:
   push:
