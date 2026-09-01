@@ -1,4 +1,4 @@
-name: Hostinger WhatsApp Credential Locate Once
+name: Hostinger WhatsApp Listener Restart Once
 
 on:
   push:
@@ -11,11 +11,11 @@ permissions:
   contents: read
 
 concurrency:
-  group: hostinger-vm-767852-whatsapp-credential-locate
+  group: hostinger-vm-767852-whatsapp-listener-restart
   cancel-in-progress: false
 
 jobs:
-  locate-whatsapp-creds:
+  restart-listener:
     runs-on: ubuntu-24.04
     timeout-minutes: 8
     env:
@@ -29,90 +29,35 @@ jobs:
           set -euo pipefail
           [[ -n "${PRIVATE_KEY:-}" ]] || exit 2
           install -d -m 700 ~/.ssh
-          printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/hostinger-wa-locate
-          chmod 600 ~/.ssh/hostinger-wa-locate
+          printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/hostinger-wa-restart
+          chmod 600 ~/.ssh/hostinger-wa-restart
 
-      - name: Locate linked WhatsApp credential state
+      - name: Restart Gateway and verify WhatsApp listener
         shell: bash
         run: |
           set -euo pipefail
           ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=15 \
-            -i ~/.ssh/hostinger-wa-locate "$USER@$HOST" 'bash -s' <<'REMOTE'
+            -i ~/.ssh/hostinger-wa-restart "$USER@$HOST" 'bash -s' <<'REMOTE'
           set -euo pipefail
-          echo WHATSAPP_CREDENTIAL_LOCATE_ONLY=1
-          echo GATEWAY_SERVICE_ACTIVE="$(systemctl is-active openclaw-gateway.service 2>/dev/null || true)"
-          echo GATEWAY_SERVICE_ENABLED="$(systemctl is-enabled openclaw-gateway.service 2>/dev/null || true)"
-
-          echo OPENCLAW_PROCESSES_BEGIN
-          ps -eo pid,user,lstart,args | grep -E '[o]penclaw.*gateway|[o]penclaw.*whatsapp' | sed -E 's/(token|secret|key|password|authorization)[=:][^[:space:]]+/\1=[REDACTED]/Ig' | tail -n 30 || true
-          echo OPENCLAW_PROCESSES_END
-
-          echo OPENCLAW_DOCKER_BEGIN
-          if command -v docker >/dev/null 2>&1; then
-            docker ps -a --format 'container={{.Names}} image={{.Image}} status={{.Status}}' | grep -Ei 'openclaw|open[-_]?claw' || true
-            for cid in $(docker ps -aq 2>/dev/null); do
-              meta="$(docker inspect "$cid" --format '{{.Name}} {{.Config.Image}}' 2>/dev/null || true)"
-              printf '%s' "$meta" | grep -Eqi 'openclaw|open[-_]?claw' || continue
-              echo "MOUNTS_FOR=$meta"
-              docker inspect "$cid" --format '{{range .Mounts}}{{println .Type "src=" .Source "dst=" .Destination}}{{end}}' 2>/dev/null || true
-            done
-          fi
-          echo OPENCLAW_DOCKER_END
-
-          echo WHATSAPP_CREDS_CANDIDATES_BEGIN
-          python3 - <<'PY'
-          import json, os, time
-          roots = [
-              '/root/.openclaw',
-              '/home/node/.openclaw',
-              '/var/lib/sahjony-openclaw-state',
-              '/var/lib/docker/volumes',
-              '/opt',
-              '/srv',
-          ]
-          seen=set()
-          rows=[]
-          now=time.time()
-          for root in roots:
-              if not os.path.exists(root):
-                  continue
-              for dirpath, dirnames, filenames in os.walk(root):
-                  # bound expensive trees while retaining likely OpenClaw/WhatsApp paths
-                  if root in ('/opt','/srv') and dirpath.count(os.sep)-root.count(os.sep) > 6:
-                      dirnames[:] = []
-                      continue
-                  if 'creds.json' not in filenames:
-                      continue
-                  p=os.path.join(dirpath,'creds.json')
-                  if 'whatsapp' not in p.lower():
-                      continue
-                  rp=os.path.realpath(p)
-                  if rp in seen:
-                      continue
-                  seen.add(rp)
-                  try:
-                      st=os.stat(p)
-                      registered='unknown'
-                      try:
-                          with open(p,'r',encoding='utf-8') as f:
-                              d=json.load(f)
-                          registered=d.get('registered','missing')
-                      except Exception:
-                          registered='unreadable'
-                      rows.append((st.st_mtime,p,st.st_size,registered,round(now-st.st_mtime)))
-                  except Exception:
-                      pass
-          for m,p,size,registered,age in sorted(rows, reverse=True):
-              print(f'path={p} size={size} registered={registered} age_seconds={age} mtime_epoch={int(m)}')
-          PY
-          echo WHATSAPP_CREDS_CANDIDATES_END
-
-          echo TARGET_TREE_BEGIN
-          find /var/lib/sahjony-openclaw-state/credentials -maxdepth 4 -type f -printf '%p size=%s mtime=%T@\n' 2>/dev/null | grep -Ei 'whatsapp|creds' | head -n 50 || true
-          echo TARGET_TREE_END
+          echo WHATSAPP_LINKED_SESSION_RESTART_ONLY=1
+          systemctl restart openclaw-gateway.service
+          sleep 12
+          systemctl is-active --quiet openclaw-gateway.service
+          systemctl is-enabled --quiet openclaw-gateway.service
+          echo OPENCLAW_GATEWAY_ACTIVE=1
+          echo OPENCLAW_GATEWAY_24X7=1
+          echo RECENT_WHATSAPP_GATEWAY_LOGS_BEGIN
+          journalctl -u openclaw-gateway.service --since '-2 minutes' --no-pager 2>/dev/null \
+            | grep -Ei 'whatsapp|connected|listener|linked|login|baileys|error|ready' \
+            | sed -E 's/(token|secret|key|password|authorization)[=:][^[:space:]]+/\1=[REDACTED]/Ig' \
+            | tail -n 120 || true
+          echo RECENT_WHATSAPP_GATEWAY_LOGS_END
+          echo LISTEN_18789_BEGIN
+          ss -ltnp 2>/dev/null | grep ':18789' || true
+          echo LISTEN_18789_END
           REMOTE
 
       - name: Cleanup SSH
         if: always()
         shell: bash
-        run: rm -f ~/.ssh/hostinger-wa-locate
+        run: rm -f ~/.ssh/hostinger-wa-restart
