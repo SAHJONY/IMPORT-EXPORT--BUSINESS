@@ -1,0 +1,145 @@
+name: Hostinger SOFIA Runtime Repair Once
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hostinger-vm-767852-mutation
+  cancel-in-progress: false
+
+jobs:
+  repair:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      HOST: '69.62.68.67'
+      USER: root
+      PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+      BRIDGE_SECRET: ${{ secrets.OPENCLAW_APP_BRIDGE_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare SSH and reviewed plugin bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "${PRIVATE_KEY:-}" ]] || { echo HOSTINGER_SSH_PRIVATE_KEY_MISSING=1 >&2; exit 2; }
+          [[ ${#BRIDGE_SECRET} -ge 24 ]] || { echo OPENCLAW_APP_BRIDGE_SECRET_MISSING=1 >&2; exit 3; }
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/hostinger-sofia-runtime
+          chmod 600 ~/.ssh/hostinger-sofia-runtime
+          ssh-keygen -y -f ~/.ssh/hostinger-sofia-runtime >/dev/null
+          tar -czf "$RUNNER_TEMP/sahjony-app-bridge.tgz" -C openclaw sahjony-app-bridge
+          umask 077
+          printf '%s' "$BRIDGE_SECRET" > "$RUNNER_TEMP/sahjony-app-bridge-secret"
+
+      - name: Transfer reviewed bridge
+        shell: bash
+        run: |
+          set -euo pipefail
+          scp -q -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=12 \
+            -i ~/.ssh/hostinger-sofia-runtime \
+            "$RUNNER_TEMP/sahjony-app-bridge.tgz" "$RUNNER_TEMP/sahjony-app-bridge-secret" \
+            "$USER@$HOST:/root/"
+
+      - name: Repair canonical workspace and application bridge
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=12 \
+            -i ~/.ssh/hostinger-sofia-runtime "$USER@$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          STATE=/var/lib/sahjony-openclaw-state
+          CONFIG="$STATE/openclaw.json"
+          WORKSPACE="$STATE/workspace"
+          HOME_DIR=/home/node
+          TS="$(date -u +%Y%m%dT%H%M%SZ)"
+          oc(){ env HOME="$HOME_DIR" OPENCLAW_HOME="$HOME_DIR" OPENCLAW_STATE_DIR="$STATE" OPENCLAW_CONFIG_PATH="$CONFIG" openclaw "$@"; }
+          BRIDGE_SECRET_FILE=/root/sahjony-app-bridge-secret
+          trap 'rm -f "$BRIDGE_SECRET_FILE"' EXIT
+
+          [[ -f "$CONFIG" ]] || { echo OPENCLAW_CONFIG_MISSING=1 >&2; exit 20; }
+          [[ -d "$WORKSPACE" ]] || { echo CANONICAL_WORKSPACE_MISSING=1 >&2; exit 21; }
+          systemctl is-active --quiet openclaw-gateway.service || { echo GATEWAY_NOT_ACTIVE=1 >&2; exit 22; }
+          install -d -m 700 /var/backups/openclaw-sofia-runtime
+          cp -a "$CONFIG" "/var/backups/openclaw-sofia-runtime/openclaw.json.$TS"
+
+          rm -rf /tmp/sahjony-app-bridge
+          tar -xzf /root/sahjony-app-bridge.tgz -C /tmp
+          rm -f /root/sahjony-app-bridge.tgz
+          oc plugins install /tmp/sahjony-app-bridge --force --acknowledge-install-policy-warning
+          rm -rf /tmp/sahjony-app-bridge
+          oc plugins enable sahjony-app-bridge
+          oc config set agents.defaults.workspace "$WORKSPACE"
+          oc config set agents.defaults.model.primary openai/gpt-5.6-sol
+          oc config set plugins.entries.sahjony-app-bridge.enabled true --strict-json
+          oc config set plugins.entries.sahjony-app-bridge.config \
+            '{"appUrl":"https://www.sahjony.com","accountId":"default","gatewayId":"hostinger-vps","businessNumber":"+12816628581","businessName":"SAHJONY LLC","pollIntervalMs":30000}' \
+            --strict-json
+
+          umask 077
+          printf 'SAHJONY_APP_URL=https://www.sahjony.com\nSAHJONY_APP_BRIDGE_SECRET=' > /etc/openclaw-sahjony-bridge.env
+          cat "$BRIDGE_SECRET_FILE" >> /etc/openclaw-sahjony-bridge.env
+          printf '\nSAHJONY_GATEWAY_ID=hostinger-vps\n' >> /etc/openclaw-sahjony-bridge.env
+          chmod 600 /etc/openclaw-sahjony-bridge.env
+          install -d -m 755 /etc/systemd/system/openclaw-gateway.service.d
+          cat > /etc/systemd/system/openclaw-gateway.service.d/30-sahjony-bridge.conf <<'EOF'
+          [Service]
+          EnvironmentFile=/etc/openclaw-sahjony-bridge.env
+          EOF
+
+          oc config validate
+          systemctl daemon-reload
+          systemctl restart openclaw-gateway.service
+          sleep 15
+          systemctl is-active --quiet openclaw-gateway.service
+          systemctl is-enabled --quiet openclaw-gateway.service
+          oc plugins inspect sahjony-app-bridge --runtime --json >/dev/null
+          primary="$(oc config get agents.defaults.model.primary --json)"
+          [[ "$primary" == '"openai/gpt-5.6-sol"' ]]
+          workspace="$(oc config get agents.defaults.workspace --json)"
+          [[ "$workspace" == '"/var/lib/sahjony-openclaw-state/workspace"' ]]
+          wa="$(oc channels status --channel whatsapp --probe 2>&1 || true)"
+          printf '%s\n' "$wa" | tail -n 30
+          grep -Eiq 'whatsapp.*(connected|ready|healthy|linked.*running)|linked.*running.*connected' <<<"$wa"
+          journalctl -u openclaw-gateway.service --since '-2 minutes' --no-pager \
+            | grep -E 'SAHJONY application bridge started|workspace path alias|Failed handling inbound' \
+            | tail -n 40 || true
+          echo SOFIA_MODEL=openai/gpt-5.6-sol
+          echo CODEX_MODEL_CONFIGURED=0
+          echo SAHJONY_APP_BRIDGE=READY
+          echo HOSTINGER_WHATSAPP=CONNECTED
+          REMOTE
+
+      - name: Verify authoritative production heartbeat
+        shell: bash
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 12); do
+            health="$(curl -fsS --max-time 20 https://www.sahjony.com/whatsapp/health)"
+            if HEALTH="$health" python3 - <<'PY'
+          import json, os, sys
+          data = json.loads(os.environ['HEALTH'])
+          host = data.get('hostinger_openclaw') or {}
+          ok = (
+              data.get('send_ready') is True
+              and host.get('gateway_id') == 'hostinger-vps'
+              and host.get('connected') is True
+              and host.get('heartbeat_fresh') is True
+          )
+          print(json.dumps({'ready': ok, 'status': data.get('status'), 'gateway_id': host.get('gateway_id'), 'connected': host.get('connected'), 'heartbeat_fresh': host.get('heartbeat_fresh')}))
+          sys.exit(0 if ok else 1)
+          PY
+            then exit 0; fi
+            sleep 10
+          done
+          echo AUTHORITATIVE_HOSTINGER_HEARTBEAT_MISSING=1 >&2
+          exit 30
+
+      - name: Cleanup
+        if: always()
+        shell: bash
+        run: rm -f ~/.ssh/hostinger-sofia-runtime "$RUNNER_TEMP/sahjony-app-bridge.tgz" "$RUNNER_TEMP/sahjony-app-bridge-secret"
