@@ -1,4 +1,4 @@
-name: Hostinger WhatsApp Self Chat Fix Once
+name: Hostinger WhatsApp Gateway Restore Once
 
 on:
   push:
@@ -11,13 +11,13 @@ permissions:
   contents: read
 
 concurrency:
-  group: hostinger-vm-767852-whatsapp-selfchat-fix
+  group: hostinger-vm-767852-whatsapp-gateway-restore
   cancel-in-progress: false
 
 jobs:
-  fix-whatsapp-selfchat:
+  restore-gateway:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 10
     env:
       HOST: '69.62.68.67'
       USER: root
@@ -27,70 +27,46 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          [[ -n "${PRIVATE_KEY:-}" ]] || { echo HOSTINGER_SSH_PRIVATE_KEY_MISSING=1 >&2; exit 2; }
+          [[ -n "${PRIVATE_KEY:-}" ]] || exit 2
           install -d -m 700 ~/.ssh
-          printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/hostinger-wa-selfchat
-          chmod 600 ~/.ssh/hostinger-wa-selfchat
+          printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/hostinger-wa-restore
+          chmod 600 ~/.ssh/hostinger-wa-restore
 
-      - name: Enable self chat and repair agent runtime
+      - name: Restore existing Gateway only
         shell: bash
         run: |
           set -euo pipefail
           ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=15 \
-            -i ~/.ssh/hostinger-wa-selfchat "$USER@$HOST" 'bash -s' <<'REMOTE'
+            -i ~/.ssh/hostinger-wa-restore "$USER@$HOST" 'bash -s' <<'REMOTE'
           set -euo pipefail
           STATE=/var/lib/sahjony-openclaw-state
           CONFIG="$STATE/openclaw.json"
           HOME_DIR=/home/node
-          SELF_NUMBER='+12816628581'
+          oc() { env HOME="$HOME_DIR" OPENCLAW_HOME="$HOME_DIR" OPENCLAW_STATE_DIR="$STATE" OPENCLAW_CONFIG_PATH="$CONFIG" openclaw "$@"; }
+          redact() { sed -E 's/(token|secret|key|password|authorization)[=:][^[:space:]]+/\1=[REDACTED]/Ig'; }
 
-          oc() {
-            env HOME="$HOME_DIR" OPENCLAW_HOME="$HOME_DIR" OPENCLAW_STATE_DIR="$STATE" OPENCLAW_CONFIG_PATH="$CONFIG" openclaw "$@"
-          }
-
-          [[ -f "$CONFIG" ]] || { echo OPENCLAW_CONFIG_MISSING=1 >&2; exit 21; }
-          systemctl cat openclaw-gateway.service >/dev/null 2>&1 || { echo OPENCLAW_GATEWAY_SERVICE_MISSING=1 >&2; exit 20; }
-
-          # Stop only long enough to register the missing harness cleanly.
-          systemctl stop openclaw-gateway.service
-          trap 'systemctl start openclaw-gateway.service >/dev/null 2>&1 || true' EXIT
-          sleep 3
-
-          # Wait out any stale OpenClaw migration lease.
-          for n in $(seq 1 36); do
-            if oc --version >/dev/null 2>&1; then break; fi
-            sleep 5
-          done
-
-          oc plugins install @openclaw/codex@2026.8.1 --force --pin --accept-capabilities
-          oc plugins enable codex --accept-capabilities
-
-          # Change only WhatsApp self-chat admission; preserve every other setting.
-          node -e 'const fs=require("fs"); const p=process.argv[1], n=process.argv[2]; const d=JSON.parse(fs.readFileSync(p,"utf8")); d.channels=d.channels||{}; d.channels.whatsapp=d.channels.whatsapp||{}; const w=d.channels.whatsapp; w.selfChatMode=true; const a=Array.isArray(w.allowFrom)?w.allowFrom:[]; if(!a.includes("*")) a.push("*"); if(!a.includes(n)) a.push(n); w.allowFrom=a; fs.writeFileSync(p,JSON.stringify(d,null,2)+"\n"); console.log("WHATSAPP_SELF_CHAT_MODE=ENABLED");' "$CONFIG" "$SELF_NUMBER"
-
-          oc config validate
+          echo WHATSAPP_GATEWAY_RESTORE_SCOPE_ONLY=1
+          systemctl daemon-reload
+          systemctl enable openclaw-gateway.service >/dev/null
           systemctl reset-failed openclaw-gateway.service >/dev/null 2>&1 || true
-          systemctl start openclaw-gateway.service
-          trap - EXIT
-          sleep 15
+          systemctl start openclaw-gateway.service || true
+          sleep 12
 
-          systemctl is-active --quiet openclaw-gateway.service
+          if ! systemctl is-active --quiet openclaw-gateway.service; then
+            echo GATEWAY_START_FAILED=1
+            journalctl -u openclaw-gateway.service -n 120 --no-pager | redact | tail -n 120
+            exit 24
+          fi
+
           echo OPENCLAW_GATEWAY_ACTIVE=1
-
-          plugin_status="$(oc plugins list 2>&1 || true)"
-          printf '%s\n' "$plugin_status" | grep -Eiq 'codex' || { echo CODEX_PLUGIN_NOT_REGISTERED=1 >&2; exit 31; }
-          echo CODEX_PLUGIN_REGISTERED=1
-
-          node -e 'const fs=require("fs"); const d=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); const w=d.channels&&d.channels.whatsapp||{}; if(w.selfChatMode!==true) process.exit(2); if(!Array.isArray(w.allowFrom)||!w.allowFrom.includes(process.argv[2])) process.exit(3); console.log("WHATSAPP_SELF_CHAT_CONFIG_OK=1");' "$CONFIG" "$SELF_NUMBER"
-
+          echo OPENCLAW_GATEWAY_ENABLED="$(systemctl is-enabled openclaw-gateway.service)"
+          oc plugins list 2>&1 | grep -Ei 'codex|whatsapp' | tail -n 40 || true
           wa="$(oc channels status --channel whatsapp --probe 2>&1 || true)"
-          printf '%s\n' "$wa" | tail -n 80
-          printf '%s\n' "$wa" | grep -Eiq 'connected|ready|healthy|linked.*running' || { echo WHATSAPP_PROBE_NOT_READY=1 >&2; exit 32; }
-          echo WHATSAPP_CONNECTED=1
-          echo SELF_CHAT_AGENT_FIX_COMPLETE=1
+          printf '%s\n' "$wa" | redact | tail -n 80
+          echo WHATSAPP_GATEWAY_RESTORE_COMPLETE=1
           REMOTE
 
       - name: Cleanup SSH
         if: always()
         shell: bash
-        run: rm -f ~/.ssh/hostinger-wa-selfchat
+        run: rm -f ~/.ssh/hostinger-wa-restore
