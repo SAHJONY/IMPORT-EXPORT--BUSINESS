@@ -27,8 +27,22 @@ jobs:
           set -euo pipefail
           umask 077
           key_file="${RUNNER_TEMP}/hostinger_ssh_key"
-          printf '%s\n' "${HOSTINGER_SSH_PRIVATE_KEY}" > "${key_file}"
-          ssh-keygen -y -f "${key_file}" > "${key_file}.pub"
+          printf '%s\n' "${HOSTINGER_SSH_PRIVATE_KEY}" | tr -d '\r' > "${key_file}"
+          if ! ssh-keygen -y -f "${key_file}" > "${key_file}.pub" 2>/dev/null; then
+            # Accommodate secrets copied with literal escaped newlines.
+            printf '%b\n' "${HOSTINGER_SSH_PRIVATE_KEY}" | tr -d '\r' > "${key_file}"
+          fi
+          if ! ssh-keygen -y -f "${key_file}" > "${key_file}.pub" 2>/dev/null; then
+            # Accommodate a base64-encoded private key without logging it.
+            if ! printf '%s' "${HOSTINGER_SSH_PRIVATE_KEY}" | base64 --decode > "${key_file}" 2>/dev/null; then
+              echo "HOSTINGER_SSH_PRIVATE_KEY is not a valid multiline, escaped-newline, or base64 private key." >&2
+              exit 1
+            fi
+          fi
+          if ! ssh-keygen -y -f "${key_file}" > "${key_file}.pub" 2>/dev/null; then
+            echo "HOSTINGER_SSH_PRIVATE_KEY could not be parsed by OpenSSH." >&2
+            exit 1
+          fi
           expected_key="$(awk '{print $1 " " $2}' "${key_file}.pub")"
 
           api_root="https://developers.hostinger.com/api/vps/v1"
