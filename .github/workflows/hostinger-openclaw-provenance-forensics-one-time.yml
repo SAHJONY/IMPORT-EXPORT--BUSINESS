@@ -1,0 +1,132 @@
+name: Hostinger OpenClaw Provenance Forensics One-Time
+
+on:
+  workflow_run:
+    workflows:
+      - Deployment Doctor
+    types:
+      - completed
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hostinger-vm-767852-mutation
+  cancel-in-progress: false
+
+env:
+  HOSTINGER_VM_ID: '767852'
+  HOSTINGER_HOST: '69.62.68.67'
+  HOSTINGER_USER: root
+  HOSTINGER_API_BASE: https://developers.hostinger.com
+
+jobs:
+  forensics_once:
+    if: >-
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.head_commit.message == 'ops: run OpenClaw provenance forensics' &&
+      github.event.workflow_run.run_attempt == 1
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      HOSTINGER_API_TOKEN: ${{ secrets.HOSTINGER_API_TOKEN }}
+    steps:
+      - name: Checkout exact forensic revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Prepare ephemeral management identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "$HOSTINGER_API_TOKEN" ]] || { echo HOSTINGER_API_TOKEN_MISSING=1 >&2; exit 4; }
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq jq sshpass netcat-openbsd >/dev/null
+          install -d -m 700 ~/.ssh
+          ssh-keygen -q -t ed25519 -N '' -f ~/.ssh/openclaw-forensics -C "sahjony-openclaw-forensics-${GITHUB_RUN_ID}"
+          echo "SSH_KEY_PATH=$HOME/.ssh/openclaw-forensics" >> "$GITHUB_ENV"
+          chmod +x openclaw/hostinger-24x7/hostinger-recovery-controller.sh
+          chmod +x openclaw/hostinger-24x7/ssh-self-heal.sh
+          chmod +x openclaw/hostinger-24x7/hostinger-runtime-bootstrap.sh
+          chmod +x openclaw/hostinger-24x7/openclaw-runtime-recovery.sh
+          chmod +x openclaw/hostinger-24x7/whatsapp-hostinger-only-guardian.sh
+          chmod +x openclaw/hostinger-24x7/openclaw-runtime-evidence-correlator.sh
+          chmod +x openclaw/hostinger-24x7/openclaw-docker-metadata-forensics.sh
+          chmod +x openclaw/hostinger-24x7/openclaw-state-audit.sh
+          bash -n openclaw/hostinger-24x7/openclaw-runtime-evidence-correlator.sh
+          bash -n openclaw/hostinger-24x7/hostinger-recovery-controller.sh
+
+      - name: Establish authenticated native Kali SSH
+        shell: bash
+        run: |
+          set -euo pipefail
+          openclaw/hostinger-24x7/hostinger-recovery-controller.sh repair-ssh
+
+      - name: Run read-only OpenClaw provenance correlation
+        id: correlate
+        shell: bash
+        run: |
+          set -uo pipefail
+          opts=(-o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -i "$SSH_KEY_PATH")
+          scp "${opts[@]}" openclaw/hostinger-24x7/openclaw-runtime-evidence-correlator.sh "$HOSTINGER_USER@$HOSTINGER_HOST:/tmp/openclaw-runtime-evidence-correlator.sh"
+          scp "${opts[@]}" openclaw/hostinger-24x7/openclaw-docker-metadata-forensics.sh "$HOSTINGER_USER@$HOSTINGER_HOST:/tmp/openclaw-docker-metadata-forensics.sh"
+          scp "${opts[@]}" openclaw/hostinger-24x7/openclaw-state-audit.sh "$HOSTINGER_USER@$HOSTINGER_HOST:/tmp/openclaw-state-audit.sh"
+          ssh "${opts[@]}" "$HOSTINGER_USER@$HOSTINGER_HOST" 'chmod 700 /tmp/openclaw-runtime-evidence-correlator.sh /tmp/openclaw-docker-metadata-forensics.sh /tmp/openclaw-state-audit.sh'
+
+          set +e
+          ssh "${opts[@]}" "$HOSTINGER_USER@$HOSTINGER_HOST" '/tmp/openclaw-runtime-evidence-correlator.sh' 2>&1 | tee /tmp/openclaw-correlator.log
+          rc=${PIPESTATUS[0]}
+          set -e
+          echo "correlator_rc=$rc" >> "$GITHUB_OUTPUT"
+
+          echo '=== HISTORICAL DOCKER STRUCTURAL EVIDENCE ==='
+          ssh "${opts[@]}" "$HOSTINGER_USER@$HOSTINGER_HOST" '/tmp/openclaw-docker-metadata-forensics.sh' || true
+          echo '=== REDACTED OPENCLAW STATE AUDIT ==='
+          ssh "${opts[@]}" "$HOSTINGER_USER@$HOSTINGER_HOST" '/tmp/openclaw-state-audit.sh' || true
+
+          ssh "${opts[@]}" "$HOSTINGER_USER@$HOSTINGER_HOST" 'cat /var/lib/sahjony-openclaw-correlator/report.json' > /tmp/openclaw-correlator-report.json || true
+          ssh "${opts[@]}" "$HOSTINGER_USER@$HOSTINGER_HOST" 'cat /var/lib/sahjony-openclaw-correlator/decision.json' > /tmp/openclaw-correlator-decision.json || true
+          echo "OPENCLAW_PROVENANCE_FORENSICS_RC=$rc"
+
+      - name: Publish forensic decision
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          {
+            echo '## OpenClaw Provenance Forensics'
+            echo
+            if [[ -s /tmp/openclaw-correlator-decision.json ]]; then
+              echo '```json'
+              cat /tmp/openclaw-correlator-decision.json
+              echo
+              echo '```'
+            else
+              echo 'No correlator decision file was retrieved.'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove ephemeral management identity
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          if [[ -s ~/.ssh/openclaw-forensics.pub && -s ~/.ssh/openclaw-forensics ]]; then
+            pub_b64="$(base64 -w0 ~/.ssh/openclaw-forensics.pub)"
+            ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 -i ~/.ssh/openclaw-forensics "$HOSTINGER_USER@$HOSTINGER_HOST" "PUB_B64='$pub_b64' bash -s" <<'REMOTE'
+          set -euo pipefail
+          auth=/root/.ssh/authorized_keys
+          if [[ -f "$auth" ]]; then
+            pub="$(printf '%s' "$PUB_B64" | base64 -d)"
+            tmp="$(mktemp)"
+            grep -vxF "$pub" "$auth" > "$tmp" || true
+            cat "$tmp" > "$auth"
+            chmod 600 "$auth"
+            rm -f "$tmp"
+          fi
+          rm -f /tmp/openclaw-runtime-evidence-correlator.sh /tmp/openclaw-docker-metadata-forensics.sh /tmp/openclaw-state-audit.sh
+          echo SAHJONY_FORENSIC_EPHEMERAL_KEY_REMOVED=1
+          REMOTE
+          fi
+          rm -f ~/.ssh/openclaw-forensics ~/.ssh/openclaw-forensics.pub
