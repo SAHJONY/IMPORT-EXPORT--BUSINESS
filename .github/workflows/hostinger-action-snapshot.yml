@@ -7,15 +7,17 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   snapshot:
     runs-on: ubuntu-24.04
     env:
       API_TOKEN: ${{ secrets.HOSTINGER_API_TOKEN }}
+      GH_TOKEN: ${{ github.token }}
       HOSTINGER_API_BASE: https://developers.hostinger.com
       VM_ID: '767852'
+      STATUS_PATH: .ops/hostinger-action-snapshot.json
     steps:
       - name: Read latest VPS actions
         shell: bash
@@ -23,6 +25,20 @@ jobs:
           set -euo pipefail
           [[ -n "$API_TOKEN" ]] || exit 2
           body="$(curl -fsS -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/actions?page=1")"
-          jq -c '[.data[]? | {id,name,state,created_at,updated_at}] | .[0:12]' <<<"$body"
+          actions="$(jq '[.data[]? | {id,name,state,created_at,updated_at}] | .[0:12]' <<<"$body")"
           busy="$(jq '[.data[]? | select(.state != "success" and .state != "failed" and .state != "failure" and .state != "error" and .state != "cancelled" and .state != "canceled")] | length' <<<"$body")"
+          snapshot="$(jq -n --arg checked_at "$(date -u +%FT%TZ)" --argjson busy "$busy" --argjson actions "$actions" '{checked_at:$checked_at,busy:$busy,actions:$actions}')"
+          printf '%s\n' "$snapshot" | jq .
           echo HOSTINGER_ACTIONS_BUSY="$busy"
+
+          encoded="$(printf '%s' "$snapshot" | base64 -w0)"
+          api="https://api.github.com/repos/${{ github.repository }}/contents/$STATUS_PATH"
+          auth=(-H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' -H 'X-GitHub-Api-Version: 2022-11-28')
+          code="$(curl -sS -o /tmp/existing.json -w '%{http_code}' "${auth[@]}" "$api?ref=main")"
+          if [[ "$code" == 200 ]]; then
+            sha="$(jq -r '.sha' /tmp/existing.json)"
+            payload="$(jq -n --arg message 'ops: record Hostinger action snapshot' --arg content "$encoded" --arg sha "$sha" '{message:$message,content:$content,sha:$sha,branch:"main"}')"
+          else
+            payload="$(jq -n --arg message 'ops: record Hostinger action snapshot' --arg content "$encoded" '{message:$message,content:$content,branch:"main"}')"
+          fi
+          curl -fsS -X PUT "${auth[@]}" -H 'Content-Type: application/json' --data "$payload" "$api" >/dev/null
