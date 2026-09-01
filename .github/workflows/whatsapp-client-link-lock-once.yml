@@ -1,0 +1,47 @@
+name: WhatsApp Client Link Lock Once
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/whatsapp-client-link-lock-once.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hostinger-vm-767852-whatsapp-pairing
+  cancel-in-progress: false
+
+jobs:
+  register-lock:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      HOSTINGER_HOST: '69.62.68.67'
+      HOSTINGER_USER: root
+      HOSTINGER_SSH_PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Register provider-side client pairing lock without re-pairing
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "${HOSTINGER_SSH_PRIVATE_KEY:-}" ]] || { echo HOSTINGER_SSH_PRIVATE_KEY_MISSING=1 >&2; exit 2; }
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$HOSTINGER_SSH_PRIVATE_KEY" > ~/.ssh/hostinger
+          chmod 600 ~/.ssh/hostinger
+          chmod +x openclaw/hostinger-24x7/whatsapp-pairing-controller.sh
+          opts=(-o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -i "$HOME/.ssh/hostinger")
+          ssh "${opts[@]}" "$HOSTINGER_USER@$HOSTINGER_HOST" 'printf SAHJONY_NORMAL_SSH_OK' | grep -q SAHJONY_NORMAL_SSH_OK || {
+            echo SAHJONY_CLIENT_LOCK_NOT_RECORDED_HOSTINGER_SSH_UNAVAILABLE=1 >&2
+            exit 20
+          }
+          scp "${opts[@]}" openclaw/hostinger-24x7/whatsapp-pairing-controller.sh "$HOSTINGER_USER@$HOSTINGER_HOST:/tmp/sahjony-whatsapp-pairing-controller"
+          ssh "${opts[@]}" "$HOSTINGER_USER@$HOSTINGER_HOST" 'set -euo pipefail; install -m 700 /tmp/sahjony-whatsapp-pairing-controller /usr/local/sbin/sahjony-whatsapp-pairing-controller; rm -f /tmp/sahjony-whatsapp-pairing-controller; /usr/local/sbin/sahjony-whatsapp-pairing-controller mark-client-lock 21600; /usr/local/sbin/sahjony-whatsapp-pairing-controller cooldown || true'
+          echo SAHJONY_WHATSAPP_CLIENT_LINK_LOCK_RECORDED=1
+
+      - name: Cleanup
+        if: always()
+        run: rm -f ~/.ssh/hostinger
