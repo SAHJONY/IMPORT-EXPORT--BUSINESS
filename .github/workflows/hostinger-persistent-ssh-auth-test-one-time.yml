@@ -17,6 +17,7 @@ concurrency:
 env:
   HOST: '69.62.68.67'
   SSH_USER: root
+  RETEST_REASON: 'secret-confirmed-in-repository-settings'
 
 jobs:
   test_auth:
