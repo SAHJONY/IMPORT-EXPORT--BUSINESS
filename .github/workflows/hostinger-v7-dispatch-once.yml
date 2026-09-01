@@ -1,7 +1,10 @@
 name: Hostinger V7 Dispatch Once
 
+# Re-armed after commit 675fecd added authoritative Hostinger heartbeat publishing
+# to the guardian that canonical Recovery V7 installs.
 on:
   push:
+    branches: [main]
     paths:
       - '.github/workflows/hostinger-v7-dispatch-once.yml'
 
