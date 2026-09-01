@@ -14,7 +14,7 @@ on:
           - recover
           - verify
       force_recovery:
-        description: 'Ignore the recovery cooldown when mode=recover'
+        description: 'Ignore the V6 recovery cooldown when mode=recover'
         required: false
         default: false
         type: boolean
@@ -74,7 +74,9 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.mode || 'heal' }}
           FORCE_RECOVERY: ${{ github.event_name == 'workflow_dispatch' && inputs.force_recovery || false }}
-          SAHJONY_AUTO_RECOVERY: ${{ vars.SAHJONY_AUTO_RECOVERY || 'false' }}
+          # Owner-directed 24/7 operation: guarded recovery is enabled by default.
+          # A repository variable can explicitly disable it with SAHJONY_AUTO_RECOVERY=false.
+          SAHJONY_AUTO_RECOVERY: ${{ vars.SAHJONY_AUTO_RECOVERY || 'true' }}
           HOSTINGER_SSH_KEY_FILE: /home/runner/.ssh/hostinger_control
         shell: bash
         run: |
