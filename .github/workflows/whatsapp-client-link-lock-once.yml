@@ -1,3 +1,4 @@
+# One-time operator safety action for the 2026-09-01 WhatsApp client-side device-link lock.
 name: WhatsApp Client Link Lock Once
 
 on:
