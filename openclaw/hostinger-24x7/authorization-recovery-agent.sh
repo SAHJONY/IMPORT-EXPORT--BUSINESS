@@ -37,9 +37,20 @@ find_hostinger_connector(){
 main(){
   log "preflight start"
   health="$(probe_health)"
-  if printf '%s' "$health" | grep -q '"gateway_connected"[[:space:]]*:[[:space:]]*true'; then
-    log "gateway already healthy; no recovery required"
+  gateway_connected=false
+  cloud_independent=false
+  if printf '%s' "$health" | grep -Eq '"gateway_connected"[[:space:]]*:[[:space:]]*true|"openclaw_fallback"[[:space:]]*:[[:space:]]*\{[^}]*"connected"[[:space:]]*:[[:space:]]*true'; then
+    gateway_connected=true
+  fi
+  if printf '%s' "$health" | grep -q '"cloud_independent_of_local_mac"[[:space:]]*:[[:space:]]*true'; then
+    cloud_independent=true
+  fi
+  if [[ "$gateway_connected" == true && "$cloud_independent" == true ]]; then
+    log "Hostinger/cloud gateway already healthy and independent of local Mac; no recovery required"
     exit 0
+  fi
+  if [[ "$gateway_connected" == true ]]; then
+    log "gateway is connected but still depends on local Mac; Hostinger recovery/bootstrap remains required"
   fi
 
   existing="$(find_existing_openclaw)"
