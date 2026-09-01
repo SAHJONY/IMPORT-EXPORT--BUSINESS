@@ -24,20 +24,21 @@ jobs:
   bootstrap:
     if: ${{ github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, 'bootstrap Hostinger SSH once') }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 30
     env:
       HOSTINGER_API_TOKEN: ${{ secrets.HOSTINGER_API_TOKEN }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Prepare ephemeral provider key and validate resolver tools
+      - name: Prepare ephemeral provider key and validate recovery tools
         id: key
         shell: bash
         run: |
           set -euo pipefail
           sudo apt-get update -qq
-          sudo apt-get install -y -qq jq netcat-openbsd openssh-client >/dev/null
+          sudo apt-get install -y -qq jq netcat-openbsd openssh-client sshpass >/dev/null
           [[ -n "${HOSTINGER_API_TOKEN:-}" ]] || { echo HOSTINGER_API_TOKEN_MISSING=1 >&2; exit 2; }
+          bash -n openclaw/hostinger-24x7/hostinger-ephemeral-key-seed.sh
           bash -n openclaw/hostinger-24x7/openclaw-runtime-recovery.sh
           bash -n openclaw/hostinger-24x7/openclaw-runtime-resolver.sh
           bash -n openclaw/hostinger-24x7/provider-bootstrap-stabilize.sh
@@ -101,7 +102,7 @@ jobs:
                 echo HOSTINGER_PUBLIC_KEY_ATTACHED=ACTION_SUCCESS
               elif [[ "$action_id" == 0 ]]; then
                 echo HOSTINGER_PUBLIC_KEY_ATTACHED=NONPOLLABLE_ACCEPTED
-                sleep 15
+                sleep 10
               else
                 echo HOSTINGER_PUBLIC_KEY_ATTACH_RESPONSE_UNUSABLE=1 >&2
                 exit 8
@@ -109,26 +110,56 @@ jobs:
               ;;
           esac
 
-      - name: Authenticate repaired Kali without Recovery
+      - name: Short normal SSH trial after provider attach
+        id: normal
         shell: bash
         run: |
           set -euo pipefail
           ready=false
           : >/tmp/bootstrap-ssh.err
-          for i in $(seq 1 60); do
+          for i in $(seq 1 8); do
             if nc -z -w 4 "$HOSTINGER_HOST" 22 >/dev/null 2>&1; then
               if ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 -i ~/.ssh/sahjony-provider-bootstrap "$HOSTINGER_USER@$HOSTINGER_HOST" 'printf SAHJONY_PROVIDER_BOOTSTRAP_SSH_OK' 2>/tmp/bootstrap-ssh.err | grep -q SAHJONY_PROVIDER_BOOTSTRAP_SSH_OK; then
                 ready=true
                 echo "HOSTINGER_PROVIDER_BOOTSTRAP_SSH=READY probe=$i"
                 break
               fi
-              echo "tcp22=open auth=pending probe=$i/60"
+              echo "tcp22=open auth=pending probe=$i/8"
             else
-              echo "tcp22=closed_or_filtered probe=$i/60"
+              echo "tcp22=closed_or_filtered probe=$i/8"
             fi
             sleep 5
           done
-          [[ "$ready" == true ]] || { echo HOSTINGER_PROVIDER_BOOTSTRAP_SSH=NOT_READY >&2; sed -n '1,20p' /tmp/bootstrap-ssh.err 2>/dev/null || true; exit 9; }
+          echo "ready=$ready" >> "$GITHUB_OUTPUT"
+          if [[ "$ready" != true ]]; then
+            echo HOSTINGER_PROVIDER_ATTACH_NOT_PROPAGATED_TO_KALI=1
+            sed -n '1,20p' /tmp/bootstrap-ssh.err 2>/dev/null || true
+          fi
+
+      - name: Seed same ephemeral key through targeted Recovery only when needed
+        if: steps.normal.outputs.ready != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x openclaw/hostinger-24x7/hostinger-ephemeral-key-seed.sh
+          openclaw/hostinger-24x7/hostinger-ephemeral-key-seed.sh "$HOME/.ssh/sahjony-provider-bootstrap"
+
+      - name: Require authenticated repaired Kali
+        shell: bash
+        run: |
+          set -euo pipefail
+          ready=false
+          : >/tmp/bootstrap-final-ssh.err
+          for i in $(seq 1 24); do
+            if nc -z -w 4 "$HOSTINGER_HOST" 22 >/dev/null 2>&1 && \
+               ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 -i ~/.ssh/sahjony-provider-bootstrap "$HOSTINGER_USER@$HOSTINGER_HOST" 'printf SAHJONY_REPAIRED_KALI_SSH_OK' 2>/tmp/bootstrap-final-ssh.err | grep -q SAHJONY_REPAIRED_KALI_SSH_OK; then
+              ready=true
+              echo "HOSTINGER_REPAIRED_KALI_SSH=READY probe=$i"
+              break
+            fi
+            sleep 5
+          done
+          [[ "$ready" == true ]] || { echo HOSTINGER_REPAIRED_KALI_SSH=NOT_READY >&2; sed -n '1,30p' /tmp/bootstrap-final-ssh.err 2>/dev/null || true; exit 9; }
 
       - name: Resolve OpenClaw runtime and install 24x7 guardian
         shell: bash
