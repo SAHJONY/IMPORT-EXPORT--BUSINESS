@@ -1,4 +1,4 @@
-name: Hostinger WhatsApp Final Restore Once
+name: Hostinger WhatsApp Live Verify Once
 
 on:
   push:
@@ -11,13 +11,13 @@ permissions:
   contents: read
 
 concurrency:
-  group: hostinger-vm-767852-whatsapp-final-restore
+  group: hostinger-vm-767852-whatsapp-live-verify
   cancel-in-progress: false
 
 jobs:
-  restore-whatsapp:
+  verify-whatsapp:
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 8
     env:
       HOST: '69.62.68.67'
       USER: root
@@ -29,85 +29,50 @@ jobs:
           set -euo pipefail
           [[ -n "${PRIVATE_KEY:-}" ]] || exit 2
           install -d -m 700 ~/.ssh
-          printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/hostinger-wa-final
-          chmod 600 ~/.ssh/hostinger-wa-final
+          printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/hostinger-wa-verify
+          chmod 600 ~/.ssh/hostinger-wa-verify
 
-      - name: Restore existing auth and WhatsApp peer link
+      - name: Verify live WhatsApp listener
         shell: bash
         run: |
           set -euo pipefail
           ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=15 \
-            -i ~/.ssh/hostinger-wa-final "$USER@$HOST" 'bash -s' <<'REMOTE'
+            -i ~/.ssh/hostinger-wa-verify "$USER@$HOST" 'bash -s' <<'REMOTE'
           set -euo pipefail
           STATE=/var/lib/sahjony-openclaw-state
           CONFIG="$STATE/openclaw.json"
           HOME_DIR=/home/node
-          oc() { env HOME="$HOME_DIR" OPENCLAW_HOME="$HOME_DIR" OPENCLAW_STATE_DIR="$STATE" OPENCLAW_CONFIG_PATH="$CONFIG" openclaw "$@"; }
           redact() { sed -E 's/(token|secret|key|password|authorization)[=:][^[:space:]]+/\1=[REDACTED]/Ig'; }
 
-          echo WHATSAPP_FINAL_RESTORE_SCOPE_ONLY=1
-          [[ -f "$CONFIG" ]] || exit 21
+          [[ -s /etc/openclaw-gateway.env ]] || { echo GATEWAY_AUTH_ENV_MISSING=1 >&2; exit 21; }
+          set -a
+          . /etc/openclaw-gateway.env
+          set +a
+          oc() { env HOME="$HOME_DIR" OPENCLAW_HOME="$HOME_DIR" OPENCLAW_STATE_DIR="$STATE" OPENCLAW_CONFIG_PATH="$CONFIG" openclaw "$@"; }
 
-          # Recover the already-existing gateway credential from the retained OpenClaw container.
-          token=''
-          if command -v docker >/dev/null 2>&1; then
-            while IFS= read -r cid; do
-              [ -n "$cid" ] || continue
-              meta="$(docker inspect "$cid" --format '{{.Name}} {{.Config.Image}}' 2>/dev/null || true)"
-              if printf '%s' "$meta" | grep -Eqi 'openclaw|open[-_]?claw'; then
-                token="$(docker inspect "$cid" --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null | sed -n 's/^OPENCLAW_GATEWAY_TOKEN=//p' | head -n1)"
-                [ -n "$token" ] && break
-              fi
-            done < <(docker ps -aq 2>/dev/null || true)
-          fi
-          [ -n "$token" ] || { echo EXISTING_GATEWAY_TOKEN_NOT_FOUND=1 >&2; exit 22; }
-
-          install -m 600 /dev/null /etc/openclaw-gateway.env
-          printf 'OPENCLAW_GATEWAY_TOKEN=%s\n' "$token" > /etc/openclaw-gateway.env
-          unset token
-          install -d -m 755 /etc/systemd/system/openclaw-gateway.service.d
-          cat > /etc/systemd/system/openclaw-gateway.service.d/10-auth.conf <<'EOF'
-          [Service]
-          EnvironmentFile=/etc/openclaw-gateway.env
-          EOF
-
-          # Repair only the missing peerDependency link reported by OpenClaw.
-          plugin="$STATE/extensions/whatsapp"
-          [ -d "$plugin" ] || { echo WHATSAPP_EXTENSION_MISSING=1 >&2; exit 23; }
-          install -d -m 755 "$plugin/node_modules"
-          host_openclaw="$(npm root -g)/openclaw"
-          [ -d "$host_openclaw" ] || { echo OPENCLAW_GLOBAL_MODULE_MISSING=1 >&2; exit 24; }
-          rm -rf "$plugin/node_modules/openclaw"
-          ln -s "$host_openclaw" "$plugin/node_modules/openclaw"
-          chown -h root:root "$plugin/node_modules/openclaw"
-
-          oc config validate >/dev/null
-          systemctl daemon-reload
-          systemctl enable openclaw-gateway.service >/dev/null
-          systemctl reset-failed openclaw-gateway.service >/dev/null 2>&1 || true
-          systemctl restart openclaw-gateway.service
-          sleep 15
-
-          if ! systemctl is-active --quiet openclaw-gateway.service; then
-            echo GATEWAY_FINAL_START_FAILED=1
-            journalctl -u openclaw-gateway.service -n 100 --no-pager | redact | tail -n 100
-            exit 31
-          fi
+          systemctl is-active --quiet openclaw-gateway.service || { echo GATEWAY_NOT_ACTIVE=1 >&2; exit 22; }
+          systemctl is-enabled --quiet openclaw-gateway.service || { echo GATEWAY_NOT_ENABLED=1 >&2; exit 23; }
           echo OPENCLAW_GATEWAY_ACTIVE=1
-          echo OPENCLAW_GATEWAY_ENABLED="$(systemctl is-enabled openclaw-gateway.service)"
+          echo OPENCLAW_GATEWAY_24X7=1
 
           wa="$(oc channels status --channel whatsapp --probe 2>&1 || true)"
           printf '%s\n' "$wa" | redact | tail -n 100
-          printf '%s\n' "$wa" | grep -Eiq 'connected|ready|healthy|linked.*running' || { echo WHATSAPP_NOT_READY=1 >&2; exit 32; }
-          echo WHATSAPP_CONNECTED=1
 
-          plugin_status="$(oc plugins list 2>&1 || true)"
-          printf '%s\n' "$plugin_status" | grep -Eiq 'codex' || { echo CODEX_NOT_REGISTERED=1 >&2; exit 33; }
-          echo CODEX_REGISTERED=1
-          echo WHATSAPP_AGENT_PIPELINE_READY=1
+          echo RECENT_WHATSAPP_GATEWAY_LOGS_BEGIN
+          journalctl -u openclaw-gateway.service --since '-5 minutes' --no-pager 2>/dev/null \
+            | grep -Ei 'whatsapp|connected|listener|inbound|codex|error' \
+            | redact | tail -n 100 || true
+          echo RECENT_WHATSAPP_GATEWAY_LOGS_END
+
+          if printf '%s\n' "$wa" | grep -Eiq 'connected|ready|healthy|linked.*running'; then
+            echo WHATSAPP_LIVE_CONNECTED=1
+          else
+            echo WHATSAPP_LIVE_CONNECTED=0
+            exit 32
+          fi
           REMOTE
 
       - name: Cleanup SSH
         if: always()
         shell: bash
-        run: rm -f ~/.ssh/hostinger-wa-final
+        run: rm -f ~/.ssh/hostinger-wa-verify
