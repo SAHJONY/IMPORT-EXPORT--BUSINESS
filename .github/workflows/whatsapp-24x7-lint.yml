@@ -1,0 +1,75 @@
+name: WhatsApp 24x7 Lint
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/whatsapp-24x7-lint.yml'
+      - '.github/workflows/whatsapp-24x7-control-plane.yml'
+      - '.github/workflows/hostinger-whatsapp-24x7-recovery-v6.yml'
+      - 'openclaw/hostinger-24x7/whatsapp-24x7-control-plane.sh'
+      - 'openclaw/hostinger-24x7/whatsapp-24x7-guardian.sh'
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate standalone Bash scripts
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n openclaw/hostinger-24x7/whatsapp-24x7-control-plane.sh
+          bash -n openclaw/hostinger-24x7/whatsapp-24x7-guardian.sh
+
+      - name: Parse workflow YAML and lint every Bash run block
+        shell: python
+        run: |
+          import pathlib
+          import subprocess
+          import tempfile
+          import yaml
+
+          paths = [
+              pathlib.Path('.github/workflows/whatsapp-24x7-control-plane.yml'),
+              pathlib.Path('.github/workflows/hostinger-whatsapp-24x7-recovery-v6.yml'),
+              pathlib.Path('.github/workflows/whatsapp-24x7-lint.yml'),
+          ]
+
+          for path in paths:
+              data = yaml.safe_load(path.read_text())
+              if not isinstance(data, dict):
+                  raise SystemExit(f'{path}: workflow root is not a mapping')
+              jobs = data.get('jobs') or {}
+              if not isinstance(jobs, dict) or not jobs:
+                  raise SystemExit(f'{path}: no jobs mapping')
+              for job_name, job in jobs.items():
+                  for idx, step in enumerate((job or {}).get('steps') or [], start=1):
+                      if not isinstance(step, dict):
+                          continue
+                      run = step.get('run')
+                      shell = str(step.get('shell') or 'bash')
+                      if not run or not shell.startswith('bash'):
+                          continue
+                      # Replace GitHub expression tokens with harmless shell literals
+                      # so bash -n validates shell grammar rather than Actions interpolation.
+                      sanitized = str(run)
+                      while '${{' in sanitized:
+                          start = sanitized.find('${{')
+                          end = sanitized.find('}}', start)
+                          if end < 0:
+                              raise SystemExit(f'{path}:{job_name}:{idx}: unterminated GitHub expression')
+                          sanitized = sanitized[:start] + 'GITHUB_EXPR' + sanitized[end + 2:]
+                      with tempfile.NamedTemporaryFile('w', suffix='.sh', delete=False) as fh:
+                          fh.write(sanitized)
+                          tmp = fh.name
+                      result = subprocess.run(['bash', '-n', tmp], capture_output=True, text=True)
+                      pathlib.Path(tmp).unlink(missing_ok=True)
+                      if result.returncode:
+                          raise SystemExit(f'{path}:{job_name}:{idx}: bash syntax failed:\n{result.stderr}')
+              print(f'OK {path}')
