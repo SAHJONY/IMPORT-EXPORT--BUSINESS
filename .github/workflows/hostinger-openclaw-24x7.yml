@@ -65,7 +65,7 @@ jobs:
           fi
 
           health="$(curl -fsS --max-time 15 https://www.sahjony.com/whatsapp/health 2>/dev/null || true)"
-          if [[ -n "$health" ]] && grep -Eq '"gateway_connected"[[:space:]]*:[[:space:]]*true|"openclaw_fallback"[[:space:]]*:[[:space:]]*\{[^}]*"connected"[[:space:]]*:[[:space:]]*true' <<<"$health"; then
+          if [[ -n "$health" ]] && grep -Eq '"hostinger_independent_runtime"[[:space:]]*:[[:space:]]*true|"hostinger_openclaw"[[:space:]]*:[[:space:]]*\{[^}]*"connected"[[:space:]]*:[[:space:]]*true' <<<"$health"; then
             recovery_required=false
           fi
 
@@ -209,11 +209,21 @@ jobs:
             "$HOSTINGER_CONFIRMED_USER@$HOSTINGER_CONFIRMED_HOST" \
             "env OPENCLAW_DOMAIN='$DOMAIN' LETSENCRYPT_EMAIL='$EMAIL' bash /opt/sahjony-openclaw/repo/openclaw/hostinger-24x7/configure-https.sh"
 
-      - name: Verify SAHJONY cloud health
+      - name: Verify Hostinger OpenClaw health
         run: |
           set -euo pipefail
-          sleep 10
-          curl --fail --silent --show-error https://www.sahjony.com/whatsapp/health | python3 -m json.tool
+          ready=false
+          for attempt in $(seq 1 18); do
+            body="$(curl -fsS --max-time 20 https://www.sahjony.com/whatsapp/health 2>/dev/null || true)"
+            printf '%s\n' "$body"
+            if grep -Eq '"hostinger_independent_runtime"[[:space:]]*:[[:space:]]*true|"hostinger_openclaw"[[:space:]]*:[[:space:]]*\{[^}]*"connected"[[:space:]]*:[[:space:]]*true' <<<"$body"; then
+              ready=true
+              break
+            fi
+            sleep 10
+          done
+          [[ "$ready" == true ]] || { echo "HOSTINGER_OPENCLAW_HEALTH_NOT_CONFIRMED=1" >&2; exit 6; }
+          echo "SAHJONY_HOSTINGER_OPENCLAW_24X7=READY"
 
       - name: Remove ephemeral SSH access
         if: ${{ always() && steps.control.outputs.ephemeral == 'true' }}
