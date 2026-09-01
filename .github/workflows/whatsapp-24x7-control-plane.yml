@@ -24,7 +24,7 @@ on:
     paths:
       - '.github/workflows/whatsapp-24x7-control-plane.yml'
       - 'openclaw/hostinger-24x7/whatsapp-24x7-control-plane.sh'
-      - 'openclaw/hostinger-24x7/whatsapp-24x7-guardian.sh'
+      - 'openclaw/hostinger-24x7/whatsapp-hostinger-only-guardian.sh'
 
 permissions:
   contents: read
@@ -69,13 +69,11 @@ jobs:
             echo HOSTINGER_CONTROL_SSH_KEY_READY=0
           fi
 
-      - name: Run WhatsApp 24x7 state machine
+      - name: Run Hostinger-only WhatsApp state machine
         env:
           GITHUB_TOKEN: ${{ github.token }}
           MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.mode || 'heal' }}
           FORCE_RECOVERY: ${{ github.event_name == 'workflow_dispatch' && inputs.force_recovery || false }}
-          # Owner-directed 24/7 operation: guarded recovery is enabled by default.
-          # A repository variable can explicitly disable it with SAHJONY_AUTO_RECOVERY=false.
           SAHJONY_AUTO_RECOVERY: ${{ vars.SAHJONY_AUTO_RECOVERY || 'true' }}
           HOSTINGER_SSH_KEY_FILE: /home/runner/.ssh/hostinger_control
         shell: bash
@@ -83,9 +81,9 @@ jobs:
           set -euo pipefail
           bash openclaw/hostinger-24x7/whatsapp-24x7-control-plane.sh
 
-      - name: Final public health snapshot
+      - name: Final Hostinger-specific public health snapshot
         if: always()
         shell: bash
         run: |
           set +e
-          curl -fsS --max-time 20 https://www.sahjony.com/whatsapp/health | jq '{status,provider,primary_provider,gateway_connected,cloud_independent_of_local_mac,hostinger_independent_runtime,hostinger_openclaw,meta_cloud}' || true
+          curl -fsS --max-time 20 https://www.sahjony.com/whatsapp/health | jq '{status,provider,hostinger_independent_runtime,hostinger_openclaw}' || true
