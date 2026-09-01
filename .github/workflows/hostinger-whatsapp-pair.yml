@@ -55,7 +55,6 @@ jobs:
           PY
 
       - name: Publish QR for phone scan
-        if: hashFiles(format('{0}/whatsapp-qr.png', runner.temp)) != ''
         uses: actions/upload-artifact@v4
         with:
           name: whatsapp-qr-${{ github.run_id }}
