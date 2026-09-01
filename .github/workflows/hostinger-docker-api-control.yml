@@ -1,170 +1,17 @@
-name: Hostinger Docker API Control Gate
+name: Hostinger Docker API Control Gate [RETIRED]
 
 on:
-  push:
-    paths:
-      - '.github/workflows/hostinger-docker-api-control.yml'
   workflow_dispatch:
 
 permissions:
   contents: read
 
-concurrency:
-  group: hostinger-vm-767852-mutation
-  cancel-in-progress: false
-
-env:
-  HOSTINGER_API_BASE: https://developers.hostinger.com
-  VM_ID: '767852'
-  APP_URL: https://www.sahjony.com
-
 jobs:
-  inspect-and-recover:
+  retired:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    env:
-      API_TOKEN: ${{ secrets.HOSTINGER_API_TOKEN }}
     steps:
-      - name: Require Hostinger API token
-        shell: bash
-        run: |
-          set -euo pipefail
-          [[ -n "$API_TOKEN" ]] || { echo HOSTINGER_API_TOKEN_MISSING=1 >&2; exit 2; }
-
-      - name: Check authoritative Hostinger heartbeat first
-        id: health
-        shell: bash
-        run: |
-          set +e
-          body="$(curl -fsS --max-time 20 "$APP_URL/whatsapp/health" 2>/dev/null)"
-          printf '%s\n' "$body" | jq -c '{status,provider,authority,hostinger_independent_runtime,send_ready,hostinger_openclaw}' 2>/dev/null || true
-          if jq -e '(.hostinger_openclaw.connected // false) == true and (.hostinger_openclaw.heartbeat_fresh // false) == true' >/dev/null 2>&1 <<<"$body"; then
-            echo ready=true >> "$GITHUB_OUTPUT"
-            echo SAHJONY_HOSTINGER_OPENCLAW_ALREADY_READY=1
-          else
-            echo ready=false >> "$GITHUB_OUTPUT"
-            echo SAHJONY_HOSTINGER_OPENCLAW_NEEDS_CONTROL_PLANE_HEAL=1
-          fi
-
-      - name: Inspect recent VPS actions and wait for transition drain
-        if: steps.health.outputs.ready != 'true'
-        shell: bash
-        run: |
-          set -euo pipefail
-          stable=false
-          for i in $(seq 1 48); do
-            actions="$(curl -fsS -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/actions?page=1")"
-            echo "$actions" | jq -c '[.data[]? | {id,name,state,created_at,updated_at}] | .[0:8]'
-            busy="$(jq '[.data[]? | select(.state != "success" and .state != "failed" and .state != "failure" and .state != "error" and .state != "cancelled" and .state != "canceled")] | length' <<<"$actions")"
-            if [ "$busy" = 0 ]; then stable=true; break; fi
-            echo "HOSTINGER_ACTIONS_BUSY=$busy probe=$i/48"
-            sleep 5
-          done
-          [[ "$stable" == true ]] || { echo HOSTINGER_ACTION_TRANSITION_STILL_BUSY=1 >&2; exit 3; }
-          echo HOSTINGER_ACTION_PLANE_STABLE=1
-
-      - name: Inspect Docker Manager without SSH
-        id: docker
-        if: steps.health.outputs.ready != 'true'
-        shell: bash
-        run: |
-          set -euo pipefail
-          tmp="$(mktemp)"
-          code="$(curl -sS -o "$tmp" -w '%{http_code}' -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/docker" || true)"
-          echo "HOSTINGER_DOCKER_MANAGER_HTTP=$code"
-          if [ "$code" != 200 ]; then
-            sed -n '1,40p' "$tmp" || true
-            echo 'available=false' >> "$GITHUB_OUTPUT"
-            echo 'project=' >> "$GITHUB_OUTPUT"
-            echo HOSTINGER_DOCKER_MANAGER_UNAVAILABLE=1
-            exit 0
-          fi
-          echo 'available=true' >> "$GITHUB_OUTPUT"
-          jq -c '[.[] | {name,status,state,path,containers:[.containers[]? | {name,image,status,state,health,ports}]}]' "$tmp"
-          match="$(jq -r '[.[] | select((.name // "" | test("openclaw|claw";"i")) or ([.containers[]? | ((.name // "") + " " + (.image // "")) | test("openclaw|claw";"i")] | any))] | first | .name // empty' "$tmp")"
-          echo "project=$match" >> "$GITHUB_OUTPUT"
-          if [ -z "$match" ]; then
-            echo HOSTINGER_OPENCLAW_DOCKER_PROJECT_NOT_REGISTERED=1
-            exit 0
-          fi
-          echo "HOSTINGER_OPENCLAW_PROJECT=$match"
-
-      - name: Start or restart OpenClaw project through Hostinger API
-        if: steps.health.outputs.ready != 'true' && steps.docker.outputs.project != ''
-        env:
-          PROJECT: ${{ steps.docker.outputs.project }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          projects="$(curl -fsS -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/docker")"
-          state="$(jq -r --arg p "$PROJECT" '.[] | select(.name==$p) | .state // empty' <<<"$projects")"
-          op=start
-          [ "$state" = running ] && op=restart
-          echo "HOSTINGER_DOCKER_OPERATION=$op project=$PROJECT state=${state:-unknown}"
-          body="$(curl -fsS -X POST -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/docker/$PROJECT/$op")"
-          action_id="$(jq -r '.id // empty' <<<"$body")"
-          [[ "$action_id" =~ ^[0-9]+$ ]] || { echo HOSTINGER_DOCKER_ACTION_ID_MISSING=1 >&2; jq -c . <<<"$body" >&2 || true; exit 10; }
-          success=false
-          for i in $(seq 1 72); do
-            a="$(curl -fsS -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/actions/$action_id")"
-            s="$(jq -r '.state // empty' <<<"$a")"
-            echo "docker_action_probe=$i/72 id=$action_id state=${s:-unknown}"
-            if [ "$s" = success ]; then success=true; break; fi
-            case "$s" in failed|failure|error|cancelled|canceled) jq -c . <<<"$a" >&2; exit 11;; esac
-            sleep 5
-          done
-          [[ "$success" == true ]] || { echo HOSTINGER_DOCKER_ACTION_TIMEOUT=1 >&2; exit 13; }
-          containers="$(curl -fsS -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/docker/$PROJECT/containers")"
-          jq -c '[.[] | {name,image,status,state,health,ports}]' <<<"$containers"
-          running="$(jq '[.[] | select(.state=="running")] | length' <<<"$containers")"
-          [ "$running" -gt 0 ] || { echo HOSTINGER_OPENCLAW_PROJECT_NOT_RUNNING=1 >&2; exit 12; }
-          echo HOSTINGER_DOCKER_API_OPENCLAW_RUNNING=1
-
-      - name: Fetch OpenClaw project logs through Hostinger API
-        if: steps.health.outputs.ready != 'true' && steps.docker.outputs.project != ''
-        env:
-          PROJECT: ${{ steps.docker.outputs.project }}
-        shell: bash
-        run: |
-          set +e
-          curl -fsS -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/docker/$PROJECT/logs" | jq -c '[.[] | {service,entries:(.entries[-25:] // [])}]' || true
-
-      - name: Verify Hostinger OpenClaw heartbeat after Docker control
-        id: verify
-        if: steps.health.outputs.ready != 'true' && steps.docker.outputs.project != ''
-        shell: bash
-        run: |
-          set -euo pipefail
-          ready=false
-          for i in $(seq 1 30); do
-            body="$(curl -fsS --max-time 20 "$APP_URL/whatsapp/health" 2>/dev/null || true)"
-            if jq -e '(.hostinger_openclaw.connected // false) == true and (.hostinger_openclaw.heartbeat_fresh // false) == true' >/dev/null 2>&1 <<<"$body"; then
-              ready=true
-              printf '%s\n' "$body" | jq -c '{status,provider,authority,hostinger_independent_runtime,send_ready,hostinger_openclaw}'
-              break
-            fi
-            echo "HOSTINGER_HEARTBEAT_WAIT=$i/30"
-            sleep 10
-          done
-          if [[ "$ready" == true ]]; then
-            echo ready=true >> "$GITHUB_OUTPUT"
-            echo SAHJONY_HOSTINGER_OPENCLAW_AUTHORITY=READY
-          else
-            echo ready=false >> "$GITHUB_OUTPUT"
-            echo SAHJONY_HOSTINGER_OPENCLAW_HEARTBEAT_NOT_READY=1
-          fi
-
-      - name: Report control-plane outcome
-        shell: bash
-        run: |
-          if [ "${{ steps.health.outputs.ready }}" = true ]; then
-            echo SAHJONY_HOSTINGER_DOCKER_API_GATE=ALREADY_READY
-          elif [ "${{ steps.verify.outputs.ready }}" = true ]; then
-            echo SAHJONY_HOSTINGER_DOCKER_API_GATE=RECOVERED
-          elif [ "${{ steps.docker.outputs.project }}" != '' ]; then
-            echo SAHJONY_HOSTINGER_DOCKER_API_GATE=PROJECT_RUNNING_HEARTBEAT_PENDING
-          elif [ "${{ steps.docker.outputs.available }}" = true ]; then
-            echo SAHJONY_HOSTINGER_DOCKER_API_GATE=NO_OPENCLAW_PROJECT
-          else
-            echo SAHJONY_HOSTINGER_DOCKER_API_GATE=UNAVAILABLE_FOR_THIS_OS
-          fi
+      - run: |
+          echo HOSTINGER_DOCKER_MANAGER_CONTROL_RETIRED=1
+          echo HOSTINGER_KALI_DOCKER_MANAGER_UNSUPPORTED=1
+          echo USE_NORMAL_SSH_AND_LOCAL_DOCKER=1
+          echo USE_HOSTINGER_RECOVERY_CONTROLLER=1
