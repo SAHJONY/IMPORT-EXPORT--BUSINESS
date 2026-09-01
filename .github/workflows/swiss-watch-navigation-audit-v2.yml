@@ -1,0 +1,273 @@
+name: Swiss Watch Navigation Audit V2
+
+on:
+  push:
+    branches: [audit/swiss-watch-20260901]
+    paths:
+      - '.github/workflows/swiss-watch-navigation-audit-v2.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit-navigation:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: audit/swiss-watch-20260901
+          submodules: false
+          fetch-depth: 1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Build and browser setup
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -f package-lock.json ]]; then npm ci --ignore-scripts; else npm install --no-audit --no-fund; fi
+          npm run build
+          npm install --no-save --package-lock=false playwright@1.55.0
+          npx playwright install --with-deps chromium
+          mkdir -p nav-audit-v2
+
+      - name: Runtime-aware static navigation graph
+        shell: bash
+        run: |
+          set -euo pipefail
+          python <<'PY'
+          import html.parser, json, pathlib, re, urllib.parse
+          root=pathlib.Path('.')
+          out=root/'nav-audit-v2'; out.mkdir(exist_ok=True)
+          cfg=json.loads((root/'vercel.json').read_text())
+          routes=[r for r in cfg.get('routes',[]) if isinstance(r,dict)]
+          exact={r.get('src'):r.get('dest') for r in routes if r.get('src') and r.get('dest') and not any(c in r.get('src','') for c in '()*+?[]{}|')}
+          html_files=sorted({p for base in (root,root/'public') for p in base.glob('*.html') if p.is_file()})
+          links=[]; clickables=[]; findings=[]; page_meta={}; source_ids={}
+
+          class Scan(html.parser.HTMLParser):
+              def __init__(self,p,text):
+                  super().__init__(); self.p=p; self.text=text; self.ids=[]; self.dynamic_href_ids=set(re.findall(r"getElementById\(['\"]([^'\"]+)['\"]\)\.href\s*=",text))
+              def handle_starttag(self,tag,attrs):
+                  a=dict(attrs); line=self.getpos()[0]; ident=a.get('id') or ''
+                  if ident: self.ids.append(ident)
+                  if tag=='a':
+                      href=(a.get('href') or '').strip(); dynamic=bool(ident and ident in self.dynamic_href_ids)
+                      links.append({'file':str(self.p),'line':line,'kind':'anchor','target':href,'id':ident,'dynamic_href':dynamic,'target_blank':a.get('target')=='_blank','rel':a.get('rel') or ''})
+                      if not href and not dynamic: findings.append({'severity':'error','code':'EMPTY_HREF','file':str(self.p),'line':line,'id':ident})
+                      if href=='#' and not dynamic: findings.append({'severity':'error','code':'PLACEHOLDER_HREF','file':str(self.p),'line':line,'id':ident})
+                      if href.lower().startswith('javascript:'): findings.append({'severity':'error','code':'JAVASCRIPT_HREF','file':str(self.p),'line':line,'target':href})
+                      if a.get('target')=='_blank' and 'noopener' not in (a.get('rel') or '').lower(): findings.append({'severity':'warning','code':'TARGET_BLANK_WITHOUT_NOOPENER','file':str(self.p),'line':line,'target':href})
+                  if tag in {'button','a','input','select','textarea'} or a.get('role') in {'button','link'} or 'onclick' in a:
+                      clickables.append({'file':str(self.p),'line':line,'tag':tag,'id':ident,'href':a.get('href'),'onclick':a.get('onclick'),'type':a.get('type'),'role':a.get('role'),'aria_label':a.get('aria-label'),'title':a.get('title')})
+                  if tag=='form' and a.get('action'):
+                      links.append({'file':str(self.p),'line':line,'kind':'form-action','target':a.get('action')})
+                  if a.get('onclick'):
+                      for m in re.finditer(r"(?:location(?:\.href)?\s*=|location\.(?:assign|replace)\s*\(|window\.open\s*\()\s*['\"]([^'\"]+)",a.get('onclick')):
+                          links.append({'file':str(self.p),'line':line,'kind':'onclick-nav','target':m.group(1)})
+
+          for p in html_files:
+              text=p.read_text(errors='ignore'); s=Scan(p,text)
+              try: s.feed(text)
+              except Exception as e: findings.append({'severity':'error','code':'HTML_PARSE_FAILURE','file':str(p),'error':type(e).__name__})
+              static_ids=[x for x in s.ids if '${' not in x and '{' not in x]
+              duplicates=sorted({x for x in static_ids if static_ids.count(x)>1})
+              for x in duplicates: findings.append({'severity':'error','code':'DUPLICATE_RUNTIME_STATIC_ID','file':str(p),'id':x})
+              page_meta[str(p)]={'ids':sorted(set(static_ids)),'dynamic_href_ids':sorted(s.dynamic_href_ids)}
+              source_ids[str(p)]=set(static_ids)
+
+          source_files=sorted(list((root/'src').rglob('*.tsx'))+list((root/'src').rglob('*.ts'))+list((root/'public').rglob('*.js')))
+          patterns=[
+              ('source-href',re.compile(r'href\s*=\s*["\']([^"\']+)["\']')),
+              ('nav-call',re.compile(r'\bnav\(\s*["\']([^"\']+)["\']\s*\)')),
+              ('location-replace',re.compile(r'location\.replace\(\s*["\']([^"\']+)["\']')),
+              ('location-href',re.compile(r'location\.href\s*=\s*["\']([^"\']+)["\']')),
+              ('window-open',re.compile(r'window\.open\(\s*["\']([^"\']+)["\']')),
+          ]
+          for p in source_files:
+              text=p.read_text(errors='ignore')
+              ids=set(re.findall(r'\bid\s*=\s*["\']([^"\']+)["\']',text))
+              source_ids[str(p)]=ids
+              for kind,pat in patterns:
+                  for m in pat.finditer(text):
+                      target=m.group(1); line=text.count('\n',0,m.start())+1
+                      links.append({'file':str(p),'line':line,'kind':kind,'target':target,'dynamic_template':'${' in target})
+              for m in re.finditer(r'<button\b([^>]*)>',text,re.I|re.S):
+                  attrs=m.group(1); line=text.count('\n',0,m.start())+1
+                  clickables.append({'file':str(p),'line':line,'tag':'button','source':'tsx','has_onclick':'onClick' in attrs,'raw':attrs[:240]})
+
+          def resolve(item):
+              target=(item.get('target') or '').strip(); source=item.get('file','')
+              if item.get('dynamic_href') or item.get('dynamic_template') or '${' in target: return True,'dynamic'
+              if not target: return False,'empty'
+              if target.startswith(('mailto:','tel:','sms:','data:')): return True,'scheme'
+              if target.startswith(('http://','https://')): return True,'external'
+              if target.startswith('#'):
+                  frag=urllib.parse.unquote(target[1:]); return bool(frag and frag in source_ids.get(source,set())),'same-document-fragment'
+              parsed=urllib.parse.urlsplit(target); path=parsed.path or '/'
+              if not path.startswith('/'):
+                  candidate=(pathlib.Path(source).parent/path).resolve()
+                  try: candidate.relative_to(root.resolve())
+                  except Exception: return False,'relative-outside'
+                  return candidate.exists(),'relative-file'
+              if path in exact: return True,'vercel-exact'
+              clean=path.lstrip('/'); candidates=[root/clean,root/'public'/clean]
+              if pathlib.Path(clean).suffix=='': candidates += [root/f'{clean}.html',root/'public'/f'{clean}.html']
+              if any(c.exists() for c in candidates): return True,'file'
+              if path=='/' or path.startswith(('/owner','/employee','/customer','/sign-in')): return True,'spa'
+              for r in routes:
+                  src=r.get('src')
+                  if not src: continue
+                  try:
+                      if re.fullmatch(src,path): return True,'vercel-pattern'
+                  except re.error: pass
+              return False,'unresolved'
+
+          for item in links:
+              ok,basis=resolve(item); item['static_resolved']=ok; item['resolution_basis']=basis
+              if not ok: findings.append({'severity':'error','code':'UNRESOLVED_INTERNAL_NAV_TARGET',**item})
+
+          # Build exhaustive concrete page URL set: all HTML files, exact non-Python Vercel routes, and concrete internal links.
+          concrete=set(['/'])
+          for p in html_files:
+              if p.parent==root/'public': concrete.add('/'+p.name)
+              elif p.parent==root: concrete.add('/'+p.name)
+          for src,dest in exact.items():
+              if isinstance(dest,str) and not dest.endswith('.py'): concrete.add(src)
+          for item in links:
+              t=(item.get('target') or '').strip()
+              if not t or '${' in t or t.startswith(('#','mailto:','tel:','sms:','javascript:','data:','http://','https://')): continue
+              u=urllib.parse.urlsplit(t)
+              if u.path.startswith('/'): concrete.add(t)
+          page_urls=sorted(concrete)
+          (out/'page-urls.json').write_text(json.dumps(page_urls,indent=2))
+          report={'html_pages':len(html_files),'vercel_routes':len(routes),'link_occurrences':len(links),'unique_targets':len({x.get('target') for x in links}),'clickables':len(clickables),'page_urls':len(page_urls),'findings':findings,'links':links,'clickables_inventory':clickables,'page_meta':page_meta}
+          (out/'static-navigation.json').write_text(json.dumps(report,indent=2))
+          errors=[x for x in findings if x['severity']=='error']; warnings=[x for x in findings if x['severity']=='warning']
+          summary=f"HTML_PAGES={len(html_files)}\nVERCEL_ROUTES={len(routes)}\nLINK_OCCURRENCES={len(links)}\nUNIQUE_TARGETS={report['unique_targets']}\nCLICKABLES_INVENTORIED={len(clickables)}\nCONCRETE_PAGE_URLS={len(page_urls)}\nSTATIC_ERRORS={len(errors)}\nSTATIC_WARNINGS={len(warnings)}\n"
+          (out/'summary.txt').write_text(summary); print(summary,end='')
+          for x in errors[:100]: print('STATIC_ERROR',json.dumps(x,ensure_ascii=False))
+          for x in warnings[:100]: print('STATIC_WARNING',json.dumps(x,ensure_ascii=False))
+          PY
+
+      - name: Exhaustive production GET audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > nav-audit-v2/http-audit.mjs <<'JS'
+          import fs from 'node:fs';
+          const base='https://www.sahjony.com';
+          const staticData=JSON.parse(fs.readFileSync('nav-audit-v2/static-navigation.json','utf8'));
+          const pagePaths=JSON.parse(fs.readFileSync('nav-audit-v2/page-urls.json','utf8'));
+          const urls=new Set(pagePaths.map(x=>new URL(x,base).href));
+          for(const x of staticData.links){
+            const t=(x.target||'').trim(); if(!t || t.includes('${') || /^(#|mailto:|tel:|sms:|javascript:|data:)/i.test(t)) continue;
+            try{urls.add(new URL(t,base).href)}catch{}
+          }
+          const list=[...urls]; const results=new Array(list.length); let next=0;
+          async function worker(){
+            while(true){const i=next++; if(i>=list.length)return; const url=list[i];
+              try{const r=await fetch(url,{redirect:'follow',headers:{'user-agent':'SAHJONY-Navigation-Audit/2.0'},signal:AbortSignal.timeout(18000)}); results[i]={url,status:r.status,finalUrl:r.url,ok:r.status<400||r.status===401||r.status===403};}
+              catch(e){results[i]={url,status:null,ok:false,error:e?.name||String(e)}}
+            }
+          }
+          await Promise.all(Array.from({length:12},worker));
+          const bad=results.filter(x=>!x.ok); fs.writeFileSync('nav-audit-v2/production-http.json',JSON.stringify({checked:results.length,bad,results},null,2));
+          fs.appendFileSync('nav-audit-v2/summary.txt',`PRODUCTION_URLS_CHECKED=${results.length}\nPRODUCTION_BAD_DESTINATIONS=${bad.length}\n`);
+          console.log(`PRODUCTION_URLS_CHECKED=${results.length}`); console.log(`PRODUCTION_BAD_DESTINATIONS=${bad.length}`); for(const x of bad.slice(0,120)) console.log('PRODUCTION_BAD',JSON.stringify(x));
+          JS
+          node nav-audit-v2/http-audit.mjs
+
+      - name: Chromium every-page runtime audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > nav-audit-v2/browser-audit.mjs <<'JS'
+          import fs from 'node:fs';
+          import {chromium} from 'playwright';
+          const base='https://www.sahjony.com'; const paths=JSON.parse(fs.readFileSync('nav-audit-v2/page-urls.json','utf8'));
+          const report={pages:[],runtimeBadAnchors:[],duplicateIds:[],unnamedClickables:[],pageErrors:[],consoleErrors:[],failedRequests:[],linkClicks:[],spaNavigationClicks:[]};
+          const browser=await chromium.launch({headless:true}); const ctx=await browser.newContext({ignoreHTTPSErrors:true}); const page=await ctx.newPage();
+          let current='';
+          page.on('pageerror',e=>report.pageErrors.push({page:current,error:String(e).slice(0,600)}));
+          page.on('console',m=>{if(m.type()==='error') report.consoleErrors.push({page:current,text:m.text().slice(0,500)})});
+          page.on('requestfailed',r=>report.failedRequests.push({page:current,url:r.url(),failure:r.failure()?.errorText||''}));
+          for(const p of paths){
+            const url=new URL(p,base).href; current=url; let resp=null;
+            try{resp=await page.goto(url,{waitUntil:'domcontentloaded',timeout:20000}); await page.waitForTimeout(220);}catch(e){report.pages.push({url,status:null,error:String(e).slice(0,350)});continue}
+            const data=await page.evaluate(()=>{
+              const visible=e=>!!(e.getClientRects().length && getComputedStyle(e).visibility!=='hidden' && getComputedStyle(e).display!=='none');
+              const anchors=[...document.querySelectorAll('a')].filter(visible).map((a,i)=>({i,href:a.getAttribute('href')||'',resolved:a.href||'',text:(a.textContent||a.getAttribute('aria-label')||a.getAttribute('title')||'').trim().replace(/\s+/g,' ').slice(0,120),target:a.target||''}));
+              const clicks=[...document.querySelectorAll('a,button,[role="link"],[role="button"],[onclick]')].filter(visible).map((e,i)=>({i,tag:e.tagName.toLowerCase(),role:e.getAttribute('role')||'',href:e.getAttribute('href')||'',text:(e.textContent||e.getAttribute('aria-label')||e.getAttribute('title')||'').trim().replace(/\s+/g,' ').slice(0,120),type:e.getAttribute('type')||'',disabled:e.hasAttribute('disabled')||e.getAttribute('aria-disabled')==='true'}));
+              const ids=[...document.querySelectorAll('[id]')].map(e=>e.id); const dup=[...new Set(ids.filter((x,i)=>x&&ids.indexOf(x)!==i))];
+              return {title:document.title,anchors,clicks,dup};
+            });
+            const status=resp?.status()??null; report.pages.push({url,status,finalUrl:page.url(),title:data.title,visibleAnchors:data.anchors.length,visibleClickables:data.clicks.length});
+            for(const a of data.anchors){if(!a.href || a.href==='#' || /^javascript:/i.test(a.href)) report.runtimeBadAnchors.push({page:url,...a});}
+            for(const id of data.dup) report.duplicateIds.push({page:url,id});
+            for(const c of data.clicks){if(!c.disabled && !c.text && !c.href) report.unnamedClickables.push({page:url,...c});}
+          }
+
+          // Click every visible same-origin anchor once from its source page. No POST/action controls are used.
+          for(const p of paths){
+            const source=new URL(p,base).href; current=source;
+            try{await page.goto(source,{waitUntil:'domcontentloaded',timeout:18000});await page.waitForTimeout(120);}catch{continue}
+            const anchors=await page.locator('a:visible').evaluateAll(as=>as.map((a,i)=>({i,href:a.getAttribute('href')||'',resolved:a.href||'',text:(a.textContent||a.getAttribute('aria-label')||a.getAttribute('title')||'').trim().replace(/\s+/g,' ').slice(0,100)})));
+            for(const a of anchors){
+              if(!a.href || a.href==='#' || /^(mailto:|tel:|sms:|javascript:|data:)/i.test(a.href)) continue;
+              let u; try{u=new URL(a.resolved)}catch{continue}; if(u.origin!==new URL(base).origin) continue;
+              try{
+                await page.goto(source,{waitUntil:'domcontentloaded',timeout:18000});await page.waitForTimeout(80);
+                const loc=page.locator('a:visible').nth(a.i); if(!await loc.count()) continue; const before=page.url();
+                await loc.click({timeout:3000}); await page.waitForTimeout(100); const after=page.url();
+                report.linkClicks.push({source,index:a.i,text:a.text,href:a.href,before,after,ok:after!==before || a.href.startsWith('#')});
+              }catch(e){report.linkClicks.push({source,index:a.i,text:a.text,href:a.href,ok:false,error:String(e).slice(0,250)});}
+            }
+          }
+
+          // SPA navigation buttons with inert session tokens. Destructive/action controls are never clicked.
+          const local=await ctx.newPage(); await local.addInitScript(()=>{for(const r of ['owner','employee','customer'])sessionStorage.setItem(`sahjony.${r}.token`,'audit-only')});
+          const spa=['http://127.0.0.1:4173/','http://127.0.0.1:4173/owner/deals','http://127.0.0.1:4173/owner/finance','http://127.0.0.1:4173/employee','http://127.0.0.1:4173/customer'];
+          const destructive=/delete|remove|pay|submit|send|approve|post|release|reverse|create|save|ingest|execute|run|call|message|refresh|load/i;
+          for(const source of spa){
+            try{await local.goto(source,{waitUntil:'domcontentloaded',timeout:15000});await local.waitForTimeout(300);}catch{continue}
+            const metas=await local.locator('button:visible,[role="link"]:visible').evaluateAll(es=>es.map((e,i)=>({i,text:(e.textContent||e.getAttribute('aria-label')||e.getAttribute('title')||'').trim().replace(/\s+/g,' ').slice(0,100),disabled=e.hasAttribute('disabled')||e.getAttribute('aria-disabled')==='true',type:e.getAttribute('type')||''})));
+            for(const m of metas){if(m.disabled||m.type==='submit'||destructive.test(m.text)||!m.text)continue;
+              try{await local.goto(source,{waitUntil:'domcontentloaded',timeout:15000});await local.waitForTimeout(100);const loc=local.locator('button:visible,[role="link"]:visible').nth(m.i);if(!await loc.count())continue;const before=local.url();await loc.click({timeout:2500,noWaitAfter:true});await local.waitForTimeout(120);const after=local.url();if(after!==before)report.spaNavigationClicks.push({source,index:m.i,text:m.text,before,after,ok:true});}catch(e){report.spaNavigationClicks.push({source,index:m.i,text:m.text,ok:false,error:String(e).slice(0,220)});}
+            }
+          }
+          await browser.close(); fs.writeFileSync('nav-audit-v2/browser-navigation.json',JSON.stringify(report,null,2));
+          const brokenPages=report.pages.filter(x=>x.status===null || x.status>=400); const failedClicks=report.linkClicks.filter(x=>!x.ok); const failedSpa=report.spaNavigationClicks.filter(x=>!x.ok);
+          const summary=`BROWSER_PAGES_VISITED=${report.pages.length}\nBROWSER_BROKEN_PAGES=${brokenPages.length}\nRUNTIME_BAD_ANCHORS=${report.runtimeBadAnchors.length}\nRUNTIME_DUPLICATE_IDS=${report.duplicateIds.length}\nUNNAMED_CLICKABLES=${report.unnamedClickables.length}\nPAGE_ERRORS=${report.pageErrors.length}\nCONSOLE_ERRORS=${report.consoleErrors.length}\nFAILED_REQUESTS=${report.failedRequests.length}\nINTERNAL_LINK_CLICKS=${report.linkClicks.length}\nFAILED_INTERNAL_LINK_CLICKS=${failedClicks.length}\nSPA_NAV_BUTTON_CLICKS=${report.spaNavigationClicks.length}\nFAILED_SPA_NAV_BUTTON_CLICKS=${failedSpa.length}\n`;
+          fs.appendFileSync('nav-audit-v2/summary.txt',summary); console.log(summary); for(const x of brokenPages.slice(0,100))console.log('BROKEN_PAGE',JSON.stringify(x));for(const x of report.runtimeBadAnchors.slice(0,100))console.log('BAD_RUNTIME_ANCHOR',JSON.stringify(x));for(const x of failedClicks.slice(0,100))console.log('FAILED_LINK_CLICK',JSON.stringify(x));
+          JS
+          npm run preview -- --host 127.0.0.1 --port 4173 > nav-audit-v2/vite-preview.log 2>&1 &
+          PID=$!; trap 'kill $PID 2>/dev/null || true' EXIT
+          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:4173/ >/dev/null && break; sleep 1; done
+          node nav-audit-v2/browser-audit.mjs
+
+      - name: Final verdict
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat nav-audit-v2/summary.txt
+          python <<'PY'
+          import json,pathlib
+          s=json.loads(pathlib.Path('nav-audit-v2/static-navigation.json').read_text()); h=json.loads(pathlib.Path('nav-audit-v2/production-http.json').read_text()); b=json.loads(pathlib.Path('nav-audit-v2/browser-navigation.json').read_text())
+          static_errors=[x for x in s['findings'] if x['severity']=='error']; broken=[x for x in b['pages'] if x.get('status') is None or (x.get('status') or 0)>=400]; failed_clicks=[x for x in b['linkClicks'] if not x.get('ok')]; failed_spa=[x for x in b['spaNavigationClicks'] if not x.get('ok')]
+          blocking=len(static_errors)+len(h['bad'])+len(broken)+len(b['runtimeBadAnchors'])+len(b['duplicateIds'])+len(b['unnamedClickables'])+len(b['pageErrors'])+len(failed_clicks)+len(failed_spa)
+          result={'verdict':'PASS' if blocking==0 else 'FAIL','blocking_findings':blocking,'static_errors':len(static_errors),'static_warnings':len([x for x in s['findings'] if x['severity']=='warning']),'production_bad_destinations':len(h['bad']),'browser_broken_pages':len(broken),'runtime_bad_anchors':len(b['runtimeBadAnchors']),'runtime_duplicate_ids':len(b['duplicateIds']),'unnamed_clickables':len(b['unnamedClickables']),'page_errors':len(b['pageErrors']),'console_errors_observed':len(b['consoleErrors']),'failed_requests_observed':len(b['failedRequests']),'internal_link_clicks_tested':len(b['linkClicks']),'failed_internal_link_clicks':len(failed_clicks),'spa_nav_button_clicks_tested':len(b['spaNavigationClicks']),'failed_spa_nav_button_clicks':len(failed_spa)}
+          pathlib.Path('nav-audit-v2/verdict.json').write_text(json.dumps(result,indent=2)); print('NAVIGATION_VERDICT='+result['verdict']); print(json.dumps(result,indent=2));
+          if blocking: raise SystemExit(1)
+          PY
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: swiss-watch-navigation-audit-v2
+          path: nav-audit-v2/
+          if-no-files-found: error
