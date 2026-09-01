@@ -1,0 +1,177 @@
+name: Hostinger Ephemeral API SSH Bootstrap One-Time
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/hostinger-ephemeral-api-ssh-bootstrap-one-time.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hostinger-vm-767852-mutation
+  cancel-in-progress: false
+
+env:
+  HOSTINGER_API_BASE: https://developers.hostinger.com
+  VM_ID: '767852'
+  HOST: '69.62.68.67'
+  SSH_USER: root
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      API_TOKEN: ${{ secrets.HOSTINGER_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare ephemeral key and tools
+        id: prep
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "$API_TOKEN" ]] || { echo HOSTINGER_API_TOKEN_MISSING=1 >&2; exit 2; }
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq jq netcat-openbsd >/dev/null
+          install -d -m 700 ~/.ssh "$RUNNER_TEMP/hostinger-ephemeral"
+          ssh-keygen -q -t ed25519 -N '' -f ~/.ssh/hostinger-ephemeral -C "sahjony-ephemeral-${GITHUB_RUN_ID}"
+          chmod 600 ~/.ssh/hostinger-ephemeral
+          echo "key_name=SAHJONY Ephemeral ${GITHUB_RUN_ID}" >> "$GITHUB_OUTPUT"
+          echo SAHJONY_EPHEMERAL_KEY_GENERATED=1
+
+      - name: Drain Hostinger action plane
+        shell: bash
+        run: |
+          set -euo pipefail
+          auth=(-H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json')
+          for i in $(seq 1 90); do
+            body="$(curl -fsS "${auth[@]}" "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/actions?page=1")"
+            active="$(jq '[.data[]? | select((.state // "") | IN("sent","started","pending","running","queued"))] | length' <<<"$body")"
+            echo "HOSTINGER_EPHEMERAL_DRAIN=$i/90 active=$active"
+            [[ "$active" == 0 ]] && exit 0
+            sleep 5
+          done
+          echo HOSTINGER_ACTION_PLANE_NOT_IDLE=1 >&2
+          exit 3
+
+      - name: Register and attach ephemeral public key
+        id: attach
+        env:
+          KEY_NAME: ${{ steps.prep.outputs.key_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          pub="$(cat ~/.ssh/hostinger-ephemeral.pub)"
+          payload="$(jq -n --arg name "$KEY_NAME" --arg key "$pub" '{name:$name,key:$key}')"
+          created="$(curl -fsS -X POST -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' -H 'Content-Type: application/json' --data "$payload" "$HOSTINGER_API_BASE/api/vps/v1/public-keys")"
+          key_id="$(jq -r '.id // empty' <<<"$created")"
+          [[ "$key_id" =~ ^[0-9]+$ ]] || { echo HOSTINGER_EPHEMERAL_KEY_CREATE_FAILED=1 >&2; exit 4; }
+          echo "key_id=$key_id" >> "$GITHUB_OUTPUT"
+          attach_payload="$(jq -n --argjson id "$key_id" '{ids:[$id]}')"
+          attached="$(curl -fsS -X POST -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' -H 'Content-Type: application/json' --data "$attach_payload" "$HOSTINGER_API_BASE/api/vps/v1/public-keys/attach/$VM_ID")"
+          action_id="$(jq -r '.id // empty' <<<"$attached")"
+          [[ "$action_id" =~ ^[0-9]+$ ]] || { echo HOSTINGER_EPHEMERAL_ATTACH_ACTION_MISSING=1 >&2; exit 5; }
+          echo "action_id=$action_id" >> "$GITHUB_OUTPUT"
+          echo "HOSTINGER_EPHEMERAL_KEY_ID=$key_id"
+          echo "HOSTINGER_EPHEMERAL_ATTACH_ACTION=$action_id"
+
+      - name: Wait for key attach action
+        shell: bash
+        env:
+          ACTION_ID: ${{ steps.attach.outputs.action_id }}
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 120); do
+            body="$(curl -fsS -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/actions/$ACTION_ID")"
+            state="$(jq -r '.state // empty' <<<"$body")"
+            echo "HOSTINGER_EPHEMERAL_ATTACH_PROBE=$i/120 state=${state:-unknown}"
+            case "$state" in
+              success) exit 0 ;;
+              failed|failure|error|cancelled|canceled) jq -c '{id,name,state,created_at,updated_at}' <<<"$body" >&2; exit 6 ;;
+            esac
+            sleep 5
+          done
+          echo HOSTINGER_EPHEMERAL_ATTACH_TIMEOUT=1 >&2
+          exit 7
+
+      - name: Authenticate normal Kali with provider-attached key
+        id: auth
+        shell: bash
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 36); do
+            if nc -z -w 4 "$HOST" 22 >/dev/null 2>&1; then
+              if ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 -i ~/.ssh/hostinger-ephemeral "$SSH_USER@$HOST" 'printf SAHJONY_EPHEMERAL_API_SSH=READY' 2>"$RUNNER_TEMP/hostinger-ephemeral/ssh.err" | grep -q 'SAHJONY_EPHEMERAL_API_SSH=READY'; then
+                echo "HOSTINGER_EPHEMERAL_API_SSH_AUTH=READY probe=$i"
+                echo 'ready=true' >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+              echo "HOSTINGER_EPHEMERAL_TCP22=OPEN auth_pending probe=$i/36"
+            else
+              echo "HOSTINGER_EPHEMERAL_TCP22=NOT_OPEN probe=$i/36"
+            fi
+            sleep 5
+          done
+          echo HOSTINGER_EPHEMERAL_API_SSH_AUTH=NOT_READY >&2
+          sed -n '1,12p' "$RUNNER_TEMP/hostinger-ephemeral/ssh.err" >&2 || true
+          exit 8
+
+      - name: Run current Hostinger VPS doctor read-only
+        if: steps.auth.outputs.ready == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          opts=(-o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -i ~/.ssh/hostinger-ephemeral)
+          scp "${opts[@]}" openclaw/hostinger-24x7/hostinger-vps-doctor.sh "$SSH_USER@$HOST:/tmp/sahjony-hostinger-vps-doctor.sh"
+          ssh "${opts[@]}" "$SSH_USER@$HOST" 'chmod 700 /tmp/sahjony-hostinger-vps-doctor.sh; SAHJONY_VPS_DOCTOR_REPORT=/tmp/sahjony-hostinger-vps-doctor.json /tmp/sahjony-hostinger-vps-doctor.sh audit'
+          scp "${opts[@]}" "$SSH_USER@$HOST:/tmp/sahjony-hostinger-vps-doctor.json" "$RUNNER_TEMP/hostinger-ephemeral/doctor.json"
+          echo '=== HOSTINGER LOCAL DOCTOR SUMMARY ==='
+          jq '{classification,severity,identity,ssh,runtime,safety}' "$RUNNER_TEMP/hostinger-ephemeral/doctor.json"
+
+      - name: Remove ephemeral key from guest
+        if: always() && steps.auth.outputs.ready == 'true'
+        shell: bash
+        run: |
+          set +e
+          pub_b64="$(base64 -w0 ~/.ssh/hostinger-ephemeral.pub 2>/dev/null)"
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 -i ~/.ssh/hostinger-ephemeral "$SSH_USER@$HOST" "PUB_B64='$pub_b64' bash -s" <<'REMOTE'
+          set -euo pipefail
+          auth=/root/.ssh/authorized_keys
+          if [[ -f "$auth" ]]; then
+            pub="$(printf '%s' "$PUB_B64" | base64 -d)"
+            core="$(awk '{print $1" "$2}' <<<"$pub")"
+            tmp="$(mktemp)"
+            awk -v core="$core" '{line=$1" "$2; if(line!=core) print}' "$auth" > "$tmp"
+            cat "$tmp" > "$auth"
+            chmod 600 "$auth"
+            rm -f "$tmp"
+          fi
+          rm -f /tmp/sahjony-hostinger-vps-doctor.sh /tmp/sahjony-hostinger-vps-doctor.json
+          echo SAHJONY_EPHEMERAL_GUEST_KEY_REMOVED=1
+          REMOTE
+          exit 0
+
+      - name: Delete ephemeral Hostinger account key record
+        if: always() && steps.attach.outputs.key_id != ''
+        env:
+          KEY_ID: ${{ steps.attach.outputs.key_id }}
+        shell: bash
+        run: |
+          set +e
+          curl -sS -X DELETE -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' "$HOSTINGER_API_BASE/api/vps/v1/public-keys/$KEY_ID" >/dev/null
+          echo HOSTINGER_EPHEMERAL_ACCOUNT_KEY_DELETE_REQUESTED=1
+          rm -f ~/.ssh/hostinger-ephemeral ~/.ssh/hostinger-ephemeral.pub
+          exit 0
+
+      - name: Upload local doctor evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hostinger-ephemeral-api-ssh-${{ github.run_id }}
+          path: ${{ runner.temp }}/hostinger-ephemeral/
+          if-no-files-found: warn
+          retention-days: 7
