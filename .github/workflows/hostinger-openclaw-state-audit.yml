@@ -1,0 +1,52 @@
+name: Hostinger OpenClaw State Audit
+
+on:
+  push:
+    paths:
+      - '.github/workflows/hostinger-openclaw-state-audit.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hostinger-vm-767852-observe
+  cancel-in-progress: true
+
+env:
+  HOST: '69.62.68.67'
+  USER: root
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    env:
+      SSH_PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure durable SSH key
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "$SSH_PRIVATE_KEY" ]] || { echo HOSTINGER_SSH_PRIVATE_KEY_MISSING=1 >&2; exit 2; }
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/hostinger
+          chmod 600 ~/.ssh/hostinger
+          ssh-keygen -y -f ~/.ssh/hostinger >/dev/null
+      - name: Verify normal Kali SSH
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 -i ~/.ssh/hostinger "$USER@$HOST" 'printf HOSTINGER_DURABLE_SSH_READY=1'
+      - name: Run redacted non-mutating state audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x openclaw/hostinger-24x7/openclaw-state-audit.sh
+          scp -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/hostinger openclaw/hostinger-24x7/openclaw-state-audit.sh "$USER@$HOST:/tmp/openclaw-state-audit.sh"
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/hostinger "$USER@$HOST" 'ROOT_PREFIX=/ bash /tmp/openclaw-state-audit.sh; rm -f /tmp/openclaw-state-audit.sh'
+      - name: Remove runner key
+        if: always()
+        shell: bash
+        run: rm -f ~/.ssh/hostinger
