@@ -1,0 +1,4 @@
+2026-09-01T04:00:00-05:00
+Observed on authorized WhatsApp iOS client: "Can't link new devices right now. Try again later."
+Action: register a six-hour local automation safety backoff on Hostinger.
+No QR generation. No forced pairing. No session deletion. No provider-security bypass.
