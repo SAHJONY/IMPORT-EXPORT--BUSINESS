@@ -1,50 +1,16 @@
-name: Wire WhatsApp Cloud Primary
+name: Wire WhatsApp Cloud Primary [RETIRED]
 
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 permissions:
-  contents: write
-
-concurrency:
-  group: whatsapp-cloud-primary-wire
-  cancel-in-progress: true
+  contents: read
 
 jobs:
-  wire:
+  retired:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Route WhatsApp through Meta Business Suite cloud-primary adapter
-        shell: bash
-        run: |
-          set -euo pipefail
-          python - <<'PY'
-          from pathlib import Path
-          p = Path('vercel.json')
-          s = p.read_text()
-          s2 = s.replace('"src":"whatsapp_api.py","use":"@vercel/python"', '"src":"whatsapp_cloud_primary_api.py","use":"@vercel/python"')
-          s2 = s2.replace('"src":"/whatsapp(.*)","dest":"whatsapp_api.py"', '"src":"/whatsapp(.*)","dest":"whatsapp_cloud_primary_api.py"')
-          if s2 != s:
-              p.write_text(s2)
-              print('WHATSAPP_CLOUD_PRIMARY_ROUTE_UPDATED=1')
-          else:
-              print('WHATSAPP_CLOUD_PRIMARY_ROUTE_ALREADY_READY=1')
-          PY
-      - name: Commit wiring if changed
-        shell: bash
-        run: |
-          set -euo pipefail
-          if git diff --quiet -- vercel.json; then
-            echo 'No routing changes required.'
-            exit 0
-          fi
-          git config user.name 'SAHJONY Cloud Operations'
-          git config user.email 'actions@users.noreply.github.com'
-          git add vercel.json
-          git commit -m 'ops(whatsapp): make Meta Business Suite cloud transport primary'
-          git push origin HEAD:main
+      - run: |
+          echo WHATSAPP_META_CLOUD_PRIMARY_WIRING_RETIRED=1
+          echo AUTHORITATIVE_TRANSPORT=HOSTINGER_OPENCLAW
+          echo USE_HOSTINGER_WHATSAPP_DIRECT_RESCUE_THEN_RECOVERY_V7=1
