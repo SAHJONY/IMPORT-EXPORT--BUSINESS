@@ -113,12 +113,14 @@ jobs:
         id: access
         shell: bash
         run: |
-          set -euo pipefail
+          set -uo pipefail
           ok=false
           reason=unknown
           key_path=''
           jit_created=false
           jit_id=''
+          jit_attach_http=''
+          jit_attach_state=''
 
           test_key() {
             local key="$1"
@@ -135,71 +137,104 @@ jobs:
             reason=hostinger_action_plane_busy
           else
             echo HOSTINGER_JIT_SSH_BOOTSTRAP=1
-            ssh-keygen -q -t ed25519 -N '' -f ~/.ssh/hostinger-jit -C "sahjony-jit-${GITHUB_RUN_ID}"
-            pub="$(cat ~/.ssh/hostinger-jit.pub)"
-            create_body="$(jq -n --arg name "sahjony-jit-${GITHUB_RUN_ID}" --arg key "$pub" '{name:$name,key:$key}')"
-            tmp="$(mktemp)"
-            code="$(curl -sS -o "$tmp" -w '%{http_code}' -X POST \
-              -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' -H 'Content-Type: application/json' \
-              --data "$create_body" "$HOSTINGER_API_BASE/api/vps/v1/public-keys")"
-            body="$(cat "$tmp")"; rm -f "$tmp"
-            if [[ "$code" != 200 && "$code" != 201 ]]; then
-              reason=jit_public_key_create_failed
-              echo "HOSTINGER_JIT_CREATE_HTTP=$code" >&2
+            rm -f ~/.ssh/hostinger-jit ~/.ssh/hostinger-jit.pub
+            if ! ssh-keygen -q -t ed25519 -N '' -f ~/.ssh/hostinger-jit -C "sahjony-jit-${GITHUB_RUN_ID}"; then
+              reason=jit_key_generation_failed
             else
-              jit_id="$(jq -r '.id // empty' <<<"$body")"
-              if [[ ! "$jit_id" =~ ^[0-9]+$ ]]; then
-                reason=jit_public_key_id_missing
+              pub="$(cat ~/.ssh/hostinger-jit.pub)"
+              create_body="$(jq -n --arg name "sahjony-jit-${GITHUB_RUN_ID}" --arg key "$pub" '{name:$name,key:$key}')"
+              tmp="$(mktemp)"
+              code="$(curl -sS -o "$tmp" -w '%{http_code}' -X POST \
+                -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' -H 'Content-Type: application/json' \
+                --data "$create_body" "$HOSTINGER_API_BASE/api/vps/v1/public-keys" || true)"
+              body="$(cat "$tmp")"; rm -f "$tmp"
+              if [[ "$code" != 200 && "$code" != 201 ]]; then
+                reason=jit_public_key_create_failed
+                echo "HOSTINGER_JIT_CREATE_HTTP=${code:-transport_error}" >&2
               else
-                jit_created=true
-                attach_payload="$(jq -n --argjson id "$jit_id" '{ids:[$id]}')"
-                tmp="$(mktemp)"
-                attach_code="$(curl -sS -o "$tmp" -w '%{http_code}' -X POST \
-                  -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' -H 'Content-Type: application/json' \
-                  --data "$attach_payload" "$HOSTINGER_API_BASE/api/vps/v1/public-keys/attach/$VM_ID")"
-                attach_body="$(cat "$tmp")"; rm -f "$tmp"
-                if [[ "$attach_code" != 200 && "$attach_code" != 201 && "$attach_code" != 202 ]]; then
-                  reason=jit_public_key_attach_failed
-                  echo "HOSTINGER_JIT_ATTACH_HTTP=$attach_code" >&2
+                jit_id="$(jq -r '.id // empty' <<<"$body" 2>/dev/null)"
+                if [[ ! "$jit_id" =~ ^[0-9]+$ ]]; then
+                  reason=jit_public_key_id_missing
                 else
-                  action_id="$(jq -r '.id // empty' <<<"$attach_body")"
-                  attach_ok=false
-                  if [[ "$action_id" =~ ^[0-9]+$ ]]; then
-                    for i in $(seq 1 60); do
-                      a="$(curl -fsS -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/actions/$action_id")"
-                      state="$(jq -r '.state // empty' <<<"$a")"
-                      echo "jit_attach_probe=$i/60 state=${state:-unknown}"
-                      case "$state" in
-                        success) attach_ok=true; break ;;
-                        failed|failure|error|cancelled|canceled) break ;;
-                      esac
-                      sleep 2
-                    done
+                  jit_created=true
+                  echo "HOSTINGER_JIT_PUBLIC_KEY_ID=$jit_id"
+                  attach_payload="$(jq -n --argjson id "$jit_id" '{ids:[$id]}')"
+                  tmp="$(mktemp)"
+                  jit_attach_http="$(curl -sS -o "$tmp" -w '%{http_code}' -X POST \
+                    -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' -H 'Content-Type: application/json' \
+                    --data "$attach_payload" "$HOSTINGER_API_BASE/api/vps/v1/public-keys/attach/$VM_ID" || true)"
+                  attach_body="$(cat "$tmp")"; rm -f "$tmp"
+                  jit_attach_state="$(jq -r '.state // empty' <<<"$attach_body" 2>/dev/null)"
+                  echo "HOSTINGER_JIT_ATTACH_HTTP=${jit_attach_http:-transport_error} STATE=${jit_attach_state:-unknown}"
+                  if [[ "$jit_attach_http" != 200 && "$jit_attach_http" != 201 && "$jit_attach_http" != 202 ]]; then
+                    reason=jit_public_key_attach_failed
+                  elif [[ "$jit_attach_state" =~ ^(failed|failure|error|cancelled|canceled)$ ]]; then
+                    reason=jit_public_key_attach_action_failed
                   else
-                    # Some Hostinger API deployments complete attachment synchronously.
-                    attach_ok=true
-                  fi
-                  if [[ "$attach_ok" == true ]]; then
-                    for i in $(seq 1 12); do
-                      if test_key ~/.ssh/hostinger-jit; then ok=true; reason=jit_authenticated; key_path="$HOME/.ssh/hostinger-jit"; break; fi
+                    # Attachment's documented success response already contains the action state.
+                    # The authoritative proof is whether sshd accepts the attached key; avoid a second action lookup.
+                    for i in $(seq 1 20); do
+                      if test_key ~/.ssh/hostinger-jit; then
+                        ok=true
+                        reason=jit_authenticated
+                        key_path="$HOME/.ssh/hostinger-jit"
+                        echo "HOSTINGER_JIT_SSH_AUTHENTICATED_ON_PROBE=$i"
+                        break
+                      fi
                       sleep 3
                     done
                     [[ "$ok" == true ]] || reason=jit_attached_but_ssh_auth_failed
-                  else
-                    reason=jit_attach_action_failed
                   fi
                 fi
               fi
             fi
           fi
 
-          echo "ssh_ok=$ok" >> "$GITHUB_OUTPUT"
-          echo "reason=$reason" >> "$GITHUB_OUTPUT"
-          echo "key_path=$key_path" >> "$GITHUB_OUTPUT"
-          echo "jit_created=$jit_created" >> "$GITHUB_OUTPUT"
-          echo "jit_id=$jit_id" >> "$GITHUB_OUTPUT"
+          {
+            echo "ssh_ok=$ok"
+            echo "reason=$reason"
+            echo "key_path=$key_path"
+            echo "jit_created=$jit_created"
+            echo "jit_id=$jit_id"
+            echo "jit_attach_http=$jit_attach_http"
+            echo "jit_attach_state=$jit_attach_state"
+          } >> "$GITHUB_OUTPUT"
           echo "HOSTINGER_NORMAL_SSH=$ok REASON=$reason"
           if [[ "$ok" != true ]]; then sed -n '1,8p' "$RUNNER_TEMP/vps-doctor/ssh.err" || true; fi
+          exit 0
+
+      - name: Remove stale SAHJONY JIT keys after authenticated access
+        if: steps.access.outputs.ssh_ok == 'true' && steps.access.outputs.reason == 'jit_authenticated'
+        env:
+          KEY: ${{ steps.access.outputs.key_path }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          pub_b64="$(base64 -w0 ~/.ssh/hostinger-jit.pub)"
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i "$KEY" "$SSH_USER@$HOST" "PUB_B64='$pub_b64' bash -s" <<'REMOTE'
+          set -euo pipefail
+          pub="$(printf '%s' "$PUB_B64" | base64 -d)"
+          auth=/root/.ssh/authorized_keys
+          mkdir -p /root/.ssh
+          chmod 700 /root/.ssh
+          touch "$auth"
+          tmp="$(mktemp)"
+          awk '!/sahjony-jit-[0-9]+$/' "$auth" >"$tmp" || true
+          printf '%s\n' "$pub" >>"$tmp"
+          awk '!seen[$0]++' "$tmp" >"$auth"
+          rm -f "$tmp"
+          chmod 600 "$auth"
+          echo SAHJONY_STALE_GUEST_JIT_KEYS_REMOVED=1
+          REMOTE
+
+          # Delete stale account-side JIT key records; account deletion alone does not alter the guest.
+          keys="$(curl -fsS -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' "$HOSTINGER_API_BASE/api/vps/v1/public-keys?page=1" || echo '{"data":[]}')"
+          current="${{ steps.access.outputs.jit_id }}"
+          jq -r --arg current "$current" '.data[]? | select(.name|test("^sahjony-jit-[0-9]+$")) | select((.id|tostring)!=$current) | .id' <<<"$keys" | while read -r id; do
+            [[ "$id" =~ ^[0-9]+$ ]] || continue
+            curl -sS -X DELETE -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' "$HOSTINGER_API_BASE/api/vps/v1/public-keys/$id" >/dev/null || true
+            echo "SAHJONY_STALE_HOSTINGER_JIT_RECORD_DELETE_REQUESTED=$id"
+          done
 
       - name: Run local VPS doctor over authenticated SSH
         if: steps.access.outputs.ssh_ok == 'true'
@@ -244,8 +279,9 @@ jobs:
             case "${{ steps.access.outputs.reason }}" in
               tcp22_unreachable) classification=external_tcp22_unreachable; severity=critical ;;
               hostinger_action_plane_busy) classification=hostinger_action_plane_busy; severity=warning ;;
-              jit_public_key_create_failed|jit_public_key_id_missing|jit_public_key_attach_failed|jit_attach_action_failed) classification=hostinger_jit_key_attach_failed; severity=critical ;;
+              jit_key_generation_failed|jit_public_key_create_failed|jit_public_key_id_missing|jit_public_key_attach_failed|jit_public_key_attach_action_failed) classification=hostinger_jit_key_attach_failed; severity=critical ;;
               jit_attached_but_ssh_auth_failed) classification=jit_key_attached_but_ssh_auth_failed; severity=critical ;;
+              durable_authenticated|jit_authenticated) classification=local_diagnostic_incomplete; severity=critical ;;
               *) classification=ssh_access_unavailable; severity=critical ;;
             esac
           fi
@@ -259,21 +295,22 @@ jobs:
             --argjson tcp443 "${{ steps.net.outputs.tcp443 || 'false' }}" \
             --argjson ssh_ok "${{ steps.access.outputs.ssh_ok || 'false' }}" \
             --arg ssh_reason "${{ steps.access.outputs.reason }}" \
+            --arg attach_http "${{ steps.access.outputs.jit_attach_http }}" \
+            --arg attach_state "${{ steps.access.outputs.jit_attach_state }}" \
             --arg classification "$classification" \
             --arg severity "$severity" \
             --slurpfile local "$RUNNER_TEMP/vps-doctor/local.json" \
-            '{schema_version:2,target:{vm_id:"767852",hostname:"srv767852.hstgr.cloud",ipv4:"69.62.68.67",os:"Kali Linux"},control_plane:{vm_state:$vm_state,action_plane_quiet:$action_plane_quiet,active_actions:$active_actions},external:{tcp22:$tcp22,tcp80:$tcp80,tcp443:$tcp443},normal_ssh:{authenticated:$ssh_ok,reason:$ssh_reason},classification:$classification,severity:$severity,local:(if ($local|length)>0 then $local[0] else null end),safety:{blind_reboot:false,recovery_started:false,root_password_reset:false,firewall_mutated:false,container_recreated:false,whatsapp_repaired:false,meta_required:false,jit_public_key:true}}' \
+            '{schema_version:3,target:{vm_id:"767852",hostname:"srv767852.hstgr.cloud",ipv4:"69.62.68.67",os:"Kali Linux"},control_plane:{vm_state:$vm_state,action_plane_quiet:$action_plane_quiet,active_actions:$active_actions},external:{tcp22:$tcp22,tcp80:$tcp80,tcp443:$tcp443},normal_ssh:{authenticated:$ssh_ok,reason:$ssh_reason},jit:{attach_http:$attach_http,attach_state:$attach_state},classification:$classification,severity:$severity,local:(if ($local|length)>0 then $local[0] else null end),safety:{blind_reboot:false,recovery_started:false,root_password_reset:false,firewall_mutated:false,container_recreated:false,whatsapp_repaired:false,meta_required:false,jit_public_key:true}}' \
             >"$RUNNER_TEMP/vps-doctor/report.json"
           cat "$RUNNER_TEMP/vps-doctor/report.json"
           {
-            echo '## Hostinger VPS Doctor'
-            echo
-            echo "- VM state: `${{ steps.control.outputs.vm_state }}`"
-            echo "- Action plane quiet: `${{ steps.control.outputs.action_plane_quiet }}`"
-            echo "- TCP/22: `${{ steps.net.outputs.tcp22 }}`"
-            echo "- Normal SSH authenticated: `${{ steps.access.outputs.ssh_ok }}` (`${{ steps.access.outputs.reason }}`)"
-            echo "- Classification: `$classification`"
-            echo "- Severity: `$severity`"
+            printf '%s\n\n' '## Hostinger VPS Doctor'
+            printf '%s %s\n' '- VM state:' '${{ steps.control.outputs.vm_state }}'
+            printf '%s %s\n' '- Action plane quiet:' '${{ steps.control.outputs.action_plane_quiet }}'
+            printf '%s %s\n' '- TCP/22:' '${{ steps.net.outputs.tcp22 }}'
+            printf '%s %s (%s)\n' '- Normal SSH authenticated:' '${{ steps.access.outputs.ssh_ok }}' '${{ steps.access.outputs.reason }}'
+            printf '%s %s\n' '- Classification:' "$classification"
+            printf '%s %s\n' '- Severity:' "$severity"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload diagnostic evidence
@@ -285,7 +322,7 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-      - name: Remove temporary JIT key from guest and Hostinger account
+      - name: Remove current temporary JIT key from guest and Hostinger account
         if: always() && steps.access.outputs.jit_created == 'true'
         env:
           KEY: ${{ steps.access.outputs.key_path }}
@@ -312,7 +349,7 @@ jobs:
             guest_rc=$?
             [[ "$guest_rc" == 0 ]] || echo SAHJONY_JIT_GUEST_KEY_CLEANUP_UNVERIFIED=1
           else
-            echo SAHJONY_JIT_GUEST_KEY_CLEANUP_SKIPPED=1
+            echo SAHJONY_JIT_GUEST_KEY_CLEANUP_UNVERIFIED=1
           fi
           if [[ "$JIT_ID" =~ ^[0-9]+$ ]]; then
             curl -sS -X DELETE -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' \
