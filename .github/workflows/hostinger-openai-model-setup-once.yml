@@ -67,8 +67,18 @@ jobs:
           sleep 10
           systemctl is-active --quiet openclaw-gateway.service
 
-          configured="$(oc config get agents.defaults.model.primary 2>/dev/null || true)"
-          [[ "$configured" == "$primary" ]] || { echo MODEL_PRIMARY_MISMATCH=1 >&2; exit 23; }
+          raw="$(oc config get agents.defaults.model.primary --json 2>/dev/null || true)"
+          configured="$(RAW="$raw" python3 - <<'PY'
+          import json, os
+          raw=os.environ.get('RAW','').strip()
+          try:
+              v=json.loads(raw)
+              print(v if isinstance(v,str) else '')
+          except Exception:
+              print(raw.strip('"'))
+          PY
+          )"
+          [[ "$configured" == "$primary" ]] || { echo MODEL_PRIMARY_MISMATCH=1 >&2; echo EXPECTED_MODEL="$primary" >&2; echo CONFIGURED_MODEL="$configured" >&2; exit 23; }
           echo OPENCLAW_GATEWAY_ACTIVE=1
           echo MODEL_PRIMARY_PROVIDER=NVIDIA_NIM
           echo MODEL_PRIMARY="$configured"
