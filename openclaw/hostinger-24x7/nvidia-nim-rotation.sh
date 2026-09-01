@@ -6,9 +6,6 @@ LOG="${NVIDIA_NIM_LOG:-/var/log/sahjony-nvidia-nim.log}"
 INVENTORY_URL="${NVIDIA_NIM_INVENTORY_URL:-https://integrate.api.nvidia.com/v1/models}"
 LOCK_FILE="${NVIDIA_NIM_LOCK_FILE:-/run/lock/sahjony-nvidia-nim.lock}"
 
-# Curated chat-capable models shipped by OpenClaw's NVIDIA provider. NVIDIA's
-# public hosted catalog currently offers these models at zero model cost; actual
-# availability/rate limits are checked dynamically instead of assumed forever.
 CANDIDATES=(
   'nvidia/nemotron-3-ultra-550b-a55b'
   'deepseek-ai/deepseek-v4-pro'
@@ -27,19 +24,38 @@ flock -n 9 || exit 0
 log(){ printf '%s %s\n' "$(date -u +%FT%TZ)" "$*" | tee -a "$LOG"; }
 fail(){ log "NVIDIA_NIM_ROTATION_FAIL=$*"; exit 1; }
 
-command -v docker >/dev/null 2>&1 || fail docker_missing
 command -v curl >/dev/null 2>&1 || fail curl_missing
 command -v python3 >/dev/null 2>&1 || fail python3_missing
 
+RUNTIME=""
+CID=""
+if command -v openclaw >/dev/null 2>&1 && systemctl is-active --quiet openclaw-gateway.service 2>/dev/null; then
+  RUNTIME=native
+elif command -v docker >/dev/null 2>&1; then
+  CID="$(docker ps --format '{{.ID}} {{.Names}} {{.Image}}' | awk 'tolower($0) ~ /openclaw/ {print $1; exit}')"
+  [[ -n "$CID" ]] && RUNTIME=docker
+fi
+if [[ -z "$RUNTIME" ]] && command -v openclaw >/dev/null 2>&1; then
+  RUNTIME=native
+fi
+[[ -n "$RUNTIME" ]] || fail openclaw_runtime_not_found
+
+oc(){
+  if [[ "$RUNTIME" == native ]]; then
+    openclaw "$@"
+  else
+    docker exec "$CID" openclaw "$@"
+  fi
+}
+
+if [[ "$RUNTIME" == docker ]]; then
+  docker exec "$CID" sh -lc 'command -v openclaw >/dev/null 2>&1' || fail openclaw_cli_missing
+fi
+
+oc plugins enable nvidia >/dev/null 2>&1 || true
+
 auth_present=false
-cid="$(docker ps --format '{{.ID}} {{.Names}} {{.Image}}' | awk 'tolower($0) ~ /openclaw/ {print $1; exit}')"
-[[ -n "$cid" ]] || fail openclaw_container_not_running
-
-docker exec "$cid" sh -lc 'command -v openclaw >/dev/null 2>&1' || fail openclaw_cli_missing
-
-docker exec "$cid" openclaw plugins enable nvidia >/dev/null 2>&1 || true
-
-auth_json="$(docker exec "$cid" openclaw models auth list --provider nvidia --json 2>/dev/null || true)"
+auth_json="$(oc models auth list --provider nvidia --json 2>/dev/null || true)"
 if AUTH_JSON="$auth_json" python3 - <<'PY'
 import json, os
 raw=os.environ.get('AUTH_JSON','').strip()
@@ -84,10 +100,9 @@ if [[ -s "$available_file" ]]; then
 else
   for id in "${CANDIDATES[@]}"; do selected+=("nvidia/$id"); done
 fi
-
 ((${#selected[@]} > 0)) || fail no_curated_models_available
 
-model_json="$(docker exec "$cid" openclaw config get agents.defaults.model --json 2>/dev/null || echo '{}')"
+model_json="$(oc config get agents.defaults.model --json 2>/dev/null || echo '{}')"
 MODEL_JSON="$model_json" NVIDIA_LIST="$(printf '%s\n' "${selected[@]}")" python3 - <<'PY' > "$STATE_DIR/target.json"
 import json, os
 try: obj=json.loads(os.environ.get('MODEL_JSON') or '{}')
@@ -104,13 +119,13 @@ print(json.dumps(out,separators=(',',':')))
 PY
 
 target="$(cat "$STATE_DIR/target.json")"
-docker exec "$cid" openclaw config set agents.defaults.model.fallbacks "$target" --strict-json >/dev/null
-docker exec "$cid" openclaw config validate >/dev/null
+oc config set agents.defaults.model.fallbacks "$target" --strict-json >/dev/null
+oc config validate >/dev/null
 printf '%s\n' "${selected[@]}" > "$STATE_DIR/nvidia-order.txt"
 chmod 600 "$STATE_DIR"/* 2>/dev/null || true
 
-primary="$(docker exec "$cid" openclaw config get agents.defaults.model.primary 2>/dev/null || true)"
-log "NVIDIA_NIM_ROTATION=READY auth=$auth_present primary=${primary:-unset} candidates=${#selected[@]}"
+primary="$(oc config get agents.defaults.model.primary 2>/dev/null || true)"
+log "NVIDIA_NIM_ROTATION=READY runtime=$RUNTIME auth=$auth_present primary=${primary:-unset} candidates=${#selected[@]}"
 if [[ "$auth_present" == true ]]; then
   touch "$STATE_DIR/auth-ready"; rm -f "$STATE_DIR/auth-required"
 else
@@ -118,13 +133,14 @@ else
   log 'NVIDIA_NIM_AUTH=REQUIRED rotation pool configured but inference waits for NVIDIA API key'
 fi
 
-AUTH_PRESENT="$auth_present" PRIMARY="$primary" COUNT="${#selected[@]}" python3 - <<'PY' > "$STATE_DIR/status.json.tmp"
+AUTH_PRESENT="$auth_present" PRIMARY="$primary" COUNT="${#selected[@]}" RUNTIME="$RUNTIME" python3 - <<'PY' > "$STATE_DIR/status.json.tmp"
 import json, os, datetime
 print(json.dumps({
   'status':'ready',
   'provider':'nvidia',
   'auth_ready': os.environ['AUTH_PRESENT']=='true',
   'primary_preserved': os.environ.get('PRIMARY',''),
+  'runtime': os.environ.get('RUNTIME','unknown'),
   'rotation_mode':'live_inventory_plus_runtime_failover',
   'candidate_count': int(os.environ['COUNT']),
   'updated_at': datetime.datetime.now(datetime.timezone.utc).isoformat(),
