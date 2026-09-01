@@ -1,6 +1,36 @@
 {
-  "checked_at": "2026-09-01T05:05:04Z",
+  "checked_at": "2026-09-01T05:05:49Z",
   "busy": 0,
+  "vm": {
+    "id": 767852,
+    "state": "running",
+    "hostname": "srv767852.hstgr.cloud",
+    "plan": "KVM 2",
+    "template": {
+      "id": 1074,
+      "name": "Kali Linux",
+      "description": "Kali Linux is a powerful, open-source operating system widely used for digital forensics and penetration testing. Developed by Offensive Security, it comes pre-loaded with a comprehensive suite of tools for security auditing, network testing, and identifying vulnerabilities within an IT environment. Kali Linux is designed for cybersecurity professionals and IT experts, featuring a customizable environment that supports a wide range of hardware platforms.",
+      "documentation": "https://www.kali.org/docs/"
+    },
+    "created_at": "2025-03-24T13:02:08Z",
+    "actions_lock": "unlocked",
+    "is_running": null,
+    "is_recovery_mode": null,
+    "ipv4": [
+      {
+        "id": 1101529,
+        "address": "69.62.68.67",
+        "ptr": "srv767852.hstgr.cloud"
+      }
+    ],
+    "ipv6": [
+      {
+        "id": 1266454,
+        "address": "2a02:4780:2d:d7f9::1",
+        "ptr": "srv767852.hstgr.cloud"
+      }
+    ]
+  },
   "actions": [
     {
       "id": 112343378,
