@@ -7,14 +7,26 @@ systemctl is-active --quiet ssh || systemctl enable --now ssh
 command -v docker >/dev/null 2>&1 || { echo DOCKER_MISSING=1 >&2; exit 20; }
 systemctl is-active --quiet docker || systemctl enable --now docker
 
-echo '=== EXISTING OPENCLAW CANDIDATES ==='
+[[ -f /tmp/openclaw-runtime-recovery.sh ]] || { echo OPENCLAW_RUNTIME_RECOVERY_TOOL_MISSING=1 >&2; exit 21; }
+[[ -f /tmp/openclaw-runtime-resolver.sh ]] || { echo OPENCLAW_RUNTIME_RESOLVER_MISSING=1 >&2; exit 22; }
+install -m 0755 /tmp/openclaw-runtime-recovery.sh /usr/local/sbin/sahjony-openclaw-runtime-recovery
+install -m 0755 /tmp/openclaw-runtime-resolver.sh /usr/local/sbin/sahjony-openclaw-runtime-resolver
+bash -n /usr/local/sbin/sahjony-openclaw-runtime-recovery
+bash -n /usr/local/sbin/sahjony-openclaw-runtime-resolver
+
+echo '=== OPENCLAW RUNTIME RESOLVER ==='
+/usr/local/sbin/sahjony-openclaw-runtime-resolver
+
 mapfile -t OPENCLAW_IDS < <(docker ps -aq | while read -r id; do
+  [[ -n "$id" ]] || continue
   meta="$(docker inspect "$id" --format '{{.Name}}|{{.Config.Image}}' 2>/dev/null || true)"
-  grep -Eqi 'openclaw|claw' <<<"$meta" && echo "$id"
+  grep -Eqi 'openclaw|open[-_ ]?claw|claw' <<<"$meta" && echo "$id"
 done)
-((${#OPENCLAW_IDS[@]})) || { echo OPENCLAW_CONTAINER_MISSING=1 >&2; exit 21; }
+((${#OPENCLAW_IDS[@]} == 1)) || { echo "OPENCLAW_CONTAINER_COUNT=${#OPENCLAW_IDS[@]}" >&2; exit 23; }
 
 for id in "${OPENCLAW_IDS[@]}"; do
+  docker update --restart unless-stopped "$id" >/dev/null
+  [[ "$(docker inspect -f '{{.State.Running}}' "$id")" == true ]] || docker start "$id" >/dev/null
   docker inspect "$id" --format 'name={{.Name}} image={{.Config.Image}} status={{.State.Status}} restart={{.HostConfig.RestartPolicy.Name}}'
 done
 
@@ -38,4 +50,7 @@ for id in "${OPENCLAW_IDS[@]}"; do
   docker inspect "$id" --format 'name={{.Name}} status={{.State.Status}} restart={{.HostConfig.RestartPolicy.Name}}'
 done
 
+# Local acceptance evidence only. Public Vercel health remains secondary.
+docker exec "${OPENCLAW_IDS[0]}" sh -lc 'openclaw channels status --probe'
+echo SAHJONY_HOSTINGER_LOCAL_RUNTIME=READY
 echo SAHJONY_HOSTINGER_BOOTSTRAP_STABILIZATION_COMPLETE=1
