@@ -1,0 +1,75 @@
+name: Hostinger WhatsApp Pair
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hostinger-vm-767852-whatsapp-pairing
+  cancel-in-progress: false
+
+jobs:
+  pair:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    env:
+      HOST: 69.62.68.67
+      USER: root
+      SSH_PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure SSH
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "$SSH_PRIVATE_KEY" ]] || { echo HOSTINGER_SSH_PRIVATE_KEY_MISSING=1 >&2; exit 2; }
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/hostinger
+          chmod 600 ~/.ssh/hostinger
+          ssh-keygen -y -f ~/.ssh/hostinger >/dev/null
+
+      - name: Start one WhatsApp pairing session
+        shell: bash
+        run: |
+          set -euo pipefail
+          opts=(-o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -i "$HOME/.ssh/hostinger")
+          scp "${opts[@]}" openclaw/hostinger-24x7/whatsapp-pairing-controller.sh "$USER@$HOST:/tmp/sahjony-whatsapp-pairing-controller"
+          ssh "${opts[@]}" "$USER@$HOST" 'install -m 700 /tmp/sahjony-whatsapp-pairing-controller /usr/local/sbin/sahjony-whatsapp-pairing-controller; rm -f /tmp/sahjony-whatsapp-pairing-controller'
+          ssh "${opts[@]}" "$USER@$HOST" 'MIN_ATTEMPT_INTERVAL_SEC=0 FAILED_ATTEMPT_BACKOFF_SEC=300 /usr/local/sbin/sahjony-whatsapp-pairing-controller start' > "$RUNNER_TEMP/pairing.json"
+          python3 - "$RUNNER_TEMP/pairing.json" "$RUNNER_TEMP/whatsapp-qr.png" <<'PY'
+          import base64, json, pathlib, sys
+          payload = json.loads(pathlib.Path(sys.argv[1]).read_text())
+          if payload.get("connected") is True:
+              pathlib.Path(sys.argv[2]).write_bytes(b"")
+              print("WHATSAPP_ALREADY_CONNECTED=1")
+          else:
+              prefix = "data:image/png;base64,"
+              qr = payload.get("qrDataUrl", "")
+              if not qr.startswith(prefix):
+                  raise SystemExit("WhatsApp QR data was not returned")
+              pathlib.Path(sys.argv[2]).write_bytes(base64.b64decode(qr[len(prefix):]))
+              print("WHATSAPP_QR_READY=1")
+          PY
+
+      - name: Publish QR for phone scan
+        if: hashFiles(format('{0}/whatsapp-qr.png', runner.temp)) != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: whatsapp-qr-${{ github.run_id }}
+          path: ${{ runner.temp }}/whatsapp-qr.png
+          retention-days: 1
+
+      - name: Wait for scan and finalize 24x7 service
+        shell: bash
+        run: |
+          set -euo pipefail
+          opts=(-o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -i "$HOME/.ssh/hostinger")
+          ssh "${opts[@]}" "$USER@$HOST" 'LOGIN_TIMEOUT_MS=240000 FAILED_ATTEMPT_BACKOFF_SEC=300 /usr/local/sbin/sahjony-whatsapp-pairing-controller wait'
+          ssh "${opts[@]}" "$USER@$HOST" '/usr/local/sbin/sahjony-whatsapp-pairing-controller finalize'
+
+      - name: Cleanup
+        if: always()
+        run: rm -f ~/.ssh/hostinger "$RUNNER_TEMP/pairing.json" "$RUNNER_TEMP/whatsapp-qr.png"
