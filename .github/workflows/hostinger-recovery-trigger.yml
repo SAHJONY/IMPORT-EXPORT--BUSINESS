@@ -1,37 +1,16 @@
-name: Trigger Hostinger Docker Recovery
+name: Trigger Hostinger Docker Recovery (Retired V3)
 
 on:
-  push:
-    paths:
-      - '.github/workflows/hostinger-recovery-trigger.yml'
+  workflow_dispatch:
 
 permissions:
-  actions: write
   contents: read
-  issues: write
 
 jobs:
-  dispatch:
+  retired:
     runs-on: ubuntu-latest
     steps:
-      - name: Dispatch canonical recovery V3
-        id: dispatch
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-        shell: bash
+      - name: Explain replacement
         run: |
-          set -euo pipefail
-          gh workflow run hostinger-recovery-docker-openclaw-v3.yml --repo "$REPO" --ref main
-          echo 'HOSTINGER_RECOVERY_V3_DISPATCHED=1'
-
-      - name: Report dispatch status
-        if: always()
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-          OUTCOME: ${{ steps.dispatch.outcome }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          gh issue comment 54 --repo "$REPO" --body "Hostinger recovery trigger outcome: **$OUTCOME**. Canonical workflow: \`hostinger-recovery-docker-openclaw-v3.yml\`. No secrets exposed."
+          echo 'HOSTINGER_RECOVERY_V3_TRIGGER_RETIRED=1'
+          echo 'Use bounded Hostinger WhatsApp Recovery V6. V3 is no longer auto-dispatched.'
