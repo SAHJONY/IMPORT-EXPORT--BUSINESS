@@ -1,0 +1,187 @@
+name: Hostinger Runtime Recovery V11
+
+on:
+  push:
+    paths:
+      - '.github/workflows/hostinger-runtime-recovery-v11.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hostinger-vm-767852-mutation
+  cancel-in-progress: false
+
+env:
+  HOSTINGER_API_BASE: https://developers.hostinger.com
+  VM_ID: '767852'
+  HOST: '69.62.68.67'
+  USER: root
+
+jobs:
+  recover-runtime:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      API_TOKEN: ${{ secrets.HOSTINGER_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare ephemeral management key
+        id: prep
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "$API_TOKEN" ]] || exit 2
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq jq sshpass netcat-openbsd >/dev/null
+          install -d -m 700 ~/.ssh
+          ssh-keygen -q -t ed25519 -N '' -f ~/.ssh/v11 -C "sahjony-v11-${GITHUB_RUN_ID}"
+          RECOVERY_PASSWORD="$(openssl rand -hex 18)Aa1!"
+          echo "::add-mask::$RECOVERY_PASSWORD"
+          echo "recovery_password=$RECOVERY_PASSWORD" >> "$GITHUB_OUTPUT"
+          chmod +x openclaw/hostinger-24x7/hostinger-runtime-bootstrap.sh openclaw/hostinger-24x7/whatsapp-hostinger-only-guardian.sh
+          bash -n openclaw/hostinger-24x7/hostinger-runtime-bootstrap.sh
+          bash -n openclaw/hostinger-24x7/whatsapp-hostinger-only-guardian.sh
+
+      - name: Require idle Hostinger action plane
+        shell: bash
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 90); do
+            a="$(curl -fsS -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/actions?page=1")"
+            busy="$(jq '[.data[]? | select(.state=="sent" or .state=="started" or .state=="pending" or .state=="running" or .state=="queued")] | length' <<<"$a")"
+            if [ "$busy" = 0 ]; then echo HOSTINGER_V11_CONTROL_PLANE_IDLE=1; exit 0; fi
+            echo "v11_busy=$busy probe=$i/90"; sleep 5
+          done
+          exit 3
+
+      - name: Enter owned Recovery session
+        id: start
+        env:
+          RECOVERY_PASSWORD: ${{ steps.prep.outputs.recovery_password }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          payload="$(jq -n --arg p "$RECOVERY_PASSWORD" '{root_password:$p}')"
+          body="$(curl -fsS -X POST -H "Authorization: Bearer $API_TOKEN" -H 'Content-Type: application/json' -H 'Accept: application/json' --data "$payload" "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/recovery")"
+          id="$(jq -r '.id // empty' <<<"$body")"
+          [[ "$id" =~ ^[0-9]+$ ]] || exit 4
+          echo "action_id=$id" >> "$GITHUB_OUTPUT"
+          echo "owned=true" >> "$GITHUB_OUTPUT"
+
+      - name: Wait Recovery start
+        env:
+          ACTION_ID: ${{ steps.start.outputs.action_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 120); do
+            a="$(curl -fsS -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/actions/$ACTION_ID")"
+            s="$(jq -r '.state // empty' <<<"$a")"; echo "v11_start=$i/120 state=${s:-unknown}"
+            case "$s" in success) exit 0;; failed|failure|error|cancelled|canceled) exit 5;; esac
+            sleep 5
+          done
+          exit 6
+
+      - name: Add one-run key to original Kali only
+        id: key
+        env:
+          RECOVERY_PASSWORD: ${{ steps.prep.outputs.recovery_password }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          export SSHPASS="$RECOVERY_PASSWORD"
+          ok=false
+          for i in $(seq 1 60); do
+            if sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=6 -o PreferredAuthentications=password -o PubkeyAuthentication=no "$USER@$HOST" 'printf OK' 2>/dev/null | grep -q OK; then ok=true; break; fi
+            sleep 10
+          done
+          [[ "$ok" == true ]] || exit 7
+          PUB_B64="$(base64 -w0 ~/.ssh/v11.pub)"
+          sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o PreferredAuthentications=password -o PubkeyAuthentication=no "$USER@$HOST" "PUB_B64='$PUB_B64' bash -s" <<'REMOTE'
+          set -euo pipefail
+          root=''
+          for mp in /mnt/sdb1 /mnt; do [ -f "$mp/etc/os-release" ] && root="$mp" && break; done
+          [ -n "$root" ] || exit 20
+          install -d -m 700 "$root/root/.ssh"
+          touch "$root/root/.ssh/authorized_keys"; chmod 600 "$root/root/.ssh/authorized_keys"
+          pub="$(printf '%s' "$PUB_B64" | base64 -d)"
+          grep -qxF "$pub" "$root/root/.ssh/authorized_keys" || printf '%s\n' "$pub" >> "$root/root/.ssh/authorized_keys"
+          chroot "$root" /usr/sbin/sshd -t
+          echo V11_EPHEMERAL_KEY_INSTALLED=1
+          REMOTE
+          echo ready=true >> "$GITHUB_OUTPUT"
+
+      - name: Exit owned Recovery
+        id: stop
+        shell: bash
+        run: |
+          set -euo pipefail
+          body="$(curl -fsS -X DELETE -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/recovery")"
+          id="$(jq -r '.id // empty' <<<"$body")"; [[ "$id" =~ ^[0-9]+$ ]] || exit 30
+          echo "action_id=$id" >> "$GITHUB_OUTPUT"
+
+      - name: Wait Recovery exit
+        env:
+          ACTION_ID: ${{ steps.stop.outputs.action_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 120); do
+            a="$(curl -fsS -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/actions/$ACTION_ID")"
+            s="$(jq -r '.state // empty' <<<"$a")"; echo "v11_stop=$i/120 state=${s:-unknown}"
+            case "$s" in success) exit 0;; failed|failure|error|cancelled|canceled) exit 31;; esac
+            sleep 5
+          done
+          exit 32
+
+      - name: Authenticate normal Kali
+        id: normal
+        shell: bash
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 48); do
+            if ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 -i ~/.ssh/v11 "$USER@$HOST" 'printf NORMAL_V11_OK' 2>/dev/null | grep -q NORMAL_V11_OK; then echo ready=true >> "$GITHUB_OUTPUT"; echo NORMAL_V11_SSH_READY=1; exit 0; fi
+            sleep 5
+          done
+          exit 40
+
+      - name: Restore retained Docker OpenClaw runtime
+        id: runtime
+        if: steps.normal.outputs.ready == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          scp -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/v11 openclaw/hostinger-24x7/hostinger-runtime-bootstrap.sh "$USER@$HOST:/tmp/hostinger-runtime-bootstrap"
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/v11 "$USER@$HOST" 'install -m 700 /tmp/hostinger-runtime-bootstrap /usr/local/sbin/sahjony-runtime-bootstrap && /usr/local/sbin/sahjony-runtime-bootstrap heal'
+          echo ready=true >> "$GITHUB_OUTPUT"
+
+      - name: Install Hostinger-only WhatsApp guardian
+        id: guardian
+        if: steps.runtime.outputs.ready == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          scp -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/v11 openclaw/hostinger-24x7/whatsapp-hostinger-only-guardian.sh "$USER@$HOST:/tmp/whatsapp-hostinger-only-guardian"
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/v11 "$USER@$HOST" 'set -e; install -m 700 /tmp/whatsapp-hostinger-only-guardian /usr/local/sbin/sahjony-whatsapp-hostinger; /usr/local/sbin/sahjony-whatsapp-hostinger install; systemctl is-active --quiet docker; systemctl is-active --quiet sahjony-whatsapp-hostinger.timer; /usr/local/sbin/sahjony-whatsapp-hostinger audit; echo SAHJONY_HOSTINGER_WHATSAPP_V11_LOCAL_GATES=READY'
+          echo ready=true >> "$GITHUB_OUTPUT"
+
+      - name: Cleanup ephemeral key
+        if: always() && steps.normal.outputs.ready == 'true'
+        shell: bash
+        run: |
+          set +e
+          PUB_B64="$(base64 -w0 ~/.ssh/v11.pub 2>/dev/null)"
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/v11 "$USER@$HOST" "PUB_B64='$PUB_B64' bash -s" <<'REMOTE'
+          pub="$(printf '%s' "$PUB_B64" | base64 -d)"; file=/root/.ssh/authorized_keys
+          if [ -f "$file" ]; then tmp="$(mktemp)"; grep -vxF "$pub" "$file" > "$tmp" || true; cat "$tmp" > "$file"; rm -f "$tmp"; chmod 600 "$file"; fi
+          REMOTE
+          rm -f ~/.ssh/v11 ~/.ssh/v11.pub
+
+      - name: Emergency Recovery cleanup
+        if: always() && steps.start.outputs.owned == 'true' && steps.stop.outcome != 'success'
+        shell: bash
+        run: |
+          curl -sS -X DELETE -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/recovery" >/dev/null 2>&1 || true
