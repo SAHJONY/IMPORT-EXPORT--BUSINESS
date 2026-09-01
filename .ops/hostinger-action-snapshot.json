@@ -1,9 +1,9 @@
 {
-  "checked_at": "2026-09-01T06:32:14Z",
+  "checked_at": "2026-09-01T06:39:44Z",
   "busy": 0,
   "vm": {
     "id": 767852,
-    "state": "recovery",
+    "state": "running",
     "hostname": "srv767852.hstgr.cloud",
     "plan": "KVM 2",
     "template": {
@@ -55,6 +55,13 @@
     "meta_cloud_controlled": false
   },
   "actions": [
+    {
+      "id": 112365402,
+      "name": "ct_recovery_stop",
+      "state": "success",
+      "created_at": "2026-09-01T06:38:00Z",
+      "updated_at": "2026-09-01T06:38:10Z"
+    },
     {
       "id": 112360954,
       "name": "ct_recovery",
@@ -131,13 +138,6 @@
       "state": "success",
       "created_at": "2026-09-01T05:28:50Z",
       "updated_at": "2026-09-01T05:31:12Z"
-    },
-    {
-      "id": 112349826,
-      "name": "ct_recovery_stop",
-      "state": "success",
-      "created_at": "2026-09-01T05:28:26Z",
-      "updated_at": "2026-09-01T05:28:35Z"
     }
   ]
 }
