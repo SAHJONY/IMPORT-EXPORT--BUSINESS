@@ -21,7 +21,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-          cache: npm
 
       - name: Frontend install, typecheck, build and dependency audit
         shell: bash
@@ -39,7 +38,13 @@ jobs:
               echo "$name=FAIL:$code" | tee -a audit-output/summary.txt
             fi
           }
-          run_check NPM_CI npm ci
+          if [[ -f package-lock.json || -f npm-shrinkwrap.json ]]; then
+            run_check NPM_INSTALL npm ci
+            echo NPM_LOCKFILE_PRESENT=1 | tee -a audit-output/summary.txt
+          else
+            run_check NPM_INSTALL npm install --no-audit --no-fund
+            echo NPM_LOCKFILE_PRESENT=0 | tee -a audit-output/summary.txt
+          fi
           run_check TYPESCRIPT npx tsc -p tsconfig.json
           run_check VITE_BUILD npm run build
           npm audit --omit=dev --json > audit-output/npm-audit.json 2>/dev/null || true
@@ -136,7 +141,9 @@ jobs:
           health=[]
           false_green=[]
           for p in root.glob('*.py'):
-              try: tree=ast.parse(p.read_text())
+              try:
+                  text=p.read_text()
+                  tree=ast.parse(text)
               except Exception: continue
               for node in ast.walk(tree):
                   if not isinstance(node,(ast.FunctionDef,ast.AsyncFunctionDef)): continue
@@ -145,9 +152,10 @@ jobs:
                       if isinstance(deco,ast.Call) and isinstance(deco.func,ast.Attribute) and deco.args and isinstance(deco.args[0],ast.Constant) and isinstance(deco.args[0].value,str):
                           if 'health' in deco.args[0].value: paths.append(deco.args[0].value)
                   if not paths: continue
-                  body=ast.get_source_segment(p.read_text(),node) or ''
+                  body=ast.get_source_segment(text,node) or ''
                   health.extend((str(p),path,node.name) for path in paths)
-                  if "'status':'ok'" in body.replace(' ', '') or '"status":"ok"' in body.replace(' ', ''):
+                  compact=body.replace(' ','')
+                  if "'status':'ok'" in compact or '"status":"ok"' in compact:
                       dependency_signals=('get_backend(','select_rows(','httpx.','await ','metadata(','_connect(','persistent_backend_status(')
                       if not any(sig in body for sig in dependency_signals):
                           for path in paths: false_green.append((str(p),path,node.name))
