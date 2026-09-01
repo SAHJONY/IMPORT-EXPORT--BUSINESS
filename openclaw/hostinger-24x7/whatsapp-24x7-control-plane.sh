@@ -2,7 +2,8 @@
 set -euo pipefail
 
 # SAHJONY WhatsApp 24/7 control plane.
-# Authorized healing only: no Meta/WhatsApp/Hostinger auth bypass.
+# Hostinger + Docker + OpenClaw is the authoritative production transport.
+# No Meta Cloud dependency and no authentication/pairing bypass.
 
 MODE="${MODE:-${1:-audit}}"
 APP_URL="${SAHJONY_APP_URL:-https://www.sahjony.com}"
@@ -24,8 +25,7 @@ fail(){ printf '[whatsapp-control-plane] FAIL: %s\n' "$*" >&2; exit 1; }
 
 health_body(){ curl -fsS --max-time 15 "$APP_URL/whatsapp/health" 2>/dev/null || true; }
 health_flag(){ local body="$1" expr="$2"; jq -e "$expr" >/dev/null 2>&1 <<<"$body"; }
-meta_ready(){ local b="$1"; health_flag "$b" '(.cloud_independent_of_local_mac // false) == true or (((.meta_cloud.send_ready // false) == true) and ((.meta_cloud.webhook_ready // false) == true))'; }
-hostinger_ready(){ local b="$1"; health_flag "$b" '(.hostinger_independent_runtime // false) == true or ((.hostinger_openclaw.connected // false) == true or (((.provider // "") == "openclaw") and ((.gateway_connected // false) == true)))'; }
+hostinger_ready(){ local b="$1"; health_flag "$b" '(.hostinger_independent_runtime // false) == true or ((.hostinger_openclaw.connected // false) == true)'; }
 ssh_tcp(){ nc -z -w 4 "$HOST" 22 >/dev/null 2>&1; }
 ssh_auth(){ [[ -s "$SSH_KEY_FILE" ]] && ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=6 -i "$SSH_KEY_FILE" "$USER@$HOST" 'printf SAHJONY_SSH_OK' 2>/dev/null | grep -q SAHJONY_SSH_OK; }
 
@@ -79,10 +79,10 @@ dispatch_recovery(){
 }
 
 print_health_summary(){
-  local b="$1" m=false h=false g=false
-  [[ -n "$b" ]] || { printf '{"public_health_reachable":false}\n'; return; }
-  meta_ready "$b" && m=true || true; hostinger_ready "$b" && h=true || true; health_flag "$b" '(.gateway_connected // false) == true' && g=true || true
-  printf '{"public_health_reachable":true,"meta_cloud_ready":%s,"hostinger_ready":%s,"gateway_connected":%s}\n' "$m" "$h" "$g"
+  local b="$1" h=false
+  [[ -n "$b" ]] || { printf '{"public_health_reachable":false,"authoritative_transport":"hostinger_openclaw"}\n'; return; }
+  hostinger_ready "$b" && h=true || true
+  printf '{"public_health_reachable":true,"authoritative_transport":"hostinger_openclaw","hostinger_ready":%s}\n' "$h"
 }
 
 main(){
@@ -90,9 +90,9 @@ main(){
   local health
   health="$(health_body)"; print_health_summary "$health"
 
-  if [[ -n "$health" ]] && meta_ready "$health"; then
-    log 'Meta Cloud transport is independently READY'
-    if hostinger_ready "$health"; then log 'Hostinger OpenClaw fallback is also READY'; return 0; fi
+  if [[ -n "$health" ]] && hostinger_ready "$health"; then
+    log 'Hostinger OpenClaw WhatsApp transport is READY'
+    return 0
   fi
 
   if ssh_tcp; then
@@ -100,9 +100,9 @@ main(){
     if ssh_auth; then
       log 'Hostinger SSH authentication is valid'
       if [[ "$MODE" == heal || "$MODE" == recover ]]; then run_guardian_remote || warn 'guardian completed with a degraded result'; sleep 10; health="$(health_body)"; print_health_summary "$health"; fi
-      if [[ -n "$health" ]] && { meta_ready "$health" || hostinger_ready "$health"; }; then log 'WhatsApp has at least one production-ready transport after local healing'; return 0; fi
-      [[ "$MODE" == verify ]] && fail 'SSH works but WhatsApp transport is not ready'
-      warn 'SSH works; transport remains degraded; disk recovery is not automatically preferred over local diagnosis'
+      if [[ -n "$health" ]] && hostinger_ready "$health"; then log 'Hostinger OpenClaw WhatsApp transport is READY after local healing'; return 0; fi
+      [[ "$MODE" == verify ]] && fail 'SSH works but Hostinger WhatsApp transport is not ready'
+      warn 'SSH works; Hostinger transport remains degraded and should be diagnosed locally before disk recovery'
       return 0
     fi
     warn 'TCP/22 is open but the durable SSH identity is unavailable or rejected'
@@ -112,7 +112,7 @@ main(){
 
   if [[ "$MODE" == recover ]]; then dispatch_recovery; return 0; fi
   if [[ "$MODE" == heal && "$AUTO_RECOVERY" == true ]]; then log 'AUTO_RECOVERY enabled; local healing unavailable'; dispatch_recovery; return 0; fi
-  [[ "$MODE" == verify ]] && fail 'neither Meta Cloud nor Hostinger OpenClaw is verified ready'
+  [[ "$MODE" == verify ]] && fail 'Hostinger OpenClaw WhatsApp transport is not verified ready'
   log 'audit/heal complete; Recovery was not authorized for this invocation'
 }
 
