@@ -1,0 +1,62 @@
+name: Hostinger Bootstrap Failure to V7 One-Time
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/hostinger-bootstrap-failure-to-v7.yml'
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: hostinger-v7-one-time-dispatch
+  cancel-in-progress: false
+
+jobs:
+  dispatch:
+    if: ${{ github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, 'dispatch Hostinger V7 after bootstrap failure') }}
+    runs-on: ubuntu-24.04
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      BOOTSTRAP_RUN_ID: '33479731498'
+    steps:
+      - name: Confirm exact bootstrap failure
+        shell: bash
+        run: |
+          set -euo pipefail
+          conclusion="$(gh api "repos/$REPO/actions/runs/$BOOTSTRAP_RUN_ID" --jq '.conclusion // ""')"
+          status="$(gh api "repos/$REPO/actions/runs/$BOOTSTRAP_RUN_ID" --jq '.status // ""')"
+          echo "BOOTSTRAP_STATUS=$status CONCLUSION=$conclusion"
+          [[ "$status" == completed && "$conclusion" == failure ]] || {
+            echo HOSTINGER_V7_DISPATCH_BLOCKED_BOOTSTRAP_NOT_FAILED=1
+            exit 1
+          }
+
+      - name: Refuse overlapping Hostinger bootstrap or V7
+        shell: bash
+        run: |
+          set -euo pipefail
+          bootstrap_active="$(gh run list --repo "$REPO" --workflow hostinger-ssh-bootstrap-once.yml --limit 20 --json status --jq '[.[] | select(.status == "in_progress" or .status == "queued" or .status == "waiting" or .status == "requested" or .status == "pending")] | length')"
+          v7_active="$(gh run list --repo "$REPO" --workflow hostinger-whatsapp-recovery-v7.yml --limit 20 --json status --jq '[.[] | select(.status == "in_progress" or .status == "queued" or .status == "waiting" or .status == "requested" or .status == "pending")] | length')"
+          echo "HOSTINGER_BOOTSTRAP_ACTIVE=$bootstrap_active HOSTINGER_V7_ACTIVE=$v7_active"
+          [[ "$bootstrap_active" == 0 ]] || { echo HOSTINGER_V7_DISPATCH_BLOCKED_BOOTSTRAP_ACTIVE=1; exit 1; }
+          if [[ "$v7_active" != 0 ]]; then
+            echo HOSTINGER_V7_ALREADY_ACTIVE=$v7_active
+            exit 0
+          fi
+
+      - name: Dispatch canonical V7 exactly once
+        shell: bash
+        run: |
+          set -euo pipefail
+          v7_active="$(gh run list --repo "$REPO" --workflow hostinger-whatsapp-recovery-v7.yml --limit 20 --json status --jq '[.[] | select(.status == "in_progress" or .status == "queued" or .status == "waiting" or .status == "requested" or .status == "pending")] | length')"
+          if [[ "$v7_active" != 0 ]]; then
+            echo HOSTINGER_V7_ALREADY_ACTIVE=$v7_active
+            exit 0
+          fi
+          gh workflow run hostinger-whatsapp-recovery-v7.yml --repo "$REPO" --ref main
+          echo SAHJONY_HOSTINGER_RECOVERY_V7_DISPATCHED=1
