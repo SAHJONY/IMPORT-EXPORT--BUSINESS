@@ -86,7 +86,7 @@ jobs:
               exit 1
             fi
 
-            attached_response="$(curl --fail --silent --show-error \
+            attached_response="$(curl --silent --show-error \
               --header "${auth_header}" \
               "${api_root}/virtual-machines/${target_vm_id}/public-keys")"
             if ! jq -e --arg expected "${expected_key}" \
@@ -126,15 +126,6 @@ jobs:
           while IFS=$'\t' read -r vm_id vm_ip; do
             [[ -n "${vm_id}" && -n "${vm_ip}" ]] || continue
             [[ -z "${target_vm_id}" || "${vm_id}" == "${target_vm_id}" ]] || continue
-            keys_response="$(curl --fail --silent --show-error \
-              --header "${auth_header}" \
-              "${api_root}/virtual-machines/${vm_id}/public-keys")"
-            if ! jq -e --arg expected "${expected_key}" \
-              '(if type == "array" then . else (.data // []) end) | any((.key | split(" ")[0:2] | join(" ")) == $expected)' \
-              <<<"${keys_response}" >/dev/null; then
-              continue
-            fi
-
             matched=1
             known_hosts="${RUNNER_TEMP}/known_hosts"
             for attempt in {1..12}; do
@@ -161,7 +152,7 @@ jobs:
           ' <<<"${vm_response}")
 
           if [[ "${matched}" -ne 1 ]]; then
-            echo "The GitHub SSH key is not attached to any Hostinger VPS." >> "${GITHUB_STEP_SUMMARY}"
+            echo "No Hostinger VPS with a usable IPv4 address was found." >> "${GITHUB_STEP_SUMMARY}"
             exit 1
           fi
           if [[ "${authenticated}" -ne 1 ]]; then
