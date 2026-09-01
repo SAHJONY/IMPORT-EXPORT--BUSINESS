@@ -1,0 +1,95 @@
+name: Hostinger V13 Recovery Cleanup Safety Net
+
+on:
+  workflow_run:
+    workflows:
+      - Hostinger Runtime Lineage V13
+    types:
+      - completed
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hostinger-vm-767852-mutation
+  cancel-in-progress: false
+
+env:
+  HOSTINGER_API_BASE: https://developers.hostinger.com
+  VM_ID: '767852'
+
+jobs:
+  cleanup:
+    if: github.event.workflow_run.id == 33474835830 && github.event.workflow_run.conclusion != 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      API_TOKEN: ${{ secrets.HOSTINGER_API_TOKEN }}
+    steps:
+      - name: Validate exact failed V13 handoff
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "${{ github.event.workflow_run.id }}" == '33474835830' ]]
+          [[ "${{ github.event.workflow_run.name }}" == 'Hostinger Runtime Lineage V13' ]]
+          [[ "${{ github.event.workflow_run.conclusion }}" != 'success' ]]
+          [[ -n "$API_TOKEN" ]]
+          echo HOSTINGER_V13_CLEANUP_EXACT_RUN=1
+
+      - name: Drain Hostinger action plane before cleanup
+        shell: bash
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 120); do
+            a="$(curl -fsS -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/actions?page=1")"
+            busy="$(jq '[.data[]? | select(.state=="sent" or .state=="started" or .state=="pending" or .state=="running" or .state=="queued")] | length' <<<"$a")"
+            if [[ "$busy" == 0 ]]; then
+              echo HOSTINGER_V13_CLEANUP_ACTION_PLANE_IDLE=1
+              exit 0
+            fi
+            echo "cleanup_busy=$busy probe=$i/120"
+            sleep 5
+          done
+          echo HOSTINGER_V13_CLEANUP_ACTION_PLANE_STILL_BUSY=1 >&2
+          exit 3
+
+      - name: Best-effort exit V13-owned Recovery
+        shell: bash
+        run: |
+          set -euo pipefail
+          tmp="$(mktemp)"
+          status="$(curl -sS -o "$tmp" -w '%{http_code}' -X DELETE \
+            -H "Authorization: Bearer $API_TOKEN" \
+            -H 'Accept: application/json' \
+            "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/recovery" || true)"
+          body="$(cat "$tmp")"
+          rm -f "$tmp"
+
+          if [[ "$status" =~ ^2 ]]; then
+            id="$(jq -r '.id // empty' <<<"$body" 2>/dev/null || true)"
+            if [[ "$id" =~ ^[0-9]+$ ]]; then
+              for i in $(seq 1 120); do
+                a="$(curl -fsS -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/actions/$id")"
+                state="$(jq -r '.state // empty' <<<"$a")"
+                echo "cleanup_recovery_stop=$i/120 state=${state:-unknown}"
+                case "$state" in
+                  success) echo HOSTINGER_V13_RECOVERY_CLEANUP=SUCCESS; exit 0 ;;
+                  failed|failure|error|cancelled|canceled) echo "$a" >&2; exit 4 ;;
+                esac
+                sleep 5
+              done
+              exit 5
+            fi
+            echo HOSTINGER_V13_RECOVERY_CLEANUP=ACCEPTED_WITHOUT_ACTION_ID
+            exit 0
+          fi
+
+          case "$status" in
+            404|409|422)
+              echo "HOSTINGER_V13_RECOVERY_CLEANUP=NO_ACTIVE_RECOVERY_OR_NOT_APPLICABLE http=$status"
+              exit 0
+              ;;
+          esac
+          echo "Unexpected recovery cleanup response: HTTP $status" >&2
+          jq -c . <<<"$body" 2>/dev/null >&2 || true
+          exit 6
