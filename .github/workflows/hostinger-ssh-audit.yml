@@ -22,6 +22,11 @@ on:
         required: false
         default: false
         type: boolean
+      print_public_key_only:
+        description: Print the non-secret deployment public key and stop
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -48,6 +53,7 @@ jobs:
           REQUESTED_VM_ID: ${{ inputs.vm_id }}
           ENSURE_SSH_FIREWALL: ${{ inputs.ensure_ssh_firewall }}
           EXIT_EMERGENCY_MODE: ${{ inputs.exit_emergency_mode }}
+          PRINT_PUBLIC_KEY_ONLY: ${{ inputs.print_public_key_only }}
         run: |
           set -euo pipefail
           umask 077
@@ -69,6 +75,10 @@ jobs:
             exit 1
           fi
           expected_key="$(awk '{print $1 " " $2}' "${key_file}.pub")"
+          if [[ "${PRINT_PUBLIC_KEY_ONLY}" == "true" ]]; then
+            echo "HOSTINGER_DEPLOYMENT_PUBLIC_KEY=${expected_key} github-actions-openclaw-deploy"
+            exit 0
+          fi
 
           api_root="https://developers.hostinger.com/api/vps/v1"
           auth_header="Authorization: Bearer ${HOSTINGER_API_TOKEN}"
