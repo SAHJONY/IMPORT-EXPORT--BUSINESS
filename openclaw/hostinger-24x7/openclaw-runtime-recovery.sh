@@ -65,6 +65,8 @@ score_artifact(){
   if grep -Eq 'restart:[[:space:]]*(unless-stopped|always)|--restart[ =](unless-stopped|always)' <<<"$lc"; then score=$((score+5)); reasons+=(restart_policy); fi
 
   # Extract likely absolute bind-mount sources from compose and docker-run syntax.
+  # Avoid shell-quote gymnastics: capture absolute paths that immediately precede
+  # a mount separator, then only count paths that actually exist on the host.
   while IFS= read -r src; do
     [[ -n "$src" ]] || continue
     [[ "$src" == /var/lib/docker* ]] && continue
@@ -75,7 +77,7 @@ score_artifact(){
     fi
   done < <(
     {
-      grep -Eo '(^|[[:space:]\["'"'])(/[A-Za-z0-9._/@:+-]+(/[A-Za-z0-9._@:+-]+)*)[[:space:]]*:' "$f" 2>/dev/null | sed -E 's/^[[:space:]\["'"']*//; s/[[:space:]]*:$//' || true
+      grep -Eo '(/[A-Za-z0-9._/@+-]+(/[A-Za-z0-9._@+-]+)*)[[:space:]]*:' "$f" 2>/dev/null | sed -E 's/[[:space:]]*:$//' || true
       grep -Eo -- '-v[[:space:]]+/[^[:space:]:]+:' "$f" 2>/dev/null | sed -E 's/^-v[[:space:]]+//; s/:$//' || true
     } | sort -u
   )
