@@ -56,15 +56,21 @@ jobs:
           [[ -f "$CONFIG" ]] || { echo OPENCLAW_CONFIG_MISSING=1 >&2; exit 21; }
           systemctl cat openclaw-gateway.service >/dev/null 2>&1 || { echo OPENCLAW_GATEWAY_SERVICE_MISSING=1 >&2; exit 20; }
 
+          echo STOPPING_GATEWAY_FOR_CODEX_REGISTRATION=1
+          systemctl stop openclaw-gateway.service
+          trap 'systemctl start openclaw-gateway.service >/dev/null 2>&1 || true' EXIT
+          sleep 3
+
           ready=0
-          for n in $(seq 1 36); do
+          for n in $(seq 1 40); do
             probe="$(oc --version 2>&1 || true)"
             if printf '%s\n' "$probe" | grep -q 'OpenClaw 2026.8.1'; then
               ready=1
+              echo OPENCLAW_CLI_READY=1
               break
             fi
             if printf '%s\n' "$probe" | grep -qi 'startup migrations are already running'; then
-              echo WAITING_FOR_OPENCLAW_MIGRATION_LOCK=1
+              echo WAITING_FOR_STALE_MIGRATION_LEASE=1
               sleep 10
               continue
             fi
@@ -72,7 +78,6 @@ jobs:
             sleep 5
           done
           [[ "$ready" == "1" ]] || { echo OPENCLAW_MIGRATION_LOCK_TIMEOUT=1 >&2; exit 22; }
-          echo OPENCLAW_VERSION="$(oc --version 2>/dev/null | tail -n1)"
 
           oc plugins install @openclaw/codex@2026.8.1 --force --pin --accept-capabilities
           oc plugins enable codex --accept-capabilities
@@ -81,18 +86,19 @@ jobs:
 
           oc config validate
           systemctl reset-failed openclaw-gateway.service >/dev/null 2>&1 || true
-          systemctl restart openclaw-gateway.service
+          systemctl start openclaw-gateway.service
+          trap - EXIT
           sleep 15
 
           if ! systemctl is-active --quiet openclaw-gateway.service; then
-            journalctl -u openclaw-gateway.service -n 140 --no-pager | redact >&2 || true
+            journalctl -u openclaw-gateway.service -n 160 --no-pager | redact >&2 || true
             exit 24
           fi
           echo OPENCLAW_GATEWAY_ACTIVE=1
 
           plugin_status="$(oc plugins list 2>&1 || true)"
-          printf '%s\n' "$plugin_status" | redact | tail -n 140
-          printf '%s\n' "$plugin_status" | grep -Eiq 'codex.*(loaded|enabled|ready)|codex' || { echo CODEX_PLUGIN_NOT_REGISTERED=1 >&2; exit 31; }
+          printf '%s\n' "$plugin_status" | redact | tail -n 160
+          printf '%s\n' "$plugin_status" | grep -Eiq 'codex' || { echo CODEX_PLUGIN_NOT_REGISTERED=1 >&2; exit 31; }
           echo CODEX_PLUGIN_REGISTERED=1
 
           wa="$(oc channels status --channel whatsapp --probe 2>&1 || true)"
