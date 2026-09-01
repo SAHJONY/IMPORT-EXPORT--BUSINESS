@@ -1,0 +1,162 @@
+name: Hostinger OpenAI Model Setup Once
+
+on:
+  push:
+    branches: [ops/model-setup-once]
+    paths:
+      - '.github/workflows/hostinger-openai-model-setup-once.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hostinger-openai-model-setup-once
+  cancel-in-progress: false
+
+jobs:
+  configure-openai:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      HOST: '69.62.68.67'
+      USER: root
+      PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+      OPENAI_API_KEY_GH: ${{ secrets.OPENAI_API_KEY }}
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID: team_Me3fB0D0J6He10CgJlJ44Xaq
+      VERCEL_PROJECT_ID: prj_XmlR9SuaYKEE9siBC7lrsjLzYjb9
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Prepare secure SSH
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "${PRIVATE_KEY:-}" ]] || { echo HOSTINGER_SSH_PRIVATE_KEY_MISSING=1 >&2; exit 2; }
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/hostinger-openai
+          chmod 600 ~/.ssh/hostinger-openai
+          ssh-keygen -y -f ~/.ssh/hostinger-openai >/dev/null
+
+      - name: Check existing OpenAI auth on VPS
+        id: existing
+        shell: bash
+        run: |
+          set -euo pipefail
+          result="$(ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=12 -i ~/.ssh/hostinger-openai "$USER@$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          STATE=/var/lib/sahjony-openclaw-state
+          CONFIG="$STATE/openclaw.json"
+          oc(){ env HOME=/home/node OPENCLAW_HOME=/home/node OPENCLAW_STATE_DIR="$STATE" OPENCLAW_CONFIG_PATH="$CONFIG" openclaw "$@"; }
+          raw="$(oc models auth list --provider openai --json 2>/dev/null || true)"
+          if RAW="$raw" python3 - <<'PY'
+          import json, os
+          raw=os.environ.get('RAW','').strip()
+          try: obj=json.loads(raw)
+          except Exception: raise SystemExit(1)
+          text=json.dumps(obj).lower()
+          raise SystemExit(0 if ('openai:' in text and not ('"profiles": []' in text or '"profiles":[]' in text)) else 1)
+          PY
+          then echo OPENAI_AUTH_PRESENT=1; else echo OPENAI_AUTH_PRESENT=0; fi
+          REMOTE
+          )"
+          printf '%s\n' "$result"
+          if grep -q 'OPENAI_AUTH_PRESENT=1' <<<"$result"; then echo 'present=true' >> "$GITHUB_OUTPUT"; else echo 'present=false' >> "$GITHUB_OUTPUT"; fi
+
+      - name: Resolve OpenAI API key securely
+        if: steps.existing.outputs.present != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          keyfile="$RUNNER_TEMP/openai-api-key"
+          if [[ -n "${OPENAI_API_KEY_GH:-}" ]]; then
+            printf '%s' "$OPENAI_API_KEY_GH" > "$keyfile"
+            echo OPENAI_KEY_SOURCE=GITHUB_SECRET
+          else
+            [[ -n "${VERCEL_TOKEN:-}" ]] || { echo OPENAI_KEY_UNAVAILABLE_NO_GITHUB_OR_VERCEL_TOKEN=1 >&2; exit 78; }
+            mkdir -p .vercel
+            printf '{"orgId":"%s","projectId":"%s"}\n' "$VERCEL_ORG_ID" "$VERCEL_PROJECT_ID" > .vercel/project.json
+            envfile="$RUNNER_TEMP/vercel-production.env"
+            if ! npx --yes vercel@latest env pull "$envfile" --yes --environment=production --token "$VERCEL_TOKEN" >/dev/null 2>&1; then
+              echo VERCEL_ENV_PULL_FAILED=1 >&2
+              exit 79
+            fi
+            set -a
+            source "$envfile"
+            set +a
+            [[ -n "${OPENAI_API_KEY:-}" ]] || { echo OPENAI_API_KEY_NOT_RETRIEVABLE_FROM_VERCEL=1 >&2; exit 80; }
+            printf '%s' "$OPENAI_API_KEY" > "$keyfile"
+            echo OPENAI_KEY_SOURCE=VERCEL_PRODUCTION
+          fi
+          [[ -s "$keyfile" ]] || { echo OPENAI_KEY_EMPTY=1 >&2; exit 81; }
+          chmod 600 "$keyfile"
+          scp -q -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=12 -i ~/.ssh/hostinger-openai "$keyfile" "$USER@$HOST:/root/.openai-api-key.once"
+          rm -f "$keyfile" "$RUNNER_TEMP/vercel-production.env"
+
+      - name: Configure canonical OpenAI route on VPS
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=12 -i ~/.ssh/hostinger-openai "$USER@$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          STATE=/var/lib/sahjony-openclaw-state
+          CONFIG="$STATE/openclaw.json"
+          oc(){ env HOME=/home/node OPENCLAW_HOME=/home/node OPENCLAW_STATE_DIR="$STATE" OPENCLAW_CONFIG_PATH="$CONFIG" openclaw "$@"; }
+          trap 'rm -f /root/.openai-api-key.once' EXIT
+
+          existing="$(oc models auth list --provider openai --json 2>/dev/null || true)"
+          if ! RAW="$existing" python3 - <<'PY'
+          import json, os
+          raw=os.environ.get('RAW','').strip()
+          try: obj=json.loads(raw)
+          except Exception: raise SystemExit(1)
+          text=json.dumps(obj).lower()
+          raise SystemExit(0 if ('openai:' in text and not ('"profiles": []' in text or '"profiles":[]' in text)) else 1)
+          PY
+          then
+            [[ -s /root/.openai-api-key.once ]] || { echo OPENAI_CREDENTIAL_MISSING=1 >&2; exit 82; }
+            chmod 600 /root/.openai-api-key.once
+            cat /root/.openai-api-key.once | oc models auth paste-api-key --provider openai --profile-id openai:hostinger >/dev/null
+            oc models auth order set --provider openai openai:hostinger >/dev/null
+            echo OPENAI_AUTH_INSTALLED=1
+          else
+            echo OPENAI_AUTH_REUSED=1
+          fi
+
+          oc plugins enable codex >/dev/null 2>&1 || true
+          oc config set agents.defaults.model.primary openai/gpt-5.6-sol >/dev/null
+          oc config validate >/dev/null
+          systemctl restart openclaw-gateway.service
+          sleep 10
+          systemctl is-active --quiet openclaw-gateway.service
+          echo OPENCLAW_GATEWAY_ACTIVE=1
+          echo OPENAI_PRIMARY_MODEL="$(oc config get agents.defaults.model.primary 2>/dev/null || true)"
+
+          probe="$(oc infer model run --local --model openai/gpt-5.6-sol --prompt 'Reply exactly SAHJONY_OPENAI_OK' --json 2>&1 || true)"
+          if grep -q 'SAHJONY_OPENAI_OK' <<<"$probe"; then
+            echo OPENAI_GPT56_SOL_SMOKE=PASS
+          else
+            echo OPENAI_GPT56_SOL_SMOKE=FAIL >&2
+            printf '%s\n' "$probe" | sed -E 's/(token|secret|key|password|authorization)[=:][^[:space:]]+/\1=[REDACTED]/Ig' | tail -n 40 >&2
+            exit 83
+          fi
+
+          wa="$(oc channels status --channel whatsapp --probe 2>&1 || true)"
+          if grep -Eiq 'whatsapp.*(connected|ready|healthy|linked.*running)|linked.*running.*connected' <<<"$wa"; then
+            echo WHATSAPP_CONNECTED_AFTER_RESTART=1
+          else
+            echo WHATSAPP_RECHECK_NEEDED=1
+          fi
+          REMOTE
+
+      - name: Cleanup transient credentials
+        if: always()
+        shell: bash
+        run: |
+          rm -f ~/.ssh/hostinger-openai "$RUNNER_TEMP/openai-api-key" "$RUNNER_TEMP/vercel-production.env"
