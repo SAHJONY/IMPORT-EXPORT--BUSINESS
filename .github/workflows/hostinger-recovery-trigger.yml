@@ -8,12 +8,14 @@ on:
 permissions:
   actions: write
   contents: read
+  issues: write
 
 jobs:
   dispatch:
     runs-on: ubuntu-latest
     steps:
       - name: Dispatch canonical recovery V3
+        id: dispatch
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
@@ -22,3 +24,14 @@ jobs:
           set -euo pipefail
           gh workflow run hostinger-recovery-docker-openclaw-v3.yml --repo "$REPO" --ref main
           echo 'HOSTINGER_RECOVERY_V3_DISPATCHED=1'
+
+      - name: Report dispatch status
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          OUTCOME: ${{ steps.dispatch.outcome }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh issue comment 54 --repo "$REPO" --body "Hostinger recovery trigger outcome: **$OUTCOME**. Canonical workflow: \`hostinger-recovery-docker-openclaw-v3.yml\`. No secrets exposed."
