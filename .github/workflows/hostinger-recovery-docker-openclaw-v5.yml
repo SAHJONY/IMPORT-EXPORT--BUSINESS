@@ -52,8 +52,45 @@ jobs:
           ip="$(jq -r '[.. | objects | .address? // empty | select(type=="string") | select(test("^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+$"))] | first // empty' <<<"$vm")"
           [[ -z "$ip" || "$ip" == "$HOST" ]] || { echo HOSTINGER_VM_IDENTITY_MISMATCH=$ip >&2; exit 3; }
           payload="$(jq -n --arg p "$RECOVERY_PASSWORD" '{root_password:$p}')"
-          curl -fsS -X POST -H "Authorization: Bearer $API_TOKEN" -H 'Content-Type: application/json' -H 'Accept: application/json' --data "$payload" "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/recovery" >/tmp/recovery-start.json
+          recovery="$(curl -fsS -X POST -H "Authorization: Bearer $API_TOKEN" -H 'Content-Type: application/json' -H 'Accept: application/json' --data "$payload" "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/recovery")"
+          printf '%s\n' "$recovery" >/tmp/recovery-start.json
+          action_id="$(jq -r '.id // empty' <<<"$recovery")"
+          action_state="$(jq -r '.state // empty' <<<"$recovery")"
+          [[ "$action_id" =~ ^[0-9]+$ ]] || { echo HOSTINGER_RECOVERY_ACTION_ID_MISSING=1 >&2; jq -c . <<<"$recovery" >&2 || true; exit 31; }
+          echo "action_id=$action_id" >> "$GITHUB_OUTPUT"
+          echo "HOSTINGER_RECOVERY_ACTION_ID=$action_id"
+          echo "HOSTINGER_RECOVERY_ACTION_INITIAL_STATE=${action_state:-unknown}"
           echo HOSTINGER_RECOVERY_MODE_REQUESTED=1
+
+      - name: Wait for Hostinger recovery action success
+        id: recovery_action
+        env:
+          ACTION_ID: ${{ steps.recovery_start.outputs.action_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$ACTION_ID" =~ ^[0-9]+$ ]] || { echo HOSTINGER_RECOVERY_ACTION_ID_INVALID=1 >&2; exit 32; }
+          success=false
+          for i in $(seq 1 96); do
+            action="$(curl -fsS -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/actions/$ACTION_ID")"
+            state="$(jq -r '.state // empty' <<<"$action")"
+            name="$(jq -r '.name // empty' <<<"$action")"
+            echo "recovery_action_probe=$i/96 id=$ACTION_ID name=${name:-unknown} state=${state:-unknown}"
+            case "$state" in
+              success)
+                success=true
+                break
+                ;;
+              failed|failure|error|cancelled|canceled)
+                echo HOSTINGER_RECOVERY_ACTION_FAILED=1 >&2
+                jq -c . <<<"$action" >&2 || true
+                exit 33
+                ;;
+            esac
+            sleep 5
+          done
+          [[ "$success" == true ]] || { echo HOSTINGER_RECOVERY_ACTION_NOT_COMPLETE=1 >&2; exit 34; }
+          echo HOSTINGER_RECOVERY_ACTION_COMPLETE=1
 
       - name: Wait for authenticated recovery SSH
         id: recovery_ready
@@ -63,17 +100,22 @@ jobs:
         run: |
           set -euo pipefail
           export SSHPASS="$RECOVERY_PASSWORD"
-          opts=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=6 -o PreferredAuthentications=password -o PubkeyAuthentication=no)
+          opts=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=6 -o PreferredAuthentications=password -o PubkeyAuthentication=no -o NumberOfPasswordPrompts=1)
           ready=false
-          for i in $(seq 1 90); do
-            echo "recovery_auth_probe=$i/90"
-            if sshpass -e ssh "${opts[@]}" "$USER@$HOST" 'printf SAHJONY_RECOVERY_AUTH_OK' 2>/dev/null | grep -q SAHJONY_RECOVERY_AUTH_OK; then
+          for i in $(seq 1 60); do
+            echo "recovery_auth_probe=$i/60"
+            : > /tmp/recovery-ssh.err
+            if sshpass -e ssh "${opts[@]}" "$USER@$HOST" 'printf SAHJONY_RECOVERY_AUTH_OK' 2>/tmp/recovery-ssh.err | grep -q SAHJONY_RECOVERY_AUTH_OK; then
               ready=true
               break
             fi
+            if (( i == 1 || i % 10 == 0 || i == 60 )); then
+              echo '=== RECOVERY SSH DIAGNOSTIC ==='
+              sed -n '1,12p' /tmp/recovery-ssh.err || true
+            fi
             sleep 10
           done
-          [[ "$ready" == true ]] || { echo RECOVERY_AUTH_NOT_READY=1 >&2; exit 34; }
+          [[ "$ready" == true ]] || { echo RECOVERY_AUTH_NOT_READY_AFTER_ACTION_SUCCESS=1 >&2; exit 35; }
           echo HOSTINGER_RECOVERY_AUTHENTICATED=1
 
       - name: Discover mount and repair original Kali SSH
@@ -84,40 +126,48 @@ jobs:
         run: |
           set -euo pipefail
           export SSHPASS="$RECOVERY_PASSWORD"
-          opts=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 -o PreferredAuthentications=password -o PubkeyAuthentication=no)
+          opts=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 -o PreferredAuthentications=password -o PubkeyAuthentication=no -o NumberOfPasswordPrompts=1)
           PUB_B64="$(base64 -w0 ~/.ssh/hostinger-recovery.pub)"
           sshpass -e ssh "${opts[@]}" "$USER@$HOST" "PUB_B64='$PUB_B64' bash -s" <<'REMOTE'
           set -euo pipefail
           echo '=== BLOCK DEVICES ==='
           lsblk -o NAME,TYPE,FSTYPE,SIZE,MOUNTPOINTS || true
-          mkdir -p /mnt/sahjony-discovery
-          n=0
-          while read -r dev fstype mnt type; do
-            [ "$type" = part ] || [ "$type" = lvm ] || continue
-            case "$fstype" in ext2|ext3|ext4|xfs|btrfs) ;; *) continue ;; esac
-            if [ -z "${mnt:-}" ]; then
-              n=$((n+1)); target="/mnt/sahjony-discovery/$n"; mkdir -p "$target"
-              if [ "$fstype" = xfs ]; then
-                mount -o nouuid "$dev" "$target" 2>/dev/null || mount "$dev" "$target" 2>/dev/null || true
-              else
-                mount "$dev" "$target" 2>/dev/null || true
-              fi
-            fi
-          done < <(lsblk -prno NAME,FSTYPE,MOUNTPOINT,TYPE 2>/dev/null)
-          echo '=== MOUNTS AFTER DISCOVERY ==='
+          echo '=== INITIAL MOUNTS ==='
           findmnt -rn -o SOURCE,TARGET,FSTYPE || true
           root=''
-          while read -r mp; do
-            [ "$mp" = / ] && continue
-            if [ -f "$mp/etc/os-release" ] && [ -d "$mp/root" ] && [ -d "$mp/var/lib/docker" ]; then root="$mp"; break; fi
-          done < <(findmnt -rn -o TARGET | sort -u)
+          if [ -f /mnt/etc/os-release ] && [ -d /mnt/root ]; then
+            root=/mnt
+            echo HOSTINGER_DOCUMENTED_ORIGINAL_DISK_MOUNT=/mnt
+          fi
           if [ -z "$root" ]; then
+            mkdir -p /mnt/sahjony-discovery
+            n=0
+            while read -r dev fstype mnt type; do
+              [ "$type" = part ] || [ "$type" = lvm ] || continue
+              case "$fstype" in ext2|ext3|ext4|xfs|btrfs) ;; *) continue ;; esac
+              if [ -z "${mnt:-}" ]; then
+                n=$((n+1)); target="/mnt/sahjony-discovery/$n"; mkdir -p "$target"
+                if [ "$fstype" = xfs ]; then
+                  mount -o nouuid "$dev" "$target" 2>/dev/null || mount "$dev" "$target" 2>/dev/null || true
+                else
+                  mount "$dev" "$target" 2>/dev/null || true
+                fi
+              fi
+            done < <(lsblk -prno NAME,FSTYPE,MOUNTPOINT,TYPE 2>/dev/null)
+            echo '=== MOUNTS AFTER DISCOVERY ==='
+            findmnt -rn -o SOURCE,TARGET,FSTYPE || true
             while read -r mp; do
               [ "$mp" = / ] && continue
-              if [ -f "$mp/etc/os-release" ] && [ -d "$mp/root" ] && [ -d "$mp/etc/ssh" ]; then root="$mp"; break; fi
+              if [ -f "$mp/etc/os-release" ] && [ -d "$mp/root" ] && [ -d "$mp/var/lib/docker" ]; then root="$mp"; break; fi
             done < <(findmnt -rn -o TARGET | sort -u)
+            if [ -z "$root" ]; then
+              while read -r mp; do
+                [ "$mp" = / ] && continue
+                if [ -f "$mp/etc/os-release" ] && [ -d "$mp/root" ] && [ -d "$mp/etc/ssh" ]; then root="$mp"; break; fi
+              done < <(findmnt -rn -o TARGET | sort -u)
+            fi
           fi
-          [ -n "$root" ] || { echo ORIGINAL_OS_ROOT_NOT_IDENTIFIED=1 >&2; exit 35; }
+          [ -n "$root" ] || { echo ORIGINAL_OS_ROOT_NOT_IDENTIFIED=1 >&2; exit 36; }
           echo "ORIGINAL_OS_ROOT=$root"
           pub="$(printf '%s' "$PUB_B64" | base64 -d)"
           install -d -m 700 "$root/root/.ssh"
@@ -148,7 +198,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          curl -fsS -X DELETE -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/recovery" >/tmp/recovery-stop.json
+          stop="$(curl -fsS -X DELETE -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/recovery")"
+          printf '%s\n' "$stop" >/tmp/recovery-stop.json
           echo HOSTINGER_RECOVERY_MODE_STOP_REQUESTED=1
 
       - name: Wait for normal Kali SSH
@@ -162,7 +213,7 @@ jobs:
             if ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=6 -i ~/.ssh/hostinger-recovery "$USER@$HOST" 'printf SAHJONY_NORMAL_SSH_OK' 2>/dev/null | grep -q SAHJONY_NORMAL_SSH_OK; then ok=true; break; fi
             sleep 10
           done
-          [[ "$ok" == true ]] || { echo NORMAL_KALI_SSH_UNREACHABLE=1 >&2; exit 36; }
+          [[ "$ok" == true ]] || { echo NORMAL_KALI_SSH_UNREACHABLE=1 >&2; exit 37; }
           echo SAHJONY_NORMAL_KALI_SSH_READY=1
 
       - name: Stabilize Docker OpenClaw
