@@ -6,9 +6,14 @@ on:
     paths:
       - '.github/workflows/whatsapp-24x7-lint.yml'
       - '.github/workflows/whatsapp-24x7-control-plane.yml'
-      - '.github/workflows/hostinger-whatsapp-24x7-recovery-v6.yml'
+      - '.github/workflows/hostinger-runtime-recovery-engine.yml'
+      - '.github/workflows/hostinger-whatsapp-recovery-v7.yml'
       - 'openclaw/hostinger-24x7/whatsapp-24x7-control-plane.sh'
       - 'openclaw/hostinger-24x7/whatsapp-hostinger-only-guardian.sh'
+      - 'openclaw/hostinger-24x7/hostinger-recovery-controller.sh'
+      - 'openclaw/hostinger-24x7/openclaw-runtime-recovery.sh'
+      - 'openclaw/hostinger-24x7/runtime-plan-doctor.sh'
+      - 'openclaw/hostinger-24x7/ssh-self-heal.sh'
 
 permissions:
   contents: read
@@ -20,12 +25,40 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Validate Hostinger-only Bash tools
+      - name: Validate Hostinger recovery Bash tools
         shell: bash
         run: |
           set -euo pipefail
-          bash -n openclaw/hostinger-24x7/whatsapp-24x7-control-plane.sh
-          bash -n openclaw/hostinger-24x7/whatsapp-hostinger-only-guardian.sh
+          for f in \
+            openclaw/hostinger-24x7/whatsapp-24x7-control-plane.sh \
+            openclaw/hostinger-24x7/whatsapp-hostinger-only-guardian.sh \
+            openclaw/hostinger-24x7/hostinger-recovery-controller.sh \
+            openclaw/hostinger-24x7/openclaw-runtime-recovery.sh \
+            openclaw/hostinger-24x7/runtime-plan-doctor.sh \
+            openclaw/hostinger-24x7/ssh-self-heal.sh
+          do
+            bash -n "$f"
+            echo "OK $f"
+          done
+
+      - name: Reject unsafe early-exit pipelines in runtime planner
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import pathlib,re
+          path=pathlib.Path('openclaw/hostinger-24x7/openclaw-runtime-recovery.sh')
+          text=path.read_text()
+          bad=[]
+          for n,line in enumerate(text.splitlines(),1):
+              if re.search(r'\|\s*head\b|\|\s*tail\b', line):
+                  bad.append((n,line.strip()))
+          if bad:
+              for n,line in bad:
+                  print(f'unsafe truncation pipeline {path}:{n}: {line}')
+              raise SystemExit(1)
+          print('PIPEFAIL_SAFE_RUNTIME_PLANNER=1')
+          PY
 
       - name: Validate workflow YAML structure
         shell: bash
@@ -37,7 +70,8 @@ jobs:
 
           paths = [
               pathlib.Path('.github/workflows/whatsapp-24x7-control-plane.yml'),
-              pathlib.Path('.github/workflows/hostinger-whatsapp-24x7-recovery-v6.yml'),
+              pathlib.Path('.github/workflows/hostinger-runtime-recovery-engine.yml'),
+              pathlib.Path('.github/workflows/hostinger-whatsapp-recovery-v7.yml'),
               pathlib.Path('.github/workflows/whatsapp-24x7-lint.yml'),
           ]
           for path in paths:
