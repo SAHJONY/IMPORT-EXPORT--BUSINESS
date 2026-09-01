@@ -22,8 +22,10 @@ var index_default = definePluginEntry({
     const config = api.pluginConfig ?? {};
     const appUrl = String(config.appUrl || process.env.SAHJONY_APP_URL || "https://www.sahjony.com").replace(/\/$/, "");
     const secret = String(process.env.SAHJONY_APP_BRIDGE_SECRET || "");
-    const accountId = String(config.accountId || "default");
-    const gatewayId = String(config.gatewayId || process.env.SAHJONY_GATEWAY_ID || "default");
+    const accountId = String(config.accountId || process.env.SAHJONY_WHATSAPP_ACCOUNT_ID || "default");
+    const gatewayId = String(config.gatewayId || process.env.SAHJONY_GATEWAY_ID || "hostinger-vps");
+    const businessNumber = String(config.businessNumber || process.env.SAHJONY_WHATSAPP_BUSINESS_NUMBER || "+12816628581");
+    const businessName = String(config.businessName || process.env.SAHJONY_WHATSAPP_BUSINESS_NAME || "SAHJONY LLC");
     const pollIntervalMs = Math.max(5e3, Math.min(3e5, Number(config.pollIntervalMs || 3e4)));
     const openclawBin = String(
       process.env.OPENCLAW_BIN ||
@@ -91,8 +93,8 @@ var index_default = definePluginEntry({
           gateway_id: gatewayId,
           account_id: accountId,
           channel_connected: connected,
-          business_number: config.businessNumber || "+12816628581",
-          business_name: config.businessName || "SAHJONY LLC",
+          business_number: businessNumber,
+          business_name: businessName,
           model: api.runtime.agent.defaults.model,
           gateway_version: gatewayVersion
         });
