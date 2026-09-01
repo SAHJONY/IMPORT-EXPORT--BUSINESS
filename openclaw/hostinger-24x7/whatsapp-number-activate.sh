@@ -16,6 +16,7 @@ ACCOUNT_ID="${SAHJONY_WHATSAPP_ACCOUNT_ID:-default}"
 BUSINESS_NAME="${SAHJONY_WHATSAPP_BUSINESS_NAME:-SAHJONY LLC}"
 EXPECTED_NUMBER="${SAHJONY_WHATSAPP_BUSINESS_NUMBER:-+12816628581}"
 MODEL="${SAHJONY_REASONING_MODEL:-gpt-5.6-sol}"
+OPENCLAW_ROOT="${SAHJONY_OPENCLAW_ROOT:-/opt/sahjony-openclaw}"
 STATE_DIR="${SAHJONY_WHATSAPP_ACTIVATION_STATE_DIR:-/var/lib/sahjony-whatsapp-guardian}"
 LAST_GOOD="${STATE_DIR}/number-activation-last-good.json"
 LOCK_FILE="${STATE_DIR}/number-activation.lock"
@@ -93,34 +94,52 @@ container_file_env_value() {
   ' sh "$key" 2>/dev/null || true
 }
 
+host_env_value() {
+  local key="$1" file="$OPENCLAW_ROOT/.env"
+  [[ -r "$file" ]] || return 1
+  awk -F= -v k="$key" '$1==k{sub(/^[^=]*=/,""); gsub(/^["'"'"']|["'"'"']$/,""); print; exit}' "$file"
+}
+
 BRIDGE_SECRET="${SAHJONY_APP_BRIDGE_SECRET:-}"
-if [[ -z "$BRIDGE_SECRET" ]]; then
-  BRIDGE_SECRET="$(container_env_value SAHJONY_APP_BRIDGE_SECRET)"
-fi
-if [[ -z "$BRIDGE_SECRET" ]]; then
-  BRIDGE_SECRET="$(container_file_env_value SAHJONY_APP_BRIDGE_SECRET)"
-fi
+[[ -n "$BRIDGE_SECRET" ]] || BRIDGE_SECRET="$(container_env_value SAHJONY_APP_BRIDGE_SECRET)"
+[[ -n "$BRIDGE_SECRET" ]] || BRIDGE_SECRET="$(container_file_env_value SAHJONY_APP_BRIDGE_SECRET)"
+[[ -n "$BRIDGE_SECRET" ]] || BRIDGE_SECRET="$(host_env_value SAHJONY_APP_BRIDGE_SECRET 2>/dev/null || true)"
 [[ ${#BRIDGE_SECRET} -ge 24 ]] || fail "bridge_secret_unavailable"
 
 if [[ -z "${SAHJONY_WHATSAPP_BUSINESS_NUMBER:-}" ]]; then
   discovered_number="$(container_env_value SAHJONY_WHATSAPP_BUSINESS_NUMBER)"
   [[ -n "$discovered_number" ]] || discovered_number="$(container_file_env_value SAHJONY_WHATSAPP_BUSINESS_NUMBER)"
+  [[ -n "$discovered_number" ]] || discovered_number="$(host_env_value SAHJONY_WHATSAPP_BUSINESS_NUMBER 2>/dev/null || true)"
   [[ -n "$discovered_number" ]] && EXPECTED_NUMBER="$discovered_number"
 fi
 
+compose_cli_available() {
+  [[ -s "$OPENCLAW_ROOT/docker-compose.yml" ]] || return 1
+  (cd "$OPENCLAW_ROOT" && docker compose config --services 2>/dev/null | grep -qx 'openclaw-cli')
+}
+
+run_openclaw_cli() {
+  if docker exec "$CONTAINER" sh -lc 'command -v openclaw >/dev/null 2>&1'; then
+    docker exec "$CONTAINER" openclaw "$@"
+    return
+  fi
+  if docker exec "$CONTAINER" sh -lc '[ -x "$HOME/.openclaw/bin/openclaw" ]'; then
+    docker exec "$CONTAINER" sh -lc 'exec "$HOME/.openclaw/bin/openclaw" "$@"' sh "$@"
+    return
+  fi
+  if docker exec "$CONTAINER" sh -lc '[ -x /root/.openclaw/bin/openclaw ]'; then
+    docker exec "$CONTAINER" /root/.openclaw/bin/openclaw "$@"
+    return
+  fi
+  if compose_cli_available; then
+    (cd "$OPENCLAW_ROOT" && docker compose run -T --rm --no-deps openclaw-cli "$@")
+    return
+  fi
+  return 127
+}
+
 probe_channel() {
-  docker exec "$CONTAINER" sh -lc '
-    if command -v openclaw >/dev/null 2>&1; then
-      exec openclaw channels status --probe
-    elif [ -x "$HOME/.openclaw/bin/openclaw" ]; then
-      exec "$HOME/.openclaw/bin/openclaw" channels status --probe
-    elif [ -x /root/.openclaw/bin/openclaw ]; then
-      exec /root/.openclaw/bin/openclaw channels status --probe
-    else
-      echo "OPENCLAW_BINARY_NOT_FOUND"
-      exit 127
-    fi
-  ' 2>&1
+  run_openclaw_cli channels status --probe 2>&1
 }
 
 is_connected() {
@@ -128,8 +147,8 @@ is_connected() {
 import re, sys
 text = sys.argv[1]
 ok = bool(
-    re.search(r"WhatsApp[^\n]*\bconnected\b", text, re.I)
-    or re.search(r"linked,\s*running,\s*connected", text, re.I)
+    re.search(r"WhatsApp[^\n]*\b(connected|ready|active|healthy)\b", text, re.I)
+    or re.search(r"\blinked,\s*running,\s*connected\b", text, re.I)
 )
 raise SystemExit(0 if ok else 1)
 PY
@@ -144,12 +163,7 @@ if ! is_connected "$PROBE_OUTPUT"; then
 fi
 is_connected "$PROBE_OUTPUT" || fail "linked_whatsapp_session_not_connected_no_relink_attempted"
 
-GATEWAY_VERSION="$(docker exec "$CONTAINER" sh -lc '
-  if command -v openclaw >/dev/null 2>&1; then openclaw --version 2>/dev/null | head -n1;
-  elif [ -x "$HOME/.openclaw/bin/openclaw" ]; then "$HOME/.openclaw/bin/openclaw" --version 2>/dev/null | head -n1;
-  elif [ -x /root/.openclaw/bin/openclaw ]; then /root/.openclaw/bin/openclaw --version 2>/dev/null | head -n1;
-  fi
-' | tr -d '\r' | head -c 80)"
+GATEWAY_VERSION="$(run_openclaw_cli --version 2>/dev/null | tr -d '\r' | head -n1 | head -c 80 || true)"
 
 PAYLOAD="$(python3 - "$GATEWAY_ID" "$ACCOUNT_ID" "$EXPECTED_NUMBER" "$BUSINESS_NAME" "$MODEL" "$GATEWAY_VERSION" <<'PY'
 import json, sys
@@ -175,7 +189,9 @@ PY
 )"
 unset BRIDGE_SECRET
 
-HTTP_CODE="$(curl -sS -o /tmp/sahjony-whatsapp-heartbeat-response.$$ -w '%{http_code}' \
+RESPONSE_FILE="$(mktemp)"
+trap 'rm -f "$RESPONSE_FILE"' EXIT
+HTTP_CODE="$(curl -sS -o "$RESPONSE_FILE" -w '%{http_code}' \
   -X POST "$APP_URL/whatsapp/openclaw/heartbeat" \
   -H 'Accept: application/json' \
   -H 'Content-Type: application/json' \
@@ -183,8 +199,7 @@ HTTP_CODE="$(curl -sS -o /tmp/sahjony-whatsapp-heartbeat-response.$$ -w '%{http_
   -H "X-SAHJONY-Signature: $SIGNATURE" \
   --data-binary "$PAYLOAD" || true)"
 unset SIGNATURE
-[[ "$HTTP_CODE" == "200" ]] || { rm -f /tmp/sahjony-whatsapp-heartbeat-response.$$; fail "heartbeat_http_${HTTP_CODE}"; }
-rm -f /tmp/sahjony-whatsapp-heartbeat-response.$$
+[[ "$HTTP_CODE" == "200" ]] || fail "heartbeat_http_${HTTP_CODE}"
 
 HEALTH="$(curl -fsS "$APP_URL/whatsapp/health")" || fail "production_health_unreachable"
 VERIFY="$(HEALTH_JSON="$HEALTH" EXPECTED_NUMBER="$EXPECTED_NUMBER" python3 - <<'PY'
