@@ -1,4 +1,4 @@
-name: Hostinger SOFIA Retained State Inspect Once
+name: Hostinger SOFIA Verify Once
 
 on:
   push:
@@ -11,9 +11,9 @@ permissions:
   contents: read
 
 jobs:
-  inspect:
+  verify:
     runs-on: ubuntu-24.04
-    timeout-minutes: 12
+    timeout-minutes: 8
     env:
       HOST: '69.62.68.67'
       USER: root
@@ -25,70 +25,61 @@ jobs:
           set -euo pipefail
           [[ -n "${PRIVATE_KEY:-}" ]] || { echo HOSTINGER_SSH_PRIVATE_KEY_MISSING=1 >&2; exit 2; }
           install -d -m 700 ~/.ssh
-          printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/hostinger-sofia
-          chmod 600 ~/.ssh/hostinger-sofia
-          ssh-keygen -y -f ~/.ssh/hostinger-sofia >/dev/null
+          printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/hostinger-sofia-verify
+          chmod 600 ~/.ssh/hostinger-sofia-verify
+          ssh-keygen -y -f ~/.ssh/hostinger-sofia-verify >/dev/null
 
-      - name: Search retained SOFIA state on Hostinger
+      - name: Verify SOFIA runtime and WhatsApp on Hostinger
         shell: bash
         run: |
           set -euo pipefail
           ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=15 \
-            -i ~/.ssh/hostinger-sofia "$USER@$HOST" 'python3 -' <<'PY'
-          import os,re,time
-          roots=['/home/node','/root','/opt','/srv','/var/lib/sahjony-openclaw-state','/var/lib/docker/volumes']
-          skip={'node_modules','.git','overlay2','containers','image','buildkit','tmp','cache'}
-          exts={'.md','.txt','.json','.jsonl','.yaml','.yml','.toml','.env','.bak','.old'}
-          secret_line=re.compile(r'(api[_-]?key|token|secret|password|authorization|credential)\s*[:=]',re.I)
-          print('HOSTINGER_VPS_SCOPE_ONLY=1')
-          matches=[]
+            -i ~/.ssh/hostinger-sofia-verify "$USER@$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          STATE=/var/lib/sahjony-openclaw-state
+          CONFIG="$STATE/openclaw.json"
+          WORKSPACE=/home/node/.openclaw/workspace
+          token="$(sed -n 's/^OPENCLAW_GATEWAY_TOKEN=//p' /etc/openclaw-gateway.env 2>/dev/null | head -n1 || true)"
+          oc(){ env HOME=/home/node OPENCLAW_HOME=/home/node OPENCLAW_STATE_DIR="$STATE" OPENCLAW_CONFIG_PATH="$CONFIG" "$@"; }
 
-          def safe_text(path):
-              try:
-                  if os.path.getsize(path)>2_000_000: return ''
-                  raw=open(path,'rb').read()
-                  if b'\x00' in raw[:4096]: return ''
-                  text=raw.decode('utf-8','replace')
-              except Exception:
-                  return ''
-              out=[]
-              for line in text.splitlines():
-                  if secret_line.search(line):
-                      key=line.split(':',1)[0].split('=',1)[0]
-                      out.append(key+'=[REDACTED]')
-                  else:
-                      out.append(line)
-                  if len(out)>=300: break
-              return '\n'.join(out)
+          echo HOSTINGER_VPS_SCOPE_ONLY=1
+          systemctl is-active --quiet openclaw-gateway.service
+          systemctl is-enabled --quiet openclaw-gateway.service
+          echo OPENCLAW_GATEWAY_ACTIVE=1
+          echo OPENCLAW_GATEWAY_24X7=1
 
-          for root in roots:
-              if not os.path.exists(root): continue
-              for dirpath,dirnames,filenames in os.walk(root):
-                  dirnames[:] = [d for d in dirnames if d not in skip]
-                  rel_depth=os.path.relpath(dirpath,root).count(os.sep)
-                  if rel_depth>7:
-                      dirnames[:] = []
-                      continue
-                  for fn in filenames:
-                      p=os.path.join(dirpath,fn)
-                      low=fn.lower()
-                      if not (os.path.splitext(low)[1] in exts or 'identity' in low or 'soul' in low or 'agent' in low or 'memory' in low or 'bootstrap' in low):
-                          continue
-                      text=safe_text(p)
-                      if 'sofia' not in text.lower(): continue
-                      matches.append(p)
-                      print('SOFIA_RETAINED_FILE='+p)
-                      print('SOFIA_RETAINED_MTIME='+time.strftime('%Y-%m-%dT%H:%M:%SZ',time.gmtime(os.path.getmtime(p))))
-                      print('SOFIA_RETAINED_CONTENT_BEGIN')
-                      print(text[:18000])
-                      print('SOFIA_RETAINED_CONTENT_END')
-                      if len(matches)>=20: break
-                  if len(matches)>=20: break
-              if len(matches)>=20: break
-          print('SOFIA_RETAINED_COUNT='+str(len(matches)))
+          grep -qi 'SOFIA' "$WORKSPACE/IDENTITY.md"
+          grep -qi 'SOFIA' "$WORKSPACE/SOUL.md"
+          echo SOFIA_IDENTITY=PASS
+
+          primary="$(oc openclaw config get agents.defaults.model.primary --json 2>/dev/null || true)"
+          fallbacks="$(oc openclaw config get agents.defaults.model.fallbacks --json 2>/dev/null || true)"
+          PRIMARY="$primary" FALLBACKS="$fallbacks" python3 - <<'PY'
+          import json,os
+          p=json.loads(os.environ['PRIMARY'])
+          f=json.loads(os.environ['FALLBACKS'])
+          assert p=='openai/gpt-5.6-sol', p
+          assert isinstance(f,list) and any(isinstance(x,str) and x.startswith('nvidia/') for x in f), f
+          print('OPENAI_PRIMARY=PASS')
+          print('NVIDIA_FALLBACK=PASS')
           PY
+
+          if [[ -n "$token" ]]; then
+            wa="$(env OPENCLAW_GATEWAY_TOKEN="$token" HOME=/home/node OPENCLAW_HOME=/home/node OPENCLAW_STATE_DIR="$STATE" OPENCLAW_CONFIG_PATH="$CONFIG" openclaw channels status --channel whatsapp --probe 2>&1 || true)"
+          else
+            wa="$(oc openclaw channels status --channel whatsapp 2>&1 || true)"
+          fi
+          printf '%s\n' "$wa" | sed -E 's/(token|secret|key|password|authorization)[=:][^[:space:]]+/\1=[REDACTED]/Ig' | tail -n 30
+          if grep -Eiq 'whatsapp.*(connected|ready|healthy|linked.*running)|linked.*running.*connected' <<<"$wa"; then
+            echo WHATSAPP_CONNECTED=1
+          elif grep -Eiq 'whatsapp.*linked|linked' <<<"$wa"; then
+            echo WHATSAPP_LINKED=1
+          else
+            echo WHATSAPP_STATUS_RECHECK_NEEDED=1
+          fi
+          REMOTE
 
       - name: Cleanup SSH
         if: always()
         shell: bash
-        run: rm -f ~/.ssh/hostinger-sofia
+        run: rm -f ~/.ssh/hostinger-sofia-verify
