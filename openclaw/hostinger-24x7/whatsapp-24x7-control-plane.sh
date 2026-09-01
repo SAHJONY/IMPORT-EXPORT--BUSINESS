@@ -52,9 +52,9 @@ ssh_auth(){
 
 run_guardian_remote(){
   [[ -r "$GUARDIAN" ]] || fail "guardian script not found: $GUARDIAN"
-  log 'running safe Hostinger-local guardian over authenticated SSH'
+  log 'installing/running persistent Hostinger-local guardian over authenticated SSH'
   ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 \
-    -i "$SSH_KEY_FILE" "$USER@$HOST" 'bash -s -- heal' <"$GUARDIAN"
+    -i "$SSH_KEY_FILE" "$USER@$HOST" 'bash -s -- install' <"$GUARDIAN"
 }
 
 gh_get(){
@@ -123,7 +123,6 @@ main(){
 
   if [[ -n "$health" ]] && meta_ready "$health"; then
     log 'Meta Cloud transport is independently READY; production WhatsApp has a cloud-primary path'
-    # Keep validating Hostinger fallback, but do not perform recovery solely because fallback is degraded.
     if hostinger_ready "$health"; then
       log 'Hostinger OpenClaw fallback is also READY'
       return 0
