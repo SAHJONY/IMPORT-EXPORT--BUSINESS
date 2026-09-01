@@ -14,6 +14,7 @@ env:
   HOSTINGER_API_BASE: "https://developers.hostinger.com"
   VM_ID: "767852"
 
+# Read-only refresh after Recovery SSH timed out on TCP/22.
 jobs:
   discover:
     runs-on: ubuntu-latest
