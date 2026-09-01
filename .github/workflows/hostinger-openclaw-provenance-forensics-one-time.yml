@@ -1,5 +1,6 @@
 name: Hostinger OpenClaw Provenance Forensics One-Time
 
+# One-time forensic trigger re-armed after retiring the obsolete resolver handoff.
 on:
   workflow_run:
     workflows:
