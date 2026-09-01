@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import FastAPI, Header
@@ -30,7 +31,7 @@ from whatsapp_api import (
     whatsapp_webhook_verify,
     _owner,
 )
-from insforge_backend import persistent_backend_status
+from insforge_backend import get_backend, persistent_backend_status
 from whatsapp_self_healing import diagnose, repair_plan, record_recovery_event
 from sofia_adaptive_intelligence import intelligence_health
 from sofia_whatsapp_runtime import generate_sofia_reply
@@ -38,7 +39,7 @@ from whatsapp_backlog_recovery import drain_backlog, find_unanswered
 from sofia_self_marketing import growth_health
 from sofia_self_selling import self_selling_health
 
-app = FastAPI(title="SAHJONY WhatsApp Cloud Primary", version="5.1.0", docs_url=None, redoc_url=None)
+app = FastAPI(title="SAHJONY WhatsApp Cloud Primary", version="5.2.0", docs_url=None, redoc_url=None)
 
 # Mandatory inbound reply runtime: the original customer text is preserved for safe
 # contact resolution, then Sofia loads durable history/memory and sales intelligence.
@@ -57,15 +58,47 @@ app.add_api_route("/whatsapp/openclaw/outbox", openclaw_outbox, methods=["GET"])
 app.add_api_route("/whatsapp/openclaw/outbox/ack", openclaw_outbox_ack, methods=["POST"])
 
 
+async def _named_openclaw_gateway_state(gateway_id: str) -> dict[str, Any]:
+    try:
+        rows = await get_backend().select(
+            "whatsapp_openclaw_gateways",
+            params={"gateway_id": f"eq.{gateway_id}", "limit": "1"},
+        ) or []
+    except Exception:
+        rows = []
+    row = rows[0] if rows else {}
+    last_seen = str(row.get("last_seen_at") or "")
+    fresh = False
+    if last_seen:
+        try:
+            seen_at = datetime.fromisoformat(last_seen.replace("Z", "+00:00"))
+            fresh = datetime.now(timezone.utc) - seen_at.astimezone(timezone.utc) <= timedelta(minutes=5)
+        except ValueError:
+            fresh = False
+    connected = bool(row.get("channel_connected")) and fresh
+    return {
+        "gateway_id": gateway_id,
+        "configured": bool(row),
+        "connected": connected,
+        "heartbeat_fresh": fresh,
+        "last_seen_at": last_seen or None,
+        "business_number": row.get("business_number"),
+        "business_name": row.get("business_name"),
+        "model": row.get("model"),
+        "gateway_version": row.get("gateway_version"),
+    }
+
+
 @app.get("/whatsapp/health")
 async def whatsapp_health_cloud_primary() -> dict[str, Any]:
     cfg = await _config()
     persistence = persistent_backend_status()
     openclaw = await _openclaw_gateway_state()
+    hostinger = await _named_openclaw_gateway_state("hostinger-vps")
     cloud_send = _send_ready(cfg)
     cloud_webhook = _webhook_ready(cfg)
     cloud_ready = _configured(cfg)
-    fallback_ready = bool(openclaw.get("connected"))
+    fallback_ready = bool(openclaw.get("connected")) or bool(hostinger.get("connected"))
     active = "meta_cloud" if cloud_send and cloud_webhook else ("openclaw" if fallback_ready else "none")
     recovery = await diagnose()
     sofia = await intelligence_health()
@@ -75,13 +108,14 @@ async def whatsapp_health_cloud_primary() -> dict[str, Any]:
     return {
         "status": "ok" if active != "none" else "configuration_required",
         "service": "whatsapp-transport",
-        "version": "5.1.0",
+        "version": "5.2.0",
         "provider": active,
         "primary_provider": "meta_cloud",
         "business_suite_connection": True,
         "cloud_independent_of_local_mac": bool(cloud_send and cloud_webhook),
+        "hostinger_independent_runtime": bool(hostinger.get("connected")),
         "send_ready": cloud_send if active == "meta_cloud" else fallback_ready,
-        "webhook_ready": cloud_webhook if active == "meta_cloud" else bool(openclaw.get("configured")),
+        "webhook_ready": cloud_webhook if active == "meta_cloud" else bool(openclaw.get("configured") or hostinger.get("configured")),
         "meta_cloud": {
             "configured": cloud_ready,
             "send_ready": cloud_send,
@@ -95,11 +129,13 @@ async def whatsapp_health_cloud_primary() -> dict[str, Any]:
             "graph_api_version_configured": bool(cfg.get("graph_api_version")),
         },
         "openclaw_fallback": {
+            "gateway_id": "default",
             "configured": bool(openclaw.get("configured")),
             "connected": bool(openclaw.get("connected")),
             "heartbeat_fresh": bool(openclaw.get("heartbeat_fresh")),
             "last_seen_at": openclaw.get("last_seen_at"),
         },
+        "hostinger_openclaw": hostinger,
         "durable_backend_configured": bool(persistence.get("configured")),
         "durable_backend_provider": persistence.get("provider"),
         "lead_capture_enabled": bool(persistence.get("configured")),
