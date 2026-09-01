@@ -100,10 +100,20 @@ host_env_value() {
   awk -F= -v k="$key" '$1==k{sub(/^[^=]*=/,""); gsub(/^["'"'"']|["'"'"']$/,""); print; exit}' "$file"
 }
 
-BRIDGE_SECRET="${SAHJONY_APP_BRIDGE_SECRET:-}"
-[[ -n "$BRIDGE_SECRET" ]] || BRIDGE_SECRET="$(container_env_value SAHJONY_APP_BRIDGE_SECRET)"
-[[ -n "$BRIDGE_SECRET" ]] || BRIDGE_SECRET="$(container_file_env_value SAHJONY_APP_BRIDGE_SECRET)"
-[[ -n "$BRIDGE_SECRET" ]] || BRIDGE_SECRET="$(host_env_value SAHJONY_APP_BRIDGE_SECRET 2>/dev/null || true)"
+# The application verifies HMAC with OPENCLAW_APP_BRIDGE_SECRET. Keep the
+# historical SAHJONY_APP_BRIDGE_SECRET only as a backwards-compatible alias.
+# Never log or emit the selected value.
+BRIDGE_SECRET="${OPENCLAW_APP_BRIDGE_SECRET:-${SAHJONY_APP_BRIDGE_SECRET:-}}"
+if [[ -z "$BRIDGE_SECRET" ]]; then
+  for key in OPENCLAW_APP_BRIDGE_SECRET SAHJONY_APP_BRIDGE_SECRET; do
+    BRIDGE_SECRET="$(container_env_value "$key")"
+    [[ -n "$BRIDGE_SECRET" ]] && break
+    BRIDGE_SECRET="$(container_file_env_value "$key")"
+    [[ -n "$BRIDGE_SECRET" ]] && break
+    BRIDGE_SECRET="$(host_env_value "$key" 2>/dev/null || true)"
+    [[ -n "$BRIDGE_SECRET" ]] && break
+  done
+fi
 [[ ${#BRIDGE_SECRET} -ge 24 ]] || fail "bridge_secret_unavailable"
 
 if [[ -z "${SAHJONY_WHATSAPP_BUSINESS_NUMBER:-}" ]]; then
