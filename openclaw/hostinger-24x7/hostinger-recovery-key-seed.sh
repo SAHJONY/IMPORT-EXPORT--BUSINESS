@@ -45,12 +45,17 @@ echo "ORIGINAL_KALI_ROOT=$root"
 
 install -d -m 700 "$root/root/.ssh"
 touch "$root/root/.ssh/authorized_keys"
+chown 0:0 "$root/root/.ssh" "$root/root/.ssh/authorized_keys"
+chmod 700 "$root/root/.ssh"
 chmod 600 "$root/root/.ssh/authorized_keys"
 
-# Remove only dead one-time SAHJONY recovery/bootstrap identities.
+backup="$root/root/.ssh/authorized_keys.sahjony-pre-v8"
+cp -a "$root/root/.ssh/authorized_keys" "$backup" 2>/dev/null || true
+
+# Remove only dead one-time SAHJONY identities; preserve all unrelated keys.
 sed -i -E '/sahjony-(v7|v8|provider-bootstrap)-/d' "$root/root/.ssh/authorized_keys" || true
 pub="$(cat "$PUB_FILE")"
-printf '%s\n' "$pub" >> "$root/root/.ssh/authorized_keys"
+grep -qxF "$pub" "$root/root/.ssh/authorized_keys" || printf '%s\n' "$pub" >> "$root/root/.ssh/authorized_keys"
 
 install -d "$root/etc/ssh/sshd_config.d" "$root/run/sshd" "$root/etc/systemd/system/multi-user.target.wants"
 cat > "$root/etc/ssh/sshd_config.d/99-sahjony-recovery-v8.conf" <<'EOF'
@@ -58,10 +63,11 @@ PubkeyAuthentication yes
 PermitRootLogin prohibit-password
 PasswordAuthentication no
 KbdInteractiveAuthentication no
+AuthorizedKeysFile .ssh/authorized_keys
 EOF
 chmod 600 "$root/etc/ssh/sshd_config.d/99-sahjony-recovery-v8.conf"
 
-# Remove obsolete V7 drop-in to leave one authoritative SAHJONY SSH policy.
+# Remove obsolete SAHJONY V7 drop-in so one policy is authoritative.
 rm -f "$root/etc/ssh/sshd_config.d/99-sahjony-recovery-v7.conf"
 
 enabled=false
@@ -78,6 +84,14 @@ done
 
 chroot "$root" /usr/bin/ssh-keygen -A 2>/dev/null || true
 chroot "$root" /usr/sbin/sshd -t
-chroot "$root" /usr/sbin/sshd -T 2>/dev/null | grep -E '^(permitrootlogin|pubkeyauthentication|passwordauthentication|authorizedkeysfile) ' || true
+
+echo '=== EFFECTIVE SSHD POLICY ==='
+chroot "$root" /usr/sbin/sshd -T 2>/dev/null | grep -E '^(permitrootlogin|pubkeyauthentication|passwordauthentication|kbdinteractiveauthentication|authorizedkeysfile|strictmodes) ' || true
+
+echo '=== SEEDED KEY EVIDENCE ==='
+grep -F 'sahjony-v8-' "$root/root/.ssh/authorized_keys" | sed -E 's/(ssh-[^ ]+ [^ ]+).*/\1 [REDACTED-COMMENT]/' || true
+stat -c 'SSH_DIR mode=%a uid=%u gid=%g path=%n' "$root/root/.ssh"
+stat -c 'AUTHORIZED_KEYS mode=%a uid=%u gid=%g path=%n' "$root/root/.ssh/authorized_keys"
+
 sync
 echo ORIGINAL_KALI_SSH_V8_REPAIRED=1
