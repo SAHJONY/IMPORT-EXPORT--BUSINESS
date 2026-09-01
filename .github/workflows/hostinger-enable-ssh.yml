@@ -22,10 +22,21 @@ jobs:
           auth_header="Authorization: Bearer ${HOSTINGER_API_TOKEN}"
 
           vms="$(curl --fail --silent --show-error --header "${auth_header}" "${api_root}/virtual-machines")"
-          vm_count="$(jq 'if type == "array" then length else (.data // [] | length) end' <<<"${vms}")"
-          [[ "${vm_count}" -eq 1 ]] || { echo "Expected exactly one Hostinger VPS; found ${vm_count}." >&2; exit 1; }
-          vm_id="$(jq -r '(if type == "array" then . else (.data // []) end)[0].id' <<<"${vms}")"
-          firewall_id="$(jq -r '(if type == "array" then . else (.data // []) end)[0].firewall_group_id // empty' <<<"${vms}")"
+          target_hostname="srv767852.hstgr.cloud"
+          vm_count="$(jq --arg host "${target_hostname}" '[
+            (if type == "array" then . else (.data // []) end)[] |
+            select(.hostname == $host)
+          ] | length' <<<"${vms}")"
+          [[ "${vm_count}" -eq 1 ]] || { echo "Expected one VPS named ${target_hostname}; found ${vm_count}." >&2; exit 1; }
+          vm_id="$(jq -r --arg host "${target_hostname}" '
+            (if type == "array" then . else (.data // []) end)[] |
+            select(.hostname == $host) | .id
+          ' <<<"${vms}")"
+          original_firewall_id="$(jq -r --arg host "${target_hostname}" '
+            (if type == "array" then . else (.data // []) end)[] |
+            select(.hostname == $host) | .firewall_group_id // empty
+          ' <<<"${vms}")"
+          firewall_id="${original_firewall_id}"
 
           if [[ -z "${firewall_id}" ]]; then
             create_response="$(curl --fail --silent --show-error \
@@ -54,7 +65,7 @@ jobs:
               "${api_root}/firewall/${firewall_id}/rules" >/dev/null
           fi
 
-          if [[ -z "$(jq -r '(if type == "array" then . else (.data // []) end)[0].firewall_group_id // empty' <<<"${vms}")" ]]; then
+          if [[ -z "${original_firewall_id}" ]]; then
             curl --fail --silent --show-error \
               --request POST \
               --header "${auth_header}" \
