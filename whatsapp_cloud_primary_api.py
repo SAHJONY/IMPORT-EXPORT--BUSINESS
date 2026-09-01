@@ -37,8 +37,9 @@ from sofia_whatsapp_runtime import generate_sofia_reply
 from whatsapp_backlog_recovery import drain_backlog, find_unanswered
 from sofia_self_marketing import growth_health
 from sofia_self_selling import self_selling_health
+from whatsapp_crm_bridge import crm_bridge_status, router as crm_bridge_router
 
-app = FastAPI(title="SAHJONY WhatsApp Hostinger OpenClaw Authority", version="5.4.0", docs_url=None, redoc_url=None)
+app = FastAPI(title="SAHJONY WhatsApp Hostinger OpenClaw Authority", version="5.5.0", docs_url=None, redoc_url=None)
 
 # Mandatory inbound reply runtime: the original customer text is preserved for safe
 # contact resolution, then Sofia loads durable history/memory and sales intelligence.
@@ -55,6 +56,7 @@ app.add_api_route("/whatsapp/openclaw/heartbeat", openclaw_heartbeat, methods=["
 app.add_api_route("/whatsapp/openclaw/events", openclaw_event, methods=["POST"])
 app.add_api_route("/whatsapp/openclaw/outbox", openclaw_outbox, methods=["GET"])
 app.add_api_route("/whatsapp/openclaw/outbox/ack", openclaw_outbox_ack, methods=["POST"])
+app.include_router(crm_bridge_router)
 
 
 async def _named_openclaw_gateway_state(gateway_id: str) -> dict[str, Any]:
@@ -110,12 +112,13 @@ async def whatsapp_health_hostinger_authority() -> dict[str, Any]:
     sofia = await intelligence_health()
     marketing = await growth_health()
     selling = await self_selling_health()
+    crm_bridge = await crm_bridge_status()
     pending = await find_unanswered(50)
 
     return {
         "status": "ok" if hostinger_ready else ("degraded" if hostinger_configured else "configuration_required"),
         "service": "whatsapp-transport",
-        "version": "5.4.0",
+        "version": "5.5.0",
         "provider": "hostinger_openclaw",
         "primary_provider": "hostinger_openclaw",
         "authority": {
@@ -157,6 +160,9 @@ async def whatsapp_health_hostinger_authority() -> dict[str, Any]:
             "can_make_production_ready": False,
         },
         "hostinger_openclaw": hostinger,
+        "crm_bridge": crm_bridge,
+        "crm_bridge_authorization": "server_to_server_hmac",
+        "crm_customer_admin_authorization_required": False,
         "durable_backend_configured": bool(persistence.get("configured")),
         "durable_backend_provider": persistence.get("provider"),
         "lead_capture_enabled": bool(persistence.get("configured")),
