@@ -1,0 +1,46 @@
+name: Hostinger Direct Rescue to V7 One-Time Handoff
+
+on:
+  workflow_run:
+    workflows: ["Hostinger WhatsApp Direct Rescue"]
+    types: [completed]
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  handoff:
+    if: ${{ github.event.workflow_run.id == 33470879454 }}
+    runs-on: ubuntu-24.04
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      APP_URL: https://www.sahjony.com
+    steps:
+      - name: Stop if Hostinger WhatsApp is already healthy
+        id: health
+        shell: bash
+        run: |
+          set -euo pipefail
+          body="$(curl -fsS --max-time 20 "$APP_URL/whatsapp/health" 2>/dev/null || true)"
+          if jq -e '(.hostinger_independent_runtime // false) == true or ((.hostinger_openclaw.connected // false) == true)' >/dev/null 2>&1 <<<"$body"; then
+            echo 'ready=true' >> "$GITHUB_OUTPUT"
+            echo SAHJONY_HOSTINGER_WHATSAPP_ALREADY_READY=1
+          else
+            echo 'ready=false' >> "$GITHUB_OUTPUT"
+            echo SAHJONY_HOSTINGER_WHATSAPP_STILL_UNAVAILABLE=1
+          fi
+
+      - name: Dispatch canonical V7 once
+        if: steps.health.outputs.ready != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          active="$(gh run list --repo "$REPO" --workflow hostinger-whatsapp-recovery-v7.yml --limit 20 --json status --jq '[.[] | select(.status == "in_progress" or .status == "queued" or .status == "waiting" or .status == "requested" or .status == "pending")] | length' 2>/dev/null || echo 0)"
+          if [ "$active" != 0 ]; then
+            echo "HOSTINGER_V7_ALREADY_ACTIVE=$active"
+            exit 0
+          fi
+          gh workflow run hostinger-whatsapp-recovery-v7.yml --repo "$REPO" --ref main
+          echo SAHJONY_HOSTINGER_RECOVERY_V7_DISPATCHED=1
