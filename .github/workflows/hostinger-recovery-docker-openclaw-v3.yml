@@ -264,7 +264,7 @@ jobs:
           PUB_B64="$(base64 -w0 ~/.ssh/hostinger-recovery.pub 2>/dev/null)"
           ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
             -o ConnectTimeout=6 -i ~/.ssh/hostinger-recovery "$USER@$HOST" \
-            "PUB_B64='$pub_b64' python3 - <<'PY'
+            "PUB_B64='$PUB_B64' python3 - <<'PY'
           import base64, os, pathlib
           p=pathlib.Path('/root/.ssh/authorized_keys')
           target=base64.b64decode(os.environ['PUB_B64']).decode().strip()
