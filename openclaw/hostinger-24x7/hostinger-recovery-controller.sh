@@ -2,23 +2,8 @@
 set -euo pipefail
 
 # SAHJONY Hostinger Recovery Controller
-# Purpose: recover Kali SSH + existing Docker/OpenClaw safely without depending on
-# Hostinger Docker Manager (unsupported on Kali) or Meta Cloud.
-#
-# Modes:
-#   diagnose      read-only checks only
-#   repair-ssh    use Hostinger Recovery only when normal SSH is unavailable
-#   heal-runtime  require normal SSH; preserve existing OpenClaw container
-#   full          repair SSH if required, then heal Docker/OpenClaw
-#
-# Required env:
-#   HOSTINGER_API_TOKEN
-#   HOSTINGER_VM_ID
-#   HOSTINGER_HOST
-# Optional:
-#   HOSTINGER_USER=root
-#   SSH_KEY_PATH=/path/to/private/key
-#   GUARDIAN_LOCAL_PATH=openclaw/hostinger-24x7/whatsapp-hostinger-only-guardian.sh
+# Recovers Kali SSH + existing Docker/OpenClaw without Hostinger Docker Manager
+# (unsupported on this Kali VPS) and without making Meta Cloud a dependency.
 
 MODE="${1:-diagnose}"
 API_BASE="${HOSTINGER_API_BASE:-https://developers.hostinger.com}"
@@ -30,8 +15,8 @@ SSH_KEY_PATH="${SSH_KEY_PATH:-}"
 GUARDIAN_LOCAL_PATH="${GUARDIAN_LOCAL_PATH:-openclaw/hostinger-24x7/whatsapp-hostinger-only-guardian.sh}"
 STATE_DIR="${SAHJONY_CONTROLLER_STATE_DIR:-/tmp/sahjony-hostinger-controller}"
 RECOVERY_OWNED=false
-RECOVERY_ACTION_ID=""
 RECOVERY_PASSWORD=""
+GENERATED_KEY=false
 
 mkdir -p "$STATE_DIR"
 chmod 700 "$STATE_DIR" || true
@@ -107,6 +92,7 @@ make_ephemeral_key(){
   SSH_KEY_PATH="$STATE_DIR/hostinger-controller-key"
   rm -f "$SSH_KEY_PATH" "$SSH_KEY_PATH.pub"
   ssh-keygen -q -t ed25519 -N '' -f "$SSH_KEY_PATH" -C "sahjony-controller-$(date +%s)"
+  GENERATED_KEY=true
 }
 
 enter_recovery(){
@@ -118,7 +104,7 @@ enter_recovery(){
   body="$(api POST "/api/vps/v1/virtual-machines/$VM_ID/recovery" "$payload")"
   id="$(jq -r '.id // empty' <<<"$body")"
   [[ "$id" =~ ^[0-9]+$ ]] || fail 'Recovery start action id missing'
-  RECOVERY_ACTION_ID="$id"; RECOVERY_OWNED=true
+  RECOVERY_OWNED=true
   wait_action "$id" recovery-start || fail 'Recovery start failed'
 }
 
@@ -158,7 +144,7 @@ chmod 600 "$root/root/.ssh/authorized_keys"
 pub="$(printf '%s' "$PUB_B64" | base64 -d)"
 grep -qxF "$pub" "$root/root/.ssh/authorized_keys" || printf '%s\n' "$pub" >> "$root/root/.ssh/authorized_keys"
 
-# Known regression guard: never run a second sshd on TCP/22.
+# Regression guard: never run a second SSH daemon on TCP/22.
 rm -f "$root/etc/systemd/system/sahjony-sshd.service"
 find "$root/etc/systemd/system" -type l -name 'sahjony-sshd.service' -delete 2>/dev/null || true
 
@@ -258,31 +244,67 @@ REMOTE
   remote 'systemctl is-active --quiet docker; systemctl is-active --quiet sahjony-whatsapp-hostinger.timer; /usr/local/sbin/sahjony-whatsapp-guardian audit; echo SAHJONY_HOSTINGER_OPENCLAW_LOCAL_GATES=READY'
 }
 
+remove_ephemeral_key_normal(){
+  [[ "$GENERATED_KEY" == true && -f "$SSH_KEY_PATH.pub" ]] || return 0
+  normal_ssh || return 0
+  local pub_b64
+  pub_b64="$(base64 -w0 "$SSH_KEY_PATH.pub")"
+  remote "PUB_B64='$pub_b64' bash -s" <<'REMOTE'
+set -euo pipefail
+pub="$(printf '%s' "$PUB_B64" | base64 -d)"
+file=/root/.ssh/authorized_keys
+[ -f "$file" ] || exit 0
+tmp="$(mktemp)"
+grep -vxF "$pub" "$file" > "$tmp" || true
+cat "$tmp" > "$file"
+rm -f "$tmp"
+chmod 600 "$file"
+echo SAHJONY_EPHEMERAL_KEY_REMOVED=1
+REMOTE
+}
+
+remove_ephemeral_key_offline(){
+  [[ "$GENERATED_KEY" == true && -f "$SSH_KEY_PATH.pub" && "$RECOVERY_OWNED" == true ]] || return 0
+  local pub_b64
+  pub_b64="$(base64 -w0 "$SSH_KEY_PATH.pub")"
+  recovery_ssh "PUB_B64='$pub_b64' bash -s" <<'REMOTE' || true
+set -euo pipefail
+root=''
+for mp in /mnt/sdb1 /mnt; do [ -f "$mp/etc/os-release" ] && root="$mp" && break; done
+[ -n "$root" ] || exit 0
+file="$root/root/.ssh/authorized_keys"
+[ -f "$file" ] || exit 0
+pub="$(printf '%s' "$PUB_B64" | base64 -d)"
+tmp="$(mktemp)"
+grep -vxF "$pub" "$file" > "$tmp" || true
+cat "$tmp" > "$file"
+rm -f "$tmp"
+chmod 600 "$file"
+REMOTE
+}
+
 cleanup(){
   local rc=$?
+  set +e
+  if [[ "$rc" -eq 0 ]]; then
+    remove_ephemeral_key_normal
+  elif [[ "$RECOVERY_OWNED" == true ]]; then
+    remove_ephemeral_key_offline
+  fi
   if [[ "$RECOVERY_OWNED" == true ]]; then
     log 'cleanup: attempting to exit owned Recovery session'
-    set +e; exit_recovery; set -e
+    exit_recovery
   fi
+  if [[ "$GENERATED_KEY" == true ]]; then rm -f "$SSH_KEY_PATH" "$SSH_KEY_PATH.pub"; fi
+  set -e
   exit "$rc"
 }
 trap cleanup EXIT INT TERM
 
 validate
 case "$MODE" in
-  diagnose)
-    print_status
-    ;;
-  repair-ssh)
-    repair_ssh_if_needed
-    print_status
-    ;;
-  heal-runtime)
-    heal_runtime
-    ;;
-  full)
-    repair_ssh_if_needed
-    heal_runtime
-    print_status
-    ;;
+  diagnose) print_status ;;
+  repair-ssh) repair_ssh_if_needed; print_status ;;
+  heal-runtime) heal_runtime ;;
+  full) repair_ssh_if_needed; heal_runtime; print_status ;;
 esac
