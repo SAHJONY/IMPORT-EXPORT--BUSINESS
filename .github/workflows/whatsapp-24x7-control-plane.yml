@@ -4,86 +4,27 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: 'audit, heal, recover, or verify'
+        description: 'audit or verify while recovery consolidation is in progress'
         required: true
-        default: heal
+        default: audit
         type: choice
         options:
           - audit
-          - heal
-          - recover
           - verify
-      force_recovery:
-        description: 'Ignore the V6 recovery cooldown when mode=recover'
-        required: false
-        default: false
-        type: boolean
-  schedule:
-    - cron: '*/15 * * * *'
-  push:
-    paths:
-      - '.github/workflows/whatsapp-24x7-control-plane.yml'
-      - 'openclaw/hostinger-24x7/whatsapp-24x7-control-plane.sh'
-      - 'openclaw/hostinger-24x7/whatsapp-hostinger-only-guardian.sh'
 
 permissions:
   contents: read
-  actions: write
 
 concurrency:
-  group: whatsapp-24x7-control-plane
-  cancel-in-progress: true
-
-env:
-  HOSTINGER_SSH_HOST: '69.62.68.67'
-  HOSTINGER_SSH_USER: root
-  SAHJONY_APP_URL: https://www.sahjony.com
-  RECOVERY_COOLDOWN_MINUTES: '90'
+  group: hostinger-vm-767852-mutation
+  cancel-in-progress: false
 
 jobs:
-  orchestrate:
+  paused-control-plane:
     runs-on: ubuntu-24.04
-    timeout-minutes: 12
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Install control-plane dependencies
-        shell: bash
+      - name: Recovery consolidation guard
         run: |
-          set -euo pipefail
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq jq netcat-openbsd >/dev/null
-
-      - name: Prepare optional Hostinger SSH identity
-        env:
-          HOSTINGER_SSH_PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          install -m 700 -d ~/.ssh
-          if [[ -n "$HOSTINGER_SSH_PRIVATE_KEY" ]]; then
-            printf '%s\n' "$HOSTINGER_SSH_PRIVATE_KEY" > ~/.ssh/hostinger_control
-            chmod 600 ~/.ssh/hostinger_control
-            echo HOSTINGER_CONTROL_SSH_KEY_READY=1
-          else
-            echo HOSTINGER_CONTROL_SSH_KEY_READY=0
-          fi
-
-      - name: Run Hostinger-only WhatsApp state machine
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-          MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.mode || 'heal' }}
-          FORCE_RECOVERY: ${{ github.event_name == 'workflow_dispatch' && inputs.force_recovery || false }}
-          SAHJONY_AUTO_RECOVERY: ${{ vars.SAHJONY_AUTO_RECOVERY || 'true' }}
-          HOSTINGER_SSH_KEY_FILE: /home/runner/.ssh/hostinger_control
-        shell: bash
-        run: |
-          set -euo pipefail
-          bash openclaw/hostinger-24x7/whatsapp-24x7-control-plane.sh
-
-      - name: Final Hostinger-specific public health snapshot
-        if: always()
-        shell: bash
-        run: |
-          set +e
-          curl -fsS --max-time 20 https://www.sahjony.com/whatsapp/health | jq '{status,provider,hostinger_independent_runtime,hostinger_openclaw}' || true
+          echo SAHJONY_HOSTINGER_CONTROL_PLANE=PAUSED_FOR_CONSOLIDATION
+          echo AUTOMATIC_RECOVERY_DISABLED=1
+          echo USE_CANONICAL_V7_ONLY=1
