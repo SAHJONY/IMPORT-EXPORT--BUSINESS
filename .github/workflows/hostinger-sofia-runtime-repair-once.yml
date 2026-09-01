@@ -70,21 +70,58 @@ jobs:
           rm -rf /tmp/sahjony-app-bridge
           tar -xzf /root/sahjony-app-bridge.tgz -C /tmp
           rm -f /root/sahjony-app-bridge.tgz
-          oc plugins install /tmp/sahjony-app-bridge --force --acknowledge-install-policy-warning
-          rm -rf /tmp/sahjony-app-bridge
-          oc plugins enable sahjony-app-bridge
           oc config set agents.defaults.workspace "$WORKSPACE"
           oc config set agents.defaults.model.primary openai/gpt-5.6-sol
-          oc config set plugins.entries.sahjony-app-bridge.enabled true --strict-json
-          oc config set plugins.entries.sahjony-app-bridge.config \
-            '{"appUrl":"https://www.sahjony.com","accountId":"default","gatewayId":"hostinger-vps","businessNumber":"+12816628581","businessName":"SAHJONY LLC","pollIntervalMs":30000}' \
-            --strict-json
 
           umask 077
           printf 'SAHJONY_APP_URL=https://www.sahjony.com\nSAHJONY_APP_BRIDGE_SECRET=' > /etc/openclaw-sahjony-bridge.env
           cat "$BRIDGE_SECRET_FILE" >> /etc/openclaw-sahjony-bridge.env
           printf '\nSAHJONY_GATEWAY_ID=hostinger-vps\n' >> /etc/openclaw-sahjony-bridge.env
+          printf 'SAHJONY_REASONING_MODEL=openai/gpt-5.6-sol\nOPENCLAW_STATE_DIR=%s\nOPENCLAW_BIN=%s\n' \
+            "$STATE" "$(command -v openclaw)" >> /etc/openclaw-sahjony-bridge.env
           chmod 600 /etc/openclaw-sahjony-bridge.env
+
+          install -m 700 /tmp/sahjony-app-bridge/health-sidecar.py /usr/local/sbin/sahjony-openclaw-health-sidecar
+          cat > /etc/systemd/system/sahjony-openclaw-health-sidecar.service <<'EOF'
+          [Unit]
+          Description=SAHJONY authoritative Hostinger OpenClaw health reporter
+          After=network-online.target openclaw-gateway.service
+          Wants=network-online.target
+          [Service]
+          Type=oneshot
+          User=root
+          Environment=HOME=/home/node
+          EnvironmentFile=/etc/openclaw-sahjony-bridge.env
+          ExecStart=/usr/local/sbin/sahjony-openclaw-health-sidecar
+          NoNewPrivileges=true
+          PrivateTmp=true
+          ProtectSystem=strict
+          ReadWritePaths=/var/lib/sahjony-openclaw-state
+          EOF
+          cat > /etc/systemd/system/sahjony-openclaw-health-sidecar.timer <<'EOF'
+          [Unit]
+          Description=Publish SAHJONY Hostinger WhatsApp health every minute
+          [Timer]
+          OnBootSec=30s
+          OnUnitActiveSec=60s
+          AccuracySec=5s
+          Persistent=true
+          [Install]
+          WantedBy=timers.target
+          EOF
+
+          if oc plugins install /tmp/sahjony-app-bridge --force --acknowledge-install-policy-warning; then
+            oc plugins enable sahjony-app-bridge
+            oc config set plugins.entries.sahjony-app-bridge.enabled true --strict-json
+            oc config set plugins.entries.sahjony-app-bridge.config \
+              '{"appUrl":"https://www.sahjony.com","accountId":"default","gatewayId":"hostinger-vps","businessNumber":"+12816628581","businessName":"SAHJONY LLC","pollIntervalMs":30000}' \
+              --strict-json
+            echo SAHJONY_APP_BRIDGE_PLUGIN=READY
+          else
+            echo SAHJONY_APP_BRIDGE_PLUGIN=BLOCKED_USING_SIDECAR
+          fi
+          rm -rf /tmp/sahjony-app-bridge
+
           install -d -m 755 /etc/systemd/system/openclaw-gateway.service.d
           cat > /etc/systemd/system/openclaw-gateway.service.d/30-sahjony-bridge.conf <<'EOF'
           [Service]
@@ -93,15 +130,17 @@ jobs:
 
           oc config validate
           systemctl daemon-reload
+          systemctl enable --now sahjony-openclaw-health-sidecar.timer
           systemctl restart openclaw-gateway.service
           sleep 15
           systemctl is-active --quiet openclaw-gateway.service
           systemctl is-enabled --quiet openclaw-gateway.service
-          oc plugins inspect sahjony-app-bridge --runtime --json >/dev/null
           primary="$(oc config get agents.defaults.model.primary --json)"
           [[ "$primary" == '"openai/gpt-5.6-sol"' ]]
           workspace="$(oc config get agents.defaults.workspace --json)"
           [[ "$workspace" == '"/var/lib/sahjony-openclaw-state/workspace"' ]]
+          systemctl is-enabled --quiet sahjony-openclaw-health-sidecar.timer
+          systemctl is-active --quiet sahjony-openclaw-health-sidecar.timer
           wa="$(oc channels status --channel whatsapp --probe 2>&1 || true)"
           printf '%s\n' "$wa" | tail -n 30
           grep -Eiq 'whatsapp.*(connected|ready|healthy|linked.*running)|linked.*running.*connected' <<<"$wa"
