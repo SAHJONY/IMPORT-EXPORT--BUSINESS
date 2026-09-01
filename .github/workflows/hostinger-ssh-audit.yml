@@ -190,10 +190,11 @@ jobs:
                   "root@${vm_host}" true; then
                 authenticated=1
                 echo "Hostinger VPS ${vm_id}: SSH key attached and root authentication succeeded." >> "${GITHUB_STEP_SUMMARY}"
-                break 2
+                break
               fi
               sleep 5
             done
+            [[ "${authenticated}" -eq 1 ]] && break
           done < <(jq -r '
             (if type == "array" then . else (.data // []) end)[] |
             [(.id | tostring),
@@ -201,6 +202,7 @@ jobs:
             @tsv
           ' <<<"${vm_response}")
 
+          echo "SSH audit result: VPS discovered=${matched}, key authentication=${authenticated}"
           if [[ "${matched}" -ne 1 ]]; then
             echo "No Hostinger VPS with a usable IP address or hostname was found." >> "${GITHUB_STEP_SUMMARY}"
             exit 1
