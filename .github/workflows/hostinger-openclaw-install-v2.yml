@@ -1,0 +1,91 @@
+name: Hostinger OpenClaw Install V2
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/hostinger-openclaw-install-v2.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hostinger-vm-767852-mutation
+  cancel-in-progress: false
+
+env:
+  HOSTINGER_VM_ID: '767852'
+  HOSTINGER_HOST: '69.62.68.67'
+  HOSTINGER_USER: root
+  HOSTINGER_API_BASE: https://developers.hostinger.com
+
+jobs:
+  install:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    env:
+      HOSTINGER_API_TOKEN: ${{ secrets.HOSTINGER_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare management identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "$HOSTINGER_API_TOKEN" ]]
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq jq sshpass netcat-openbsd >/dev/null
+          install -d -m 700 ~/.ssh
+          ssh-keygen -q -t ed25519 -N '' -f ~/.ssh/openclaw-install-v2 -C "sahjony-openclaw-install-${GITHUB_RUN_ID}"
+          echo "SSH_KEY_PATH=$HOME/.ssh/openclaw-install-v2" >> "$GITHUB_ENV"
+          chmod +x openclaw/hostinger-24x7/hostinger-recovery-controller.sh
+          chmod +x openclaw/hostinger-24x7/ssh-self-heal.sh
+          chmod +x openclaw/hostinger-24x7/hostinger-runtime-bootstrap.sh
+          chmod +x openclaw/hostinger-24x7/openclaw-runtime-recovery.sh
+          chmod +x openclaw/hostinger-24x7/whatsapp-hostinger-only-guardian.sh
+          chmod +x openclaw/hostinger-24x7/install-openclaw-docker.sh
+
+      - name: Establish authenticated Kali SSH
+        shell: bash
+        run: |
+          set -euo pipefail
+          openclaw/hostinger-24x7/hostinger-recovery-controller.sh repair-ssh
+
+      - name: Install OpenClaw on Hostinger
+        shell: bash
+        run: |
+          set -euo pipefail
+          opts=(-o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -i "$SSH_KEY_PATH")
+          scp "${opts[@]}" openclaw/hostinger-24x7/install-openclaw-docker.sh "$HOSTINGER_USER@$HOSTINGER_HOST:/tmp/install-openclaw-docker.sh"
+          ssh "${opts[@]}" "$HOSTINGER_USER@$HOSTINGER_HOST" 'chmod 700 /tmp/install-openclaw-docker.sh && /tmp/install-openclaw-docker.sh'
+
+      - name: Verify OpenClaw runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          opts=(-o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -i "$SSH_KEY_PATH")
+          ssh "${opts[@]}" "$HOSTINGER_USER@$HOSTINGER_HOST" 'set -euo pipefail; systemctl is-active --quiet docker.service; test "$(docker inspect sahjony-openclaw-gateway --format "{{.State.Health.Status}}")" = healthy; policy="$(docker inspect sahjony-openclaw-gateway --format "{{.HostConfig.RestartPolicy.Name}}")"; test "$policy" = unless-stopped -o "$policy" = always; echo SAHJONY_HOSTINGER_OPENCLAW_INSTALL=READY'
+
+      - name: Remove ephemeral management identity
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          if [[ -s ~/.ssh/openclaw-install-v2.pub && -s ~/.ssh/openclaw-install-v2 ]]; then
+            pub_b64="$(base64 -w0 ~/.ssh/openclaw-install-v2.pub)"
+            ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 -i ~/.ssh/openclaw-install-v2 "$HOSTINGER_USER@$HOSTINGER_HOST" "PUB_B64='$pub_b64' bash -s" <<'REMOTE'
+          set -euo pipefail
+          auth=/root/.ssh/authorized_keys
+          if [[ -f "$auth" ]]; then
+            pub="$(printf '%s' "$PUB_B64" | base64 -d)"
+            tmp="$(mktemp)"
+            grep -vxF "$pub" "$auth" > "$tmp" || true
+            cat "$tmp" > "$auth"
+            chmod 600 "$auth"
+            rm -f "$tmp"
+          fi
+          rm -f /tmp/install-openclaw-docker.sh
+          echo SAHJONY_OPENCLAW_INSTALL_EPHEMERAL_KEY_REMOVED=1
+          REMOTE
+          fi
+          rm -f ~/.ssh/openclaw-install-v2 ~/.ssh/openclaw-install-v2.pub
