@@ -82,6 +82,27 @@ jobs:
             [[ -n "$val" ]] && echo "$key=$val" || echo "$key=<unset>"
           done
 
+          echo '--- agent workspace metadata ---'
+          oc agents list --json 2>/dev/null || oc agents list 2>&1 || true
+          python3 - <<'PY'
+          import json, os
+          config = "/var/lib/sahjony-openclaw-state/openclaw.json"
+          with open(config, encoding="utf-8") as handle:
+              data = json.load(handle)
+          print("AGENTS_CONFIG=" + json.dumps(data.get("agents", {}), sort_keys=True))
+          for path in (
+              "/home/node/.openclaw/workspace",
+              "/var/lib/sahjony-openclaw-state/workspace",
+              "/root/.openclaw/workspace",
+          ):
+              print(
+                  "WORKSPACE_PATH=" + path,
+                  "exists=" + str(os.path.exists(path)).lower(),
+                  "islink=" + str(os.path.islink(path)).lower(),
+                  "realpath=" + os.path.realpath(path),
+              )
+          PY
+
           echo '--- plugins filesystem ---'
           for d in /home/node/.openclaw/extensions /var/lib/sahjony-openclaw-state/extensions /root/.openclaw/extensions; do
             if [[ -d "$d" ]]; then
