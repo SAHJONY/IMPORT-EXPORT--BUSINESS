@@ -53,6 +53,7 @@ jobs:
             [[ -z "$data" ]] || args+=(-H 'Content-Type: application/json' --data "$data")
             curl "${args[@]}" "$HOSTINGER_API_BASE$path"
           }
+
           busy="$(api GET "/api/vps/v1/virtual-machines/$HOSTINGER_VM_ID/actions?page=1" | jq '[.data[]? | select(.state=="sent" or .state=="started" or .state=="pending" or .state=="running" or .state=="queued")] | length')"
           [[ "$busy" == 0 ]] || { echo HOSTINGER_ACTION_PLANE_BUSY=$busy >&2; exit 3; }
           echo HOSTINGER_ACTION_PLANE=IDLE
@@ -61,35 +62,56 @@ jobs:
           payload="$(jq -n --arg name '${{ steps.key.outputs.key_name }}' --arg key "$pub" '{name:$name,key:$key}')"
           created="$(api POST '/api/vps/v1/public-keys' "$payload")"
           key_id="$(jq -r '.id // empty' <<<"$created")"
-          [[ "$key_id" =~ ^[0-9]+$ ]] || { echo HOSTINGER_PUBLIC_KEY_CREATE_FAILED=1 >&2; jq -c . <<<"$created" >&2 || true; exit 4; }
+          [[ "$key_id" =~ ^[0-9]+$ ]] || { echo HOSTINGER_PUBLIC_KEY_CREATE_FAILED=1 >&2; exit 4; }
           echo "key_id=$key_id" >> "$GITHUB_OUTPUT"
           echo HOSTINGER_PUBLIC_KEY_REGISTERED=1
 
           attach_payload="$(jq -n --argjson id "$key_id" '{ids:[$id]}')"
           attached="$(api POST "/api/vps/v1/public-keys/attach/$HOSTINGER_VM_ID" "$attach_payload")"
           action_id="$(jq -r '.id // empty' <<<"$attached")"
-          [[ "$action_id" =~ ^[0-9]+$ ]] || { echo HOSTINGER_PUBLIC_KEY_ATTACH_FAILED=1 >&2; jq -c . <<<"$attached" >&2 || true; exit 5; }
-          echo HOSTINGER_PUBLIC_KEY_ATTACH_ACTION=$action_id
+          attach_state="$(jq -r '.state // empty' <<<"$attached")"
+          jq -c '{id:(.id // null),name:(.name // null),state:(.state // null)}' <<<"$attached" || true
+          echo "HOSTINGER_PUBLIC_KEY_ATTACH_ID=${action_id:-missing} STATE=${attach_state:-unknown}"
 
-          success=false
-          for i in $(seq 1 90); do
-            a="$(api GET "/api/vps/v1/virtual-machines/$HOSTINGER_VM_ID/actions/$action_id")"
-            state="$(jq -r '.state // empty' <<<"$a")"
-            echo "key_attach_probe=$i/90 state=${state:-unknown}"
-            case "$state" in
-              success) success=true; break ;;
-              failed|failure|error|cancelled|canceled) jq -c '{id,name,state,created_at,updated_at}' <<<"$a" >&2 || true; exit 6 ;;
-            esac
-            sleep 4
-          done
-          [[ "$success" == true ]] || { echo HOSTINGER_KEY_ATTACH_TIMEOUT=1 >&2; exit 7; }
-          echo HOSTINGER_PUBLIC_KEY_ATTACHED=SUCCESS
+          case "$attach_state" in
+            success)
+              echo HOSTINGER_PUBLIC_KEY_ATTACHED=SUCCESS_RESPONSE
+              ;;
+            failed|failure|error|cancelled|canceled)
+              echo HOSTINGER_PUBLIC_KEY_ATTACH_FAILED_STATE="$attach_state" >&2
+              exit 5
+              ;;
+            *)
+              if [[ "$action_id" =~ ^[1-9][0-9]*$ ]]; then
+                success=false
+                for i in $(seq 1 90); do
+                  a="$(api GET "/api/vps/v1/virtual-machines/$HOSTINGER_VM_ID/actions/$action_id")"
+                  state="$(jq -r '.state // empty' <<<"$a")"
+                  echo "key_attach_probe=$i/90 state=${state:-unknown}"
+                  case "$state" in
+                    success) success=true; break ;;
+                    failed|failure|error|cancelled|canceled) exit 6 ;;
+                  esac
+                  sleep 4
+                done
+                [[ "$success" == true ]] || { echo HOSTINGER_KEY_ATTACH_TIMEOUT=1 >&2; exit 7; }
+                echo HOSTINGER_PUBLIC_KEY_ATTACHED=ACTION_SUCCESS
+              elif [[ "$action_id" == 0 ]]; then
+                echo HOSTINGER_PUBLIC_KEY_ATTACHED=NONPOLLABLE_ACCEPTED
+                sleep 15
+              else
+                echo HOSTINGER_PUBLIC_KEY_ATTACH_RESPONSE_UNUSABLE=1 >&2
+                exit 8
+              fi
+              ;;
+          esac
 
       - name: Authenticate normal Kali without Recovery
         shell: bash
         run: |
           set -euo pipefail
           ready=false
+          : >/tmp/bootstrap-ssh.err
           for i in $(seq 1 60); do
             if nc -z -w 4 "$HOSTINGER_HOST" 22 >/dev/null 2>&1; then
               if ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 -i ~/.ssh/sahjony-provider-bootstrap "$HOSTINGER_USER@$HOSTINGER_HOST" 'printf SAHJONY_PROVIDER_BOOTSTRAP_SSH_OK' 2>/tmp/bootstrap-ssh.err | grep -q SAHJONY_PROVIDER_BOOTSTRAP_SSH_OK; then
@@ -103,69 +125,38 @@ jobs:
             fi
             sleep 5
           done
-          [[ "$ready" == true ]] || { echo HOSTINGER_PROVIDER_BOOTSTRAP_SSH=NOT_READY >&2; sed -n '1,20p' /tmp/bootstrap-ssh.err 2>/dev/null || true; exit 8; }
+          [[ "$ready" == true ]] || { echo HOSTINGER_PROVIDER_BOOTSTRAP_SSH=NOT_READY >&2; sed -n '1,20p' /tmp/bootstrap-ssh.err 2>/dev/null || true; exit 9; }
 
       - name: Stabilize existing Docker OpenClaw and install guardian
         shell: bash
         run: |
           set -euo pipefail
           key="$HOME/.ssh/sahjony-provider-bootstrap"
-          scp -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 -i "$key" \
+          common=(-o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 -i "$key")
+          scp "${common[@]}" \
             openclaw/hostinger-24x7/whatsapp-guardian.sh \
             openclaw/hostinger-24x7/install-whatsapp-guardian.sh \
+            openclaw/hostinger-24x7/provider-bootstrap-stabilize.sh \
             "$HOSTINGER_USER@$HOSTINGER_HOST:/tmp/"
-          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 -i "$key" "$HOSTINGER_USER@$HOSTINGER_HOST" 'bash -s' <<'REMOTE'
-          set -euo pipefail
-          echo "HOST=$(hostname)"
-          systemctl is-active --quiet ssh || systemctl enable --now ssh
-          command -v docker >/dev/null 2>&1 || { echo DOCKER_MISSING=1 >&2; exit 20; }
-          systemctl is-active --quiet docker || systemctl enable --now docker
-          echo '=== EXISTING OPENCLAW CANDIDATES ==='
-          docker ps -a --format '{{.ID}} {{.Names}} {{.Image}} {{.Status}}' | grep -Ei 'openclaw|claw' || { echo OPENCLAW_CONTAINER_MISSING=1 >&2; exit 21; }
-          install -d -m 0755 /opt/sahjony-whatsapp-guardian
-          install -m 0755 /tmp/whatsapp-guardian.sh /opt/sahjony-whatsapp-guardian/whatsapp-guardian.sh
-          install -m 0755 /tmp/install-whatsapp-guardian.sh /opt/sahjony-whatsapp-guardian/install-whatsapp-guardian.sh
-          /opt/sahjony-whatsapp-guardian/install-whatsapp-guardian.sh
-          echo '=== GUARDIAN TIMER ==='
-          systemctl is-enabled sahjony-whatsapp-guardian.timer
-          systemctl is-active sahjony-whatsapp-guardian.timer
-          echo '=== LAST GUARDIAN OUTPUT ==='
-          tail -n 80 /var/log/sahjony-whatsapp-guardian.log 2>/dev/null || true
-          echo '=== LAST GOOD ==='
-          cat /var/lib/sahjony-whatsapp-guardian/last-good 2>/dev/null || true
-          echo '=== OPENCLAW RESTART POLICY ==='
-          docker ps -aq | while read -r id; do
-            meta="$(docker inspect "$id" --format '{{.Name}}|{{.Config.Image}}' 2>/dev/null || true)"
-            if grep -Eqi 'openclaw|claw' <<<"$meta"; then
-              docker inspect "$id" --format 'name={{.Name}} status={{.State.Status}} restart={{.HostConfig.RestartPolicy.Name}}'
-            fi
-          done
-          echo SAHJONY_HOSTINGER_BOOTSTRAP_STABILIZATION_COMPLETE=1
-          REMOTE
+          ssh "${common[@]}" "$HOSTINGER_USER@$HOSTINGER_HOST" 'chmod +x /tmp/provider-bootstrap-stabilize.sh && /tmp/provider-bootstrap-stabilize.sh'
 
-      - name: Remove ephemeral key from VPS and Hostinger account
+      - name: Remove ephemeral bootstrap keys
         if: always()
         shell: bash
-        env:
-          KEY_ID: ${{ steps.attach.outputs.key_id }}
         run: |
           set +e
-          if [[ -f ~/.ssh/sahjony-provider-bootstrap.pub && -f ~/.ssh/sahjony-provider-bootstrap ]]; then
-            PUB_B64="$(base64 -w0 ~/.ssh/sahjony-provider-bootstrap.pub)"
-            ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=6 -i ~/.ssh/sahjony-provider-bootstrap "$HOSTINGER_USER@$HOSTINGER_HOST" "PUB_B64='$PUB_B64' bash -s" <<'REMOTE'
-            set +e
-            pub="$(printf '%s' "$PUB_B64" | base64 -d)"
-            if [[ -f /root/.ssh/authorized_keys ]]; then
-              tmp="$(mktemp)"
-              grep -vxF "$pub" /root/.ssh/authorized_keys > "$tmp" || true
-              cat "$tmp" > /root/.ssh/authorized_keys
-              rm -f "$tmp"
-              chmod 600 /root/.ssh/authorized_keys
-            fi
-            REMOTE
+          if [[ -f ~/.ssh/sahjony-provider-bootstrap ]]; then
+            ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=6 -i ~/.ssh/sahjony-provider-bootstrap "$HOSTINGER_USER@$HOSTINGER_HOST" \
+              "sed -i '/sahjony-provider-bootstrap-/d' /root/.ssh/authorized_keys 2>/dev/null || true" >/dev/null 2>&1 || true
           fi
-          if [[ "$KEY_ID" =~ ^[0-9]+$ ]]; then
-            curl -fsS -X DELETE -H "Authorization: Bearer $HOSTINGER_API_TOKEN" -H 'Accept: application/json' "$HOSTINGER_API_BASE/api/vps/v1/public-keys/$KEY_ID" >/dev/null 2>&1 || true
+
+          account_keys="$(curl -fsS -H "Authorization: Bearer $HOSTINGER_API_TOKEN" -H 'Accept: application/json' "$HOSTINGER_API_BASE/api/vps/v1/public-keys?page=1" 2>/dev/null || true)"
+          if [[ -n "$account_keys" ]]; then
+            jq -r '.data[]? | select((.name // "") | test("^SAHJONY (Provider Bootstrap|bootstrap)")) | .id' <<<"$account_keys" | while read -r id; do
+              [[ "$id" =~ ^[0-9]+$ ]] || continue
+              curl -fsS -X DELETE -H "Authorization: Bearer $HOSTINGER_API_TOKEN" -H 'Accept: application/json' "$HOSTINGER_API_BASE/api/vps/v1/public-keys/$id" >/dev/null 2>&1 || true
+              echo "HOSTINGER_BOOTSTRAP_ACCOUNT_KEY_DELETED=$id"
+            done
           fi
           rm -f ~/.ssh/sahjony-provider-bootstrap ~/.ssh/sahjony-provider-bootstrap.pub
           echo HOSTINGER_EPHEMERAL_KEY_CLEANUP_COMPLETE=1
