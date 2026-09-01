@@ -1,0 +1,128 @@
+name: Hostinger Resilient Access and OpenClaw Recovery One-Time
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/hostinger-resilient-access-one-time.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hostinger-vm-767852-mutation
+  cancel-in-progress: false
+
+env:
+  HOSTINGER_API_BASE: https://developers.hostinger.com
+  HOSTINGER_VM_ID: '767852'
+  HOSTINGER_HOST: '69.62.68.67'
+  HOSTINGER_USER: root
+
+jobs:
+  recover:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.head_commit.message == 'ops: run resilient Hostinger access recovery'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      HOSTINGER_API_TOKEN: ${{ secrets.HOSTINGER_API_TOKEN }}
+      DURABLE_PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Checkout exact recovery revision
+        uses: actions/checkout@v4
+
+      - name: Prepare serialized management identity and tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "$HOSTINGER_API_TOKEN" ]] || { echo HOSTINGER_API_TOKEN_MISSING=1 >&2; exit 2; }
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq jq sshpass netcat-openbsd >/dev/null
+          install -d -m 700 ~/.ssh "$RUNNER_TEMP/sahjony-resilient-access"
+
+          if [[ -n "$DURABLE_PRIVATE_KEY" ]]; then
+            printf '%s\n' "$DURABLE_PRIVATE_KEY" > ~/.ssh/sahjony-hostinger-management
+            chmod 600 ~/.ssh/sahjony-hostinger-management
+            ssh-keygen -y -f ~/.ssh/sahjony-hostinger-management > ~/.ssh/sahjony-hostinger-management.pub
+            echo EPHEMERAL_MANAGEMENT_KEY=false >> "$GITHUB_ENV"
+            echo HOSTINGER_MANAGEMENT_IDENTITY=DURABLE
+          else
+            ssh-keygen -q -t ed25519 -N '' -f ~/.ssh/sahjony-hostinger-management -C "sahjony-resilient-${GITHUB_RUN_ID}"
+            echo EPHEMERAL_MANAGEMENT_KEY=true >> "$GITHUB_ENV"
+            echo HOSTINGER_MANAGEMENT_IDENTITY=EPHEMERAL
+          fi
+          echo "SSH_KEY_PATH=$HOME/.ssh/sahjony-hostinger-management" >> "$GITHUB_ENV"
+
+          chmod +x \
+            openclaw/hostinger-24x7/hostinger-resilient-access-broker.sh \
+            openclaw/hostinger-24x7/hostinger-recovery-controller.sh \
+            openclaw/hostinger-24x7/hostinger-incident-resolver.sh \
+            openclaw/hostinger-24x7/ssh-self-heal.sh \
+            openclaw/hostinger-24x7/hostinger-runtime-bootstrap.sh \
+            openclaw/hostinger-24x7/openclaw-runtime-recovery.sh \
+            openclaw/hostinger-24x7/whatsapp-hostinger-only-guardian.sh
+
+          bash -n openclaw/hostinger-24x7/hostinger-resilient-access-broker.sh
+          bash -n openclaw/hostinger-24x7/hostinger-recovery-controller.sh
+          bash -n openclaw/hostinger-24x7/hostinger-incident-resolver.sh
+          echo SAHJONY_RESILIENT_ACCESS_TOOLING=VALID
+
+      - name: Restore authenticated normal Kali access
+        shell: bash
+        run: |
+          set -euo pipefail
+          openclaw/hostinger-24x7/hostinger-resilient-access-broker.sh solve | tee "$RUNNER_TEMP/sahjony-resilient-access/access-broker.log"
+          grep -q 'SAHJONY_HOSTINGER_ACCESS_BROKER=READY' "$RUNNER_TEMP/sahjony-resilient-access/access-broker.log"
+
+      - name: Heal retained Docker OpenClaw and WhatsApp runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          SAHJONY_ALLOW_OPENCLAW_RECONSTRUCT=RECOVER_RETAINED_OPENCLAW \
+            openclaw/hostinger-24x7/hostinger-recovery-controller.sh full | \
+            tee "$RUNNER_TEMP/sahjony-resilient-access/runtime-controller.log"
+
+      - name: Prove Hostinger-local 24x7 acceptance gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          openclaw/hostinger-24x7/hostinger-incident-resolver.sh diagnose | \
+            tee "$RUNNER_TEMP/sahjony-resilient-access/final-diagnose.log"
+          grep -q 'SAHJONY_HOSTINGER_INCIDENT=READY' "$RUNNER_TEMP/sahjony-resilient-access/final-diagnose.log"
+          echo SAHJONY_HOSTINGER_LOCAL_RUNTIME=READY
+
+      - name: Publish recovery evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hostinger-resilient-access-${{ github.run_id }}
+          path: ${{ runner.temp }}/sahjony-resilient-access/
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Remove per-run ephemeral guest key
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          if [[ "${EPHEMERAL_MANAGEMENT_KEY:-false}" == true && -s "$SSH_KEY_PATH" && -s "$SSH_KEY_PATH.pub" ]]; then
+            pub_b64="$(base64 -w0 "$SSH_KEY_PATH.pub")"
+            ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 \
+              -i "$SSH_KEY_PATH" "$HOSTINGER_USER@$HOSTINGER_HOST" "PUB_B64='$pub_b64' bash -s" <<'REMOTE'
+          set +e
+          auth=/root/.ssh/authorized_keys
+          pub="$(printf '%s' "$PUB_B64" | base64 -d)"
+          if [[ -f "$auth" ]]; then
+            tmp="$(mktemp)"
+            grep -vxF "$pub" "$auth" > "$tmp" || true
+            cat "$tmp" > "$auth"
+            chmod 600 "$auth"
+            rm -f "$tmp"
+          fi
+          echo SAHJONY_RESILIENT_EPHEMERAL_GUEST_KEY_REMOVED=1
+          REMOTE
+          fi
+          rm -f "$SSH_KEY_PATH" "$SSH_KEY_PATH.pub"
