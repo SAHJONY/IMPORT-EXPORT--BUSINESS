@@ -1,3 +1,4 @@
+# One-time WhatsApp-only activation. No Docker/model/runtime mutation.
 name: Hostinger WhatsApp Native Activate Once
 
 on:
@@ -59,7 +60,6 @@ jobs:
           }
           [[ -f "$CONFIG" ]] || { echo OPENCLAW_CONFIG_MISSING=1 >&2; exit 21; }
 
-          # Repair only the WhatsApp plugin tree ownership inherited from the old container, if needed.
           ext="$STATE/extensions/whatsapp"
           if [[ -d "$ext" ]] && find "$ext" -xdev \( ! -uid 0 -o ! -gid 0 \) -print -quit | grep -q .; then
             chown -R root:root "$ext"
@@ -71,25 +71,21 @@ jobs:
           before="$(oc channels status --channel whatsapp --probe 2>&1 || true)"
           printf '%s\n' "$before" | sed -E 's/(token|secret|key|password|authorization)[=:][^[:space:]]+/\1=[REDACTED]/Ig' | tail -n 80
 
-          # WhatsApp is an external official plugin. Do not touch any other plugin/model/runtime.
           if printf '%s\n' "$before" | grep -Eiq 'plugin.*(missing|not installed|not found)|unknown channel|no plugin.*whatsapp'; then
             oc plugins install clawhub:@openclaw/whatsapp >/dev/null
             echo WHATSAPP_PLUGIN_INSTALLED=1
           fi
 
-          # Installing does not necessarily enable the plugin. Enabling is idempotent.
           set +e
           enable_out="$(oc plugins enable whatsapp 2>&1)"
           enable_rc=$?
           set -e
           if (( enable_rc != 0 )); then
             printf '%s\n' "$enable_out" | sed -E 's/(token|secret|key|password|authorization)[=:][^[:space:]]+/\1=[REDACTED]/Ig' >&2
-            # Capability consent is intentionally not bypassed automatically.
             exit "$enable_rc"
           fi
           echo WHATSAPP_PLUGIN_ENABLED=1
 
-          # One controlled reload of the already-configured Gateway; no Docker, no model changes, no QR/logout.
           systemctl restart openclaw-gateway.service
           sleep 10
           systemctl is-active --quiet openclaw-gateway.service
