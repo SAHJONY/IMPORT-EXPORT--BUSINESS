@@ -1,0 +1,24 @@
+name: Hostinger Mutation Queue Fence
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/hostinger-mutation-queue-fence.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hostinger-vm-767852-mutation
+  cancel-in-progress: false
+
+jobs:
+  fence:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Hold mutation lane without touching Hostinger
+        run: |
+          echo SAHJONY_HOSTINGER_MUTATION_QUEUE_FENCE=NO_OP
