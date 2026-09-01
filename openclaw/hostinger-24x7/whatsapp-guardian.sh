@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# SAHJONY WhatsApp 24/7 Guardian
-# Hostinger-local runtime is authoritative. Public health is secondary evidence.
-# Repairs only reversible runtime state; it does not bypass Meta/WhatsApp authentication or policy gates.
+# SAHJONY WhatsApp 24/7 Guardian — Hostinger/OpenClaw only.
+# Hostinger-local runtime is authoritative; public health is secondary evidence.
+# Repairs only reversible runtime state and never bypasses WhatsApp pairing/2FA/auth.
 
 LOCK=/run/lock/sahjony-whatsapp-guardian.lock
 STATE_DIR=/var/lib/sahjony-whatsapp-guardian
 LOG=/var/log/sahjony-whatsapp-guardian.log
+RESTART_STAMP="$STATE_DIR/last-restart"
+RESTART_COOLDOWN="${SAHJONY_RESTART_COOLDOWN_SECONDS:-300}"
 mkdir -p "$STATE_DIR" "$(dirname "$LOCK")"
 exec 9>"$LOCK"
 flock -n 9 || exit 0
@@ -24,6 +26,13 @@ mapfile -t IDS < <(docker ps -aq | while read -r id; do
 done)
 ((${#IDS[@]})) || fail openclaw_container_missing
 
+probe_ready(){
+  local id="$1" probe
+  probe="$(docker exec "$id" sh -lc 'command -v openclaw >/dev/null 2>&1 && openclaw channels status --probe 2>&1' || true)"
+  printf '%s\n' "$probe"
+  grep -Eqi 'whatsapp.*(connected|ready|active|healthy|ok)|(connected|ready|active|healthy).*whatsapp' <<<"$probe"
+}
+
 healthy=false
 for id in "${IDS[@]}"; do
   docker update --restart unless-stopped "$id" >/dev/null || true
@@ -31,24 +40,22 @@ for id in "${IDS[@]}"; do
   [[ "$status" == running ]] || docker start "$id" >/dev/null || true
   name="$(docker inspect "$id" --format '{{.Name}}' 2>/dev/null | sed 's#^/##')"
   echo "OPENCLAW_CONTAINER=$name status=$(docker inspect "$id" --format '{{.State.Status}}') restart=$(docker inspect "$id" --format '{{.HostConfig.RestartPolicy.Name}}')"
-
-  probe="$(docker exec "$id" sh -lc 'command -v openclaw >/dev/null 2>&1 && openclaw channels status --probe 2>&1' || true)"
-  printf '%s\n' "$probe"
-  if grep -Eqi 'whatsapp.*(connected|ready|ok)|connected.*whatsapp' <<<"$probe"; then
-    healthy=true
-    break
-  fi
+  if probe_ready "$id"; then healthy=true; break; fi
 done
 
 if [[ "$healthy" != true ]]; then
   echo OPENCLAW_WHATSAPP_PROBE_FAILED=1
-  for id in "${IDS[@]}"; do docker restart "$id" >/dev/null || true; done
-  sleep 20
-  for id in "${IDS[@]}"; do
-    probe="$(docker exec "$id" sh -lc 'command -v openclaw >/dev/null 2>&1 && openclaw channels status --probe 2>&1' || true)"
-    printf '%s\n' "$probe"
-    grep -Eqi 'whatsapp.*(connected|ready|ok)|connected.*whatsapp' <<<"$probe" && healthy=true && break
-  done
+  now="$(date +%s)"; last=0
+  [[ -f "$RESTART_STAMP" ]] && last="$(cat "$RESTART_STAMP" 2>/dev/null || echo 0)"
+  if (( now - last >= RESTART_COOLDOWN )); then
+    echo "OPENCLAW_RESTART_ALLOWED cooldown=${RESTART_COOLDOWN}s"
+    printf '%s\n' "$now" > "$RESTART_STAMP"
+    for id in "${IDS[@]}"; do docker restart "$id" >/dev/null || true; done
+    sleep 20
+    for id in "${IDS[@]}"; do probe_ready "$id" && healthy=true && break; done
+  else
+    echo "OPENCLAW_RESTART_SUPPRESSED cooldown=${RESTART_COOLDOWN}s age=$((now-last))s"
+  fi
 fi
 
 if [[ "$healthy" == true ]]; then
@@ -59,5 +66,5 @@ else
   exit 2
 fi
 
-# Secondary observation only: never downgrade a healthy Hostinger-local runtime because Vercel is stale.
+# Secondary observation only; never downgrade healthy Hostinger-local evidence because app health is stale.
 curl -fsS --max-time 15 https://www.sahjony.com/whatsapp/health > "$STATE_DIR/public-health.json.tmp" 2>/dev/null && mv "$STATE_DIR/public-health.json.tmp" "$STATE_DIR/public-health.json" || true
