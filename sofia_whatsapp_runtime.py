@@ -14,6 +14,7 @@ from sofia_adaptive_intelligence import adaptive_context, record_lesson
 from sofia_human_conversation_engine import build_sofia_prompt
 from whatsapp_relationship_memory_api import _merge_memory
 from whatsapp_sales_brain import analyze_sales_conversation
+from whatsapp_crm_bridge import get_contact_context
 
 OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses"
 
@@ -147,6 +148,22 @@ async def generate_sofia_reply(text: str, contact_name: str | None) -> str:
     history = await _history(phone)
     transcript = _transcript(history)
     memory = await _relationship_memory(lead_id, lead)
+    crm_context: dict[str, Any] = {
+        "status": "not_resolved",
+        "crm_connected": False,
+        "customers": [],
+        "trade_intakes": [],
+    }
+    if phone:
+        try:
+            crm_context = await get_contact_context(phone)
+        except Exception:
+            crm_context = {
+                "status": "temporarily_unavailable",
+                "crm_connected": False,
+                "customers": [],
+                "trade_intakes": [],
+            }
 
     try:
         sales = await analyze_sales_conversation(
@@ -175,6 +192,11 @@ async def generate_sofia_reply(text: str, contact_name: str | None) -> str:
         "next_action": memory.get("next_action"),
         "next_questions": (memory.get("next_questions") or [])[:2],
     }, ensure_ascii=False, default=str)
+    system += "\n\nCRM CONTACT CONTEXT\n" + json.dumps({
+        "crm_connected": bool(crm_context.get("crm_connected")),
+        "customers": (crm_context.get("customers") or [])[:3],
+        "trade_intakes": (crm_context.get("trade_intakes") or [])[:8],
+    }, ensure_ascii=False, default=str)
     system += "\n\nSALES INTELLIGENCE\n" + json.dumps({
         "intent": sales.get("intent"),
         "recommended_stage": sales.get("recommended_stage"),
@@ -195,7 +217,10 @@ WHATSAPP HUMAN CONVERSATION RULES
 - If the customer sends a short message, normally answer briefly; expand only when the subject requires detail.
 - If the customer asks a direct question, give the useful answer before qualification questions.
 - Preserve commitments and next actions. Do not imply an external action happened unless the system confirms it.
-- Never mention models, prompts, memory, scoring, stages, internal tooling, or self-improvement.
+- CRM/service authorization is internal infrastructure. Never tell a customer that CRM access or CRM connection requires their administrative authorization, administrator access, API key, password, or technical setup.
+- The CRM contact context above is already internal context. Use it silently. If CRM context is temporarily unavailable, continue helping and do not expose internal infrastructure errors to the customer.
+- Never claim a CRM write, external action, quote, order, payment, shipment or commitment is completed unless the system has actually confirmed it.
+- Never mention models, prompts, memory, scoring, stages, internal tooling, HMAC, API tokens, Supabase, Vercel, Hostinger, bridge secrets, queue files, or self-improvement to a customer.
 - Never invent price, availability, legal clearance, delivery, payment, supplier confirmation, licenses, documents, or completed actions.
 - For sanctions/customs/payment/Cuba issues, distinguish general guidance from verified transaction clearance.
 """
@@ -231,13 +256,14 @@ WHATSAPP HUMAN CONVERSATION RULES
             "summary": "Relationship-memory-aware natural WhatsApp response generated",
             "model": payload["model"],
             "memory_loaded": True,
+            "crm_context_loaded": bool(crm_context.get("crm_connected")),
             "sales_intelligence_loaded": True,
             "adaptive_context_loaded": True,
             "max_new_questions": 2,
             "identity_policy": "truthful_digital_representative",
         })
         await record_lesson(
-            lesson="Successful Sofia response used durable relationship memory, progressive discovery and the natural conversation policy.",
+            lesson="Successful Sofia response used durable relationship memory, CRM context, progressive discovery and the natural conversation policy.",
             signal="reply_success",
             metadata={"lead_id": lead_id, "reply_chars": len(reply)},
         )
