@@ -1,4 +1,4 @@
-name: Hostinger V13 Recovery Cleanup Safety Net
+name: Hostinger V13 Recovery Cleanup and Controller Handoff
 
 on:
   workflow_run:
@@ -8,6 +8,7 @@ on:
       - completed
 
 permissions:
+  actions: write
   contents: read
 
 concurrency:
@@ -19,24 +20,26 @@ env:
   VM_ID: '767852'
 
 jobs:
-  cleanup:
-    if: github.event.workflow_run.id == 33474835830 && github.event.workflow_run.conclusion != 'success'
+  handoff:
+    if: github.event.workflow_run.id == 33474835830
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 25
     env:
       API_TOKEN: ${{ secrets.HOSTINGER_API_TOKEN }}
+      GH_TOKEN: ${{ github.token }}
     steps:
-      - name: Validate exact failed V13 handoff
+      - name: Validate exact V13 handoff
         shell: bash
         run: |
           set -euo pipefail
           [[ "${{ github.event.workflow_run.id }}" == '33474835830' ]]
           [[ "${{ github.event.workflow_run.name }}" == 'Hostinger Runtime Lineage V13' ]]
-          [[ "${{ github.event.workflow_run.conclusion }}" != 'success' ]]
           [[ -n "$API_TOKEN" ]]
-          echo HOSTINGER_V13_CLEANUP_EXACT_RUN=1
+          echo "HOSTINGER_V13_CONCLUSION=${{ github.event.workflow_run.conclusion }}"
+          echo HOSTINGER_V13_HANDOFF_EXACT_RUN=1
 
-      - name: Drain Hostinger action plane before cleanup
+      - name: Drain Hostinger action plane after failed V13
+        if: github.event.workflow_run.conclusion != 'success'
         shell: bash
         run: |
           set -euo pipefail
@@ -53,7 +56,8 @@ jobs:
           echo HOSTINGER_V13_CLEANUP_ACTION_PLANE_STILL_BUSY=1 >&2
           exit 3
 
-      - name: Best-effort exit V13-owned Recovery
+      - name: Best-effort exit V13-owned Recovery after failure
+        if: github.event.workflow_run.conclusion != 'success'
         shell: bash
         run: |
           set -euo pipefail
@@ -93,3 +97,14 @@ jobs:
           echo "Unexpected recovery cleanup response: HTTP $status" >&2
           jq -c . <<<"$body" 2>/dev/null >&2 || true
           exit 6
+
+      - name: Dispatch conservative full recovery controller
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh workflow run hostinger-recovery-controller.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref main \
+            -f mode=full \
+            -f confirm_mutation=RECOVER
+          echo HOSTINGER_RECOVERY_CONTROLLER_FULL_DISPATCHED=1
