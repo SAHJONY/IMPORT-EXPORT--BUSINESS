@@ -1,0 +1,46 @@
+name: Hostinger WhatsApp V7 Dispatch Once
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/ops/hostinger-whatsapp-v7-trigger.txt'
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: hostinger-whatsapp-v7-dispatch-once
+  cancel-in-progress: false
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Refuse duplicate active V7 and dispatch exactly once
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          api="https://api.github.com/repos/$REPO"
+          auth=(-H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' -H 'X-GitHub-Api-Version: 2022-11-28')
+
+          runs="$(curl -fsS "${auth[@]}" "$api/actions/runs?per_page=100")"
+          active="$(jq '[.workflow_runs[] | select(.path == ".github/workflows/hostinger-whatsapp-recovery-v7.yml" and (.status == "queued" or .status == "in_progress" or .status == "waiting" or .status == "requested" or .status == "pending"))] | length' <<<"$runs")"
+          if (( active > 0 )); then
+            echo HOSTINGER_WHATSAPP_RECOVERY_V7_ALREADY_ACTIVE=1
+            jq -c '.workflow_runs[] | select(.path == ".github/workflows/hostinger-whatsapp-recovery-v7.yml" and (.status != "completed")) | {id,status,conclusion,created_at}' <<<"$runs"
+            exit 0
+          fi
+
+          code="$(curl -sS -o /tmp/dispatch.out -w '%{http_code}' -X POST "${auth[@]}" -H 'Content-Type: application/json' --data '{"ref":"main"}' "$api/actions/workflows/hostinger-whatsapp-recovery-v7.yml/dispatches")"
+          if [[ "$code" != 204 ]]; then
+            echo "HOSTINGER_WHATSAPP_RECOVERY_V7_DISPATCH_HTTP=$code" >&2
+            cat /tmp/dispatch.out >&2 || true
+            exit 30
+          fi
+          echo HOSTINGER_WHATSAPP_RECOVERY_V7_DISPATCHED=1
