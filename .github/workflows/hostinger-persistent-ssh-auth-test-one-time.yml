@@ -1,0 +1,88 @@
+name: Hostinger Persistent SSH Auth Test One-Time
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/hostinger-persistent-ssh-auth-test-one-time.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hostinger-vm-767852-observe
+  cancel-in-progress: false
+
+env:
+  HOST: '69.62.68.67'
+  SSH_USER: root
+
+jobs:
+  test_auth:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - name: Prepare persistent SSH credential
+        id: key
+        env:
+          HOSTINGER_SSH_PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "$HOSTINGER_SSH_PRIVATE_KEY" ]]; then
+            echo HOSTINGER_PERSISTENT_SSH_SECRET=MISSING
+            echo 'present=false' >> "$GITHUB_OUTPUT"
+            exit 20
+          fi
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$HOSTINGER_SSH_PRIVATE_KEY" > ~/.ssh/hostinger-persistent
+          chmod 600 ~/.ssh/hostinger-persistent
+          ssh-keygen -y -f ~/.ssh/hostinger-persistent >/dev/null
+          echo HOSTINGER_PERSISTENT_SSH_SECRET=PRESENT_VALID_PRIVATE_KEY
+          echo 'present=true' >> "$GITHUB_OUTPUT"
+
+      - name: Authenticate normal Kali read-only
+        id: auth
+        if: steps.key.outputs.present == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            -o ConnectTimeout=10 -o ConnectionAttempts=2 -i ~/.ssh/hostinger-persistent \
+            "$SSH_USER@$HOST" 'printf SAHJONY_PERSISTENT_SSH_AUTH=READY'
+          echo 'ready=true' >> "$GITHUB_OUTPUT"
+
+      - name: Inspect runtime read-only after authentication
+        if: steps.auth.outputs.ready == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            -o ConnectTimeout=10 -i ~/.ssh/hostinger-persistent "$SSH_USER@$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          echo SAHJONY_NORMAL_KALI_SSH=READY
+          printf 'HOSTNAME='; hostname
+          printf 'KERNEL='; uname -sr
+          if systemctl is-active --quiet docker.service 2>/dev/null; then
+            echo DOCKER_ACTIVE=true
+          else
+            echo DOCKER_ACTIVE=false
+          fi
+          if command -v docker >/dev/null 2>&1; then
+            echo 'OPENCLAW_CONTAINER_CANDIDATES_BEGIN'
+            docker ps -a --format '{{.Names}}|{{.Image}}|{{.Status}}' 2>/dev/null | grep -Ei 'openclaw|open[-_ ]?claw|claw' || true
+            echo 'OPENCLAW_CONTAINER_CANDIDATES_END'
+          fi
+          if systemctl is-active --quiet sahjony-whatsapp-guardian.timer 2>/dev/null; then
+            echo GUARDIAN_TIMER_ACTIVE=true
+          else
+            echo GUARDIAN_TIMER_ACTIVE=false
+          fi
+          if [[ -s /var/lib/sahjony-whatsapp-guardian/last-good ]]; then
+            echo GUARDIAN_LAST_GOOD_PRESENT=true
+            stat -c 'GUARDIAN_LAST_GOOD_MTIME=%Y' /var/lib/sahjony-whatsapp-guardian/last-good 2>/dev/null || true
+          else
+            echo GUARDIAN_LAST_GOOD_PRESENT=false
+          fi
+          REMOTE
