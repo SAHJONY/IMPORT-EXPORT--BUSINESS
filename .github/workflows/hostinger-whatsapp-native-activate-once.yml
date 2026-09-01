@@ -1,0 +1,119 @@
+name: Hostinger WhatsApp Native Activate Once
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/hostinger-whatsapp-native-activate-once.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hostinger-vm-767852-whatsapp-only
+  cancel-in-progress: false
+
+jobs:
+  activate-whatsapp-only:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    env:
+      HOST: '69.62.68.67'
+      USER: root
+      PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Prepare SSH
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "${PRIVATE_KEY:-}" ]] || { echo HOSTINGER_SSH_PRIVATE_KEY_MISSING=1 >&2; exit 2; }
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/hostinger-whatsapp-only
+          chmod 600 ~/.ssh/hostinger-whatsapp-only
+
+      - name: Activate only the existing native WhatsApp channel
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 \
+            -i ~/.ssh/hostinger-whatsapp-only "$USER@$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+
+          STATE=/var/lib/sahjony-openclaw-state
+          CONFIG="$STATE/openclaw.json"
+          HOME_DIR=/home/node
+
+          oc() {
+            env HOME="$HOME_DIR" \
+              OPENCLAW_HOME="$HOME_DIR" \
+              OPENCLAW_STATE_DIR="$STATE" \
+              OPENCLAW_CONFIG_PATH="$CONFIG" \
+              openclaw "$@"
+          }
+
+          echo 'WHATSAPP_ONLY_SCOPE=1'
+          systemctl is-active --quiet openclaw-gateway.service || {
+            echo OPENCLAW_GATEWAY_NOT_ACTIVE=1 >&2
+            exit 20
+          }
+          [[ -f "$CONFIG" ]] || { echo OPENCLAW_CONFIG_MISSING=1 >&2; exit 21; }
+
+          # Repair only the WhatsApp plugin tree ownership inherited from the old container, if needed.
+          ext="$STATE/extensions/whatsapp"
+          if [[ -d "$ext" ]] && find "$ext" -xdev \( ! -uid 0 -o ! -gid 0 \) -print -quit | grep -q .; then
+            chown -R root:root "$ext"
+            echo WHATSAPP_PLUGIN_OWNERSHIP_REPAIRED=1
+          fi
+
+          oc config validate >/dev/null
+
+          before="$(oc channels status --channel whatsapp --probe 2>&1 || true)"
+          printf '%s\n' "$before" | sed -E 's/(token|secret|key|password|authorization)[=:][^[:space:]]+/\1=[REDACTED]/Ig' | tail -n 80
+
+          # WhatsApp is an external official plugin. Do not touch any other plugin/model/runtime.
+          if printf '%s\n' "$before" | grep -Eiq 'plugin.*(missing|not installed|not found)|unknown channel|no plugin.*whatsapp'; then
+            oc plugins install clawhub:@openclaw/whatsapp >/dev/null
+            echo WHATSAPP_PLUGIN_INSTALLED=1
+          fi
+
+          # Installing does not necessarily enable the plugin. Enabling is idempotent.
+          set +e
+          enable_out="$(oc plugins enable whatsapp 2>&1)"
+          enable_rc=$?
+          set -e
+          if (( enable_rc != 0 )); then
+            printf '%s\n' "$enable_out" | sed -E 's/(token|secret|key|password|authorization)[=:][^[:space:]]+/\1=[REDACTED]/Ig' >&2
+            # Capability consent is intentionally not bypassed automatically.
+            exit "$enable_rc"
+          fi
+          echo WHATSAPP_PLUGIN_ENABLED=1
+
+          # One controlled reload of the already-configured Gateway; no Docker, no model changes, no QR/logout.
+          systemctl restart openclaw-gateway.service
+          sleep 10
+          systemctl is-active --quiet openclaw-gateway.service
+
+          after="$(oc channels status --channel whatsapp --probe 2>&1 || true)"
+          printf '%s\n' "$after" | sed -E 's/(token|secret|key|password|authorization)[=:][^[:space:]]+/\1=[REDACTED]/Ig' | tail -n 100
+
+          if printf '%s\n' "$after" | grep -Eiq 'whatsapp.*(linked.*running.*connected|connected|ready|healthy)|(linked.*running.*connected).*whatsapp'; then
+            echo SAHJONY_WHATSAPP_NATIVE_CONNECTED=1
+          elif printf '%s\n' "$after" | grep -Eiq 'not linked|qr required|login required'; then
+            echo SAHJONY_WHATSAPP_NATIVE_NEEDS_RELINK=1 >&2
+            exit 41
+          else
+            echo SAHJONY_WHATSAPP_NATIVE_NOT_CONNECTED=1 >&2
+            exit 42
+          fi
+
+          echo '=== PUBLIC HEALTH ==='
+          curl -fsS --retry 3 --retry-delay 2 https://www.sahjony.com/whatsapp/health \
+            | python3 -c 'import json,sys; h=json.load(sys.stdin); n=h.get("hostinger_openclaw") or {}; print(json.dumps({"status":h.get("status"),"send_ready":h.get("send_ready"),"webhook_ready":h.get("webhook_ready"),"gateway_connected":n.get("connected"),"gateway_id":n.get("gateway_id"),"business_number":n.get("business_number"),"last_seen_at":n.get("last_seen_at")},separators=(",",":")))'
+          echo SAHJONY_WHATSAPP_ACTIVATION_CHECK=COMPLETE
+          REMOTE
+
+      - name: Cleanup SSH
+        if: always()
+        shell: bash
+        run: rm -f ~/.ssh/hostinger-whatsapp-only
