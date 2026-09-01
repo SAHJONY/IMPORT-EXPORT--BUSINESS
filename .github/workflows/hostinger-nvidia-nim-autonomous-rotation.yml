@@ -61,22 +61,23 @@ jobs:
           "${SCP[@]}" openclaw/hostinger-24x7/openclaw-runtime-guardian.sh "$USER@$HOST:/tmp/sahjony-openclaw-runtime-guardian"
           "${SSH[@]}" "$USER@$HOST" 'set -euo pipefail; install -m 700 /tmp/sahjony-nvidia-nim-rotation /usr/local/sbin/sahjony-nvidia-nim-rotation; install -m 700 /tmp/sahjony-openclaw-runtime-guardian /usr/local/sbin/sahjony-openclaw-runtime-guardian; rm -f /tmp/sahjony-nvidia-nim-rotation /tmp/sahjony-openclaw-runtime-guardian; install -d -m 700 /var/lib/sahjony-nvidia-nim /var/lib/sahjony-openclaw-guardian'
 
-      - name: Harden OpenClaw restart semantics
+      - name: Enforce single native runtime and repair plugin ownership
         shell: bash
         run: |
           set -euo pipefail
           ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 -i ~/.ssh/hostinger-nim "$USER@$HOST" 'bash -s' <<'REMOTE'
           set -euo pipefail
-          systemctl enable docker.service >/dev/null 2>&1 || true
           cid=""
           if command -v docker >/dev/null 2>&1; then
-            cid="$(docker ps -aq | while read -r id; do meta="$(docker inspect "$id" --format '{{.Name}}|{{.Config.Image}}|{{json .Config.Labels}}' 2>/dev/null || true)"; grep -Eqi 'openclaw|open[-_ ]?claw|claw' <<<"$meta" && { echo "$id"; break; } || true; done)"
+            cid="$(docker ps -aq | while read -r id; do meta="$(docker inspect "$id" --format '{{.Name}}|{{.Config.Image}}' 2>/dev/null || true)"; grep -Eqi 'openclaw|open[-_ ]?claw|claw' <<<"$meta" && { echo "$id"; break; } || true; done)"
           fi
-          if [[ -n "$cid" ]]; then
-            docker update --restart unless-stopped "$cid" >/dev/null
-            echo "OPENCLAW_DOCKER_RESTART_POLICY=$(docker inspect "$cid" --format '{{.HostConfig.RestartPolicy.Name}}')"
-          fi
+
+          native=false
           if command -v openclaw >/dev/null 2>&1 && systemctl cat openclaw-gateway.service >/dev/null 2>&1; then
+            native=true
+          fi
+
+          if [[ "$native" == true ]]; then
             install -d -m 755 /etc/systemd/system/openclaw-gateway.service.d
             cat >/etc/systemd/system/openclaw-gateway.service.d/90-sahjony-24x7.conf <<'EOF2'
           [Unit]
@@ -88,7 +89,35 @@ jobs:
           EOF2
             systemctl daemon-reload
             systemctl enable openclaw-gateway.service >/dev/null
+
+            if [[ -n "$cid" ]]; then
+              docker update --restart no "$cid" >/dev/null
+              if [[ "$(docker inspect "$cid" --format '{{.State.Running}}' 2>/dev/null || true)" == true ]]; then
+                docker stop -t 30 "$cid" >/dev/null
+              fi
+              echo "OPENCLAW_DOCKER_STANDBY_RESTART=$(docker inspect "$cid" --format '{{.HostConfig.RestartPolicy.Name}}')"
+            fi
+
+            whatsapp_ext=/var/lib/sahjony-openclaw-state/extensions/whatsapp
+            if [[ -d "$whatsapp_ext" ]]; then
+              chown -R root:root "$whatsapp_ext"
+              if find "$whatsapp_ext" -xdev \( ! -uid 0 -o ! -gid 0 \) -print -quit | grep -q .; then
+                echo WHATSAPP_PLUGIN_OWNERSHIP_REPAIR_FAILED=1 >&2
+                exit 31
+              fi
+              echo WHATSAPP_PLUGIN_OWNERSHIP=ROOT
+            fi
+
+            systemctl restart openclaw-gateway.service
+            sleep 8
+            systemctl is-active --quiet openclaw-gateway.service
             echo OPENCLAW_NATIVE_RESTART_POLICY=READY
+          else
+            systemctl enable docker.service >/dev/null 2>&1 || true
+            if [[ -n "$cid" ]]; then
+              docker update --restart unless-stopped "$cid" >/dev/null
+              echo "OPENCLAW_DOCKER_RESTART_POLICY=$(docker inspect "$cid" --format '{{.HostConfig.RestartPolicy.Name}}')"
+            fi
           fi
           REMOTE
 
@@ -111,7 +140,7 @@ jobs:
 
           mode=''
           cid=''
-          if command -v openclaw >/dev/null 2>&1 && systemctl is-active --quiet openclaw-gateway.service 2>/dev/null; then
+          if command -v openclaw >/dev/null 2>&1 && systemctl cat openclaw-gateway.service >/dev/null 2>&1; then
             mode=native
           elif command -v docker >/dev/null 2>&1; then
             cid="$(docker ps --format '{{.ID}} {{.Names}} {{.Image}}' | awk 'tolower($0) ~ /openclaw/ {print $1; exit}')"
@@ -119,12 +148,16 @@ jobs:
           fi
           [[ -n "$mode" ]] || { echo OPENCLAW_RUNTIME_NOT_FOUND=1 >&2; exit 21; }
 
+          oc_native(){
+            env HOME=/home/node OPENCLAW_HOME=/home/node OPENCLAW_STATE_DIR=/var/lib/sahjony-openclaw-state OPENCLAW_CONFIG_PATH=/var/lib/sahjony-openclaw-state/openclaw.json openclaw "$@"
+          }
+
           if [[ "$mode" == native ]]; then
-            openclaw plugins enable nvidia >/dev/null 2>&1 || true
-            cat /root/.sahjony-nvidia-api-key | openclaw models auth paste-api-key --provider nvidia --profile-id nvidia:nim >/dev/null
-            openclaw models auth order set --provider nvidia nvidia:nim >/dev/null
-            openclaw config set models.providers.nvidia '{"baseUrl":"https://integrate.api.nvidia.com/v1","api":"openai-completions"}' --strict-json --merge >/dev/null
-            openclaw config validate >/dev/null
+            oc_native plugins enable nvidia >/dev/null 2>&1 || true
+            cat /root/.sahjony-nvidia-api-key | env HOME=/home/node OPENCLAW_HOME=/home/node OPENCLAW_STATE_DIR=/var/lib/sahjony-openclaw-state OPENCLAW_CONFIG_PATH=/var/lib/sahjony-openclaw-state/openclaw.json openclaw models auth paste-api-key --provider nvidia --profile-id nvidia:nim >/dev/null
+            oc_native models auth order set --provider nvidia nvidia:nim >/dev/null
+            oc_native config set models.providers.nvidia '{"baseUrl":"https://integrate.api.nvidia.com/v1","api":"openai-completions"}' --strict-json --merge >/dev/null
+            oc_native config validate >/dev/null
           else
             docker exec "$cid" openclaw plugins enable nvidia >/dev/null 2>&1 || true
             cat /root/.sahjony-nvidia-api-key | docker exec -i "$cid" openclaw models auth paste-api-key --provider nvidia --profile-id nvidia:nim >/dev/null
@@ -148,8 +181,8 @@ jobs:
           cat >/etc/systemd/system/sahjony-nvidia-nim-rotation.service <<'EOF2'
           [Unit]
           Description=SAHJONY autonomous NVIDIA NIM model rotation
-          After=network-online.target docker.service openclaw-gateway.service
-          Wants=network-online.target docker.service
+          After=network-online.target openclaw-gateway.service
+          Wants=network-online.target
 
           [Service]
           Type=oneshot
@@ -191,8 +224,8 @@ jobs:
           cat >/etc/systemd/system/sahjony-openclaw-runtime-guardian.service <<'EOF2'
           [Unit]
           Description=SAHJONY OpenClaw native 24x7 runtime guardian
-          After=network-online.target docker.service
-          Wants=network-online.target docker.service
+          After=network-online.target openclaw-gateway.service
+          Wants=network-online.target
           StartLimitIntervalSec=0
 
           [Service]
@@ -210,7 +243,8 @@ jobs:
           EOF2
 
           systemctl daemon-reload
-          systemctl enable --now sahjony-openclaw-runtime-guardian.service >/dev/null
+          systemctl enable sahjony-openclaw-runtime-guardian.service >/dev/null
+          systemctl restart sahjony-openclaw-runtime-guardian.service
           sleep 5
           systemctl is-enabled --quiet sahjony-openclaw-runtime-guardian.service
           systemctl is-active --quiet sahjony-openclaw-runtime-guardian.service
@@ -219,27 +253,50 @@ jobs:
           echo SAHJONY_OPENCLAW_RUNTIME_GUARDIAN=READY
           REMOTE
 
-      - name: Verify durable production state
+      - name: Verify durable native production state
         shell: bash
         run: |
           set -euo pipefail
           ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 -i ~/.ssh/hostinger-nim "$USER@$HOST" 'bash -s' <<'REMOTE'
           set -euo pipefail
+          systemctl is-enabled --quiet openclaw-gateway.service
+          systemctl is-active --quiet openclaw-gateway.service
+          systemctl is-enabled --quiet sahjony-openclaw-runtime-guardian.service
           systemctl is-active --quiet sahjony-openclaw-runtime-guardian.service
+          systemctl is-enabled --quiet sahjony-nvidia-nim-rotation.timer
           systemctl is-active --quiet sahjony-nvidia-nim-rotation.timer
+
           guardian="$(cat /var/lib/sahjony-openclaw-guardian/status.json)"
           nim="$(cat /var/lib/sahjony-nvidia-nim/status.json)"
           python3 - "$guardian" "$nim" <<'PY'
           import json, sys
           g=json.loads(sys.argv[1]); n=json.loads(sys.argv[2])
-          assert g.get('runtime') in {'native','docker'}, g
-          assert n.get('runtime') in {'native','docker'}, n
+          assert g.get('runtime') == 'native', g
+          assert g.get('healthy') is True, g
+          assert n.get('runtime') == 'native', n
           assert int(n.get('candidate_count',0)) >= 1, n
-          print('SAHJONY_RUNTIME_MODE='+str(g.get('runtime')))
-          print('SAHJONY_NIM_RUNTIME='+str(n.get('runtime')))
+          print('SAHJONY_RUNTIME_MODE=native')
+          print('SAHJONY_NIM_RUNTIME=native')
           print('SAHJONY_NIM_AUTH_READY='+str(bool(n.get('auth_ready'))).lower())
           PY
-          echo SAHJONY_PRODUCTION_24X7_RUNTIME=READY
+
+          cid=""
+          if command -v docker >/dev/null 2>&1; then
+            cid="$(docker ps -aq | while read -r id; do meta="$(docker inspect "$id" --format '{{.Name}}|{{.Config.Image}}' 2>/dev/null || true)"; grep -Eqi 'openclaw|open[-_ ]?claw|claw' <<<"$meta" && { echo "$id"; break; } || true; done)"
+          fi
+          if [[ -n "$cid" ]]; then
+            [[ "$(docker inspect "$cid" --format '{{.State.Running}}')" == false ]]
+            [[ "$(docker inspect "$cid" --format '{{.HostConfig.RestartPolicy.Name}}')" == no ]]
+            echo OPENCLAW_DOCKER_STANDBY=SAFE
+          fi
+
+          whatsapp_ext=/var/lib/sahjony-openclaw-state/extensions/whatsapp
+          if [[ -d "$whatsapp_ext" ]]; then
+            ! find "$whatsapp_ext" -xdev \( ! -uid 0 -o ! -gid 0 \) -print -quit | grep -q .
+            echo WHATSAPP_PLUGIN_OWNERSHIP=READY
+          fi
+
+          echo SAHJONY_PRODUCTION_NATIVE_24X7_RUNTIME=READY
           REMOTE
 
       - name: Cleanup transient credentials
