@@ -1,0 +1,90 @@
+{
+  "checked_at": "2026-09-01T05:05:04Z",
+  "busy": 0,
+  "actions": [
+    {
+      "id": 112343378,
+      "name": "ct_restart",
+      "state": "success",
+      "created_at": "2026-09-01T05:01:40Z",
+      "updated_at": "2026-09-01T05:01:49Z"
+    },
+    {
+      "id": 112341668,
+      "name": "ct_recovery_stop",
+      "state": "success",
+      "created_at": "2026-09-01T04:56:01Z",
+      "updated_at": "2026-09-01T04:56:10Z"
+    },
+    {
+      "id": 112341044,
+      "name": "ct_recovery",
+      "state": "success",
+      "created_at": "2026-09-01T04:53:36Z",
+      "updated_at": "2026-09-01T04:55:47Z"
+    },
+    {
+      "id": 112339621,
+      "name": "ct_restart",
+      "state": "success",
+      "created_at": "2026-09-01T04:47:58Z",
+      "updated_at": "2026-09-01T04:48:07Z"
+    },
+    {
+      "id": 112338219,
+      "name": "ct_restart",
+      "state": "success",
+      "created_at": "2026-09-01T04:43:09Z",
+      "updated_at": "2026-09-01T04:43:17Z"
+    },
+    {
+      "id": 112337787,
+      "name": "ct_recovery_stop",
+      "state": "success",
+      "created_at": "2026-09-01T04:41:25Z",
+      "updated_at": "2026-09-01T04:41:36Z"
+    },
+    {
+      "id": 112337146,
+      "name": "ct_recovery",
+      "state": "success",
+      "created_at": "2026-09-01T04:38:25Z",
+      "updated_at": "2026-09-01T04:40:48Z"
+    },
+    {
+      "id": 112337107,
+      "name": "ct_recovery_stop",
+      "state": "success",
+      "created_at": "2026-09-01T04:38:13Z",
+      "updated_at": "2026-09-01T04:38:23Z"
+    },
+    {
+      "id": 112336547,
+      "name": "ct_recovery",
+      "state": "success",
+      "created_at": "2026-09-01T04:35:58Z",
+      "updated_at": "2026-09-01T04:38:10Z"
+    },
+    {
+      "id": 112336487,
+      "name": "ct_recovery_stop",
+      "state": "success",
+      "created_at": "2026-09-01T04:35:40Z",
+      "updated_at": "2026-09-01T04:35:49Z"
+    },
+    {
+      "id": 112335531,
+      "name": "ct_recovery",
+      "state": "success",
+      "created_at": "2026-09-01T04:31:57Z",
+      "updated_at": "2026-09-01T04:35:04Z"
+    },
+    {
+      "id": 112330419,
+      "name": "ct_recovery_stop",
+      "state": "success",
+      "created_at": "2026-09-01T04:12:25Z",
+      "updated_at": "2026-09-01T04:12:36Z"
+    }
+  ]
+}
