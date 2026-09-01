@@ -137,19 +137,22 @@ jobs:
 
             matched=1
             known_hosts="${RUNNER_TEMP}/known_hosts"
-            ssh-keyscan -T 10 -H "${vm_ip}" > "${known_hosts}" 2>/dev/null
-            if ssh -i "${key_file}" \
-              -o BatchMode=yes \
-              -o ConnectTimeout=15 \
-              -o IdentitiesOnly=yes \
-              -o PasswordAuthentication=no \
-              -o StrictHostKeyChecking=yes \
-              -o UserKnownHostsFile="${known_hosts}" \
-              "root@${vm_ip}" true; then
-              authenticated=1
-              echo "Hostinger VPS ${vm_id}: SSH key attached and root authentication succeeded." >> "${GITHUB_STEP_SUMMARY}"
-              break
-            fi
+            for attempt in {1..12}; do
+              if ssh-keyscan -T 10 -H "${vm_ip}" > "${known_hosts}" 2>/dev/null && \
+                ssh -i "${key_file}" \
+                  -o BatchMode=yes \
+                  -o ConnectTimeout=15 \
+                  -o IdentitiesOnly=yes \
+                  -o PasswordAuthentication=no \
+                  -o StrictHostKeyChecking=yes \
+                  -o UserKnownHostsFile="${known_hosts}" \
+                  "root@${vm_ip}" true; then
+                authenticated=1
+                echo "Hostinger VPS ${vm_id}: SSH key attached and root authentication succeeded." >> "${GITHUB_STEP_SUMMARY}"
+                break 2
+              fi
+              sleep 5
+            done
           done < <(jq -r '
             (if type == "array" then . else (.data // []) end)[] |
             [(.id | tostring),
@@ -162,6 +165,6 @@ jobs:
             exit 1
           fi
           if [[ "${authenticated}" -ne 1 ]]; then
-            echo "The key is attached, but non-interactive root SSH authentication failed." >> "${GITHUB_STEP_SUMMARY}"
+            echo "The key is attached, but port 22 or non-interactive root SSH authentication remained unavailable after retries." | tee -a "${GITHUB_STEP_SUMMARY}" >&2
             exit 1
           fi
