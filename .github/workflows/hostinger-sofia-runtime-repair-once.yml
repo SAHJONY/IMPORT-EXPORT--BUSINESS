@@ -145,7 +145,7 @@ jobs:
           systemctl is-active --quiet sahjony-openclaw-health-sidecar.timer
           token="$(sed -n 's/^OPENCLAW_GATEWAY_TOKEN=//p' /etc/openclaw-gateway.env 2>/dev/null | head -n1 || true)"
           if [[ -n "$token" ]]; then
-            wa="$(oc channels status --channel whatsapp --probe --token "$token" 2>&1 || true)"
+            wa="$(OPENCLAW_GATEWAY_TOKEN="$token" oc channels status --channel whatsapp --probe 2>&1 || true)"
           else
             wa="$(oc channels status --channel whatsapp 2>&1 || true)"
           fi
