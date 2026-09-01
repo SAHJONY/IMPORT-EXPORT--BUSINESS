@@ -1,0 +1,51 @@
+name: Hostinger Docker Readonly Diagnostic
+
+on:
+  push:
+    paths:
+      - '.github/workflows/hostinger-docker-readonly-diagnostic.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  HOSTINGER_API_BASE: https://developers.hostinger.com
+  VM_ID: '767852'
+
+jobs:
+  inspect:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      API_TOKEN: ${{ secrets.HOSTINGER_API_TOKEN }}
+    steps:
+      - name: Inspect VPS and Docker Manager read-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "$API_TOKEN" ]] || { echo HOSTINGER_API_TOKEN_MISSING=1 >&2; exit 2; }
+          vm="$(curl -fsS -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID")"
+          echo "$vm" | jq -c '{id,state,hostname,ipv4,ipv6}' || true
+          actions="$(curl -fsS -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/actions?page=1")"
+          echo "$actions" | jq -c '[.data[]? | {id,name,state,created_at,updated_at}] | .[0:12]'
+          tmp="$(mktemp)"
+          code="$(curl -sS -o "$tmp" -w '%{http_code}' -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/docker" || true)"
+          echo "HOSTINGER_DOCKER_MANAGER_HTTP=$code"
+          if [ "$code" != 200 ]; then
+            sed -n '1,80p' "$tmp" || true
+            echo HOSTINGER_DOCKER_MANAGER_READONLY_UNAVAILABLE=1
+            exit 0
+          fi
+          jq -c '[.[] | {name,status,state,path,containers:[.containers[]? | {name,image,status,state,health,ports}]}]' "$tmp"
+          mapfile -t projects < <(jq -r '.[] | select((.name // "" | test("openclaw|claw";"i")) or ([.containers[]? | ((.name // "") + " " + (.image // "")) | test("openclaw|claw";"i")] | any)) | .name' "$tmp")
+          if ((${#projects[@]} == 0)); then
+            echo HOSTINGER_OPENCLAW_PROJECT_READONLY=NOT_FOUND
+            exit 0
+          fi
+          for project in "${projects[@]}"; do
+            echo "HOSTINGER_OPENCLAW_PROJECT_READONLY=$project"
+            curl -fsS -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/docker/$project/containers" | jq -c '[.[] | {name,image,status,state,health,ports}]' || true
+            curl -fsS -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/docker/$project/logs" | jq -c '[.[] | {service,entries:(.entries[-15:] // [])}]' || true
+          done
+          echo HOSTINGER_DOCKER_READONLY_DIAGNOSTIC=COMPLETE
