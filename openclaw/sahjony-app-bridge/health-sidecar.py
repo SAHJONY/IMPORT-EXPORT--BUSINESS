@@ -4,7 +4,7 @@
 Runs outside the OpenClaw plugin runtime so health reporting does not depend on
 plugin subprocess semantics. It probes the real OpenClaw CLI, signs the same
 HMAC heartbeat used by the application bridge, and posts authoritative channel
-state to SAHJONY.
+state to SAHJONY. It never links, unlinks, logs out, or mutates WhatsApp auth.
 """
 from __future__ import annotations
 
@@ -14,7 +14,6 @@ import json
 import os
 import re
 import subprocess
-import sys
 import time
 import urllib.error
 import urllib.request
@@ -25,6 +24,7 @@ STATE_DIR = Path(os.environ.get("OPENCLAW_STATE_DIR", HOME / ".openclaw"))
 ENV_FILE = STATE_DIR / ".env"
 OPENCLAW_BIN = os.environ.get("OPENCLAW_BIN", str(STATE_DIR / "bin" / "openclaw"))
 APP_URL = os.environ.get("SAHJONY_APP_URL", "https://www.sahjony.com").rstrip("/")
+GATEWAY_ID = os.environ.get("SAHJONY_GATEWAY_ID", "hostinger-vps")
 ACCOUNT_ID = os.environ.get("SAHJONY_WHATSAPP_ACCOUNT_ID", "default")
 BUSINESS_NUMBER = os.environ.get("SAHJONY_WHATSAPP_BUSINESS_NUMBER", "+12816628581")
 BUSINESS_NAME = os.environ.get("SAHJONY_WHATSAPP_BUSINESS_NAME", "SAHJONY LLC")
@@ -71,12 +71,12 @@ def probe() -> dict[str, object]:
             or re.search(r"linked,\s*running,\s*connected", status_output, re.I)
         )
     )
-    healthy = bool(status_code == 0 and re.search(r"health:healthy", status_output, re.I))
+    healthy_marker = bool(status_code == 0 and re.search(r"health\s*:\s*healthy", status_output, re.I))
     gateway_version = version_output.strip().splitlines()[0][:80] if version_code == 0 and version_output.strip() else None
 
     return {
         "connected": connected,
-        "healthy": healthy,
+        "healthy_marker": healthy_marker,
         "gateway_version": gateway_version,
         "status_code": status_code,
         "status_excerpt": status_output[-1200:],
@@ -96,7 +96,7 @@ def signed_post(secret: str, payload: dict[str, object]) -> tuple[int, str]:
             "Content-Type": "application/json",
             "X-SAHJONY-Timestamp": timestamp,
             "X-SAHJONY-Signature": f"sha256={digest}",
-            "User-Agent": "SAHJONY-OpenClaw-Health-Sidecar/1.0",
+            "User-Agent": "SAHJONY-OpenClaw-Health-Sidecar/2.0",
         },
     )
     try:
@@ -112,6 +112,11 @@ def main() -> int:
     env = read_env(ENV_FILE)
     secret = os.environ.get("SAHJONY_APP_BRIDGE_SECRET") or env.get("SAHJONY_APP_BRIDGE_SECRET", "")
     app_url = os.environ.get("SAHJONY_APP_URL") or env.get("SAHJONY_APP_URL")
+    gateway_id = os.environ.get("SAHJONY_GATEWAY_ID") or env.get("SAHJONY_GATEWAY_ID") or GATEWAY_ID
+    account_id = os.environ.get("SAHJONY_WHATSAPP_ACCOUNT_ID") or env.get("SAHJONY_WHATSAPP_ACCOUNT_ID") or ACCOUNT_ID
+    business_number = os.environ.get("SAHJONY_WHATSAPP_BUSINESS_NUMBER") or env.get("SAHJONY_WHATSAPP_BUSINESS_NUMBER") or BUSINESS_NUMBER
+    business_name = os.environ.get("SAHJONY_WHATSAPP_BUSINESS_NAME") or env.get("SAHJONY_WHATSAPP_BUSINESS_NAME") or BUSINESS_NAME
+    model = os.environ.get("SAHJONY_REASONING_MODEL") or env.get("SAHJONY_REASONING_MODEL") or MODEL
     global APP_URL
     if app_url:
         APP_URL = app_url.rstrip("/")
@@ -125,25 +130,26 @@ def main() -> int:
 
     state = probe()
     payload = {
-        "gateway_id": "default",
-        "account_id": ACCOUNT_ID,
-        "channel_connected": bool(state["connected"] and state["healthy"]),
-        "business_number": BUSINESS_NUMBER,
-        "business_name": BUSINESS_NAME,
-        "model": MODEL,
+        "gateway_id": gateway_id,
+        "account_id": account_id,
+        "channel_connected": bool(state["connected"]),
+        "business_number": business_number,
+        "business_name": business_name,
+        "model": model,
         "gateway_version": state["gateway_version"],
-        "probe_source": "macos-health-sidecar-v1",
     }
     http_status, response = signed_post(secret, payload)
     result = {
-        "ok": http_status == 200,
+        "ok": http_status == 200 and payload["channel_connected"],
         "http_status": http_status,
-        "payload": payload,
+        "gateway_id": gateway_id,
+        "business_number_configured": bool(business_number),
+        "channel_connected": payload["channel_connected"],
         "probe": state,
         "response_excerpt": response[:500],
     }
     print(json.dumps(result, ensure_ascii=False))
-    return 0 if http_status == 200 and payload["channel_connected"] else 1
+    return 0 if result["ok"] else 1
 
 
 if __name__ == "__main__":
