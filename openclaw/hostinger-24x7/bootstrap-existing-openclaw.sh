@@ -9,6 +9,7 @@ INSTALL_ROOT="${SAHJONY_OPENCLAW_ROOT:-/opt/sahjony-openclaw}"
 REPO_DIR="${INSTALL_ROOT}/repo"
 BACKUP_DIR="${INSTALL_ROOT}/backups"
 RUNTIME_ENV="${INSTALL_ROOT}/runtime.env"
+GATEWAY_ID="${SAHJONY_GATEWAY_ID:-hostinger-vps}"
 
 require_root() {
   if [[ "$(id -u)" -ne 0 ]]; then
@@ -78,6 +79,7 @@ ensure_bridge_secret() {
   cat >"${RUNTIME_ENV}" <<EOF
 SAHJONY_APP_URL=${APP_URL}
 SAHJONY_APP_BRIDGE_SECRET=${secret}
+SAHJONY_GATEWAY_ID=${GATEWAY_ID}
 SAHJONY_BUSINESS_NUMBER=${BUSINESS_NUMBER}
 SAHJONY_BUSINESS_NAME=${BUSINESS_NAME}
 EOF
@@ -106,6 +108,7 @@ install_bridge_into_container() {
   docker exec -i "$cid" sh -lc "umask 077; cat > '$state_dir/.env'" <<EOF
 SAHJONY_APP_URL=${APP_URL}
 SAHJONY_APP_BRIDGE_SECRET=${SAHJONY_APP_BRIDGE_SECRET}
+SAHJONY_GATEWAY_ID=${GATEWAY_ID}
 EOF
 
   docker rm -f sahjony-openclaw-plugin-staging >/dev/null 2>&1 || true
@@ -118,7 +121,7 @@ EOF
     docker exec "$cid" openclaw config set channels.whatsapp.accounts.default.pluginHooks.messageReceived true --strict-json || true
     docker exec "$cid" openclaw config set plugins.entries.sahjony-app-bridge.enabled true --strict-json || true
     docker exec "$cid" openclaw config set plugins.entries.sahjony-app-bridge.config \
-      "{\"appUrl\":\"${APP_URL}\",\"accountId\":\"default\",\"businessNumber\":\"${BUSINESS_NUMBER}\",\"businessName\":\"${BUSINESS_NAME}\",\"pollIntervalMs\":30000}" \
+      "{\"appUrl\":\"${APP_URL}\",\"accountId\":\"default\",\"gatewayId\":\"${GATEWAY_ID}\",\"businessNumber\":\"${BUSINESS_NUMBER}\",\"businessName\":\"${BUSINESS_NAME}\",\"pollIntervalMs\":30000}" \
       --strict-json --merge || true
     docker exec "$cid" openclaw config validate
   else
