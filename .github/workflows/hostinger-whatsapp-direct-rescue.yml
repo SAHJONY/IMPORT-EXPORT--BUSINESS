@@ -1,0 +1,157 @@
+name: Hostinger WhatsApp Direct Rescue
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/hostinger-whatsapp-direct-rescue.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hostinger-whatsapp-direct-rescue
+  cancel-in-progress: false
+
+env:
+  HOSTINGER_API_BASE: https://developers.hostinger.com
+  VM_ID: '767852'
+  HOST: '69.62.68.67'
+  USER: root
+
+jobs:
+  rescue:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      API_TOKEN: ${{ secrets.HOSTINGER_API_TOKEN }}
+      HOSTINGER_SSH_PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify Hostinger control plane and recent actions
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "$API_TOKEN" ]] || { echo HOSTINGER_API_TOKEN_MISSING=1 >&2; exit 2; }
+          vm_code="$(curl -sS -o /tmp/vm.json -w '%{http_code}' -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID")"
+          echo "HOSTINGER_VM_HTTP=$vm_code"
+          [[ "$vm_code" == 200 ]] || { cat /tmp/vm.json; exit 3; }
+          jq '{id,status,state,hostname,ipv4,ipv6}' /tmp/vm.json 2>/dev/null || jq . /tmp/vm.json
+          act_code="$(curl -sS -o /tmp/actions.json -w '%{http_code}' -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/actions?page=1")"
+          echo "HOSTINGER_ACTIONS_HTTP=$act_code"
+          if [[ "$act_code" == 200 ]]; then jq '[.data[]? | {id,name,state,created_at,updated_at}][0:12]' /tmp/actions.json; else cat /tmp/actions.json; fi
+
+      - name: Inspect Docker directly through Hostinger API
+        id: docker_api
+        shell: bash
+        run: |
+          set -euo pipefail
+          code="$(curl -sS -o /tmp/docker-projects.json -w '%{http_code}' -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/docker")"
+          echo "http_code=$code" >> "$GITHUB_OUTPUT"
+          echo "HOSTINGER_DOCKER_MANAGER_HTTP=$code"
+          cat /tmp/docker-projects.json | jq . 2>/dev/null || cat /tmp/docker-projects.json
+          if [[ "$code" == 200 ]]; then
+            candidate="$(jq -r '[.[] | select((.name // "" | test("openclaw|claw|sahjony";"i")) or ([.containers[]? | ((.name // "") + " " + (.image // ""))] | join(" ") | test("openclaw|claw";"i"))) | .name][0] // empty' /tmp/docker-projects.json)"
+            echo "candidate=$candidate" >> "$GITHUB_OUTPUT"
+            [[ -n "$candidate" ]] && echo "HOSTINGER_OPENCLAW_PROJECT=$candidate" || echo HOSTINGER_OPENCLAW_PROJECT_NOT_DISCOVERED=1
+          fi
+
+      - name: Restart discovered OpenClaw project without SSH
+        if: steps.docker_api.outputs.http_code == '200' && steps.docker_api.outputs.candidate != ''
+        id: docker_restart
+        shell: bash
+        env:
+          PROJECT: ${{ steps.docker_api.outputs.candidate }}
+        run: |
+          set -euo pipefail
+          code="$(curl -sS -o /tmp/docker-restart.json -w '%{http_code}' -X POST -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/docker/$PROJECT/restart")"
+          echo "HOSTINGER_DOCKER_RESTART_HTTP=$code"
+          cat /tmp/docker-restart.json | jq . 2>/dev/null || cat /tmp/docker-restart.json
+          [[ "$code" == 200 ]] || exit 20
+          action_id="$(jq -r '.id // empty' /tmp/docker-restart.json)"
+          if [[ "$action_id" =~ ^[0-9]+$ ]]; then
+            for i in $(seq 1 60); do
+              action="$(curl -fsS -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/actions/$action_id")"
+              state="$(jq -r '.state // empty' <<<"$action")"
+              echo "docker_restart_action=$action_id probe=$i state=${state:-unknown}"
+              [[ "$state" == success ]] && break
+              [[ "$state" =~ ^(failed|failure|error|cancelled|canceled)$ ]] && exit 21
+              sleep 5
+            done
+          fi
+
+      - name: Verify OpenClaw containers and logs through Hostinger API
+        if: steps.docker_api.outputs.http_code == '200' && steps.docker_api.outputs.candidate != ''
+        shell: bash
+        env:
+          PROJECT: ${{ steps.docker_api.outputs.candidate }}
+        run: |
+          set -euo pipefail
+          code="$(curl -sS -o /tmp/containers.json -w '%{http_code}' -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/docker/$PROJECT/containers")"
+          echo "HOSTINGER_DOCKER_CONTAINERS_HTTP=$code"
+          [[ "$code" == 200 ]] || { cat /tmp/containers.json; exit 22; }
+          jq '[.[] | {name,image,state,status,health,ports}]' /tmp/containers.json
+          jq -e 'any(.[]; ((.name // "") + " " + (.image // "") | test("openclaw|claw";"i")) and (.state == "running"))' /tmp/containers.json >/dev/null || { echo OPENCLAW_NOT_RUNNING_VIA_HOSTINGER_DOCKER_API=1 >&2; exit 23; }
+          curl -sS -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/docker/$PROJECT/logs" | jq '[.[] | {service,entries:(.entries[-40:] // [])}]' 2>/dev/null || true
+          echo SAHJONY_OPENCLAW_DOCKER_API_RUNTIME=READY
+
+      - name: Bounded VPS restart when Docker Manager is unavailable
+        if: steps.docker_api.outputs.http_code != '200'
+        id: vm_restart
+        shell: bash
+        run: |
+          set -euo pipefail
+          if nc -z -w 3 "$HOST" 22; then
+            echo HOSTINGER_TCP22_ALREADY_OPEN=1
+            exit 0
+          fi
+          code="$(curl -sS -o /tmp/vm-restart.json -w '%{http_code}' -X POST -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/restart")"
+          echo "HOSTINGER_VM_RESTART_HTTP=$code"
+          cat /tmp/vm-restart.json | jq . 2>/dev/null || cat /tmp/vm-restart.json
+          [[ "$code" == 200 ]] || exit 30
+          id="$(jq -r '.id // empty' /tmp/vm-restart.json)"
+          [[ "$id" =~ ^[0-9]+$ ]] || exit 31
+          for i in $(seq 1 72); do
+            action="$(curl -fsS -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/actions/$id")"
+            state="$(jq -r '.state // empty' <<<"$action")"
+            echo "vm_restart_action=$id probe=$i state=${state:-unknown}"
+            [[ "$state" == success ]] && break
+            [[ "$state" =~ ^(failed|failure|error|cancelled|canceled)$ ]] && exit 32
+            sleep 5
+          done
+          for i in $(seq 1 60); do nc -z -w 3 "$HOST" 22 && { echo HOSTINGER_TCP22_OPEN_AFTER_RESTART=1; exit 0; }; sleep 5; done
+          echo HOSTINGER_TCP22_STILL_CLOSED_AFTER_RESTART=1 >&2
+          exit 33
+
+      - name: Use persistent SSH key if available
+        if: steps.docker_api.outputs.http_code != '200'
+        id: ssh_path
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "$HOSTINGER_SSH_PRIVATE_KEY" ]] || { echo HOSTINGER_PERSISTENT_SSH_KEY_NOT_CONFIGURED=1; exit 0; }
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$HOSTINGER_SSH_PRIVATE_KEY" > ~/.ssh/hostinger
+          chmod 600 ~/.ssh/hostinger
+          if ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 -i ~/.ssh/hostinger "$USER@$HOST" 'echo SAHJONY_PERSISTENT_SSH_READY=1'; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo HOSTINGER_PERSISTENT_SSH_AUTH_FAILED=1
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install guardian over persistent SSH fallback
+        if: steps.ssh_path.outputs.ready == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          scp -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/hostinger openclaw/hostinger-24x7/whatsapp-guardian.sh openclaw/hostinger-24x7/install-whatsapp-guardian.sh "$USER@$HOST:/root/"
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/hostinger "$USER@$HOST" 'install -d /opt/sahjony/openclaw/hostinger-24x7; mv /root/whatsapp-guardian.sh /root/install-whatsapp-guardian.sh /opt/sahjony/openclaw/hostinger-24x7/; chmod +x /opt/sahjony/openclaw/hostinger-24x7/*.sh; cd /opt/sahjony/openclaw/hostinger-24x7 && ./install-whatsapp-guardian.sh; systemctl is-active sahjony-whatsapp-guardian.timer; echo SAHJONY_WHATSAPP_GUARDIAN=READY'
+
+      - name: Public transport observation
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          curl -fsS --max-time 20 https://www.sahjony.com/whatsapp/health | jq . || true
