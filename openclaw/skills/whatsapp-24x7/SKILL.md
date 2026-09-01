@@ -1,7 +1,9 @@
 # WhatsApp 24x7
 
 ## Purpose
-Maintain SAHJONY LLC WhatsApp availability continuously using authorized Meta Cloud and Hostinger OpenClaw transports. Never bypass account verification, pairing, 2FA, access controls, or provider policy.
+Maintain SAHJONY LLC WhatsApp availability continuously using the authorized **Hostinger + Docker + OpenClaw** runtime. Meta Cloud is not controlled and is not part of the production dependency chain.
+
+Never bypass WhatsApp account verification, QR/device pairing, 2FA, Hostinger authentication, access controls, or provider policy.
 
 ## Use this skill when
 - WhatsApp is disconnected, degraded, stale, or not sending/receiving.
@@ -14,23 +16,22 @@ Maintain SAHJONY LLC WhatsApp availability continuously using authorized Meta Cl
 2. Docker container state and `openclaw channels status --probe` on Hostinger.
 3. Fresh `hostinger-vps` heartbeat.
 4. `/whatsapp/health` Hostinger-specific fields.
-5. Generic public gateway fields.
+5. Generic public gateway fields only as supporting evidence.
 
-Never infer Hostinger health from Vercel deployment state.
+Never infer Hostinger health from Vercel deployment state. Never mark WhatsApp READY because of Meta fields.
 
 ## State machine
 
-### 1. Audit transports
-Check `https://www.sahjony.com/whatsapp/health`.
+### 1. Audit Hostinger OpenClaw
+Check `https://www.sahjony.com/whatsapp/health`, but treat direct Hostinger evidence as authoritative.
 
-Meta primary is ready only when explicit Meta send + webhook readiness is true.
-Hostinger fallback is ready only when the `hostinger-vps` gateway is fresh/connected or direct local evidence confirms the channel.
+Hostinger is ready only when `hostinger_independent_runtime=true`, `hostinger_openclaw.connected=true`, or direct authenticated inspection proves the WhatsApp channel is connected.
 
 ### 2. Prefer safe local healing
-If Hostinger SSH is authenticated, run the persistent guardian installer:
+If Hostinger SSH is authenticated, install/run:
 
 ```bash
-/opt/sahjony-openclaw/whatsapp-24x7-guardian.sh install
+/opt/sahjony-openclaw/whatsapp-hostinger-only-guardian.sh install
 ```
 
 The guardian:
@@ -43,12 +44,12 @@ The guardian:
 - installs a two-minute systemd timer;
 - retains pairing and durable state.
 
-### 3. Recovery only when local healing is unavailable
-Use `Hostinger WhatsApp 24x7 Recovery V6` only when neither Meta nor Hostinger is verified ready and normal Hostinger SSH cannot be used.
+### 3. Recovery only when normal SSH cannot heal the runtime
+Use `Hostinger WhatsApp 24x7 Recovery V6` when Hostinger WhatsApp is not ready and normal Hostinger SSH cannot be used.
 
-V6 must:
+Recovery must:
 - prevent concurrent V5/V6 recovery by shared concurrency lock;
-- POST Recovery and wait for its action ID to reach `success`;
+- POST Recovery and wait for its Hostinger action ID to reach `success`;
 - authenticate Recovery SSH;
 - locate the original OS disk;
 - install an ephemeral SSH key;
@@ -56,8 +57,8 @@ V6 must:
 - DELETE Recovery and wait for its stop action ID to reach `success`;
 - authenticate the normal OS;
 - stabilize the existing Docker/OpenClaw container;
-- persist/install the guardian before removing the ephemeral key;
-- verify WhatsApp locally and through public health;
+- persist/install the Hostinger-only guardian before removing ephemeral access;
+- verify WhatsApp locally and through Hostinger-specific public health;
 - clean up ephemeral access.
 
 ### 4. Anti-loop policy
@@ -66,22 +67,25 @@ V6 must:
 - Container restart cooldown: 5 minutes.
 - A failed legacy V5 does not block the first V6 remediation.
 - Never erase OpenClaw state or create a replacement container merely to solve connectivity.
+- Never restart a healthy OpenClaw container because Vercel or another unrelated cloud service is degraded.
 
 ## Acceptance
-Do not report `READY` until at least one production transport is verified ready.
-For Hostinger readiness, require:
-- normal OS booted;
+Do not report `READY` until Hostinger OpenClaw is verified ready.
+Require:
+- normal Hostinger OS booted;
 - Docker active;
 - existing OpenClaw container running;
 - persistent restart policy;
-- WhatsApp channel probe connected/ready;
-- guardian timer active;
-- fresh Hostinger-specific heartbeat or equivalent direct evidence.
+- `openclaw channels status --probe` shows WhatsApp connected/ready;
+- Hostinger-only guardian timer active;
+- fresh Hostinger-specific heartbeat or equivalent direct evidence;
+- production continues with the local iMac offline.
 
-For full cloud-primary readiness, Meta must also have the official WABA/Phone Number IDs, access token, app secret, webhook verify token, webhook subscription, and supported Graph API version configured.
+If the durable WhatsApp session expires or WhatsApp explicitly requires device re-linking, surface that as a pairing requirement. Software must not fabricate or bypass that authorization.
 
 ## Operator tools
-- `openclaw/hostinger-24x7/whatsapp-24x7-guardian.sh`
+- `openclaw/hostinger-24x7/whatsapp-hostinger-only-guardian.sh`
 - `openclaw/hostinger-24x7/whatsapp-24x7-control-plane.sh`
 - `.github/workflows/whatsapp-24x7-control-plane.yml`
 - `.github/workflows/hostinger-whatsapp-24x7-recovery-v6.yml`
+- `.github/workflows/whatsapp-24x7-lint.yml`
