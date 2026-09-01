@@ -17,7 +17,7 @@ TARGET_RECOVERY_WORKFLOW="hostinger-whatsapp-24x7-recovery-v6.yml"
 RECOVERY_COOLDOWN_MINUTES="${RECOVERY_COOLDOWN_MINUTES:-90}"
 AUTO_RECOVERY="${SAHJONY_AUTO_RECOVERY:-false}"
 FORCE_RECOVERY="${FORCE_RECOVERY:-false}"
-GUARDIAN="${GUARDIAN_SCRIPT:-openclaw/hostinger-24x7/whatsapp-24x7-guardian.sh}"
+GUARDIAN="${GUARDIAN_SCRIPT:-openclaw/hostinger-24x7/whatsapp-hostinger-only-guardian.sh}"
 
 log(){ printf '[whatsapp-control-plane] %s\n' "$*"; }
 warn(){ printf '[whatsapp-control-plane] WARN: %s\n' "$*" >&2; }
@@ -31,20 +31,20 @@ ssh_auth(){ [[ -s "$SSH_KEY_FILE" ]] && ssh -o BatchMode=yes -o StrictHostKeyChe
 
 run_guardian_remote(){
   [[ -r "$GUARDIAN" ]] || fail "guardian script not found: $GUARDIAN"
-  log 'persisting and installing Hostinger-local guardian over authenticated SSH'
+  log 'persisting and installing Hostinger-only WhatsApp guardian over authenticated SSH'
   ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 -i "$SSH_KEY_FILE" "$USER@$HOST" 'bash -s' < <(
     {
       cat <<'REMOTE'
 set -euo pipefail
 install -d -m 700 /opt/sahjony-openclaw
 umask 077
-cat > /opt/sahjony-openclaw/whatsapp-24x7-guardian.sh <<'GUARDIAN_EOF'
+cat > /opt/sahjony-openclaw/whatsapp-hostinger-only-guardian.sh <<'GUARDIAN_EOF'
 REMOTE
       cat "$GUARDIAN"
       cat <<'REMOTE'
 GUARDIAN_EOF
-chmod 700 /opt/sahjony-openclaw/whatsapp-24x7-guardian.sh
-/opt/sahjony-openclaw/whatsapp-24x7-guardian.sh install
+chmod 700 /opt/sahjony-openclaw/whatsapp-hostinger-only-guardian.sh
+/opt/sahjony-openclaw/whatsapp-hostinger-only-guardian.sh install
 REMOTE
     }
   )
