@@ -9,6 +9,7 @@ on:
 permissions:
   contents: write
 
+# Read-only provider snapshot while the serialized recovery controller owns mutations.
 jobs:
   snapshot:
     runs-on: ubuntu-24.04
