@@ -1,284 +1,177 @@
 name: Hostinger WhatsApp Pair Live
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/hostinger-whatsapp-pair-live.yml'
   workflow_dispatch:
+    inputs:
+      mode:
+        description: Pairing operation
+        required: true
+        type: choice
+        default: audit
+        options:
+          - audit
+          - pair_once
+          - mark_client_lock
+      client_lock_backoff_minutes:
+        description: Local safety backoff after WhatsApp reports device-link lock
+        required: false
+        default: '360'
+        type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: hostinger-vm-767852-mutation
+  group: hostinger-vm-767852-whatsapp-pairing
   cancel-in-progress: false
 
 env:
-  HOSTINGER_VM_ID: '767852'
   HOSTINGER_HOST: '69.62.68.67'
   HOSTINGER_USER: root
-  HOSTINGER_API_BASE: https://developers.hostinger.com
 
 jobs:
   pair:
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 15
     env:
-      HOSTINGER_API_TOKEN: ${{ secrets.HOSTINGER_API_TOKEN }}
       HOSTINGER_SSH_PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Prepare authorized management path
+      - name: Prepare authorized SSH
         shell: bash
         run: |
           set -euo pipefail
-          [[ -n "$HOSTINGER_API_TOKEN" ]] || { echo HOSTINGER_API_TOKEN_MISSING=1 >&2; exit 2; }
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq jq sshpass netcat-openbsd >/dev/null
+          [[ -n "${HOSTINGER_SSH_PRIVATE_KEY:-}" ]] || { echo HOSTINGER_SSH_PRIVATE_KEY_MISSING=1 >&2; exit 2; }
           install -d -m 700 ~/.ssh
-          if [[ -n "${HOSTINGER_SSH_PRIVATE_KEY:-}" ]]; then
-            printf '%s\n' "$HOSTINGER_SSH_PRIVATE_KEY" > ~/.ssh/hostinger-persistent
-            chmod 600 ~/.ssh/hostinger-persistent
-            ssh-keygen -y -f ~/.ssh/hostinger-persistent > ~/.ssh/hostinger-persistent.pub
-            echo "SSH_KEY_PATH=$HOME/.ssh/hostinger-persistent" >> "$GITHUB_ENV"
-            echo "SSH_EPHEMERAL=false" >> "$GITHUB_ENV"
-            echo "SAHJONY_PAIR_SSH_CREDENTIAL=persistent_secret"
-          else
-            ssh-keygen -q -t ed25519 -N '' -f ~/.ssh/whatsapp-pair -C "sahjony-whatsapp-pair-${GITHUB_RUN_ID}"
-            echo "SSH_KEY_PATH=$HOME/.ssh/whatsapp-pair" >> "$GITHUB_ENV"
-            echo "SSH_EPHEMERAL=true" >> "$GITHUB_ENV"
-            echo "SAHJONY_PAIR_SSH_CREDENTIAL=ephemeral_recovery_fallback"
-          fi
-          chmod +x openclaw/hostinger-24x7/hostinger-recovery-controller.sh
-          chmod +x openclaw/hostinger-24x7/ssh-self-heal.sh
-          chmod +x openclaw/hostinger-24x7/hostinger-runtime-bootstrap.sh
-          chmod +x openclaw/hostinger-24x7/openclaw-runtime-recovery.sh
+          printf '%s\n' "$HOSTINGER_SSH_PRIVATE_KEY" > ~/.ssh/hostinger
+          chmod 600 ~/.ssh/hostinger
+          echo "SSH_KEY_PATH=$HOME/.ssh/hostinger" >> "$GITHUB_ENV"
+          chmod +x openclaw/hostinger-24x7/whatsapp-pairing-controller.sh
           chmod +x openclaw/hostinger-24x7/whatsapp-hostinger-only-guardian.sh
 
-      - name: Verify authorized SSH and live guard
-        shell: bash
-        run: |
-          set -euo pipefail
-          set +e
-          openclaw/hostinger-24x7/hostinger-recovery-controller.sh repair-ssh
-          controller_rc=$?
-          set -e
-          opts=(-o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 -i "$SSH_KEY_PATH")
-          ready=0
-          for i in $(seq 1 24); do
-            if ssh "${opts[@]}" "$HOSTINGER_USER@$HOSTINGER_HOST" 'printf SAHJONY_NORMAL_SSH_OK' 2>/dev/null | grep -q SAHJONY_NORMAL_SSH_OK; then
-              ready=1
-              echo "SAHJONY_PAIR_SSH_READY_PROBE=$i"
-              break
-            fi
-            sleep 5
-          done
-          (( ready == 1 )) || exit "${controller_rc:-1}"
-          guard=0
-          for i in $(seq 1 8); do
-            if scp "${opts[@]}" openclaw/hostinger-24x7/ssh-self-heal.sh "$HOSTINGER_USER@$HOSTINGER_HOST:/tmp/sahjony-ssh-self-heal" >/dev/null 2>&1 && \
-              ssh "${opts[@]}" "$HOSTINGER_USER@$HOSTINGER_HOST" 'set -euo pipefail; install -m 755 /tmp/sahjony-ssh-self-heal /usr/local/sbin/sahjony-ssh-self-heal; /usr/local/sbin/sahjony-ssh-self-heal >/dev/null; systemctl is-active --quiet ssh.service; systemctl is-active --quiet sahjony-ssh-runtime-guard.timer; /usr/sbin/sshd -t'; then
-              guard=1
-              echo "SAHJONY_PAIR_SSH_GUARD_READY_PROBE=$i"
-              break
-            fi
-            sleep 5
-          done
-          (( guard == 1 )) || exit 21
-
-      - name: Start WhatsApp Gateway QR login
-        id: qr1
+      - name: Require normal Hostinger SSH
         shell: bash
         run: |
           set -euo pipefail
           opts=(-o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -i "$SSH_KEY_PATH")
-          ssh "${opts[@]}" "$HOSTINGER_USER@$HOSTINGER_HOST" \
-            "docker exec sahjony-openclaw-gateway openclaw gateway call web.login.start --params '{\"accountId\":\"default\",\"timeoutMs\":180000}' --timeout 190000 --json" \
-            > /tmp/whatsapp-login-start.json
+          ssh "${opts[@]}" "$HOSTINGER_USER@$HOSTINGER_HOST" 'printf SAHJONY_NORMAL_SSH_OK' | grep -q SAHJONY_NORMAL_SSH_OK || {
+            echo 'SAHJONY_PAIRING_BLOCKED_BY_HOSTINGER_SSH=1' >&2
+            echo 'Use the canonical Hostinger runtime recovery workflow before pairing. Pairing recovery does not mutate VPS recovery state.' >&2
+            exit 20
+          }
+
+      - name: Install lock-aware pairing controller
+        shell: bash
+        run: |
+          set -euo pipefail
+          opts=(-o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -i "$SSH_KEY_PATH")
+          scp "${opts[@]}" openclaw/hostinger-24x7/whatsapp-pairing-controller.sh "$HOSTINGER_USER@$HOSTINGER_HOST:/tmp/sahjony-whatsapp-pairing-controller"
+          scp "${opts[@]}" openclaw/hostinger-24x7/whatsapp-hostinger-only-guardian.sh "$HOSTINGER_USER@$HOSTINGER_HOST:/tmp/sahjony-whatsapp-guardian"
+          ssh "${opts[@]}" "$HOSTINGER_USER@$HOSTINGER_HOST" 'set -euo pipefail; install -m 700 /tmp/sahjony-whatsapp-pairing-controller /usr/local/sbin/sahjony-whatsapp-pairing-controller; install -m 700 /tmp/sahjony-whatsapp-guardian /usr/local/sbin/sahjony-whatsapp-guardian; rm -f /tmp/sahjony-whatsapp-pairing-controller /tmp/sahjony-whatsapp-guardian'
+
+      - name: Audit pairing state
+        if: inputs.mode == 'audit'
+        shell: bash
+        run: |
+          set -euo pipefail
+          opts=(-o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -i "$SSH_KEY_PATH")
+          ssh "${opts[@]}" "$HOSTINGER_USER@$HOSTINGER_HOST" '/usr/local/sbin/sahjony-whatsapp-pairing-controller audit' || rc=$?
+          rc="${rc:-0}"
+          if [[ "$rc" == 41 ]]; then
+            echo SAHJONY_PAIRING_AUDIT=DISCONNECTED
+            exit 0
+          fi
+          exit "$rc"
+
+      - name: Record WhatsApp client device-link lock
+        if: inputs.mode == 'mark_client_lock'
+        shell: bash
+        run: |
+          set -euo pipefail
+          minutes='${{ inputs.client_lock_backoff_minutes }}'
+          [[ "$minutes" =~ ^[0-9]+$ ]] || { echo INVALID_BACKOFF_MINUTES="$minutes" >&2; exit 64; }
+          seconds=$((minutes*60))
+          opts=(-o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -i "$SSH_KEY_PATH")
+          ssh "${opts[@]}" "$HOSTINGER_USER@$HOSTINGER_HOST" "/usr/local/sbin/sahjony-whatsapp-pairing-controller mark-client-lock '$seconds'"
+          echo SAHJONY_WHATSAPP_CLIENT_LINK_LOCK_SAFELY_BACKED_OFF=1
+
+      - name: Start exactly one authorized pairing attempt
+        id: start
+        if: inputs.mode == 'pair_once'
+        shell: bash
+        run: |
+          set -euo pipefail
+          opts=(-o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -i "$SSH_KEY_PATH")
+          set +e
+          ssh "${opts[@]}" "$HOSTINGER_USER@$HOSTINGER_HOST" '/usr/local/sbin/sahjony-whatsapp-pairing-controller start' > /tmp/whatsapp-pair-start.json
+          rc=$?
+          set -e
+          if [[ "$rc" == 75 ]]; then
+            echo SAHJONY_PAIRING_REFUSED_BY_COOLDOWN=1
+            exit 75
+          fi
+          (( rc == 0 )) || exit "$rc"
           python3 - <<'PY'
           import base64, json, pathlib, sys
-          p=pathlib.Path('/tmp/whatsapp-login-start.json')
-          raw=p.read_text(errors='replace').strip()
-          try:
-              data=json.loads(raw)
-          except Exception:
-              print('SAHJONY_QR_START_JSON_INVALID=1', file=sys.stderr)
-              print(raw[:1200], file=sys.stderr)
-              sys.exit(31)
-          if data.get('connected') is True:
+          p=pathlib.Path('/tmp/whatsapp-pair-start.json')
+          d=json.loads(p.read_text())
+          if d.get('connected') is True:
               pathlib.Path('/tmp/whatsapp-already-connected').write_text('1')
               print('SAHJONY_WHATSAPP_ALREADY_CONNECTED=1')
               sys.exit(0)
-          qr=data.get('qrDataUrl') or ''
+          qr=d.get('qrDataUrl') or ''
           if not qr.startswith('data:image/png;base64,'):
               print('SAHJONY_QR_DATA_URL_MISSING=1', file=sys.stderr)
-              print(str(data.get('message',''))[:500], file=sys.stderr)
               sys.exit(32)
-          img=base64.b64decode(qr.split(',',1)[1], validate=True)
-          pathlib.Path('/tmp/whatsapp-qr-1.png').write_bytes(img)
-          print(f'SAHJONY_WHATSAPP_QR_1_READY_BYTES={len(img)}')
+          pathlib.Path('/tmp/whatsapp-qr.png').write_bytes(base64.b64decode(qr.split(',',1)[1], validate=True))
+          print('SAHJONY_WHATSAPP_SINGLE_QR_READY=1')
           PY
           if [[ -s /tmp/whatsapp-already-connected ]]; then
             echo 'qr_ready=false' >> "$GITHUB_OUTPUT"
             echo 'already_connected=true' >> "$GITHUB_OUTPUT"
           else
-            test -s /tmp/whatsapp-qr-1.png
             echo 'qr_ready=true' >> "$GITHUB_OUTPUT"
             echo 'already_connected=false' >> "$GITHUB_OUTPUT"
           fi
-          rm -f /tmp/whatsapp-login-start.json
+          rm -f /tmp/whatsapp-pair-start.json
 
-      - name: Publish live WhatsApp QR 1
-        if: steps.qr1.outputs.qr_ready == 'true'
+      - name: Publish the single live WhatsApp QR
+        if: inputs.mode == 'pair_once' && steps.start.outputs.qr_ready == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: SAHJONY-WHATSAPP-QR-LIVE-1
-          path: /tmp/whatsapp-qr-1.png
+          name: SAHJONY-WHATSAPP-QR-SINGLE-AUTHORIZED
+          path: /tmp/whatsapp-qr.png
           retention-days: 1
           if-no-files-found: error
 
-      - name: Wait for QR 1 scan
-        id: wait1
-        if: steps.qr1.outputs.already_connected != 'true'
+      - name: Wait for the single pairing attempt
+        id: wait
+        if: inputs.mode == 'pair_once' && steps.start.outputs.qr_ready == 'true'
         shell: bash
         run: |
           set -euo pipefail
           opts=(-o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -i "$SSH_KEY_PATH")
           set +e
-          ssh "${opts[@]}" "$HOSTINGER_USER@$HOSTINGER_HOST" \
-            "docker exec sahjony-openclaw-gateway openclaw gateway call web.login.wait --params '{\"accountId\":\"default\",\"timeoutMs\":180000}' --timeout 190000 --json" \
-            > /tmp/whatsapp-login-wait-1.json
+          ssh "${opts[@]}" "$HOSTINGER_USER@$HOSTINGER_HOST" '/usr/local/sbin/sahjony-whatsapp-pairing-controller wait'
           rc=$?
           set -e
-          (( rc == 0 )) || { echo "SAHJONY_QR_WAIT_1_RPC_RC=$rc"; echo 'connected=false' >> "$GITHUB_OUTPUT"; exit 0; }
-          connected="$(python3 - <<'PY'
-          import json
-          try:
-              d=json.load(open('/tmp/whatsapp-login-wait-1.json'))
-              print('true' if d.get('connected') is True else 'false')
-          except Exception:
-              print('false')
-          PY
-          )"
-          echo "connected=$connected" >> "$GITHUB_OUTPUT"
-          echo "SAHJONY_QR_1_CONNECTED=$connected"
-          rm -f /tmp/whatsapp-login-wait-1.json /tmp/whatsapp-qr-1.png
-
-      - name: Generate fresh WhatsApp QR 2 if needed
-        id: qr2
-        if: steps.qr1.outputs.already_connected != 'true' && steps.wait1.outputs.connected != 'true'
-        shell: bash
-        run: |
-          set -euo pipefail
-          opts=(-o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -i "$SSH_KEY_PATH")
-          ssh "${opts[@]}" "$HOSTINGER_USER@$HOSTINGER_HOST" \
-            "docker exec sahjony-openclaw-gateway openclaw gateway call web.login.start --params '{\"accountId\":\"default\",\"force\":true,\"timeoutMs\":180000}' --timeout 190000 --json" \
-            > /tmp/whatsapp-login-start-2.json
-          python3 - <<'PY'
-          import base64, json, pathlib, sys
-          d=json.load(open('/tmp/whatsapp-login-start-2.json'))
-          if d.get('connected') is True:
-              pathlib.Path('/tmp/whatsapp-connected-2').write_text('1')
-              print('SAHJONY_WHATSAPP_CONNECTED_BEFORE_QR_2=1')
-              sys.exit(0)
-          qr=d.get('qrDataUrl') or ''
-          if not qr.startswith('data:image/png;base64,'):
-              print('SAHJONY_QR_2_DATA_URL_MISSING=1', file=sys.stderr)
-              print(str(d.get('message',''))[:500], file=sys.stderr)
-              sys.exit(33)
-          img=base64.b64decode(qr.split(',',1)[1], validate=True)
-          pathlib.Path('/tmp/whatsapp-qr-2.png').write_bytes(img)
-          print(f'SAHJONY_WHATSAPP_QR_2_READY_BYTES={len(img)}')
-          PY
-          if [[ -s /tmp/whatsapp-connected-2 ]]; then
-            echo 'qr_ready=false' >> "$GITHUB_OUTPUT"
-            echo 'already_connected=true' >> "$GITHUB_OUTPUT"
-          else
-            echo 'qr_ready=true' >> "$GITHUB_OUTPUT"
-            echo 'already_connected=false' >> "$GITHUB_OUTPUT"
-          fi
-          rm -f /tmp/whatsapp-login-start-2.json
-
-      - name: Publish live WhatsApp QR 2
-        if: steps.qr2.outputs.qr_ready == 'true'
-        uses: actions/upload-artifact@v4
-        with:
-          name: SAHJONY-WHATSAPP-QR-LIVE-2
-          path: /tmp/whatsapp-qr-2.png
-          retention-days: 1
-          if-no-files-found: error
-
-      - name: Wait for QR 2 scan
-        id: wait2
-        if: steps.qr2.outputs.qr_ready == 'true'
-        shell: bash
-        run: |
-          set -euo pipefail
-          opts=(-o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -i "$SSH_KEY_PATH")
-          ssh "${opts[@]}" "$HOSTINGER_USER@$HOSTINGER_HOST" \
-            "docker exec sahjony-openclaw-gateway openclaw gateway call web.login.wait --params '{\"accountId\":\"default\",\"timeoutMs\":180000}' --timeout 190000 --json" \
-            > /tmp/whatsapp-login-wait-2.json
-          connected="$(python3 - <<'PY'
-          import json
-          d=json.load(open('/tmp/whatsapp-login-wait-2.json'))
-          print('true' if d.get('connected') is True else 'false')
-          PY
-          )"
-          echo "connected=$connected" >> "$GITHUB_OUTPUT"
-          echo "SAHJONY_QR_2_CONNECTED=$connected"
-          rm -f /tmp/whatsapp-login-wait-2.json /tmp/whatsapp-qr-2.png
-
-      - name: Verify channel and arm 24x7 guardian
-        shell: bash
-        run: |
-          set -euo pipefail
-          opts=(-o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -i "$SSH_KEY_PATH")
-          scp "${opts[@]}" openclaw/hostinger-24x7/whatsapp-hostinger-only-guardian.sh "$HOSTINGER_USER@$HOSTINGER_HOST:/tmp/sahjony-whatsapp-guardian"
-          ssh "${opts[@]}" "$HOSTINGER_USER@$HOSTINGER_HOST" 'bash -s' <<'REMOTE'
-          set -euo pipefail
-          cd /opt/sahjony-openclaw
-          probe="$(docker exec sahjony-openclaw-gateway openclaw channels status --channel whatsapp --probe 2>&1 || true)"
-          printf '%s\n' "$probe" | sed -E 's/(token|secret|key|password)[=:][^[:space:]]+/\1=[REDACTED]/Ig'
-          if ! printf '%s' "$probe" | grep -Eiq 'whatsapp.*(connected|ready|active|healthy)|(connected|ready|active|healthy).*whatsapp'; then
-            echo SAHJONY_WHATSAPP_PAIRING_NOT_COMPLETED=1 >&2
+          if [[ "$rc" == 41 ]]; then
+            echo SAHJONY_WHATSAPP_PAIRING_NOT_COMPLETED_BACKOFF_ARMED=1
             exit 41
           fi
-          install -m 700 /tmp/sahjony-whatsapp-guardian /usr/local/sbin/sahjony-whatsapp-guardian
-          rm -f /tmp/sahjony-whatsapp-guardian
-          /usr/local/sbin/sahjony-whatsapp-guardian install
-          systemctl is-enabled --quiet sahjony-whatsapp-hostinger.timer
-          systemctl is-active --quiet sahjony-whatsapp-hostinger.timer
-          policy="$(docker inspect sahjony-openclaw-gateway --format '{{.HostConfig.RestartPolicy.Name}}')"
-          [[ "$policy" == "unless-stopped" || "$policy" == "always" ]]
-          /usr/local/sbin/sahjony-whatsapp-guardian audit
-          echo SAHJONY_HOSTINGER_WHATSAPP_24X7=READY
-          REMOTE
+          exit "$rc"
 
-      - name: Remove transient management identity and QR files
+      - name: Finalize 24x7 guardian after connection
+        if: inputs.mode == 'pair_once' && (steps.start.outputs.already_connected == 'true' || success())
+        shell: bash
+        run: |
+          set -euo pipefail
+          opts=(-o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -i "$SSH_KEY_PATH")
+          ssh "${opts[@]}" "$HOSTINGER_USER@$HOSTINGER_HOST" '/usr/local/sbin/sahjony-whatsapp-pairing-controller finalize'
+
+      - name: Cleanup transient files
         if: always()
         shell: bash
         run: |
-          set +e
-          rm -f /tmp/whatsapp-qr-1.png /tmp/whatsapp-qr-2.png /tmp/whatsapp-login-*.json /tmp/whatsapp-already-connected /tmp/whatsapp-connected-2
-          if [[ "${SSH_EPHEMERAL:-false}" == "true" && -s "$SSH_KEY_PATH.pub" && -s "$SSH_KEY_PATH" ]]; then
-            pub_b64="$(base64 -w0 "$SSH_KEY_PATH.pub")"
-            ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 -i "$SSH_KEY_PATH" "$HOSTINGER_USER@$HOSTINGER_HOST" "PUB_B64='$pub_b64' bash -s" <<'REMOTE'
-          set -euo pipefail
-          auth=/root/.ssh/authorized_keys
-          if [[ -f "$auth" ]]; then
-            pub="$(printf '%s' "$PUB_B64" | base64 -d)"
-            tmp="$(mktemp)"
-            grep -vxF "$pub" "$auth" > "$tmp" || true
-            cat "$tmp" > "$auth"
-            chmod 600 "$auth"
-            rm -f "$tmp"
-          fi
-          rm -f /tmp/sahjony-whatsapp-guardian /tmp/sahjony-ssh-self-heal
-          echo SAHJONY_WHATSAPP_PAIR_EPHEMERAL_KEY_REMOVED=1
-          REMOTE
-          else
-            echo SAHJONY_WHATSAPP_PAIR_PERSISTENT_KEY_PRESERVED=1
-          fi
-          rm -f ~/.ssh/whatsapp-pair ~/.ssh/whatsapp-pair.pub ~/.ssh/hostinger-persistent ~/.ssh/hostinger-persistent.pub
+          rm -f /tmp/whatsapp-qr.png /tmp/whatsapp-pair-start.json /tmp/whatsapp-already-connected ~/.ssh/hostinger
