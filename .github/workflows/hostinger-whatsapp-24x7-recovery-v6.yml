@@ -1,0 +1,259 @@
+name: Hostinger WhatsApp 24x7 Recovery V6
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Share the existing recovery lock so V5/V6 can never modify the VPS concurrently.
+concurrency:
+  group: hostinger-recovery-docker-openclaw-v5
+  cancel-in-progress: false
+
+env:
+  HOSTINGER_API_BASE: https://developers.hostinger.com
+  VM_ID: '767852'
+  HOST: '69.62.68.67'
+  USER: root
+
+jobs:
+  recover:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    env:
+      API_TOKEN: ${{ secrets.HOSTINGER_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare ephemeral credentials
+        id: creds
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "$API_TOKEN" ]] || { echo HOSTINGER_API_TOKEN_MISSING=1 >&2; exit 2; }
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq sshpass netcat-openbsd jq >/dev/null
+          install -m 700 -d ~/.ssh
+          ssh-keygen -q -t ed25519 -N '' -f ~/.ssh/hostinger-recovery-v6 -C "sahjony-v6-${GITHUB_RUN_ID}"
+          RECOVERY_PASSWORD="$(openssl rand -hex 18)Aa1!"
+          echo "::add-mask::$RECOVERY_PASSWORD"
+          echo "recovery_password=$RECOVERY_PASSWORD" >> "$GITHUB_OUTPUT"
+
+      - name: Start Hostinger Recovery
+        id: start
+        env:
+          RECOVERY_PASSWORD: ${{ steps.creds.outputs.recovery_password }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          vm="$(curl -fsS -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID")"
+          ip="$(jq -r '[.. | objects | .address? // empty | select(type=="string") | select(test("^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+$"))] | first // empty' <<<"$vm")"
+          [[ -z "$ip" || "$ip" == "$HOST" ]] || { echo HOSTINGER_VM_IDENTITY_MISMATCH=$ip >&2; exit 3; }
+          payload="$(jq -n --arg p "$RECOVERY_PASSWORD" '{root_password:$p}')"
+          action="$(curl -fsS -X POST -H "Authorization: Bearer $API_TOKEN" -H 'Content-Type: application/json' -H 'Accept: application/json' --data "$payload" "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/recovery")"
+          id="$(jq -r '.id // empty' <<<"$action")"
+          [[ "$id" =~ ^[0-9]+$ ]] || { echo RECOVERY_ACTION_ID_MISSING=1 >&2; jq -c . <<<"$action" >&2 || true; exit 31; }
+          echo "action_id=$id" >> "$GITHUB_OUTPUT"
+          echo "HOSTINGER_RECOVERY_V6_START_ACTION=$id"
+
+      - name: Wait for Recovery action success
+        env:
+          ACTION_ID: ${{ steps.start.outputs.action_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          success=false
+          for i in $(seq 1 120); do
+            a="$(curl -fsS -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/actions/$ACTION_ID")"
+            state="$(jq -r '.state // empty' <<<"$a")"
+            name="$(jq -r '.name // empty' <<<"$a")"
+            echo "recovery_start_probe=$i/120 id=$ACTION_ID name=${name:-unknown} state=${state:-unknown}"
+            case "$state" in
+              success) success=true; break ;;
+              failed|failure|error|cancelled|canceled) jq -c . <<<"$a" >&2 || true; exit 32 ;;
+            esac
+            sleep 5
+          done
+          [[ "$success" == true ]] || { echo RECOVERY_START_TIMEOUT=1 >&2; exit 33; }
+
+      - name: Authenticate Recovery SSH
+        env:
+          RECOVERY_PASSWORD: ${{ steps.creds.outputs.recovery_password }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          export SSHPASS="$RECOVERY_PASSWORD"
+          ready=false
+          for i in $(seq 1 72); do
+            : >/tmp/recovery-v6.err
+            if sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=6 -o PreferredAuthentications=password -o PubkeyAuthentication=no -o NumberOfPasswordPrompts=1 "$USER@$HOST" 'printf RECOVERY_V6_OK' 2>/tmp/recovery-v6.err | grep -q RECOVERY_V6_OK; then ready=true; break; fi
+            if (( i == 1 || i % 12 == 0 || i == 72 )); then sed -n '1,12p' /tmp/recovery-v6.err || true; fi
+            sleep 10
+          done
+          [[ "$ready" == true ]] || { echo RECOVERY_V6_AUTH_FAILED=1 >&2; exit 34; }
+
+      - name: Repair original OS SSH safely
+        env:
+          RECOVERY_PASSWORD: ${{ steps.creds.outputs.recovery_password }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          export SSHPASS="$RECOVERY_PASSWORD"
+          PUB_B64="$(base64 -w0 ~/.ssh/hostinger-recovery-v6.pub)"
+          sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 -o PreferredAuthentications=password -o PubkeyAuthentication=no -o NumberOfPasswordPrompts=1 "$USER@$HOST" "PUB_B64='$PUB_B64' bash -s" <<'REMOTE'
+          set -euo pipefail
+          echo '=== BLOCK DEVICES ==='
+          lsblk -o NAME,TYPE,FSTYPE,SIZE,MOUNTPOINTS || true
+          root=''
+          if [ -f /mnt/etc/os-release ] && [ -d /mnt/root ]; then root=/mnt; fi
+          if [ -z "$root" ]; then
+            while read -r mp; do
+              [ "$mp" = / ] && continue
+              if [ -f "$mp/etc/os-release" ] && [ -d "$mp/root" ] && [ -d "$mp/var/lib/docker" ]; then root="$mp"; break; fi
+            done < <(findmnt -rn -o TARGET | sort -u)
+          fi
+          if [ -z "$root" ]; then
+            while read -r mp; do
+              [ "$mp" = / ] && continue
+              if [ -f "$mp/etc/os-release" ] && [ -d "$mp/root" ] && [ -d "$mp/etc/ssh" ]; then root="$mp"; break; fi
+            done < <(findmnt -rn -o TARGET | sort -u)
+          fi
+          [ -n "$root" ] || { echo ORIGINAL_OS_ROOT_NOT_IDENTIFIED=1 >&2; exit 35; }
+          echo "ORIGINAL_OS_ROOT=$root"
+          pub="$(printf '%s' "$PUB_B64" | base64 -d)"
+          install -d -m 700 "$root/root/.ssh"
+          touch "$root/root/.ssh/authorized_keys"
+          chmod 600 "$root/root/.ssh/authorized_keys"
+          grep -qxF "$pub" "$root/root/.ssh/authorized_keys" || printf '%s\n' "$pub" >> "$root/root/.ssh/authorized_keys"
+          install -d "$root/etc/ssh/sshd_config.d" "$root/run/sshd" "$root/etc/systemd/system/multi-user.target.wants"
+          cat > "$root/etc/ssh/sshd_config.d/99-sahjony-recovery-v6.conf" <<'EOF'
+          PubkeyAuthentication yes
+          PermitRootLogin prohibit-password
+          PasswordAuthentication no
+          EOF
+          chmod 600 "$root/etc/ssh/sshd_config.d/99-sahjony-recovery-v6.conf"
+          enabled=false
+          for unit in ssh.service sshd.service; do
+            target="$(find "$root/lib/systemd/system" "$root/usr/lib/systemd/system" -maxdepth 1 -name "$unit" -print -quit 2>/dev/null || true)"
+            if [ -n "$target" ]; then
+              ln -sfn "/${target#"$root/"}" "$root/etc/systemd/system/multi-user.target.wants/$unit"
+              echo "SSH_UNIT_ENABLED=$unit"
+              enabled=true
+              break
+            fi
+          done
+          [[ "$enabled" == true ]] || { echo SSH_SYSTEMD_UNIT_NOT_FOUND=1 >&2; exit 36; }
+          if [ -x "$root/usr/sbin/sshd" ]; then chroot "$root" /usr/sbin/sshd -t; fi
+          echo ORIGINAL_OS_SSH_V6_REPAIRED=1
+          REMOTE
+
+      - name: Stop Hostinger Recovery
+        id: stop
+        shell: bash
+        run: |
+          set -euo pipefail
+          action="$(curl -fsS -X DELETE -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/recovery")"
+          id="$(jq -r '.id // empty' <<<"$action")"
+          [[ "$id" =~ ^[0-9]+$ ]] || { echo RECOVERY_STOP_ACTION_ID_MISSING=1 >&2; jq -c . <<<"$action" >&2 || true; exit 40; }
+          echo "action_id=$id" >> "$GITHUB_OUTPUT"
+          echo "HOSTINGER_RECOVERY_V6_STOP_ACTION=$id"
+
+      - name: Wait for Recovery stop action success
+        env:
+          ACTION_ID: ${{ steps.stop.outputs.action_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          success=false
+          for i in $(seq 1 120); do
+            a="$(curl -fsS -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/actions/$ACTION_ID")"
+            state="$(jq -r '.state // empty' <<<"$a")"
+            name="$(jq -r '.name // empty' <<<"$a")"
+            echo "recovery_stop_probe=$i/120 id=$ACTION_ID name=${name:-unknown} state=${state:-unknown}"
+            case "$state" in
+              success) success=true; break ;;
+              failed|failure|error|cancelled|canceled) jq -c . <<<"$a" >&2 || true; exit 41 ;;
+            esac
+            sleep 5
+          done
+          [[ "$success" == true ]] || { echo RECOVERY_STOP_TIMEOUT=1 >&2; exit 42; }
+
+      - name: Wait for authenticated normal SSH
+        id: normal
+        shell: bash
+        run: |
+          set -euo pipefail
+          ready=false
+          for i in $(seq 1 120); do
+            : >/tmp/normal-v6.err
+            if ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=6 -i ~/.ssh/hostinger-recovery-v6 "$USER@$HOST" 'printf NORMAL_V6_OK' 2>/tmp/normal-v6.err | grep -q NORMAL_V6_OK; then ready=true; break; fi
+            if (( i == 1 || i % 12 == 0 || i == 120 )); then sed -n '1,12p' /tmp/normal-v6.err || true; fi
+            sleep 10
+          done
+          [[ "$ready" == true ]] || { echo NORMAL_V6_SSH_FAILED=1 >&2; exit 43; }
+          echo SAHJONY_NORMAL_SSH_V6_READY=1
+
+      - name: Stabilize OpenClaw and seed persistent guardian
+        id: stabilize
+        shell: bash
+        run: |
+          set -euo pipefail
+          GUARDIAN_B64="$(base64 -w0 openclaw/hostinger-24x7/whatsapp-24x7-guardian.sh)"
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/hostinger-recovery-v6 "$USER@$HOST" "GUARDIAN_B64='$GUARDIAN_B64' bash -s" <<'REMOTE'
+          set -euo pipefail
+          command -v docker >/dev/null 2>&1 || { echo DOCKER_NOT_FOUND=1 >&2; exit 44; }
+          systemctl enable --now docker >/dev/null 2>&1 || true
+          cid="$(docker ps -a --format '{{.ID}}|{{.Names}}|{{.Image}}' | awk -F'|' 'tolower($0) ~ /openclaw|claw/ {print $1; exit}')"
+          [ -n "$cid" ] || { echo OPENCLAW_CONTAINER_NOT_FOUND=1 >&2; exit 45; }
+          docker update --restart unless-stopped "$cid" >/dev/null
+          [ "$(docker inspect "$cid" --format '{{.State.Running}}')" = true ] || docker start "$cid" >/dev/null
+          sleep 8
+          install -d -m 700 /opt/sahjony-openclaw
+          printf '%s' "$GUARDIAN_B64" | base64 -d > /opt/sahjony-openclaw/whatsapp-24x7-guardian.sh
+          chmod 700 /opt/sahjony-openclaw/whatsapp-24x7-guardian.sh
+          /opt/sahjony-openclaw/whatsapp-24x7-guardian.sh install || true
+          probe="$(docker exec "$cid" openclaw channels status --probe 2>&1 || true)"
+          printf '%s\n' "$probe"
+          if ! grep -Eiq 'whatsapp.*(connected|ready|active|healthy)|(connected|ready|active|healthy).*whatsapp' <<<"$probe"; then
+            echo OPENCLAW_WHATSAPP_NOT_CONNECTED_AFTER_GUARDIAN=1 >&2
+            exit 46
+          fi
+          docker inspect "$cid" --format 'OPENCLAW name={{.Name}} restart={{.HostConfig.RestartPolicy.Name}} running={{.State.Running}}'
+          systemctl is-active sahjony-whatsapp-24x7-guardian.timer
+          echo SAHJONY_HOSTINGER_WHATSAPP_LOCAL_READY=1
+          REMOTE
+
+      - name: Verify public WhatsApp health
+        shell: bash
+        run: |
+          set -euo pipefail
+          ready=false
+          for i in $(seq 1 24); do
+            body="$(curl -fsS --max-time 20 https://www.sahjony.com/whatsapp/health 2>/dev/null || true)"
+            printf '%s\n' "$body" | jq '{status,provider,primary_provider,gateway_connected,cloud_independent_of_local_mac,hostinger_independent_runtime,hostinger_openclaw,meta_cloud}' 2>/dev/null || true
+            if jq -e '(.hostinger_independent_runtime // false) == true or ((.hostinger_openclaw.connected // false) == true) or (.cloud_independent_of_local_mac // false) == true' >/dev/null 2>&1 <<<"$body"; then ready=true; break; fi
+            sleep 10
+          done
+          [[ "$ready" == true ]] || { echo PUBLIC_WHATSAPP_HEALTH_NOT_READY=1 >&2; exit 47; }
+          echo SAHJONY_WHATSAPP_24X7=READY
+
+      - name: Cleanup ephemeral access
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          if [[ "${{ steps.normal.outcome }}" == success && -f ~/.ssh/hostinger-recovery-v6.pub ]]; then
+            PUB_B64="$(base64 -w0 ~/.ssh/hostinger-recovery-v6.pub)"
+            ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/hostinger-recovery-v6 "$USER@$HOST" "PUB_B64='$PUB_B64' bash -s" <<'REMOTE'
+          set +e
+          pub="$(printf '%s' "$PUB_B64" | base64 -d)"
+          if [ -f /root/.ssh/authorized_keys ]; then
+            tmp="$(mktemp)"; grep -vxF "$pub" /root/.ssh/authorized_keys >"$tmp" || true; cat "$tmp" >/root/.ssh/authorized_keys; rm -f "$tmp"; chmod 600 /root/.ssh/authorized_keys
+          fi
+          rm -f /etc/ssh/sshd_config.d/99-sahjony-recovery-v6.conf
+          REMOTE
+          fi
+          curl -sS -X DELETE -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/recovery" >/dev/null 2>&1 || true
+          rm -f ~/.ssh/hostinger-recovery-v6 ~/.ssh/hostinger-recovery-v6.pub
+          echo HOSTINGER_WHATSAPP_RECOVERY_V6_CLEANUP_COMPLETE=1
