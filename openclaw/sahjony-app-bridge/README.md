@@ -7,6 +7,7 @@ It provides:
 - signed inbound and outbound event delivery to the CRM;
 - a bounded owner-governed outbound queue;
 - gateway heartbeats for truthful health reporting;
+- explicit gateway identity so Hostinger VPS and local Mac runtimes are not conflated;
 - no application, filesystem, shell, browser, or owner-route access for public WhatsApp users.
 
 Required environment variables on the OpenClaw gateway host:
@@ -15,6 +16,8 @@ Required environment variables on the OpenClaw gateway host:
 SAHJONY_APP_URL=https://www.sahjony.com
 SAHJONY_APP_BRIDGE_SECRET=<same secret configured in Vercel>
 ```
+
+For the Hostinger VPS runtime, use `gatewayId: "hostinger-vps"` (the Hostinger bootstrap configures this automatically).
 
 ## Recommended macOS installation
 
@@ -73,6 +76,7 @@ Required OpenClaw configuration:
         config: {
           appUrl: "https://www.sahjony.com",
           accountId: "default",
+          gatewayId: "hostinger-vps",
           businessNumber: "+12816628581",
           businessName: "SAHJONY LLC",
           pollIntervalMs: 30000,
