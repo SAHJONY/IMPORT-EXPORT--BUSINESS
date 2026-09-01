@@ -1,0 +1,105 @@
+name: Hostinger Network Access Diagnostic One-Time
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/hostinger-network-access-diagnostic-one-time.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hostinger-vm-767852-observe
+  cancel-in-progress: false
+
+env:
+  HOSTINGER_API_BASE: https://developers.hostinger.com
+  VM_ID: '767852'
+  HOST: '69.62.68.67'
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      API_TOKEN: ${{ secrets.HOSTINGER_API_TOKEN }}
+    steps:
+      - name: Prepare diagnostics
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "$API_TOKEN" ]] || { echo HOSTINGER_API_TOKEN_MISSING=1 >&2; exit 2; }
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq jq netcat-openbsd iputils-ping >/dev/null
+          install -d "$RUNNER_TEMP/hostinger-netdiag"
+
+      - name: Read Hostinger VM action firewall and SSH-key state
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="$RUNNER_TEMP/hostinger-netdiag"
+          auth=(-H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json')
+
+          curl -fsS "${auth[@]}" "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID" > "$out/vm.json"
+          curl -fsS "${auth[@]}" "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/actions?page=1" > "$out/actions.json"
+          curl -fsS "${auth[@]}" "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/public-keys?page=1" > "$out/keys.json" || printf '{"data":[]}' > "$out/keys.json"
+          curl -fsS "${auth[@]}" "$HOSTINGER_API_BASE/api/vps/v1/firewall?page=1" > "$out/firewalls.json" || printf '{"data":[]}' > "$out/firewalls.json"
+
+          echo '=== VM SAFE SUMMARY ==='
+          jq '{id,hostname,state,plan,location,firewall_id,firewall,ipv4,ipv6,ip_addresses,template,os,created_at,updated_at}' "$out/vm.json" || true
+
+          echo '=== VM FIELDS RELATED TO NETWORK/FIREWALL ==='
+          jq '[paths(scalars) as $p | select(($p|map(tostring)|join("."))|test("firewall|network|ip|address|gateway|port";"i")) | {path:($p|map(tostring)|join(".")),value:getpath($p)}]' "$out/vm.json" || true
+
+          echo '=== RECENT ACTIONS ==='
+          jq '[.data[]? | {id,name,state,created_at,updated_at}] | .[:20]' "$out/actions.json" || true
+          echo "ACTIVE_ACTIONS=$(jq '[.data[]? | select((.state // "") | IN("sent","started","pending","running","queued"))] | length' "$out/actions.json")"
+
+          echo '=== ATTACHED PUBLIC KEYS (NO KEY MATERIAL) ==='
+          jq '[.data[]? | {id,name}]' "$out/keys.json" || true
+
+          echo '=== HOSTINGER FIREWALL GROUPS/RULES ==='
+          jq '[.data[]? | {id,name,is_synced,rules:[.rules[]? | {id,action,protocol,port,source,source_detail}]}]' "$out/firewalls.json" || true
+
+          echo '=== FIREWALL SSH RULE INVENTORY ==='
+          jq '[.data[]? as $fw | $fw.rules[]? | select((.protocol == "TCP" or .protocol == "any") and ((.port|tostring) == "22" or (.port|tostring) == "1:65535" or (.port|tostring) == "any")) | {firewall_id:$fw.id,firewall_name:$fw.name,is_synced:$fw.is_synced,action,protocol,port,source,source_detail}]' "$out/firewalls.json" || true
+
+      - name: Probe public network path without mutation
+        shell: bash
+        run: |
+          set +e
+          for port in 22 80 443; do
+            if nc -z -w 5 "$HOST" "$port" >/dev/null 2>&1; then
+              echo "HOSTINGER_NETDIAG_TCP_${port}=OPEN"
+            else
+              echo "HOSTINGER_NETDIAG_TCP_${port}=CLOSED_OR_FILTERED"
+            fi
+          done
+          if ping -c 2 -W 3 "$HOST" >/dev/null 2>&1; then
+            echo HOSTINGER_NETDIAG_ICMP=REACHABLE
+          else
+            echo HOSTINGER_NETDIAG_ICMP=NO_REPLY
+          fi
+          exit 0
+
+      - name: Classify access layer
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="$RUNNER_TEMP/hostinger-netdiag"
+          state="$(jq -r '.state // "unknown"' "$out/vm.json")"
+          active="$(jq '[.data[]? | select((.state // "") | IN("sent","started","pending","running","queued"))] | length' "$out/actions.json")"
+          ssh_rule_count="$(jq '[.data[]? as $fw | $fw.rules[]? | select((.protocol == "TCP" or .protocol == "any") and ((.port|tostring) == "22" or (.port|tostring) == "1:65535" or (.port|tostring) == "any"))] | length' "$out/firewalls.json" 2>/dev/null || echo 0)"
+          tcp22=false
+          nc -z -w 5 "$HOST" 22 >/dev/null 2>&1 && tcp22=true || true
+          echo "HOSTINGER_NETDIAG_VM_STATE=$state"
+          echo "HOSTINGER_NETDIAG_ACTIVE_ACTIONS=$active"
+          echo "HOSTINGER_NETDIAG_FIREWALL_GROUPS_WITH_SSH_RULE=$ssh_rule_count"
+          echo "HOSTINGER_NETDIAG_TCP22=$tcp22"
+          if [[ "$state" == running && "$active" == 0 && "$tcp22" != true ]]; then
+            echo HOSTINGER_NETDIAG_CLASSIFICATION=HOSTINGER_ACCESS_PATH_BLOCKED_OR_GUEST_SSH_UNREACHABLE
+          else
+            echo HOSTINGER_NETDIAG_CLASSIFICATION=REQUIRES_CORRELATION
+          fi
