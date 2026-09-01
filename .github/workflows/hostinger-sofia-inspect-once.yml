@@ -1,0 +1,104 @@
+name: Hostinger SOFIA Inspect Once
+
+on:
+  push:
+    branches: [ops/model-setup-once]
+    paths:
+      - '.github/workflows/hostinger-sofia-inspect-once.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    env:
+      HOST: '69.62.68.67'
+      USER: root
+      PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Prepare secure SSH
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "${PRIVATE_KEY:-}" ]] || { echo HOSTINGER_SSH_PRIVATE_KEY_MISSING=1 >&2; exit 2; }
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/hostinger-sofia
+          chmod 600 ~/.ssh/hostinger-sofia
+          ssh-keygen -y -f ~/.ssh/hostinger-sofia >/dev/null
+
+      - name: Inspect current config and SOFIA backups on Hostinger
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=15 \
+            -i ~/.ssh/hostinger-sofia "$USER@$HOST" 'python3 -' <<'PY'
+          import json, os, glob, re, time
+          state='/var/lib/sahjony-openclaw-state'
+          current=os.path.join(state,'openclaw.json')
+          secret_re=re.compile(r'(token|secret|password|api[_-]?key|authorization|credential)',re.I)
+
+          def redact(v, key=''):
+              if secret_re.search(str(key)):
+                  return '[REDACTED]'
+              if isinstance(v,dict):
+                  return {k:redact(val,k) for k,val in v.items()}
+              if isinstance(v,list):
+                  return [redact(x,key) for x in v]
+              if isinstance(v,str) and len(v)>120:
+                  return v[:120]+'…'
+              return v
+
+          def load(p):
+              try:
+                  with open(p,encoding='utf-8') as f: return json.load(f)
+              except Exception: return None
+
+          print('HOSTINGER_VPS_SCOPE_ONLY=1')
+          print('CURRENT_EXISTS='+('1' if os.path.isfile(current) else '0'))
+          cur=load(current)
+          if isinstance(cur,dict):
+              print('CURRENT_TOP_KEYS='+','.join(sorted(cur.keys())))
+              print('CURRENT_AGENTS='+json.dumps(redact(cur.get('agents',{})),ensure_ascii=False,separators=(',',':'))[:5000])
+              chans=cur.get('channels',{}) if isinstance(cur.get('channels'),dict) else {}
+              print('CURRENT_WHATSAPP='+json.dumps(redact(chans.get('whatsapp',{})),ensure_ascii=False,separators=(',',':'))[:2500])
+              txt=json.dumps(cur,ensure_ascii=False).lower()
+              print('CURRENT_HAS_SOFIA='+('1' if 'sofia' in txt else '0'))
+
+          patterns=[
+              os.path.join(state,'openclaw.json*'),
+              os.path.join(state,'*.bak*'),
+              os.path.join(state,'backup*','*.json'),
+              os.path.join(state,'backups','**','*.json'),
+          ]
+          files=[]
+          for pat in patterns:
+              files += glob.glob(pat,recursive=True)
+          seen=[]
+          for p in files:
+              if p==current or p in seen or not os.path.isfile(p): continue
+              seen.append(p)
+          seen.sort(key=lambda p: os.path.getmtime(p),reverse=True)
+          matches=[]
+          for p in seen[:100]:
+              d=load(p)
+              if not isinstance(d,dict): continue
+              raw=json.dumps(d,ensure_ascii=False).lower()
+              if 'sofia' not in raw: continue
+              matches.append(p)
+              print('SOFIA_BACKUP_FILE='+p)
+              print('SOFIA_BACKUP_MTIME='+time.strftime('%Y-%m-%dT%H:%M:%SZ',time.gmtime(os.path.getmtime(p))))
+              print('SOFIA_BACKUP_TOP_KEYS='+','.join(sorted(d.keys())))
+              print('SOFIA_BACKUP_AGENTS='+json.dumps(redact(d.get('agents',{})),ensure_ascii=False,separators=(',',':'))[:7000])
+              chans=d.get('channels',{}) if isinstance(d.get('channels'),dict) else {}
+              print('SOFIA_BACKUP_WHATSAPP='+json.dumps(redact(chans.get('whatsapp',{})),ensure_ascii=False,separators=(',',':'))[:3500])
+              if len(matches)>=5: break
+          print('SOFIA_BACKUP_COUNT='+str(len(matches)))
+          PY
+
+      - name: Cleanup SSH
+        if: always()
+        shell: bash
+        run: rm -f ~/.ssh/hostinger-sofia
