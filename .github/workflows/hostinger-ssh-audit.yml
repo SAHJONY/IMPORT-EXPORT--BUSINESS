@@ -1,0 +1,82 @@
+name: Hostinger SSH access audit
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      HOSTINGER_API_TOKEN: ${{ secrets.HOSTINGER_API_TOKEN }}
+      HOSTINGER_SSH_PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Verify required secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "${HOSTINGER_API_TOKEN}" ]] || { echo "HOSTINGER_API_TOKEN is missing" >&2; exit 1; }
+          [[ -n "${HOSTINGER_SSH_PRIVATE_KEY}" ]] || { echo "HOSTINGER_SSH_PRIVATE_KEY is missing" >&2; exit 1; }
+
+      - name: Confirm attached key and SSH authentication
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          key_file="${RUNNER_TEMP}/hostinger_ssh_key"
+          printf '%s\n' "${HOSTINGER_SSH_PRIVATE_KEY}" > "${key_file}"
+          ssh-keygen -y -f "${key_file}" > "${key_file}.pub"
+          expected_key="$(awk '{print $1 " " $2}' "${key_file}.pub")"
+
+          api_root="https://developers.hostinger.com/api/vps/v1"
+          auth_header="Authorization: Bearer ${HOSTINGER_API_TOKEN}"
+          vm_response="$(curl --fail --silent --show-error \
+            --header "${auth_header}" \
+            "${api_root}/virtual-machines")"
+
+          matched=0
+          authenticated=0
+          while IFS=$'\t' read -r vm_id vm_ip; do
+            [[ -n "${vm_id}" && -n "${vm_ip}" ]] || continue
+            keys_response="$(curl --fail --silent --show-error \
+              --header "${auth_header}" \
+              "${api_root}/virtual-machines/${vm_id}/public-keys")"
+            if ! jq -e --arg expected "${expected_key}" \
+              '.data // [] | any((.key | split(" ")[0:2] | join(" ")) == $expected)' \
+              <<<"${keys_response}" >/dev/null; then
+              continue
+            fi
+
+            matched=1
+            known_hosts="${RUNNER_TEMP}/known_hosts"
+            ssh-keyscan -T 10 -H "${vm_ip}" > "${known_hosts}" 2>/dev/null
+            if ssh -i "${key_file}" \
+              -o BatchMode=yes \
+              -o ConnectTimeout=15 \
+              -o IdentitiesOnly=yes \
+              -o PasswordAuthentication=no \
+              -o StrictHostKeyChecking=yes \
+              -o UserKnownHostsFile="${known_hosts}" \
+              "root@${vm_ip}" true; then
+              authenticated=1
+              echo "Hostinger VPS ${vm_id}: SSH key attached and root authentication succeeded." >> "${GITHUB_STEP_SUMMARY}"
+              break
+            fi
+          done < <(jq -r '
+            (.data // [])[] |
+            [(.id | tostring),
+             (.ipv4[0].address // .ipv4_address // .ip // .ip_address // empty)] |
+            @tsv
+          ' <<<"${vm_response}")
+
+          if [[ "${matched}" -ne 1 ]]; then
+            echo "The GitHub SSH key is not attached to any Hostinger VPS." >> "${GITHUB_STEP_SUMMARY}"
+            exit 1
+          fi
+          if [[ "${authenticated}" -ne 1 ]]; then
+            echo "The key is attached, but non-interactive root SSH authentication failed." >> "${GITHUB_STEP_SUMMARY}"
+            exit 1
+          fi
