@@ -100,17 +100,17 @@ prepare_key(){
 }
 
 report(){
-  local access_class="$1" tcp=false auth=false busy='[]'
+  local access_class="$1" tcp=false auth=false body='' busy_actions_json='[]'
   tcp22 && tcp=true || true
   ssh_auth && auth=true || true
-  if body="$(actions_json 2>/dev/null)"; then busy="$(busy_actions <<<"$body")"; fi
+  if body="$(actions_json 2>/dev/null)"; then busy_actions_json="$(busy_actions <<<"$body")"; fi
   jq -n \
     --arg vm_id "$VM_ID" --arg host "$HOST" --arg access_class "$access_class" \
     --arg strategy 'direct_ssh_then_owned_recovery_key_seed' \
     --arg key_path "${SSH_KEY_PATH:-}" \
     --argjson tcp22 "$tcp" --argjson ssh_authenticated "$auth" \
-    --argjson generated_key "$GENERATED_KEY" --argjson busy_actions "$busy" \
-    '{vm_id:$vm_id,host:$host,access_class:$access_class,strategy:$strategy,tcp22:$tcp22,ssh_authenticated:$ssh_authenticated,generated_ephemeral_key:$generated_key,local_key_path:$key_path,provider_public_key_attach_required:false,hostinger_recovery_authorization_required_for_fallback:true,docker_manager_required:false,meta_cloud_required:false,busy_actions:$busy}' | tee "$STATE_DIR/report.json"
+    --argjson generated_key "$GENERATED_KEY" --argjson busy_actions "$busy_actions_json" \
+    '{vm_id:$vm_id,host:$host,access_class:$access_class,strategy:$strategy,tcp22:$tcp22,ssh_authenticated:$ssh_authenticated,generated_ephemeral_key:$generated_key,local_key_path:$key_path,provider_public_key_attach_required:false,hostinger_recovery_authorization_required_for_fallback:true,docker_manager_required:false,meta_cloud_required:false,busy_actions:$busy_actions}' | tee "$STATE_DIR/report.json"
 }
 
 diagnose(){
