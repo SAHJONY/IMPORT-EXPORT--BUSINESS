@@ -141,7 +141,7 @@ jobs:
             fi
           done
           echo SAHJONY_HOSTINGER_BOOTSTRAP_STABILIZATION_COMPLETE=1
-REMOTE
+          REMOTE
 
       - name: Remove ephemeral key from VPS and Hostinger account
         if: always()
@@ -162,7 +162,7 @@ REMOTE
               rm -f "$tmp"
               chmod 600 /root/.ssh/authorized_keys
             fi
-REMOTE
+            REMOTE
           fi
           if [[ "$KEY_ID" =~ ^[0-9]+$ ]]; then
             curl -fsS -X DELETE -H "Authorization: Bearer $HOSTINGER_API_TOKEN" -H 'Accept: application/json' "$HOSTINGER_API_BASE/api/vps/v1/public-keys/$KEY_ID" >/dev/null 2>&1 || true
