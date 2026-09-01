@@ -1,7 +1,9 @@
 name: Hostinger Resilient Access and OpenClaw Recovery One-Time
 
-# Run marker: after successful read-only Recovery V2 audit, use the resilient
-# broker to seed authenticated Kali access and converge the retained runtime.
+# Run marker: normalize/fallback management identity before touching Hostinger.
+# A malformed durable secret must never block an otherwise authorized Recovery
+# session; the workflow can safely use a per-run ephemeral key and seed it into
+# the mounted Kali filesystem through the canonical Recovery controller.
 
 on:
   workflow_dispatch:
@@ -46,18 +48,36 @@ jobs:
           sudo apt-get install -y -qq jq sshpass netcat-openbsd >/dev/null
           install -d -m 700 ~/.ssh "$RUNNER_TEMP/sahjony-resilient-access"
 
+          key="$HOME/.ssh/sahjony-hostinger-management"
+          use_ephemeral=true
+
           if [[ -n "$DURABLE_PRIVATE_KEY" ]]; then
-            printf '%s\n' "$DURABLE_PRIVATE_KEY" > ~/.ssh/sahjony-hostinger-management
-            chmod 600 ~/.ssh/sahjony-hostinger-management
-            ssh-keygen -y -f ~/.ssh/sahjony-hostinger-management > ~/.ssh/sahjony-hostinger-management.pub
-            echo EPHEMERAL_MANAGEMENT_KEY=false >> "$GITHUB_ENV"
-            echo HOSTINGER_MANAGEMENT_IDENTITY=DURABLE
-          else
-            ssh-keygen -q -t ed25519 -N '' -f ~/.ssh/sahjony-hostinger-management -C "sahjony-resilient-${GITHUB_RUN_ID}"
-            echo EPHEMERAL_MANAGEMENT_KEY=true >> "$GITHUB_ENV"
-            echo HOSTINGER_MANAGEMENT_IDENTITY=EPHEMERAL
+            # Normalize the two common secret-storage artifacts without ever
+            # printing the key: CRLF line endings and literal backslash-n.
+            if [[ "$DURABLE_PRIVATE_KEY" == *'\n'* ]]; then
+              printf '%b' "$DURABLE_PRIVATE_KEY" | sed 's/\r$//' > "$key"
+            else
+              printf '%s\n' "$DURABLE_PRIVATE_KEY" | sed 's/\r$//' > "$key"
+            fi
+            chmod 600 "$key"
+            if ssh-keygen -y -f "$key" > "$key.pub" 2>/dev/null; then
+              use_ephemeral=false
+              echo HOSTINGER_MANAGEMENT_IDENTITY=DURABLE_VALIDATED
+            else
+              echo HOSTINGER_DURABLE_KEY_INVALID=1
+              echo HOSTINGER_MANAGEMENT_IDENTITY=EPHEMERAL_FALLBACK
+              rm -f "$key" "$key.pub"
+            fi
           fi
-          echo "SSH_KEY_PATH=$HOME/.ssh/sahjony-hostinger-management" >> "$GITHUB_ENV"
+
+          if [[ "$use_ephemeral" == true ]]; then
+            ssh-keygen -q -t ed25519 -N '' -f "$key" -C "sahjony-resilient-${GITHUB_RUN_ID}"
+            echo EPHEMERAL_MANAGEMENT_KEY=true >> "$GITHUB_ENV"
+          else
+            echo EPHEMERAL_MANAGEMENT_KEY=false >> "$GITHUB_ENV"
+          fi
+
+          echo "SSH_KEY_PATH=$key" >> "$GITHUB_ENV"
 
           chmod +x \
             openclaw/hostinger-24x7/hostinger-resilient-access-broker.sh \
