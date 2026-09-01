@@ -49,7 +49,37 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          set +e
           openclaw/hostinger-24x7/hostinger-recovery-controller.sh repair-ssh
+          controller_rc=$?
+          set -e
+
+          opts=(-o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 -i "$SSH_KEY_PATH")
+          ssh_ready=0
+          for i in $(seq 1 24); do
+            if ssh "${opts[@]}" "$HOSTINGER_USER@$HOSTINGER_HOST" 'printf SAHJONY_NORMAL_SSH_OK' 2>/dev/null | grep -q SAHJONY_NORMAL_SSH_OK; then
+              echo "SAHJONY_POST_RECOVERY_SSH_READY_PROBE=$i"
+              ssh_ready=1
+              break
+            fi
+            sleep 5
+          done
+          (( ssh_ready == 1 )) || { echo SAHJONY_POST_RECOVERY_SSH_UNAVAILABLE=1 >&2; exit "${controller_rc:-1}"; }
+          if (( controller_rc != 0 )); then
+            echo SAHJONY_CONTROLLER_TRANSIENT_SSH_RACE_TOLERATED=1
+          fi
+
+          live_guard_ready=0
+          for i in $(seq 1 8); do
+            if scp "${opts[@]}" openclaw/hostinger-24x7/ssh-self-heal.sh "$HOSTINGER_USER@$HOSTINGER_HOST:/tmp/sahjony-ssh-self-heal" >/dev/null 2>&1 && \
+               ssh "${opts[@]}" "$HOSTINGER_USER@$HOSTINGER_HOST" 'set -euo pipefail; install -m 755 /tmp/sahjony-ssh-self-heal /usr/local/sbin/sahjony-ssh-self-heal; /usr/local/sbin/sahjony-ssh-self-heal; systemctl is-active --quiet ssh.service; systemctl is-enabled --quiet ssh.service; systemctl is-active --quiet sahjony-ssh-runtime-guard.timer; systemctl is-enabled --quiet sahjony-ssh-runtime-guard.timer; test -d /run/sshd; /usr/sbin/sshd -t; echo SAHJONY_NATIVE_SSH_SELF_HEAL=READY'; then
+              echo "SAHJONY_LIVE_SSH_GUARD_READY_PROBE=$i"
+              live_guard_ready=1
+              break
+            fi
+            sleep 5
+          done
+          (( live_guard_ready == 1 )) || { echo SAHJONY_LIVE_SSH_GUARD_NOT_READY=1 >&2; exit 21; }
 
       - name: Install and enable official WhatsApp plugin
         shell: bash
@@ -164,7 +194,7 @@ jobs:
             chmod 600 "$auth"
             rm -f "$tmp"
           fi
-          rm -f /tmp/sahjony-whatsapp-guardian
+          rm -f /tmp/sahjony-whatsapp-guardian /tmp/sahjony-ssh-self-heal
           echo SAHJONY_WHATSAPP_ACTIVATION_EPHEMERAL_KEY_REMOVED=1
           REMOTE
           fi
