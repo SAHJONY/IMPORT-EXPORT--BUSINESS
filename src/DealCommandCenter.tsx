@@ -76,11 +76,11 @@ const LABEL: Record<Stage, string> = {
   BLOCKED: "Blocked",
 };
 
-function authHeaders() {
+function authHeaders(): Record<string, string> {
   const token = sessionStorage.getItem("sahjony.owner.token") || "";
-  return token
-    ? { Authorization: `Bearer ${token}`, "X-Role": "owner" }
-    : { "X-Role": "owner" };
+  const headers: Record<string, string> = { "X-Role": "owner" };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  return headers;
 }
 async function collection(path: string) {
   try {

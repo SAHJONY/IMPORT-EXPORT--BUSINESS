@@ -1,9 +1,6 @@
 import {Component,StrictMode,type ErrorInfo,type PropsWithChildren,type ReactNode} from 'react';
 import {createRoot} from 'react-dom/client';
 import {I18nextProvider} from 'react-i18next';
-import App from './App';
-import DealCommandCenter from './DealCommandCenter';
-import NeonAuthPage from './NeonAuthPage';
 import i18n from './i18n';
 import '../app/globals.css';
 import './workflow.css';
@@ -41,17 +38,24 @@ window.addEventListener('unhandledrejection',e=>{console.error('SAHJONY_UNHANDLE
 
 function protectedRoleFromPath(){const first=location.pathname.split('/').filter(Boolean)[0];return first==='customer'||first==='employee'?first:null}
 function withI18n(node:ReactNode){return <I18nextProvider i18n={i18n}>{node}</I18nextProvider>}
-function boot(){
+async function boot(){
  if(!rootElement)return;
  const path=location.pathname;
- if(path==='/sign-in'||path.startsWith('/sign-in/')){createRoot(rootElement).render(withI18n(<StrictMode><AppBoundary><NeonAuthPage/></AppBoundary></StrictMode>));return}
+ if(path==='/sign-in'||path.startsWith('/sign-in/')){
+   const {default:NeonAuthPage}=await import('./NeonAuthPage');
+   createRoot(rootElement).render(withI18n(<StrictMode><AppBoundary><NeonAuthPage/></AppBoundary></StrictMode>));return
+ }
  if(path==='/owner'){location.replace('/owner/deals');return}
- if(path==='/owner/deals'||path.startsWith('/owner/deals/')){createRoot(rootElement).render(withI18n(<StrictMode><AppBoundary><DealCommandCenter/></AppBoundary></StrictMode>));return}
+ if(path==='/owner/deals'||path.startsWith('/owner/deals/')){
+   const {default:DealCommandCenter}=await import('./DealCommandCenter');
+   createRoot(rootElement).render(withI18n(<StrictMode><AppBoundary><DealCommandCenter/></AppBoundary></StrictMode>));return
+ }
  const role=protectedRoleFromPath();
  if(role&&!sessionStorage.getItem(`sahjony.${role}.token`)){
    const next=encodeURIComponent(location.pathname+location.search);
    location.replace(`/sign-in?role=${role}&next=${next}`);return
  }
- try{createRoot(rootElement).render(withI18n(<StrictMode><AppBoundary><App/></AppBoundary></StrictMode>))}catch(error){console.error('SAHJONY_BOOT_FAILURE',error);hardFallback(i18n.t('emergency.initError'))}
+ const {default:App}=await import('./App');
+ createRoot(rootElement).render(withI18n(<StrictMode><AppBoundary><App/></AppBoundary></StrictMode>));
 }
-boot();
+void boot().catch(error=>{console.error('SAHJONY_BOOT_FAILURE',error);hardFallback(i18n.t('emergency.initError'))});

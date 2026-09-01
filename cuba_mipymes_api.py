@@ -123,7 +123,7 @@ async def ingest_source(sid):
    if not changed or not ex.get('_record_key'):dup+=1;continue
    merged['updated_at']=now; pending.append({'logical_table':'external_trade_prospects','record_key':ex['_record_key'],'data':merged,'created_at':merged.get('created_at') or now,'updated_at':now});upd+=1
   else:
-   rk='minjus:'+hashlib.sha1(f"{k}|{inc['external_reference']}".encode()).hexdigest()[:24]; pending.append({'logical_table':'external_trade_prospects','record_key':rk,'data':inc,'created_at':now,'updated_at':now}); by[k]={**inc,'_record_key':rk};ins+=1
+   rk='minjus:'+hashlib.sha256(f"{k}|{inc['external_reference']}".encode()).hexdigest()[:24]; pending.append({'logical_table':'external_trade_prospects','record_key':rk,'data':inc,'created_at':now,'updated_at':now}); by[k]={**inc,'_record_key':rk};ins+=1
  await upsert(pending); after=private_before|{norm(c['name']) for c in cand if norm(c.get('name')) and c.get('actor_type')!='CNA'}
  return {'status':'ok','source_id':sid,'source':SOURCES[sid][1],'source_pages':pages,'parsed_unique':len(cand),'rejected_or_duplicate_in_source':reject,'inserted':ins,'updated':upd,'duplicates_skipped':dup,'current_before':len(private_before),'current_unique':len(after),'target':TARGET,'remaining_shortfall':max(TARGET-len(after),0),'classification':'RESEARCH / VERIFIED PUBLIC SOURCE'}
 

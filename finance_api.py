@@ -7,10 +7,11 @@ from decimal import Decimal
 from typing import Literal
 
 from fastapi import FastAPI, Header, HTTPException, Query
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from auth import verify_owner_token
-from physical_postgres import insert_row, select_rows, update_rows
+from physical_postgres import database_health, insert_row, select_rows, update_rows
 
 app = FastAPI(title='SAHJONY Global Trade Finance', version='2.0.0', docs_url=None, redoc_url=None)
 Role = Literal['owner','employee']
@@ -120,10 +121,12 @@ async def journal_rows(journal_id: str) -> tuple[dict, list[dict]]:
 
 @app.get('/finance/health')
 async def health():
-    return {
-        'status':'ok',
+    dependency = await database_health()
+    body = {
+        'status': dependency['status'],
         'service':'trade-finance-ledger',
-        'storage':'physical_neon_postgres',
+        'storage':'physical_postgres',
+        'dependency': dependency,
         'currency':'USD',
         'double_entry':True,
         'owner_posting_only':True,
@@ -133,6 +136,9 @@ async def health():
         'beneficiary_requester_cannot_verify':True,
         'beneficiary_verifier_cannot_approve':True,
     }
+    if dependency['status'] != 'ok':
+        return JSONResponse(status_code=503, content=body)
+    return body
 
 
 @app.get('/finance/accounts')
