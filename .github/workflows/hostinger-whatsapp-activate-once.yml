@@ -26,10 +26,11 @@ jobs:
     timeout-minutes: 50
     env:
       HOSTINGER_API_TOKEN: ${{ secrets.HOSTINGER_API_TOKEN }}
+      DURABLE_SSH_PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Prepare ephemeral authorized management path
+      - name: Prepare safe management identity and validate tooling
         shell: bash
         run: |
           set -euo pipefail
@@ -37,153 +38,121 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq jq sshpass netcat-openbsd >/dev/null
           install -d -m 700 ~/.ssh
-          ssh-keygen -q -t ed25519 -N '' -f ~/.ssh/whatsapp-activate -C "sahjony-whatsapp-activate-${GITHUB_RUN_ID}"
-          echo "SSH_KEY_PATH=$HOME/.ssh/whatsapp-activate" >> "$GITHUB_ENV"
-          chmod +x openclaw/hostinger-24x7/hostinger-recovery-controller.sh
-          chmod +x openclaw/hostinger-24x7/ssh-self-heal.sh
-          chmod +x openclaw/hostinger-24x7/hostinger-runtime-bootstrap.sh
-          chmod +x openclaw/hostinger-24x7/openclaw-runtime-recovery.sh
-          chmod +x openclaw/hostinger-24x7/whatsapp-hostinger-only-guardian.sh
+          key="$HOME/.ssh/sahjony-whatsapp-activate"
+          if [[ -n "${DURABLE_SSH_PRIVATE_KEY:-}" ]]; then
+            printf '%s\n' "$DURABLE_SSH_PRIVATE_KEY" > "$key"
+            chmod 600 "$key"
+            ssh-keygen -y -f "$key" > "$key.pub"
+            echo KEY_IS_EPHEMERAL=false >> "$GITHUB_ENV"
+            echo SAHJONY_EXISTING_SSH_IDENTITY_AVAILABLE=1
+          else
+            ssh-keygen -q -t ed25519 -N '' -f "$key" -C "sahjony-whatsapp-activate-${GITHUB_RUN_ID}"
+            echo KEY_IS_EPHEMERAL=true >> "$GITHUB_ENV"
+            echo SAHJONY_EPHEMERAL_SSH_IDENTITY_CREATED=1
+          fi
+          unset DURABLE_SSH_PRIVATE_KEY
+          echo "SSH_KEY_PATH=$key" >> "$GITHUB_ENV"
+          chmod +x \
+            openclaw/hostinger-24x7/hostinger-recovery-controller.sh \
+            openclaw/hostinger-24x7/ssh-self-heal.sh \
+            openclaw/hostinger-24x7/hostinger-runtime-bootstrap.sh \
+            openclaw/hostinger-24x7/openclaw-runtime-recovery.sh \
+            openclaw/hostinger-24x7/whatsapp-hostinger-only-guardian.sh \
+            openclaw/hostinger-24x7/whatsapp-number-activate.sh
+          bash -n openclaw/hostinger-24x7/hostinger-recovery-controller.sh
+          bash -n openclaw/hostinger-24x7/whatsapp-hostinger-only-guardian.sh
+          bash -n openclaw/hostinger-24x7/whatsapp-number-activate.sh
+          echo SAHJONY_ACTIVATION_TOOLING_VALIDATED=1
 
-      - name: Ensure normal Kali SSH without competing recovery
+      - name: Establish authenticated native Kali SSH without competing mutation
         shell: bash
         run: |
           set -euo pipefail
-          set +e
+          export SSH_KEY_PATH
           openclaw/hostinger-24x7/hostinger-recovery-controller.sh repair-ssh
-          controller_rc=$?
-          set -e
+          opts=(-o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -i "$SSH_KEY_PATH")
+          ssh "${opts[@]}" "$HOSTINGER_USER@$HOSTINGER_HOST" \
+            'set -euo pipefail; systemctl is-active --quiet ssh.service; systemctl is-active --quiet docker.service; printf "SAHJONY_NORMAL_KALI_SSH=READY\n"'
 
-          opts=(-o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 -i "$SSH_KEY_PATH")
-          ssh_ready=0
-          for i in $(seq 1 24); do
-            if ssh "${opts[@]}" "$HOSTINGER_USER@$HOSTINGER_HOST" 'printf SAHJONY_NORMAL_SSH_OK' 2>/dev/null | grep -q SAHJONY_NORMAL_SSH_OK; then
-              echo "SAHJONY_POST_RECOVERY_SSH_READY_PROBE=$i"
-              ssh_ready=1
-              break
-            fi
-            sleep 5
-          done
-          (( ssh_ready == 1 )) || { echo SAHJONY_POST_RECOVERY_SSH_UNAVAILABLE=1 >&2; exit "${controller_rc:-1}"; }
-          if (( controller_rc != 0 )); then
-            echo SAHJONY_CONTROLLER_TRANSIENT_SSH_RACE_TOLERATED=1
-          fi
-
-          live_guard_ready=0
-          for i in $(seq 1 8); do
-            if scp "${opts[@]}" openclaw/hostinger-24x7/ssh-self-heal.sh "$HOSTINGER_USER@$HOSTINGER_HOST:/tmp/sahjony-ssh-self-heal" >/dev/null 2>&1 && \
-               ssh "${opts[@]}" "$HOSTINGER_USER@$HOSTINGER_HOST" 'set -euo pipefail; install -m 755 /tmp/sahjony-ssh-self-heal /usr/local/sbin/sahjony-ssh-self-heal; /usr/local/sbin/sahjony-ssh-self-heal; systemctl is-active --quiet ssh.service; systemctl is-enabled --quiet ssh.service; systemctl is-active --quiet sahjony-ssh-runtime-guard.timer; systemctl is-enabled --quiet sahjony-ssh-runtime-guard.timer; test -d /run/sshd; /usr/sbin/sshd -t; echo SAHJONY_NATIVE_SSH_SELF_HEAL=READY'; then
-              echo "SAHJONY_LIVE_SSH_GUARD_READY_PROBE=$i"
-              live_guard_ready=1
-              break
-            fi
-            sleep 5
-          done
-          (( live_guard_ready == 1 )) || { echo SAHJONY_LIVE_SSH_GUARD_NOT_READY=1 >&2; exit 21; }
-
-      - name: Install and enable official WhatsApp plugin
+      - name: Activate the existing linked WhatsApp session and install 24x7 heartbeat guardian
         shell: bash
         run: |
           set -euo pipefail
           opts=(-o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -i "$SSH_KEY_PATH")
+          scp "${opts[@]}" \
+            openclaw/hostinger-24x7/whatsapp-number-activate.sh \
+            "$HOSTINGER_USER@$HOSTINGER_HOST:/tmp/sahjony-whatsapp-number-activate"
+          scp "${opts[@]}" \
+            openclaw/hostinger-24x7/whatsapp-hostinger-only-guardian.sh \
+            "$HOSTINGER_USER@$HOSTINGER_HOST:/tmp/sahjony-whatsapp-guardian"
+
           ssh "${opts[@]}" "$HOSTINGER_USER@$HOSTINGER_HOST" 'bash -s' <<'REMOTE'
           set -euo pipefail
-          cd /opt/sahjony-openclaw
-          test -s docker-compose.yml
+          install -m 700 /tmp/sahjony-whatsapp-number-activate /usr/local/sbin/sahjony-whatsapp-number-activate
+          install -m 700 /tmp/sahjony-whatsapp-guardian /usr/local/sbin/sahjony-whatsapp-hostinger-guardian
+          rm -f /tmp/sahjony-whatsapp-number-activate /tmp/sahjony-whatsapp-guardian
+
+          echo '=== EXISTING LINKED SESSION ACTIVATION ==='
+          /usr/local/sbin/sahjony-whatsapp-number-activate
+
+          echo '=== 24X7 GUARDIAN INSTALL ==='
+          /usr/local/sbin/sahjony-whatsapp-hostinger-guardian install
+          systemctl is-enabled --quiet sahjony-whatsapp-hostinger.timer
+          systemctl is-active --quiet sahjony-whatsapp-hostinger.timer
+
+          echo '=== LOCAL ACCEPTANCE ==='
           systemctl is-active --quiet docker.service
-          test "$(docker inspect sahjony-openclaw-gateway --format '{{.State.Running}}')" = true
-
-          run_cli(){
-            docker compose run -T --rm --no-deps openclaw-cli "$@"
-          }
-
-          echo '=== INSTALL OFFICIAL WHATSAPP PLUGIN ==='
-          set +e
-          out="$(run_cli plugins install clawhub:@openclaw/whatsapp --accept-capabilities 2>&1)"
-          rc=$?
-          set -e
-          printf '%s\n' "$out" | sed -E 's/(token|secret|key|password)[=:][^[:space:]]+/\1=[REDACTED]/Ig'
-          if (( rc != 0 )); then
-            if grep -qi 'acknowledge-clawhub-risk' <<<"$out"; then
-              run_cli plugins install clawhub:@openclaw/whatsapp --accept-capabilities --acknowledge-clawhub-risk
-            elif grep -Eqi 'already (installed|exists)' <<<"$out"; then
-              echo WHATSAPP_PLUGIN_ALREADY_PRESENT=1
-            else
-              exit "$rc"
-            fi
-          fi
-
-          echo '=== ENABLE WHATSAPP PLUGIN ==='
-          run_cli plugins enable whatsapp --accept-capabilities
-
-          echo '=== HOST-LEVEL GATEWAY RELOAD ==='
-          docker restart sahjony-openclaw-gateway >/dev/null
-          for i in $(seq 1 24); do
-            status="$(docker inspect sahjony-openclaw-gateway --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' 2>/dev/null || true)"
-            echo "gateway_health_probe=$i status=${status:-unknown}"
-            [[ "$status" == healthy ]] && break
-            [[ "$status" == exited || "$status" == dead ]] && exit 20
-            sleep 5
-          done
-          test "$(docker inspect sahjony-openclaw-gateway --format '{{.State.Health.Status}}')" = healthy
-
-          echo '=== PLUGIN INVENTORY ==='
-          run_cli plugins list 2>&1 | sed -E 's/(token|secret|key|password)[=:][^[:space:]]+/\1=[REDACTED]/Ig' | grep -Ei 'whatsapp|plugin|enabled|loaded' || true
-
-          echo '=== WHATSAPP CHANNEL PROBE ==='
-          set +e
-          probe="$(run_cli channels status --channel whatsapp --probe 2>&1)"
-          probe_rc=$?
-          set -e
-          printf '%s\n' "$probe" | sed -E 's/(token|secret|key|password)[=:][^[:space:]]+/\1=[REDACTED]/Ig'
-          echo "WHATSAPP_CHANNEL_PROBE_RC=$probe_rc"
-          if printf '%s' "$probe" | grep -Eiq 'whatsapp.*(connected|ready|active|healthy)|(connected|ready|active|healthy).*whatsapp'; then
-            echo SAHJONY_HOSTINGER_WHATSAPP_CHANNEL=READY
-          else
-            echo SAHJONY_HOSTINGER_WHATSAPP_CHANNEL=PAIRING_OR_AUTH_REQUIRED
-          fi
-
-          echo '=== AUTH/SESSION CANDIDATE METADATA ONLY ==='
-          for base in /var/lib/sahjony-openclaw-state /var/lib/sahjony-openclaw-auth /root/.openclaw /var/backups/sahjony-openclaw; do
-            [[ -d "$base" ]] || continue
-            find "$base" -xdev -maxdepth 10 -type f \
-              \( -iname '*whatsapp*' -o -iname '*baileys*' -o -iname 'creds.json' -o -iname '*session*.json' -o -iname '*auth*.json' -o -iname '*device*.json' \) \
-              -printf '%p|size=%s|mtime=%TY-%Tm-%TdT%TH:%TM:%TSZ\n' 2>/dev/null | head -n 240 || true
-          done
+          cid="$(docker ps -a --format '{{.ID}}|{{.Names}}|{{.Image}}' | awk -F'|' 'tolower($0) ~ /openclaw|claw/ {print $1; exit}')"
+          test -n "$cid"
+          test "$(docker inspect "$cid" --format '{{.State.Running}}')" = true
+          policy="$(docker inspect "$cid" --format '{{.HostConfig.RestartPolicy.Name}}')"
+          case "$policy" in unless-stopped|always) ;; *) echo "BAD_RESTART_POLICY=$policy" >&2; exit 31 ;; esac
+          test -s /var/lib/sahjony-whatsapp-guardian/number-activation-last-good.json
+          echo SAHJONY_HOSTINGER_WHATSAPP_LOCAL=READY
           REMOTE
 
-      - name: Install guardian only when WhatsApp is already connected
+      - name: Verify production number is active
         shell: bash
         run: |
           set -euo pipefail
-          opts=(-o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -i "$SSH_KEY_PATH")
-          scp "${opts[@]}" openclaw/hostinger-24x7/whatsapp-hostinger-only-guardian.sh "$HOSTINGER_USER@$HOSTINGER_HOST:/tmp/sahjony-whatsapp-guardian"
-          ssh "${opts[@]}" "$HOSTINGER_USER@$HOSTINGER_HOST" 'bash -s' <<'REMOTE'
-          set -euo pipefail
-          install -m 700 /tmp/sahjony-whatsapp-guardian /usr/local/sbin/sahjony-whatsapp-guardian
-          rm -f /tmp/sahjony-whatsapp-guardian
-          set +e
-          /usr/local/sbin/sahjony-whatsapp-guardian audit
-          rc=$?
-          set -e
-          if (( rc == 0 )); then
-            /usr/local/sbin/sahjony-whatsapp-guardian install
-            systemctl is-enabled --quiet sahjony-whatsapp-hostinger.timer
-            systemctl is-active --quiet sahjony-whatsapp-hostinger.timer
-            echo SAHJONY_WHATSAPP_GUARDIAN=READY
-          else
-            echo SAHJONY_WHATSAPP_GUARDIAN=DEFERRED_UNTIL_CHANNEL_AUTH
-          fi
-          REMOTE
+          health="$(curl -fsS --retry 5 --retry-delay 2 https://www.sahjony.com/whatsapp/health)"
+          HEALTH_JSON="$health" python3 - <<'PY'
+          import json, os, sys
+          h=json.loads(os.environ['HEALTH_JSON'])
+          node=h.get('hostinger_openclaw') or {}
+          checks={
+              'status_ok': h.get('status') == 'ok',
+              'hostinger_independent_runtime': h.get('hostinger_independent_runtime') is True,
+              'send_ready': h.get('send_ready') is True,
+              'webhook_ready': h.get('webhook_ready') is True,
+              'hostinger_connected': node.get('connected') is True,
+              'gateway_matches': node.get('gateway_id') == 'hostinger-vps',
+              'business_number_present': bool(node.get('business_number')),
+          }
+          safe={
+              'ok': all(checks.values()),
+              'checks': checks,
+              'gateway_id': node.get('gateway_id'),
+              'business_number': node.get('business_number'),
+              'last_seen_at': node.get('last_seen_at'),
+              'provider': h.get('primary_provider'),
+          }
+          print(json.dumps(safe, separators=(',',':')))
+          if not safe['ok']:
+              sys.exit(1)
+          print('SAHJONY_WHATSAPP_NUMBER=ACTIVE')
+          PY
 
       - name: Remove ephemeral management identity
         if: always()
         shell: bash
         run: |
           set +e
-          if [[ -s ~/.ssh/whatsapp-activate.pub && -s ~/.ssh/whatsapp-activate ]]; then
-            pub_b64="$(base64 -w0 ~/.ssh/whatsapp-activate.pub)"
-            ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 -i ~/.ssh/whatsapp-activate "$HOSTINGER_USER@$HOSTINGER_HOST" "PUB_B64='$pub_b64' bash -s" <<'REMOTE'
+          key="${SSH_KEY_PATH:-$HOME/.ssh/sahjony-whatsapp-activate}"
+          if [[ "${KEY_IS_EPHEMERAL:-false}" == true && -s "$key.pub" && -s "$key" ]]; then
+            pub_b64="$(base64 -w0 "$key.pub")"
+            ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 -i "$key" \
+              "$HOSTINGER_USER@$HOSTINGER_HOST" "PUB_B64='$pub_b64' bash -s" <<'REMOTE'
           set -euo pipefail
           auth=/root/.ssh/authorized_keys
           if [[ -f "$auth" ]]; then
@@ -194,8 +163,7 @@ jobs:
             chmod 600 "$auth"
             rm -f "$tmp"
           fi
-          rm -f /tmp/sahjony-whatsapp-guardian /tmp/sahjony-ssh-self-heal
-          echo SAHJONY_WHATSAPP_ACTIVATION_EPHEMERAL_KEY_REMOVED=1
+          echo SAHJONY_EPHEMERAL_MANAGEMENT_IDENTITY_REMOVED=1
           REMOTE
           fi
-          rm -f ~/.ssh/whatsapp-activate ~/.ssh/whatsapp-activate.pub
+          rm -f "$key" "$key.pub"
