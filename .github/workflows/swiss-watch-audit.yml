@@ -1,0 +1,182 @@
+name: Swiss Watch Full Audit
+
+on:
+  push:
+    branches: [audit/swiss-watch-20260901]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+          fetch-depth: 1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Frontend install, typecheck, build and dependency audit
+        shell: bash
+        run: |
+          set -u
+          mkdir -p audit-output
+          : > audit-output/summary.txt
+          run_check() {
+            local name="$1"; shift
+            echo "===== $name =====" | tee -a audit-output/summary.txt
+            if "$@" >> audit-output/summary.txt 2>&1; then
+              echo "$name=PASS" | tee -a audit-output/summary.txt
+            else
+              code=$?
+              echo "$name=FAIL:$code" | tee -a audit-output/summary.txt
+            fi
+          }
+          run_check NPM_CI npm ci
+          run_check TYPESCRIPT npx tsc -p tsconfig.json
+          run_check VITE_BUILD npm run build
+          npm audit --omit=dev --json > audit-output/npm-audit.json 2>/dev/null || true
+          node <<'NODE' | tee -a audit-output/summary.txt
+          const fs=require('fs'),path=require('path');
+          const root='dist/assets';
+          let files=[];
+          if(fs.existsSync(root)){
+            for(const name of fs.readdirSync(root)){
+              const p=path.join(root,name); const st=fs.statSync(p);
+              if(st.isFile() && /\.(js|css)$/.test(name)) files.push([name,st.size]);
+            }
+          }
+          files.sort((a,b)=>b[1]-a[1]);
+          console.log('BUNDLE_FILE_COUNT='+files.length);
+          console.log('LARGEST_BUNDLES');
+          for(const [name,size] of files.slice(0,20)) console.log(`${name}\t${size}`);
+          const oversized=files.filter(([,s])=>s>500*1024);
+          console.log('BUNDLES_OVER_500KB='+oversized.length);
+          NODE
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Python correctness, tests and dependency integrity
+        shell: bash
+        run: |
+          set -u
+          run_check() {
+            local name="$1"; shift
+            echo "===== $name =====" | tee -a audit-output/summary.txt
+            if "$@" >> audit-output/summary.txt 2>&1; then
+              echo "$name=PASS" | tee -a audit-output/summary.txt
+            else
+              code=$?
+              echo "$name=FAIL:$code" | tee -a audit-output/summary.txt
+            fi
+          }
+          run_check PIP_INSTALL python -m pip install -r requirements.txt
+          run_check PIP_CHECK python -m pip check
+          run_check PY_COMPILE python -m compileall -q .
+          run_check PYTEST python -m pytest -q
+          python -m pip install -q ruff bandit pip-audit
+          run_check RUFF_CORRECTNESS ruff check . --select E9,F63,F7,F82 --exclude node_modules,dist,gstack,superpowers,ui-ux-pro-max-skill
+          pip-audit -r requirements.txt --progress-spinner off > audit-output/pip-audit.txt 2>&1 || true
+          bandit -r . -x ./tests,./node_modules,./dist,./gstack,./superpowers,./ui-ux-pro-max-skill -q -ll > audit-output/bandit.txt 2>&1 || true
+
+      - name: Route, secret-pattern and health-check integrity scan
+        shell: bash
+        run: |
+          python <<'PY' | tee -a audit-output/summary.txt
+          import ast, json, pathlib, re
+          root=pathlib.Path('.')
+          cfg=json.loads((root/'vercel.json').read_text())
+          missing=[]; duplicate=[]; seen={}
+          for route in cfg.get('routes',[]):
+              src=route.get('src'); dest=route.get('dest')
+              if src:
+                  if src in seen: duplicate.append((src,seen[src],dest))
+                  seen[src]=dest
+              if not dest or not isinstance(dest,str): continue
+              clean=dest.lstrip('/')
+              if clean.endswith('.py') and not (root/clean).exists(): missing.append((src,dest,'python'))
+              elif clean.endswith('.html') and not ((root/clean).exists() or (root/'public'/clean).exists()): missing.append((src,dest,'html'))
+          for build in cfg.get('builds',[]):
+              src=build.get('src','')
+              if src.endswith('.py') and not (root/src).exists(): missing.append(('build',src,'python'))
+          print('VERCEL_ROUTES='+str(len(cfg.get('routes',[]))))
+          print('VERCEL_BUILDS='+str(len(cfg.get('builds',[]))))
+          print('MISSING_ROUTE_TARGETS='+str(len(missing)))
+          for row in missing[:100]: print('MISSING_TARGET',*row,sep='\t')
+          print('DUPLICATE_EXACT_ROUTE_PATTERNS='+str(len(duplicate)))
+          for row in duplicate[:100]: print('DUPLICATE_ROUTE',*row,sep='\t')
+
+          secret_vars={'OPENAI_API_KEY','NVIDIA_API_KEY','SUPABASE_SERVICE_ROLE_KEY','SUPABASE_SECRET_KEY','OWNER_TOKEN','OWNER_SESSION_SECRET','DATABASE_URL','POSTGRES_URL','NEON_DATABASE_URL','VERCEL_TOKEN','GITHUB_TOKEN','WHATSAPP_ACCESS_TOKEN'}
+          secret_hits=[]
+          assign=re.compile(r'(?i)\b('+'|'.join(map(re.escape,secret_vars))+r')\b\s*[:=]\s*[\"\']([^\"\']+)[\"\']')
+          for p in root.rglob('*'):
+              if not p.is_file() or any(x in p.parts for x in {'.git','node_modules','dist','gstack','superpowers','ui-ux-pro-max-skill'}): continue
+              if p.suffix.lower() not in {'.py','.js','.mjs','.cjs','.ts','.tsx','.json','.yml','.yaml','.md','.env','.example','.txt'} and p.name!='.env.example': continue
+              try: text=p.read_text(errors='ignore')
+              except Exception: continue
+              for i,line in enumerate(text.splitlines(),1):
+                  m=assign.search(line)
+                  if not m: continue
+                  val=m.group(2).strip()
+                  if not val or val.startswith('${') or val.startswith('$') or 'example' in val.lower() or 'your_' in val.lower() or '<' in val or val.lower() in {'true','false','required','optional'}: continue
+                  secret_hits.append((str(p),i,m.group(1)))
+          print('POTENTIAL_HARDCODED_SECRET_ASSIGNMENTS='+str(len(secret_hits)))
+          for p,line,var in secret_hits[:100]: print('SECRET_PATTERN',p,line,var,sep='\t')
+
+          health=[]
+          false_green=[]
+          for p in root.glob('*.py'):
+              try: tree=ast.parse(p.read_text())
+              except Exception: continue
+              for node in ast.walk(tree):
+                  if not isinstance(node,(ast.FunctionDef,ast.AsyncFunctionDef)): continue
+                  paths=[]
+                  for deco in node.decorator_list:
+                      if isinstance(deco,ast.Call) and isinstance(deco.func,ast.Attribute) and deco.args and isinstance(deco.args[0],ast.Constant) and isinstance(deco.args[0].value,str):
+                          if 'health' in deco.args[0].value: paths.append(deco.args[0].value)
+                  if not paths: continue
+                  body=ast.get_source_segment(p.read_text(),node) or ''
+                  health.extend((str(p),path,node.name) for path in paths)
+                  if "'status':'ok'" in body.replace(' ', '') or '"status":"ok"' in body.replace(' ', ''):
+                      dependency_signals=('get_backend(','select_rows(','httpx.','await ','metadata(','_connect(','persistent_backend_status(')
+                      if not any(sig in body for sig in dependency_signals):
+                          for path in paths: false_green.append((str(p),path,node.name))
+          print('HEALTH_ENDPOINTS_FOUND='+str(len(health)))
+          print('POTENTIAL_FALSE_GREEN_HEALTH_ENDPOINTS='+str(len(false_green)))
+          for row in false_green[:100]: print('FALSE_GREEN_HEALTH',*row,sep='\t')
+          PY
+
+      - name: Repository scale and architecture inventory
+        shell: bash
+        run: |
+          python <<'PY' | tee -a audit-output/summary.txt
+          import pathlib
+          root=pathlib.Path('.')
+          ignored={'.git','node_modules','dist','gstack','superpowers','ui-ux-pro-max-skill'}
+          files=[p for p in root.rglob('*') if p.is_file() and not any(x in p.parts for x in ignored)]
+          py=[p for p in files if p.suffix=='.py']; ts=[p for p in files if p.suffix in {'.ts','.tsx'}]; html=[p for p in files if p.suffix=='.html']
+          print('REPO_FILES='+str(len(files)))
+          print('PYTHON_FILES='+str(len(py)))
+          print('TYPESCRIPT_FILES='+str(len(ts)))
+          print('HTML_FILES='+str(len(html)))
+          print('PYTHON_LOC='+str(sum(len(p.read_text(errors='ignore').splitlines()) for p in py)))
+          print('TYPESCRIPT_LOC='+str(sum(len(p.read_text(errors='ignore').splitlines()) for p in ts)))
+          print('HTML_LOC='+str(sum(len(p.read_text(errors='ignore').splitlines()) for p in html)))
+          PY
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: swiss-watch-audit
+          path: audit-output/
+          if-no-files-found: warn
