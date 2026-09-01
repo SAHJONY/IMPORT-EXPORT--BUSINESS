@@ -38,7 +38,7 @@ from whatsapp_backlog_recovery import drain_backlog, find_unanswered
 from sofia_self_marketing import growth_health
 from sofia_self_selling import self_selling_health
 
-app = FastAPI(title="SAHJONY WhatsApp Hostinger OpenClaw Primary", version="5.3.0", docs_url=None, redoc_url=None)
+app = FastAPI(title="SAHJONY WhatsApp Hostinger OpenClaw Authority", version="5.4.0", docs_url=None, redoc_url=None)
 
 # Mandatory inbound reply runtime: the original customer text is preserved for safe
 # contact resolution, then Sofia loads durable history/memory and sales intelligence.
@@ -89,22 +89,22 @@ async def _named_openclaw_gateway_state(gateway_id: str) -> dict[str, Any]:
 
 
 @app.get("/whatsapp/health")
-async def whatsapp_health_hostinger_primary() -> dict[str, Any]:
+async def whatsapp_health_hostinger_authority() -> dict[str, Any]:
     cfg = await _config()
     persistence = persistent_backend_status()
-    openclaw = await _openclaw_gateway_state()
-    hostinger = await _named_openclaw_gateway_state("hostinger-vps")
 
-    # Meta is diagnostic-only in the present architecture. It must not downgrade
-    # or gate a healthy Hostinger/OpenClaw transport.
+    # hostinger-vps is the sole production authority. The generic/default gateway
+    # is retained only for diagnostics and can never make production ready.
+    hostinger = await _named_openclaw_gateway_state("hostinger-vps")
+    default_openclaw = await _openclaw_gateway_state()
+    hostinger_ready = bool(hostinger.get("connected"))
+    hostinger_configured = bool(hostinger.get("configured"))
+
+    # Any cloud-provider configuration is diagnostic-only and cannot promote,
+    # downgrade, route, or release production WhatsApp traffic.
     cloud_send = _send_ready(cfg)
     cloud_webhook = _webhook_ready(cfg)
     cloud_ready = _configured(cfg)
-
-    hostinger_ready = bool(hostinger.get("connected"))
-    default_openclaw_ready = bool(openclaw.get("connected"))
-    openclaw_ready = hostinger_ready or default_openclaw_ready
-    active = "hostinger_openclaw" if hostinger_ready else ("openclaw" if default_openclaw_ready else "none")
 
     recovery = await diagnose()
     sofia = await intelligence_health()
@@ -113,20 +113,28 @@ async def whatsapp_health_hostinger_primary() -> dict[str, Any]:
     pending = await find_unanswered(50)
 
     return {
-        "status": "ok" if openclaw_ready else "configuration_required",
+        "status": "ok" if hostinger_ready else ("degraded" if hostinger_configured else "configuration_required"),
         "service": "whatsapp-transport",
-        "version": "5.3.0",
-        "provider": active,
+        "version": "5.4.0",
+        "provider": "hostinger_openclaw",
         "primary_provider": "hostinger_openclaw",
-        "transport_policy": "openclaw_hostinger_primary_meta_optional",
+        "authority": {
+            "runtime": "hostinger-vps",
+            "transport": "openclaw",
+            "gateway_id": "hostinger-vps",
+            "sole_production_authority": True,
+            "fallback_authority_allowed": False,
+        },
+        "transport_policy": "hostinger_openclaw_single_authority",
         "business_suite_connection": True,
         "hostinger_independent_runtime": hostinger_ready,
-        "send_ready": openclaw_ready,
-        "webhook_ready": bool(openclaw.get("configured") or hostinger.get("configured")),
+        "send_ready": hostinger_ready,
+        "webhook_ready": hostinger_ready,
         "meta_cloud_required": False,
         "meta_cloud_controlled": False,
+        "cross_provider_failover": False,
         "meta_cloud": {
-            "role": "optional_future_transport_diagnostics_only",
+            "role": "diagnostic_only_non_authoritative",
             "configured": cloud_ready,
             "send_ready": cloud_send,
             "webhook_ready": cloud_webhook,
@@ -140,11 +148,13 @@ async def whatsapp_health_hostinger_primary() -> dict[str, Any]:
             "graph_api_version_configured": bool(cfg.get("graph_api_version")),
         },
         "openclaw_default": {
+            "role": "diagnostic_only_non_authoritative",
             "gateway_id": "default",
-            "configured": bool(openclaw.get("configured")),
-            "connected": bool(openclaw.get("connected")),
-            "heartbeat_fresh": bool(openclaw.get("heartbeat_fresh")),
-            "last_seen_at": openclaw.get("last_seen_at"),
+            "configured": bool(default_openclaw.get("configured")),
+            "connected": bool(default_openclaw.get("connected")),
+            "heartbeat_fresh": bool(default_openclaw.get("heartbeat_fresh")),
+            "last_seen_at": default_openclaw.get("last_seen_at"),
+            "can_make_production_ready": False,
         },
         "hostinger_openclaw": hostinger,
         "durable_backend_configured": bool(persistence.get("configured")),
@@ -160,6 +170,7 @@ async def whatsapp_health_hostinger_primary() -> dict[str, Any]:
         "self_healing": True,
         "self_repair": True,
         "automatic_failover": True,
+        "automatic_failover_scope": "hostinger_local_runtime_only",
         "adaptive_sofia": sofia,
         "self_marketing": marketing,
         "self_selling": selling,
@@ -183,6 +194,7 @@ async def whatsapp_recovery_health() -> dict[str, Any]:
         "version": "1.2.0",
         "diagnosis": result,
         "automatic_failover": True,
+        "automatic_failover_scope": "hostinger_local_runtime_only",
         "retry_strategy": "bounded_exponential_backoff",
         "idempotent_replay": True,
         "circuit_breaker": True,
@@ -234,12 +246,11 @@ async def whatsapp_send_hostinger_primary(
 ) -> dict[str, Any]:
     _owner(authorization)
 
-    # OpenClaw outbox is the authoritative outbound transport. Hostinger consumes
-    # this durable queue. Meta credentials, if present, are intentionally ignored
-    # here so stale/partial Meta configuration cannot hijack production sends.
+    # The durable OpenClaw outbox is the only production outbound path. The
+    # Hostinger gateway consumes it. No alternate provider may hijack delivery.
     result = await _enqueue_openclaw_message(payload)
     await record_recovery_event(
-        "openclaw_primary_enqueue",
-        {"status": "ok", "provider": "hostinger_openclaw", "meta_required": False},
+        "hostinger_openclaw_authoritative_enqueue",
+        {"status": "ok", "provider": "hostinger_openclaw", "gateway_id": "hostinger-vps"},
     )
     return result
