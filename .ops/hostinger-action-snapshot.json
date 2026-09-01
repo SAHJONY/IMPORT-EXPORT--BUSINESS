@@ -1,5 +1,5 @@
 {
-  "checked_at": "2026-09-01T05:05:49Z",
+  "checked_at": "2026-09-01T05:07:24Z",
   "busy": 0,
   "vm": {
     "id": 767852,
@@ -30,6 +30,29 @@
         "ptr": "srv767852.hstgr.cloud"
       }
     ]
+  },
+  "public_health": {
+    "status": "configuration_required",
+    "version": "5.4.0",
+    "provider": "hostinger_openclaw",
+    "primary_provider": "hostinger_openclaw",
+    "send_ready": false,
+    "webhook_ready": false,
+    "gateway_connected": null,
+    "hostinger_independent_runtime": false,
+    "hostinger_openclaw": {
+      "gateway_id": "hostinger-vps",
+      "configured": false,
+      "connected": false,
+      "heartbeat_fresh": false,
+      "last_seen_at": null,
+      "business_number": null,
+      "business_name": null,
+      "model": null,
+      "gateway_version": null
+    },
+    "meta_cloud_required": false,
+    "meta_cloud_controlled": false
   },
   "actions": [
     {
