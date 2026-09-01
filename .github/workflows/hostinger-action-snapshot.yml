@@ -18,8 +18,9 @@ jobs:
       HOSTINGER_API_BASE: https://developers.hostinger.com
       VM_ID: '767852'
       STATUS_PATH: .ops/hostinger-action-snapshot.json
+      APP_URL: https://www.sahjony.com
     steps:
-      - name: Read VM and latest VPS actions
+      - name: Read VM, actions, and secondary public health
         shell: bash
         run: |
           set -euo pipefail
@@ -30,7 +31,15 @@ jobs:
           actions="$(jq '[.data[]? | {id,name,state,created_at,updated_at}] | .[0:12]' <<<"$body")"
           busy="$(jq '[.data[]? | select(.state != "success" and .state != "failed" and .state != "failure" and .state != "error" and .state != "cancelled" and .state != "canceled")] | length' <<<"$body")"
           vm_summary="$(jq '{id,state,hostname,plan,template,created_at,actions_lock,is_running,is_recovery_mode,ipv4,ipv6}' <<<"$vm")"
-          snapshot="$(jq -n --arg checked_at "$(date -u +%FT%TZ)" --argjson busy "$busy" --argjson vm "$vm_summary" --argjson actions "$actions" '{checked_at:$checked_at,busy:$busy,vm:$vm,actions:$actions}')"
+
+          health_raw="$(curl -sS --max-time 20 "$APP_URL/whatsapp/health" || true)"
+          if jq -e . >/dev/null 2>&1 <<<"$health_raw"; then
+            health="$(jq '{status,version,provider,primary_provider,send_ready,webhook_ready,gateway_connected,hostinger_independent_runtime,hostinger_openclaw,meta_cloud_required,meta_cloud_controlled}' <<<"$health_raw")"
+          else
+            health="$(jq -n --arg raw "${health_raw:0:500}" '{parseable:false,raw:$raw}')"
+          fi
+
+          snapshot="$(jq -n --arg checked_at "$(date -u +%FT%TZ)" --argjson busy "$busy" --argjson vm "$vm_summary" --argjson actions "$actions" --argjson health "$health" '{checked_at:$checked_at,busy:$busy,vm:$vm,public_health:$health,actions:$actions}')"
           printf '%s\n' "$snapshot" | jq .
           echo HOSTINGER_ACTIONS_BUSY="$busy"
 
@@ -40,8 +49,8 @@ jobs:
           code="$(curl -sS -o /tmp/existing.json -w '%{http_code}' "${auth_github[@]}" "$api?ref=main")"
           if [[ "$code" == 200 ]]; then
             sha="$(jq -r '.sha' /tmp/existing.json)"
-            payload="$(jq -n --arg message 'ops: record Hostinger VM/action snapshot' --arg content "$encoded" --arg sha "$sha" '{message:$message,content:$content,sha:$sha,branch:"main"}')"
+            payload="$(jq -n --arg message 'ops: record Hostinger VM/action/health snapshot' --arg content "$encoded" --arg sha "$sha" '{message:$message,content:$content,sha:$sha,branch:"main"}')"
           else
-            payload="$(jq -n --arg message 'ops: record Hostinger VM/action snapshot' --arg content "$encoded" '{message:$message,content:$content,branch:"main"}')"
+            payload="$(jq -n --arg message 'ops: record Hostinger VM/action/health snapshot' --arg content "$encoded" '{message:$message,content:$content,branch:"main"}')"
           fi
           curl -fsS -X PUT "${auth_github[@]}" -H 'Content-Type: application/json' --data "$payload" "$api" >/dev/null
