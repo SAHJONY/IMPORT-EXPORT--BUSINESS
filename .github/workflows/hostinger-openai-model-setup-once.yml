@@ -1,0 +1,223 @@
+name: Hostinger OpenAI + NVIDIA Setup Once
+
+on:
+  push:
+    branches: [ops/model-setup-once]
+    paths:
+      - '.github/workflows/hostinger-openai-model-setup-once.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hostinger-dual-model-setup-once
+  cancel-in-progress: false
+
+jobs:
+  configure-models:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      HOST: '69.62.68.67'
+      USER: root
+      PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+      OPENAI_API_KEY_GH: ${{ secrets.OPENAI_API_KEY }}
+      NVIDIA_API_KEY_GH: ${{ secrets.NVIDIA_API_KEY }}
+    steps:
+      - name: Validate required secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "${PRIVATE_KEY:-}" ]] || { echo HOSTINGER_SSH_PRIVATE_KEY_MISSING=1 >&2; exit 2; }
+          [[ -n "${OPENAI_API_KEY_GH:-}" ]] || { echo OPENAI_API_KEY_GITHUB_SECRET_MISSING=1 >&2; exit 3; }
+          [[ -n "${NVIDIA_API_KEY_GH:-}" ]] || { echo NVIDIA_API_KEY_GITHUB_SECRET_MISSING=1 >&2; exit 4; }
+          echo OPENAI_API_KEY_GITHUB_SECRET_PRESENT=1
+          echo NVIDIA_API_KEY_GITHUB_SECRET_PRESENT=1
+
+      - name: Prepare secure SSH
+        shell: bash
+        run: |
+          set -euo pipefail
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/hostinger-models
+          chmod 600 ~/.ssh/hostinger-models
+          ssh-keygen -y -f ~/.ssh/hostinger-models >/dev/null
+
+      - name: Transfer provider keys securely to Hostinger VPS
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          printf '%s' "$OPENAI_API_KEY_GH" > "$RUNNER_TEMP/openai-api-key"
+          printf '%s' "$NVIDIA_API_KEY_GH" > "$RUNNER_TEMP/nvidia-api-key"
+          chmod 600 "$RUNNER_TEMP/openai-api-key" "$RUNNER_TEMP/nvidia-api-key"
+          ok=0
+          for attempt in 1 2 3 4; do
+            if scp -q -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=12 \
+              -i ~/.ssh/hostinger-models "$RUNNER_TEMP/openai-api-key" "$USER@$HOST:/root/.openai-api-key.once" \
+              && scp -q -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=12 \
+              -i ~/.ssh/hostinger-models "$RUNNER_TEMP/nvidia-api-key" "$USER@$HOST:/root/.nvidia-api-key.once"; then
+              ok=1
+              break
+            fi
+            echo "SSH_TRANSFER_ATTEMPT_${attempt}_FAILED=1"
+            sleep $((attempt * 4))
+          done
+          rm -f "$RUNNER_TEMP/openai-api-key" "$RUNNER_TEMP/nvidia-api-key"
+          [[ "$ok" == "1" ]] || { echo HOSTINGER_SSH_TRANSFER_FAILED=1 >&2; exit 5; }
+
+      - name: Configure OpenAI primary and NVIDIA NIM fallback on Hostinger
+        shell: bash
+        run: |
+          set -euo pipefail
+          ok=0
+          for attempt in 1 2 3 4; do
+            if ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=12 \
+              -i ~/.ssh/hostinger-models "$USER@$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          STATE=/var/lib/sahjony-openclaw-state
+          CONFIG="$STATE/openclaw.json"
+          HOME_DIR=/home/node
+          OPENAI_TMP=/root/.openai-api-key.once
+          NVIDIA_TMP=/root/.nvidia-api-key.once
+          OPENAI_ENV=/etc/openclaw-openai.env
+          DROPIN=/etc/systemd/system/openclaw-gateway.service.d/20-openai-auth.conf
+          NIM_STATE=/var/lib/sahjony-nvidia-nim
+          oc(){ env HOME="$HOME_DIR" OPENCLAW_HOME="$HOME_DIR" OPENCLAW_STATE_DIR="$STATE" OPENCLAW_CONFIG_PATH="$CONFIG" openclaw "$@"; }
+          trap 'rm -f "$OPENAI_TMP" "$NVIDIA_TMP" /tmp/openai-smoke.json /tmp/nvidia-smoke.json' EXIT
+
+          echo HOSTINGER_VPS_SCOPE_ONLY=1
+          [[ -s "$OPENAI_TMP" ]] || { echo OPENAI_KEY_TRANSFER_MISSING=1 >&2; exit 20; }
+          [[ -s "$NVIDIA_TMP" ]] || { echo NVIDIA_KEY_TRANSFER_MISSING=1 >&2; exit 21; }
+          [[ -f "$CONFIG" ]] || { echo OPENCLAW_CONFIG_MISSING=1 >&2; exit 22; }
+          systemctl cat openclaw-gateway.service >/dev/null 2>&1 || { echo OPENCLAW_GATEWAY_SERVICE_MISSING=1 >&2; exit 23; }
+
+          chmod 600 "$OPENAI_TMP" "$NVIDIA_TMP"
+          umask 077
+          {
+            printf 'OPENAI_API_KEY='
+            cat "$OPENAI_TMP"
+            printf '\n'
+          } > "$OPENAI_ENV"
+          chmod 600 "$OPENAI_ENV"
+
+          install -d -m 755 "$(dirname "$DROPIN")"
+          cat > "$DROPIN" <<'EOF2'
+          [Service]
+          EnvironmentFile=/etc/openclaw-openai.env
+          EOF2
+
+          oc plugins enable nvidia >/dev/null 2>&1 || true
+          cat "$NVIDIA_TMP" | oc models auth paste-api-key --provider nvidia --profile-id nvidia:nim >/dev/null
+          oc models auth order set --provider nvidia nvidia:nim >/dev/null
+          oc config set models.providers.nvidia '{"baseUrl":"https://integrate.api.nvidia.com/v1","api":"openai-completions"}' --strict-json --merge >/dev/null
+
+          mkdir -p "$NIM_STATE"
+          chmod 700 "$NIM_STATE"
+          if [[ -x /usr/local/sbin/sahjony-nvidia-nim-rotation ]]; then
+            /usr/local/sbin/sahjony-nvidia-nim-rotation >/dev/null
+          fi
+
+          fallback='nvidia/nemotron-3.5-lightning-30b-a3b'
+          if [[ -s "$NIM_STATE/nvidia-order.txt" ]]; then
+            fallback="$(head -n1 "$NIM_STATE/nvidia-order.txt" | tr -d '\r\n')"
+            fallback="${fallback#nvidia/}"
+            fallback="nvidia/${fallback#nvidia/}"
+          fi
+
+          oc config set agents.defaults.model.primary openai/gpt-5.6-sol >/dev/null
+          existing="$(oc config get agents.defaults.model.fallbacks --json 2>/dev/null || echo '[]')"
+          EXISTING="$existing" FALLBACK="$fallback" python3 - <<'PY' > /tmp/fallbacks.json
+          import json, os
+          try: vals=json.loads(os.environ.get('EXISTING') or '[]')
+          except Exception: vals=[]
+          if not isinstance(vals,list): vals=[]
+          fb=os.environ['FALLBACK']
+          out=[]
+          for x in [fb]+vals:
+              if isinstance(x,str) and x not in out and x != 'openai/gpt-5.6-sol': out.append(x)
+          print(json.dumps(out,separators=(',',':')))
+          PY
+          oc config set agents.defaults.model.fallbacks "$(cat /tmp/fallbacks.json)" --strict-json >/dev/null
+          rm -f /tmp/fallbacks.json
+          oc config validate >/dev/null
+
+          systemctl daemon-reload
+          systemctl restart openclaw-gateway.service
+          sleep 12
+          systemctl is-active --quiet openclaw-gateway.service
+          systemctl is-enabled --quiet openclaw-gateway.service
+
+          pid="$(systemctl show openclaw-gateway.service -p MainPID --value)"
+          [[ "$pid" =~ ^[0-9]+$ ]] && [[ "$pid" -gt 1 ]]
+          tr '\0' '\n' < "/proc/$pid/environ" | grep -q '^OPENAI_API_KEY='
+
+          raw="$(oc config get agents.defaults.model.primary --json 2>/dev/null || true)"
+          configured="$(RAW="$raw" python3 - <<'PY'
+          import json, os
+          raw=os.environ.get('RAW','').strip()
+          try:
+              v=json.loads(raw)
+              print(v if isinstance(v,str) else '')
+          except Exception:
+              print(raw.strip('"'))
+          PY
+          )"
+          [[ "$configured" == 'openai/gpt-5.6-sol' ]] || { echo OPENAI_PRIMARY_MODEL_MISMATCH=1 >&2; exit 24; }
+
+          fallbacks="$(oc config get agents.defaults.model.fallbacks --json 2>/dev/null || echo '[]')"
+          FALLBACKS="$fallbacks" python3 - <<'PY'
+          import json, os
+          vals=json.loads(os.environ.get('FALLBACKS') or '[]')
+          assert any(isinstance(x,str) and x.startswith('nvidia/') for x in vals), vals
+          print('NVIDIA_FALLBACK_CONFIGURED=1')
+          PY
+
+          set -a
+          . "$OPENAI_ENV"
+          set +a
+          openai_http="$(curl -sS -o /tmp/openai-smoke.json -w '%{http_code}' --connect-timeout 10 --max-time 60 \
+            -H "Authorization: Bearer $OPENAI_API_KEY" \
+            -H 'Content-Type: application/json' \
+            -d '{"model":"gpt-5.6-sol","input":"Reply exactly SAHJONY_OPENAI_OK","max_output_tokens":24}' \
+            https://api.openai.com/v1/responses || true)"
+          echo "OPENAI_API_HTTP=$openai_http"
+
+          nkey="$(tr -d '\r\n' < "$NVIDIA_TMP")"
+          nvidia_http="$(curl -sS -o /tmp/nvidia-smoke.json -w '%{http_code}' --connect-timeout 10 --max-time 90 \
+            -H "Authorization: Bearer $nkey" \
+            -H 'Content-Type: application/json' \
+            -d '{"model":"nvidia/nemotron-3.5-lightning-30b-a3b","messages":[{"role":"user","content":"Reply exactly SAHJONY_NIM_OK"}],"max_tokens":24,"temperature":0}' \
+            https://integrate.api.nvidia.com/v1/chat/completions || true)"
+          [[ "$nvidia_http" == "200" ]] || { echo "NVIDIA_NIM_SMOKE_HTTP=$nvidia_http" >&2; exit 25; }
+
+          echo OPENCLAW_GATEWAY_ACTIVE=1
+          echo OPENCLAW_GATEWAY_24X7=1
+          echo OPENAI_API_KEY_BOUND_TO_GATEWAY=1
+          echo OPENAI_PRIMARY_MODEL=openai/gpt-5.6-sol
+          echo NVIDIA_NIM_AUTH_READY=1
+          echo NVIDIA_NIM_FALLBACK="$fallback"
+          echo NVIDIA_NIM_SMOKE=PASS
+
+          wa="$(oc channels status --channel whatsapp --probe 2>&1 || true)"
+          if grep -Eiq 'whatsapp.*(connected|ready|healthy|linked.*running)|linked.*running.*connected' <<<"$wa"; then
+            echo WHATSAPP_CONNECTED=1
+          else
+            echo WHATSAPP_RECHECK_NEEDED=1
+            printf '%s\n' "$wa" | tail -n 25
+          fi
+          REMOTE
+            then
+              ok=1
+              break
+            fi
+            echo "SSH_CONFIG_ATTEMPT_${attempt}_FAILED=1"
+            sleep $((attempt * 4))
+          done
+          [[ "$ok" == "1" ]] || { echo HOSTINGER_DUAL_MODEL_SETUP_FAILED=1 >&2; exit 6; }
+
+      - name: Cleanup transient credentials
+        if: always()
+        shell: bash
+        run: rm -f ~/.ssh/hostinger-models "$RUNNER_TEMP/openai-api-key" "$RUNNER_TEMP/nvidia-api-key"
