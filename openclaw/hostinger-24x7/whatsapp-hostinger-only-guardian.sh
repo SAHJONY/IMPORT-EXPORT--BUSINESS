@@ -7,6 +7,7 @@ LOCK="$ROOT/hostinger-whatsapp.guard.lock"
 STAMP="$ROOT/hostinger-whatsapp.last-restart"
 COOLDOWN="${SAHJONY_RESTART_COOLDOWN_SECONDS:-300}"
 GATEWAY_ID="${SAHJONY_GATEWAY_ID:-hostinger-vps}"
+ACTIVATOR="${SAHJONY_WHATSAPP_NUMBER_ACTIVATOR:-/usr/local/sbin/sahjony-whatsapp-number-activate}"
 
 mkdir -p "$ROOT"
 chmod 700 "$ROOT" 2>/dev/null || true
@@ -28,12 +29,22 @@ find_container(){
 
 probe_channel(){
   local cid="$1"
-  docker exec "$cid" sh -lc 'command -v openclaw >/dev/null 2>&1' || return 1
-  docker exec "$cid" openclaw channels status --probe 2>&1 || true
+  docker exec "$cid" sh -lc '
+    if command -v openclaw >/dev/null 2>&1; then
+      exec openclaw channels status --probe
+    elif [ -x "$HOME/.openclaw/bin/openclaw" ]; then
+      exec "$HOME/.openclaw/bin/openclaw" channels status --probe
+    elif [ -x /root/.openclaw/bin/openclaw ]; then
+      exec /root/.openclaw/bin/openclaw channels status --probe
+    else
+      echo OPENCLAW_BINARY_NOT_FOUND
+      exit 127
+    fi
+  ' 2>&1 || true
 }
 
 is_whatsapp_ready(){
-  grep -Eiq 'whatsapp.*(connected|ready|active|healthy)|(connected|ready|active|healthy).*whatsapp'
+  grep -Eiq 'whatsapp.*(connected|ready|active|healthy)|(connected|ready|active|healthy).*whatsapp|linked,[[:space:]]*running,[[:space:]]*connected'
 }
 
 restart_allowed(){
@@ -73,6 +84,15 @@ EOF
   systemctl enable --now sahjony-whatsapp-hostinger.timer
 }
 
+maintain_authoritative_heartbeat(){
+  [[ -x "$ACTIVATOR" ]] || {
+    log 'number activator is not installed yet; channel health remains local-only'
+    return 0
+  }
+  log 'publishing authoritative hostinger-vps WhatsApp heartbeat'
+  "$ACTIVATOR"
+}
+
 main(){
   [[ "$(id -u)" -eq 0 ]] || fail 'run as root on the authorized Hostinger VPS'
   systemctl enable --now docker >/dev/null 2>&1 || true
@@ -110,7 +130,11 @@ main(){
   printf '{"gateway_id":"%s","authoritative_transport":"hostinger_openclaw","container_running":%s,"restart_policy":"%s","whatsapp_connected":%s,"guardian_timer":%s}\n' \
     "$GATEWAY_ID" "$running" "$restart_policy" "$ready" "$timer"
 
-  [[ "$ready" == true ]] || fail 'WhatsApp is not connected through Hostinger OpenClaw; if the durable WhatsApp session expired, a valid re-pairing is required'
+  [[ "$ready" == true ]] || fail 'WhatsApp is not connected through Hostinger OpenClaw; existing linked session was preserved and no re-pair was attempted'
+
+  if [[ "$MODE" != audit ]]; then
+    maintain_authoritative_heartbeat
+  fi
   log 'Hostinger OpenClaw WhatsApp channel is READY'
 }
 
