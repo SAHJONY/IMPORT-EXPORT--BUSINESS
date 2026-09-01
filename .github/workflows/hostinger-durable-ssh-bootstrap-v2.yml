@@ -1,0 +1,215 @@
+name: Hostinger Durable SSH Bootstrap V2
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/hostinger-durable-ssh-bootstrap-v2.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hostinger-vm-767852-mutation
+  cancel-in-progress: false
+
+env:
+  HOSTINGER_API_BASE: https://developers.hostinger.com
+  VM_ID: '767852'
+  HOST: '69.62.68.67'
+  SSH_USER: root
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    env:
+      API_TOKEN: ${{ secrets.HOSTINGER_API_TOKEN }}
+      DURABLE_PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate durable credential and derive public key
+        id: key
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "$API_TOKEN" ]] || { echo HOSTINGER_API_TOKEN_MISSING=1 >&2; exit 2; }
+          [[ -n "$DURABLE_PRIVATE_KEY" ]] || { echo HOSTINGER_SSH_PRIVATE_KEY_MISSING=1 >&2; exit 3; }
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq jq netcat-openbsd >/dev/null
+          install -d -m 700 ~/.ssh "$RUNNER_TEMP/hostinger-durable-v2"
+          printf '%s\n' "$DURABLE_PRIVATE_KEY" > ~/.ssh/hostinger-durable
+          chmod 600 ~/.ssh/hostinger-durable
+          ssh-keygen -y -f ~/.ssh/hostinger-durable > ~/.ssh/hostinger-durable.pub
+          pub="$(cat ~/.ssh/hostinger-durable.pub)"
+          fingerprint="$(ssh-keygen -lf ~/.ssh/hostinger-durable.pub -E sha256 | awk '{print $2}')"
+          echo "fingerprint=$fingerprint" >> "$GITHUB_OUTPUT"
+          printf '%s\n' "$pub" > "$RUNNER_TEMP/hostinger-durable-v2/durable.pub"
+          echo "HOSTINGER_DURABLE_PRIVATE_KEY=VALID fingerprint=$fingerprint"
+
+      - name: Try current normal SSH before mutation
+        id: direct
+        shell: bash
+        run: |
+          set -euo pipefail
+          ready=false
+          tcp=false
+          if nc -z -w 5 "$HOST" 22 >/dev/null 2>&1; then
+            tcp=true
+            if ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 -i ~/.ssh/hostinger-durable "$SSH_USER@$HOST" 'printf SAHJONY_DURABLE_SSH=READY' 2>"$RUNNER_TEMP/hostinger-durable-v2/direct-ssh.err" | grep -q SAHJONY_DURABLE_SSH=READY; then
+              ready=true
+            fi
+          fi
+          echo "tcp22=$tcp" >> "$GITHUB_OUTPUT"
+          echo "ready=$ready" >> "$GITHUB_OUTPUT"
+          echo "HOSTINGER_DIRECT_TCP22=$tcp HOSTINGER_DIRECT_DURABLE_SSH=$ready"
+
+      - name: Drain Hostinger action plane
+        if: steps.direct.outputs.ready != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          auth=(-H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json')
+          for i in $(seq 1 90); do
+            body="$(curl -fsS "${auth[@]}" "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/actions?page=1")"
+            active="$(jq '[.data[]? | select((.state // "") | IN("sent","started","pending","running","queued"))] | length' <<<"$body")"
+            echo "HOSTINGER_DURABLE_DRAIN=$i/90 active=$active"
+            [[ "$active" == 0 ]] && exit 0
+            sleep 5
+          done
+          echo HOSTINGER_ACTION_PLANE_NOT_IDLE=1 >&2
+          exit 4
+
+      - name: Ensure durable key exists in Hostinger account
+        id: account_key
+        if: steps.direct.outputs.ready != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          pub="$(cat ~/.ssh/hostinger-durable.pub)"
+          pub_core="$(awk '{print $1" "$2}' <<<"$pub")"
+          body="$(curl -fsS -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' "$HOSTINGER_API_BASE/api/vps/v1/public-keys?page=1")"
+          key_id="$(jq -r --arg core "$pub_core" '.data[]? | select(((.key // "") | split(" ")[0:2] | join(" ")) == $core) | .id' <<<"$body" | head -n1)"
+          if [[ -z "$key_id" ]]; then
+            payload="$(jq -n --arg name 'SAHJONY Durable GitHub Actions' --arg key "$pub" '{name:$name,key:$key}')"
+            created="$(curl -fsS -X POST -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' -H 'Content-Type: application/json' --data "$payload" "$HOSTINGER_API_BASE/api/vps/v1/public-keys")"
+            key_id="$(jq -r '.id // empty' <<<"$created")"
+          fi
+          [[ "$key_id" =~ ^[0-9]+$ && "$key_id" -gt 0 ]] || { echo HOSTINGER_DURABLE_ACCOUNT_KEY_UNRESOLVED=1 >&2; exit 5; }
+          echo "key_id=$key_id" >> "$GITHUB_OUTPUT"
+          echo "HOSTINGER_DURABLE_ACCOUNT_KEY_ID=$key_id"
+
+      - name: Attach durable key if not already attached
+        id: attach
+        if: steps.direct.outputs.ready != 'true'
+        env:
+          KEY_ID: ${{ steps.account_key.outputs.key_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          attached_list="$(curl -fsS -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/public-keys?page=1")"
+          if jq -e --argjson id "$KEY_ID" '.data[]? | select(.id == $id)' >/dev/null <<<"$attached_list"; then
+            echo HOSTINGER_DURABLE_KEY_ALREADY_ATTACHED=1
+            echo 'requested=false' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          payload="$(jq -n --argjson id "$KEY_ID" '{ids:[$id]}')"
+          response="$(curl -fsS -X POST -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' -H 'Content-Type: application/json' --data "$payload" "$HOSTINGER_API_BASE/api/vps/v1/public-keys/attach/$VM_ID")"
+          printf '%s\n' "$response" > "$RUNNER_TEMP/hostinger-durable-v2/attach-response.json"
+          action_id="$(jq -r '.id // 0' <<<"$response")"
+          action_state="$(jq -r '.state // empty' <<<"$response")"
+          echo "requested=true" >> "$GITHUB_OUTPUT"
+          echo "action_id=$action_id" >> "$GITHUB_OUTPUT"
+          echo "action_state=$action_state" >> "$GITHUB_OUTPUT"
+          echo "HOSTINGER_DURABLE_ATTACH_RESPONSE id=$action_id state=${action_state:-unknown}"
+          # Hostinger has been observed returning id=0 here. Treat that as a
+          # non-pollable response and verify the authoritative attached-key list.
+          if [[ "$action_id" =~ ^[0-9]+$ && "$action_id" -gt 0 && "$action_state" != success ]]; then
+            for i in $(seq 1 60); do
+              a="$(curl -fsS -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/actions/$action_id")"
+              state="$(jq -r '.state // empty' <<<"$a")"
+              echo "HOSTINGER_DURABLE_ATTACH_ACTION=$i/60 state=${state:-unknown}"
+              case "$state" in
+                success) break ;;
+                failed|failure|error|cancelled|canceled) jq -c . <<<"$a" >&2 || true; exit 6 ;;
+              esac
+              sleep 5
+            done
+          fi
+
+      - name: Verify durable key through VPS attached-key state
+        id: verify_attach
+        if: steps.direct.outputs.ready != 'true'
+        env:
+          KEY_ID: ${{ steps.account_key.outputs.key_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          verified=false
+          for i in $(seq 1 36); do
+            body="$(curl -fsS -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/public-keys?page=1")"
+            if jq -e --argjson id "$KEY_ID" '.data[]? | select(.id == $id)' >/dev/null <<<"$body"; then
+              verified=true
+              break
+            fi
+            echo "HOSTINGER_DURABLE_ATTACHED_STATE=$i/36 pending"
+            sleep 5
+          done
+          echo "verified=$verified" >> "$GITHUB_OUTPUT"
+          [[ "$verified" == true ]] || { echo HOSTINGER_DURABLE_KEY_NOT_CONFIRMED_ATTACHED=1 >&2; exit 7; }
+          echo HOSTINGER_DURABLE_KEY_CONFIRMED_ATTACHED=1
+
+      - name: Authenticate normal Kali after durable attach
+        id: auth
+        if: steps.direct.outputs.ready != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          ready=false
+          tcp=false
+          for i in $(seq 1 36); do
+            if nc -z -w 4 "$HOST" 22 >/dev/null 2>&1; then
+              tcp=true
+              if ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 -i ~/.ssh/hostinger-durable "$SSH_USER@$HOST" 'printf SAHJONY_DURABLE_SSH=READY' 2>"$RUNNER_TEMP/hostinger-durable-v2/ssh.err" | grep -q SAHJONY_DURABLE_SSH=READY; then
+                ready=true
+                break
+              fi
+              echo "HOSTINGER_DURABLE_TCP22=OPEN auth_pending probe=$i/36"
+            else
+              echo "HOSTINGER_DURABLE_TCP22=NOT_OPEN probe=$i/36"
+            fi
+            sleep 5
+          done
+          echo "ready=$ready" >> "$GITHUB_OUTPUT"
+          echo "tcp22=$tcp" >> "$GITHUB_OUTPUT"
+          if [[ "$ready" == true ]]; then
+            echo HOSTINGER_DURABLE_SSH_AUTH=READY
+            exit 0
+          fi
+          echo "HOSTINGER_DURABLE_SSH_AUTH=NOT_READY tcp22=$tcp" >&2
+          sed -n '1,12p' "$RUNNER_TEMP/hostinger-durable-v2/ssh.err" >&2 || true
+          # Classification exit codes are intentional: 20 means network/sshd,
+          # 21 means SSH is listening but the guest did not accept the key.
+          [[ "$tcp" == true ]] && exit 21 || exit 20
+
+      - name: Run Hostinger VPS doctor when SSH is ready
+        if: steps.direct.outputs.ready == 'true' || steps.auth.outputs.ready == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          opts=(-o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -i ~/.ssh/hostinger-durable)
+          scp "${opts[@]}" openclaw/hostinger-24x7/hostinger-vps-doctor.sh "$SSH_USER@$HOST:/tmp/sahjony-hostinger-vps-doctor.sh"
+          ssh "${opts[@]}" "$SSH_USER@$HOST" 'chmod 700 /tmp/sahjony-hostinger-vps-doctor.sh; SAHJONY_VPS_DOCTOR_REPORT=/tmp/sahjony-hostinger-vps-doctor.json /tmp/sahjony-hostinger-vps-doctor.sh audit'
+          scp "${opts[@]}" "$SSH_USER@$HOST:/tmp/sahjony-hostinger-vps-doctor.json" "$RUNNER_TEMP/hostinger-durable-v2/doctor.json"
+          jq '{classification,severity,identity,ssh,runtime,safety}' "$RUNNER_TEMP/hostinger-durable-v2/doctor.json"
+
+      - name: Upload bootstrap evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hostinger-durable-ssh-bootstrap-v2-${{ github.run_id }}
+          path: ${{ runner.temp }}/hostinger-durable-v2/
+          if-no-files-found: warn
+          retention-days: 7
