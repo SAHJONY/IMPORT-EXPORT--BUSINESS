@@ -64,7 +64,7 @@ jobs:
             --header "${auth_header}" \
             "${api_root}/virtual-machines")"
 
-          mapfile -t vm_ids < <(jq -r '(.data // [])[].id' <<<"${vm_response}")
+          mapfile -t vm_ids < <(jq -r '(if type == "array" then . else (.data // []) end)[].id' <<<"${vm_response}")
           if [[ "${#vm_ids[@]}" -eq 0 ]]; then
             echo "The Hostinger account has no VPS instances." >> "${GITHUB_STEP_SUMMARY}"
             exit 1
@@ -90,13 +90,13 @@ jobs:
               --header "${auth_header}" \
               "${api_root}/virtual-machines/${target_vm_id}/public-keys")"
             if ! jq -e --arg expected "${expected_key}" \
-              '.data // [] | any((.key | split(" ")[0:2] | join(" ")) == $expected)' \
+              '(if type == "array" then . else (.data // []) end) | any((.key | split(" ")[0:2] | join(" ")) == $expected)' \
               <<<"${attached_response}" >/dev/null; then
               account_keys="$(curl --fail --silent --show-error \
                 --header "${auth_header}" \
                 "${api_root}/public-keys")"
               public_key_id="$(jq -r --arg expected "${expected_key}" \
-                '(.data // [])[] | select((.key | split(" ")[0:2] | join(" ")) == $expected) | .id' \
+                '(if type == "array" then . else (.data // []) end)[] | select((.key | split(" ")[0:2] | join(" ")) == $expected) | .id' \
                 <<<"${account_keys}" | head -n 1)"
               if [[ -z "${public_key_id}" ]]; then
                 create_body="$(jq -cn --arg name 'github-actions-openclaw-deploy' --arg key "$(cat "${key_file}.pub")" '{name:$name,key:$key}')"
@@ -130,7 +130,7 @@ jobs:
               --header "${auth_header}" \
               "${api_root}/virtual-machines/${vm_id}/public-keys")"
             if ! jq -e --arg expected "${expected_key}" \
-              '.data // [] | any((.key | split(" ")[0:2] | join(" ")) == $expected)' \
+              '(if type == "array" then . else (.data // []) end) | any((.key | split(" ")[0:2] | join(" ")) == $expected)' \
               <<<"${keys_response}" >/dev/null; then
               continue
             fi
@@ -151,7 +151,7 @@ jobs:
               break
             fi
           done < <(jq -r '
-            (.data // [])[] |
+            (if type == "array" then . else (.data // []) end)[] |
             [(.id | tostring),
              (.ipv4[0].address // .ipv4_address // .ip // .ip_address // empty)] |
             @tsv
