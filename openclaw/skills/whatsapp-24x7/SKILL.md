@@ -1,15 +1,17 @@
 # WhatsApp 24x7
 
 ## Purpose
-Maintain SAHJONY LLC WhatsApp availability continuously using the authorized **Hostinger + Docker + OpenClaw** runtime. Meta Cloud is not controlled and is not part of the production dependency chain.
+Maintain SAHJONY LLC WhatsApp availability continuously using the authorized **Hostinger + Docker + OpenClaw** runtime. Meta Cloud is optional and is not part of the production dependency chain.
 
-Never bypass WhatsApp account verification, QR/device pairing, 2FA, Hostinger authentication, access controls, or provider policy.
+Never bypass WhatsApp account verification, device-link restrictions, QR authorization, phone-number linking authorization, 2FA, rate limits, Hostinger authentication, access controls, or provider policy.
 
 ## Use this skill when
 - WhatsApp is disconnected, degraded, stale, or not sending/receiving.
-- Hostinger OpenClaw needs health verification or safe restart.
+- Hostinger OpenClaw needs health verification or a safe restart.
+- WhatsApp displays **“Can’t link new devices right now. Try again later.”**
+- A QR is generated but the phone refuses device linking.
+- Repeated pairing attempts must be stopped before they worsen a provider-side lock.
 - The local Mac/iMac must not be required for production uptime.
-- A recovery workflow is stuck or repeated recoveries must be prevented.
 
 ## Evidence priority
 1. Authenticated Hostinger OS inspection.
@@ -22,13 +24,55 @@ Never infer Hostinger health from Vercel deployment state. Never mark WhatsApp R
 
 ## State machine
 
-### 1. Audit Hostinger OpenClaw
-Check `https://www.sahjony.com/whatsapp/health`, but treat direct Hostinger evidence as authoritative.
+### 1. Audit before changing anything
+Run the local pairing controller on Hostinger:
 
-Hostinger is ready only when `hostinger_independent_runtime=true`, `hostinger_openclaw.connected=true`, or direct authenticated inspection proves the WhatsApp channel is connected.
+```bash
+/usr/local/sbin/sahjony-whatsapp-pairing-controller audit
+```
 
-### 2. Prefer safe local healing
-If Hostinger SSH is authenticated, install/run:
+If WhatsApp is already connected, do not pair again. Preserve the retained session and arm the guardian.
+
+### 2. Treat “Can’t link new devices right now” as a provider-side authorization lock
+This error is not solved by generating more QR codes. When the phone shows the lock:
+
+```bash
+/usr/local/sbin/sahjony-whatsapp-pairing-controller mark-client-lock 21600
+```
+
+The six-hour value is a **local safety backoff**, not a claim about WhatsApp’s actual lock duration. It prevents SAHJONY automation from repeatedly requesting new pairings while WhatsApp is refusing them. The backoff can be extended by an authorized operator.
+
+During this state:
+- do not call `web.login.start` repeatedly;
+- do not use `force:true`;
+- do not delete OpenClaw auth/session volumes;
+- do not log out working linked devices;
+- do not recreate the OpenClaw container merely to obtain another QR;
+- do not rotate the business phone number;
+- do not attempt to circumvent WhatsApp security/rate controls.
+
+On the phone, the authorized operator should leave the account intact, keep WhatsApp current, verify the device has normal network access and automatic date/time, and review WhatsApp **Linked Devices** for stale or unrecognized entries. The native **Link with phone number instead** option may be used after the provider allows new linking again; it is an alternate authorization method, not a bypass for an active lock.
+
+### 3. Pair once after cooldown
+Use the canonical workflow:
+
+`Hostinger WhatsApp Pair Live`
+
+Choose `pair_once`. It:
+- requires normal authenticated Hostinger SSH;
+- installs the lock-aware pairing controller;
+- refuses to run during a local safety cooldown;
+- starts exactly one non-forced OpenClaw WhatsApp login;
+- publishes only one QR artifact;
+- waits once for authorization;
+- arms a backoff if pairing is not completed;
+- never generates a second forced QR;
+- finalizes the 24x7 guardian only after a positive channel probe.
+
+If the phone again displays “Can’t link new devices right now,” stop the pairing attempt and run the same workflow with `mark_client_lock` instead of requesting another QR.
+
+### 4. Prefer safe local healing after connection
+When Hostinger SSH is authenticated, install/run:
 
 ```bash
 /opt/sahjony-openclaw/whatsapp-hostinger-only-guardian.sh install
@@ -41,31 +85,34 @@ The guardian:
 - starts stopped Docker/OpenClaw services;
 - probes the WhatsApp channel;
 - permits at most one container restart per cooldown;
-- installs a two-minute systemd timer;
+- installs a persistent systemd timer;
 - retains pairing and durable state.
 
-### 3. Recovery only when normal SSH cannot heal the runtime
-Use `Hostinger WhatsApp 24x7 Recovery V6` when Hostinger WhatsApp is not ready and normal Hostinger SSH cannot be used.
+### 5. Hostinger recovery only when normal SSH is unavailable
+Use the canonical **Hostinger WhatsApp Recovery V7** path when the VPS cannot be managed through normal authenticated SSH.
 
-Recovery must:
-- prevent concurrent V5/V6 recovery by shared concurrency lock;
-- POST Recovery and wait for its Hostinger action ID to reach `success`;
+Infrastructure recovery and WhatsApp pairing are separate failure domains. V7 may repair the Hostinger/Kali/SSH/Docker/OpenClaw runtime, but it must not fabricate WhatsApp authorization or bypass device linking.
+
+V7 recovery must:
+- serialize Hostinger VPS mutations;
+- reconcile recent Hostinger actions before starting another action;
 - authenticate Recovery SSH;
-- locate the original OS disk;
-- install an ephemeral SSH key;
-- validate `sshd -t` in the original OS;
-- DELETE Recovery and wait for its stop action ID to reach `success`;
-- authenticate the normal OS;
-- stabilize the existing Docker/OpenClaw container;
-- persist/install the Hostinger-only guardian before removing ephemeral access;
-- verify WhatsApp locally and through Hostinger-specific public health;
-- clean up ephemeral access.
+- repair original Kali SSH without erasing application state;
+- leave Recovery and wait for the action to finish;
+- use at most one bounded official VPS restart if needed;
+- stabilize the retained Docker/OpenClaw runtime;
+- install the Hostinger-only guardian;
+- verify the local WhatsApp probe if an authorized session already exists;
+- surface `PAIRING_REQUIRED` if authorization has expired.
 
-### 4. Anti-loop policy
-- One recovery at a time.
-- V6 cooldown: 90 minutes after a completed V6 unless an authorized operator explicitly forces it.
-- Container restart cooldown: 5 minutes.
-- A failed legacy V5 does not block the first V6 remediation.
+### 6. Anti-loop policy
+- One infrastructure recovery at a time.
+- One WhatsApp pairing attempt at a time.
+- No forced QR refresh loop.
+- Pairing minimum interval: 30 minutes by default.
+- Failed pairing backoff: 60 minutes by default.
+- Client-side device-link lock safety backoff: 6 hours by default.
+- Container restart cooldown remains independent from pairing cooldown.
 - Never erase OpenClaw state or create a replacement container merely to solve connectivity.
 - Never restart a healthy OpenClaw container because Vercel or another unrelated cloud service is degraded.
 
@@ -84,8 +131,10 @@ Require:
 If the durable WhatsApp session expires or WhatsApp explicitly requires device re-linking, surface that as a pairing requirement. Software must not fabricate or bypass that authorization.
 
 ## Operator tools
+- `openclaw/hostinger-24x7/whatsapp-pairing-controller.sh`
 - `openclaw/hostinger-24x7/whatsapp-hostinger-only-guardian.sh`
 - `openclaw/hostinger-24x7/whatsapp-24x7-control-plane.sh`
+- `.github/workflows/hostinger-whatsapp-pair-live.yml`
+- `.github/workflows/hostinger-whatsapp-recovery-v7.yml`
 - `.github/workflows/whatsapp-24x7-control-plane.yml`
-- `.github/workflows/hostinger-whatsapp-24x7-recovery-v6.yml`
 - `.github/workflows/whatsapp-24x7-lint.yml`
