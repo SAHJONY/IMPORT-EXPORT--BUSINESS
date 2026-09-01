@@ -2,6 +2,16 @@ name: Hostinger SSH access audit
 
 on:
   workflow_dispatch:
+    inputs:
+      repair_access:
+        description: Register and attach the GitHub deployment key when missing
+        required: false
+        default: false
+        type: boolean
+      vm_id:
+        description: Hostinger VPS ID (required only when the account has multiple VPS instances)
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -23,6 +33,9 @@ jobs:
 
       - name: Confirm attached key and SSH authentication
         shell: bash
+        env:
+          REPAIR_ACCESS: ${{ inputs.repair_access }}
+          REQUESTED_VM_ID: ${{ inputs.vm_id }}
         run: |
           set -euo pipefail
           umask 077
@@ -51,10 +64,68 @@ jobs:
             --header "${auth_header}" \
             "${api_root}/virtual-machines")"
 
+          mapfile -t vm_ids < <(jq -r '(.data // [])[].id' <<<"${vm_response}")
+          if [[ "${#vm_ids[@]}" -eq 0 ]]; then
+            echo "The Hostinger account has no VPS instances." >> "${GITHUB_STEP_SUMMARY}"
+            exit 1
+          fi
+
+          target_vm_id="${REQUESTED_VM_ID:-}"
+          if [[ -n "${target_vm_id}" ]] && ! printf '%s\n' "${vm_ids[@]}" | grep -Fxq "${target_vm_id}"; then
+            echo "Requested VPS ID was not found in this Hostinger account." >> "${GITHUB_STEP_SUMMARY}"
+            exit 1
+          fi
+          if [[ -z "${target_vm_id}" && "${#vm_ids[@]}" -eq 1 ]]; then
+            target_vm_id="${vm_ids[0]}"
+          fi
+
+          if [[ "${REPAIR_ACCESS}" == "true" ]]; then
+            if [[ -z "${target_vm_id}" ]]; then
+              echo "Multiple VPS instances exist; rerun with an explicit vm_id." >> "${GITHUB_STEP_SUMMARY}"
+              printf 'Available VPS IDs: `%s`\n' "$(IFS=,; echo "${vm_ids[*]}")" >> "${GITHUB_STEP_SUMMARY}"
+              exit 1
+            fi
+
+            attached_response="$(curl --fail --silent --show-error \
+              --header "${auth_header}" \
+              "${api_root}/virtual-machines/${target_vm_id}/public-keys")"
+            if ! jq -e --arg expected "${expected_key}" \
+              '.data // [] | any((.key | split(" ")[0:2] | join(" ")) == $expected)' \
+              <<<"${attached_response}" >/dev/null; then
+              account_keys="$(curl --fail --silent --show-error \
+                --header "${auth_header}" \
+                "${api_root}/public-keys")"
+              public_key_id="$(jq -r --arg expected "${expected_key}" \
+                '(.data // [])[] | select((.key | split(" ")[0:2] | join(" ")) == $expected) | .id' \
+                <<<"${account_keys}" | head -n 1)"
+              if [[ -z "${public_key_id}" ]]; then
+                create_body="$(jq -cn --arg name 'github-actions-openclaw-deploy' --arg key "$(cat "${key_file}.pub")" '{name:$name,key:$key}')"
+                create_response="$(curl --fail --silent --show-error \
+                  --request POST \
+                  --header "${auth_header}" \
+                  --header 'Content-Type: application/json' \
+                  --data "${create_body}" \
+                  "${api_root}/public-keys")"
+                public_key_id="$(jq -r '.id // .data.id // empty' <<<"${create_response}")"
+              fi
+              [[ -n "${public_key_id}" ]] || { echo "Hostinger did not return a public-key ID." >&2; exit 1; }
+              attach_body="$(jq -cn --argjson id "${public_key_id}" '{ids:[$id]}')"
+              curl --fail --silent --show-error \
+                --request POST \
+                --header "${auth_header}" \
+                --header 'Content-Type: application/json' \
+                --data "${attach_body}" \
+                "${api_root}/public-keys/attach/${target_vm_id}" >/dev/null
+              echo "Registered and attached the GitHub deployment key to Hostinger VPS ${target_vm_id}." >> "${GITHUB_STEP_SUMMARY}"
+              sleep 5
+            fi
+          fi
+
           matched=0
           authenticated=0
           while IFS=$'\t' read -r vm_id vm_ip; do
             [[ -n "${vm_id}" && -n "${vm_ip}" ]] || continue
+            [[ -z "${target_vm_id}" || "${vm_id}" == "${target_vm_id}" ]] || continue
             keys_response="$(curl --fail --silent --show-error \
               --header "${auth_header}" \
               "${api_root}/virtual-machines/${vm_id}/public-keys")"
