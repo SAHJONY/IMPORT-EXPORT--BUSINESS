@@ -1,3 +1,4 @@
+# Triggered after workflow registration.
 name: Hostinger Codex Runtime Fix Once
 
 on:
@@ -59,11 +60,9 @@ jobs:
 
           echo OPENCLAW_VERSION="$(oc --version 2>/dev/null | tail -n1)"
 
-          # Match the plugin to the installed 2026.8.1 core. No WhatsApp/model/runtime migration.
           oc plugins install npm:@openclaw/codex@2026.8.1 --force --pin
           oc plugins enable codex
 
-          # If an allowlist already exists, preserve it and append codex only.
           python3 - "$CONFIG" <<'PY'
 import json, os, sys
 p = sys.argv[1]
@@ -99,7 +98,6 @@ PY
           printf '%s\n' "$plugin_status" | grep -Eiq 'codex' || { echo CODEX_PLUGIN_NOT_REGISTERED=1 >&2; exit 31; }
           echo CODEX_PLUGIN_REGISTERED=1
 
-          # Confirm WhatsApp remains untouched and connected after the required Gateway restart.
           wa="$(oc channels status --channel whatsapp --probe 2>&1 || true)"
           printf '%s\n' "$wa" | redact | tail -n 80
           if printf '%s\n' "$wa" | grep -Eiq 'whatsapp.*(connected|ready|healthy|linked.*running)|linked.*running.*connected'; then
