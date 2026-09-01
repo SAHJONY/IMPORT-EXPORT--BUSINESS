@@ -1,0 +1,203 @@
+name: Hostinger OpenClaw Permanent 24x7 One-Time
+
+on:
+  push:
+    branches:
+      - ops/openclaw-native-gpt56-sol-execute
+    paths:
+      - '.github/workflows/hostinger-openclaw-permanent-24x7-one-time.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hostinger-vm-767852-mutation
+  cancel-in-progress: false
+
+jobs:
+  install-24x7:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      HOST: '69.62.68.67'
+      USER: root
+      PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare authenticated SSH
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "$PRIVATE_KEY" ]] || { echo HOSTINGER_SSH_PRIVATE_KEY_MISSING=1 >&2; exit 2; }
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/hostinger-24x7
+          chmod 600 ~/.ssh/hostinger-24x7
+          ssh-keygen -y -f ~/.ssh/hostinger-24x7 >/dev/null
+          for i in $(seq 1 24); do
+            if ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=6 -i ~/.ssh/hostinger-24x7 "$USER@$HOST" 'printf HOSTINGER_24X7_SSH_READY' 2>/dev/null | grep -q HOSTINGER_24X7_SSH_READY; then
+              exit 0
+            fi
+            echo "ssh_probe=$i/24"
+            sleep 5
+          done
+          echo HOSTINGER_24X7_SSH_UNAVAILABLE=1 >&2
+          exit 3
+
+      - name: Stage permanent guardian files
+        shell: bash
+        run: |
+          set -euo pipefail
+          SCP=(scp -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 -i ~/.ssh/hostinger-24x7)
+          SSH=(ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 -i ~/.ssh/hostinger-24x7)
+          "${SSH[@]}" "$USER@$HOST" 'install -d -m 700 /opt/sahjony/openclaw/hostinger-24x7'
+          "${SCP[@]}" \
+            openclaw/hostinger-24x7/whatsapp-guardian.sh \
+            openclaw/hostinger-24x7/install-whatsapp-guardian.sh \
+            openclaw/hostinger-24x7/whatsapp-24x7-orchestrator.sh \
+            "$USER@$HOST:/opt/sahjony/openclaw/hostinger-24x7/"
+          "${SSH[@]}" "$USER@$HOST" 'chmod 700 /opt/sahjony/openclaw/hostinger-24x7/*.sh'
+
+      - name: Install permanent OpenClaw uptime plane
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 -i ~/.ssh/hostinger-24x7 "$USER@$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+
+          systemctl enable --now docker >/dev/null 2>&1 || true
+          docker info >/dev/null
+
+          cid="$(docker ps --format '{{.ID}} {{.Names}} {{.Image}}' | awk 'tolower($0) ~ /openclaw/ {print $1; exit}')"
+          if [[ -z "$cid" ]]; then
+            cid="$(docker ps -a --format '{{.ID}} {{.Names}} {{.Image}}' | awk 'tolower($0) ~ /openclaw/ {print $1; exit}')"
+          fi
+          [[ -n "$cid" ]] || { echo OPENCLAW_CONTAINER_NOT_FOUND=1 >&2; exit 10; }
+          cname="$(docker inspect --format '{{.Name}}' "$cid" | sed 's#^/##')"
+
+          docker update --restart unless-stopped "$cid" >/dev/null
+          docker inspect -f '{{.State.Running}}' "$cid" | grep -qx true || docker start "$cid" >/dev/null
+          sleep 5
+
+          # Native config must remain valid before installing self-healing controls.
+          docker exec "$cid" sh -lc 'command -v openclaw >/dev/null 2>&1' || { echo OPENCLAW_CLI_NOT_FOUND=1 >&2; exit 11; }
+          docker exec "$cid" openclaw config validate
+
+          # Install the existing reviewed WhatsApp guardian. It probes the retained
+          # linked session and refuses to claim READY unless the channel is healthy.
+          cd /opt/sahjony/openclaw/hostinger-24x7
+          ./install-whatsapp-guardian.sh
+
+          # Durable state backup: independent from application/Vercel health.
+          install -d -m 700 /opt/sahjony-openclaw/backups
+          cat >/usr/local/sbin/sahjony-openclaw-backup <<'EOF'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          cid="$(docker ps -aq | while read -r id; do meta="$(docker inspect "$id" --format '{{.Name}}|{{.Config.Image}}' 2>/dev/null || true)"; if grep -Eqi 'openclaw|claw' <<<"$meta"; then echo "$id"; break; fi; done)"
+          [[ -n "$cid" ]] || exit 2
+          state=''
+          for p in /root/.openclaw /home/node/.openclaw /home/openclaw/.openclaw; do
+            if docker exec "$cid" sh -lc "test -d '$p'" >/dev/null 2>&1; then state="$p"; break; fi
+          done
+          [[ -n "$state" ]] || exit 3
+          out="/opt/sahjony-openclaw/backups/openclaw-state-$(date -u +%Y%m%dT%H%M%SZ).tar.gz"
+          docker exec "$cid" sh -lc "tar -C '$state' -czf - ." > "$out"
+          chmod 600 "$out"
+          find /opt/sahjony-openclaw/backups -type f -name 'openclaw-state-*.tar.gz' -mtime +14 -delete
+          EOF
+          chmod 700 /usr/local/sbin/sahjony-openclaw-backup
+
+          cat >/etc/systemd/system/sahjony-openclaw-backup.service <<'EOF'
+          [Unit]
+          Description=Backup SAHJONY OpenClaw durable state
+          After=docker.service
+          Requires=docker.service
+
+          [Service]
+          Type=oneshot
+          ExecStart=/usr/local/sbin/sahjony-openclaw-backup
+          EOF
+
+          cat >/etc/systemd/system/sahjony-openclaw-backup.timer <<'EOF'
+          [Unit]
+          Description=Daily SAHJONY OpenClaw durable-state backup
+
+          [Timer]
+          OnCalendar=*-*-* 03:30:00
+          RandomizedDelaySec=10m
+          Persistent=true
+
+          [Install]
+          WantedBy=timers.target
+          EOF
+
+          # A second lightweight container watchdog is intentionally separate from
+          # the WhatsApp guardian: it starts the retained container if Docker finds
+          # it stopped after host/process failure.
+          cat >/usr/local/sbin/sahjony-openclaw-container-watchdog <<'EOF'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          cid="$(docker ps -aq | while read -r id; do meta="$(docker inspect "$id" --format '{{.Name}}|{{.Config.Image}}' 2>/dev/null || true)"; if grep -Eqi 'openclaw|claw' <<<"$meta"; then echo "$id"; break; fi; done)"
+          [[ -n "$cid" ]] || exit 2
+          if [[ "$(docker inspect -f '{{.State.Running}}' "$cid" 2>/dev/null || true)" != true ]]; then
+            docker start "$cid" >/dev/null
+          fi
+          EOF
+          chmod 700 /usr/local/sbin/sahjony-openclaw-container-watchdog
+
+          cat >/etc/systemd/system/sahjony-openclaw-container-watchdog.service <<'EOF'
+          [Unit]
+          Description=SAHJONY OpenClaw container watchdog
+          After=docker.service network-online.target
+          Requires=docker.service
+
+          [Service]
+          Type=oneshot
+          ExecStart=/usr/local/sbin/sahjony-openclaw-container-watchdog
+          EOF
+
+          cat >/etc/systemd/system/sahjony-openclaw-container-watchdog.timer <<'EOF'
+          [Unit]
+          Description=Check SAHJONY OpenClaw container every two minutes
+
+          [Timer]
+          OnBootSec=45s
+          OnUnitActiveSec=2min
+          AccuracySec=15s
+          Persistent=true
+
+          [Install]
+          WantedBy=timers.target
+          EOF
+
+          systemctl daemon-reload
+          systemctl enable --now sahjony-openclaw-backup.timer
+          systemctl enable --now sahjony-openclaw-container-watchdog.timer
+          systemctl start sahjony-openclaw-backup.service
+
+          echo "OPENCLAW_CONTAINER=$cname"
+          echo "OPENCLAW_RESTART_POLICY=$(docker inspect -f '{{.HostConfig.RestartPolicy.Name}}' "$cid")"
+          systemctl is-enabled docker
+          systemctl is-active docker
+          systemctl is-enabled sahjony-whatsapp-guardian.timer
+          systemctl is-active sahjony-whatsapp-guardian.timer
+          systemctl is-enabled sahjony-openclaw-container-watchdog.timer
+          systemctl is-active sahjony-openclaw-container-watchdog.timer
+          systemctl is-enabled sahjony-openclaw-backup.timer
+          systemctl is-active sahjony-openclaw-backup.timer
+          test -n "$(find /opt/sahjony-openclaw/backups -maxdepth 1 -type f -name 'openclaw-state-*.tar.gz' -print -quit)"
+
+          probe="$(docker exec "$cid" openclaw channels status --channel whatsapp --probe 2>&1 || docker exec "$cid" openclaw channels status --probe 2>&1 || true)"
+          printf '%s\n' "$probe"
+          grep -Eqi 'whatsapp.*(connected|ready|active|healthy|ok)|(connected|ready|active|healthy).*whatsapp|linked,[[:space:]]*running,[[:space:]]*connected' <<<"$probe" || { echo WHATSAPP_24X7_PROBE_NOT_READY=1 >&2; exit 12; }
+
+          [[ "$(docker inspect -f '{{.HostConfig.RestartPolicy.Name}}' "$cid")" == unless-stopped ]] || { echo OPENCLAW_RESTART_POLICY_NOT_PERSISTENT=1 >&2; exit 13; }
+          echo SAHJONY_OPENCLAW_PERMANENT_24X7=READY
+          echo SAHJONY_WHATSAPP_PERMANENT_24X7=READY
+          REMOTE
+
+      - name: Cleanup SSH key
+        if: always()
+        shell: bash
+        run: rm -f ~/.ssh/hostinger-24x7
