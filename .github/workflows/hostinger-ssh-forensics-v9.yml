@@ -1,0 +1,176 @@
+name: Hostinger Kali SSH Forensics V9
+
+on:
+  push:
+    paths:
+      - '.github/workflows/hostinger-ssh-forensics-v9.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hostinger-vm-767852-mutation
+  cancel-in-progress: false
+
+env:
+  HOSTINGER_API_BASE: https://developers.hostinger.com
+  VM_ID: '767852'
+  HOST: '69.62.68.67'
+  USER: root
+
+jobs:
+  forensics:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      API_TOKEN: ${{ secrets.HOSTINGER_API_TOKEN }}
+    steps:
+      - name: Prepare forensic access
+        id: creds
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "$API_TOKEN" ]] || { echo HOSTINGER_API_TOKEN_MISSING=1 >&2; exit 2; }
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq sshpass jq >/dev/null
+          RECOVERY_PASSWORD="$(openssl rand -hex 18)Aa1!"
+          echo "::add-mask::$RECOVERY_PASSWORD"
+          echo "recovery_password=$RECOVERY_PASSWORD" >> "$GITHUB_OUTPUT"
+
+      - name: Require idle Hostinger action plane
+        shell: bash
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 60); do
+            actions="$(curl -fsS -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/actions?page=1")"
+            busy="$(jq '[.data[]? | select(.state=="sent" or .state=="started" or .state=="pending" or .state=="running" or .state=="queued")] | length' <<<"$actions")"
+            jq -c '[.data[]? | {id,name,state,created_at,updated_at}] | .[0:8]' <<<"$actions"
+            if [ "$busy" = 0 ]; then echo HOSTINGER_FORENSICS_CONTROL_PLANE_IDLE=1; exit 0; fi
+            echo "hostinger_forensics_busy=$busy probe=$i/60"
+            sleep 5
+          done
+          echo HOSTINGER_FORENSICS_CONTROL_PLANE_BUSY=1 >&2
+          exit 3
+
+      - name: Enter owned Recovery session
+        id: recovery_start
+        env:
+          RECOVERY_PASSWORD: ${{ steps.creds.outputs.recovery_password }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          payload="$(jq -n --arg p "$RECOVERY_PASSWORD" '{root_password:$p}')"
+          body="$(curl -fsS -X POST -H "Authorization: Bearer $API_TOKEN" -H 'Content-Type: application/json' -H 'Accept: application/json' --data "$payload" "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/recovery")"
+          id="$(jq -r '.id // empty' <<<"$body")"
+          [[ "$id" =~ ^[0-9]+$ ]] || { echo HOSTINGER_FORENSICS_RECOVERY_ACTION_MISSING=1 >&2; exit 4; }
+          echo "action_id=$id" >> "$GITHUB_OUTPUT"
+          echo "owned=true" >> "$GITHUB_OUTPUT"
+          echo HOSTINGER_FORENSICS_RECOVERY_ACTION=$id
+
+      - name: Wait for Recovery start
+        env:
+          ACTION_ID: ${{ steps.recovery_start.outputs.action_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 120); do
+            a="$(curl -fsS -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/actions/$ACTION_ID")"
+            state="$(jq -r '.state // empty' <<<"$a")"
+            echo "forensics_recovery_start=$i/120 state=${state:-unknown}"
+            case "$state" in success) exit 0;; failed|failure|error|cancelled|canceled) jq -c . <<<"$a" >&2; exit 5;; esac
+            sleep 5
+          done
+          exit 6
+
+      - name: Read original Kali SSH evidence
+        env:
+          RECOVERY_PASSWORD: ${{ steps.creds.outputs.recovery_password }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          export SSHPASS="$RECOVERY_PASSWORD"
+          ready=false
+          for i in $(seq 1 60); do
+            if sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=6 -o PreferredAuthentications=password -o PubkeyAuthentication=no -o NumberOfPasswordPrompts=1 "$USER@$HOST" 'printf FORENSICS_RECOVERY_OK' 2>/tmp/forensics-ssh.err | grep -q FORENSICS_RECOVERY_OK; then ready=true; break; fi
+            if (( i == 1 || i % 10 == 0 || i == 60 )); then sed -n '1,16p' /tmp/forensics-ssh.err || true; fi
+            sleep 10
+          done
+          [[ "$ready" == true ]] || { echo HOSTINGER_FORENSICS_RECOVERY_SSH_FAILED=1 >&2; exit 7; }
+
+          sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 -o PreferredAuthentications=password -o PubkeyAuthentication=no "$USER@$HOST" 'bash -s' <<'REMOTE'
+          set -u
+          root=''
+          for mp in /mnt/sdb1 /mnt; do
+            if [ -f "$mp/etc/os-release" ] && [ -x "$mp/usr/sbin/sshd" ]; then root="$mp"; break; fi
+          done
+          if [ -z "$root" ]; then
+            echo ORIGINAL_KALI_ROOT_NOT_FOUND=1
+            lsblk -f || true
+            findmnt || true
+            exit 20
+          fi
+          echo "ORIGINAL_KALI_ROOT=$root"
+          echo '=== FIRSTBOOT DIAGNOSTIC ==='
+          if [ -f "$root/var/log/sahjony-firstboot-diagnostic.log" ]; then
+            tail -n 400 "$root/var/log/sahjony-firstboot-diagnostic.log"
+          else
+            echo FIRSTBOOT_DIAGNOSTIC_LOG_MISSING=1
+          fi
+          echo '=== SSH SYSTEMD UNITS ==='
+          ls -l "$root/etc/systemd/system/default.target" "$root/etc/systemd/system/sahjony-sshd.service" "$root/etc/systemd/system/ssh.service" "$root/etc/systemd/system/sshd.service" "$root/etc/systemd/system/ssh.socket" 2>/dev/null || true
+          find "$root/etc/systemd/system" -maxdepth 2 -type l -name '*ssh*' -printf '%p -> %l\n' 2>/dev/null | sort || true
+          echo '=== SAHJONY SSH UNIT ==='
+          sed -n '1,220p' "$root/etc/systemd/system/sahjony-sshd.service" 2>/dev/null || true
+          echo '=== SSHD CONFIG ==='
+          sed -n '1,260p' "$root/etc/ssh/sshd_config" 2>/dev/null || true
+          for f in "$root"/etc/ssh/sshd_config.d/*.conf; do [ -f "$f" ] || continue; echo "--- $f"; sed -n '1,220p' "$f"; done
+          echo '=== EFFECTIVE SSHD CONFIG ==='
+          chroot "$root" /usr/sbin/sshd -T 2>&1 | grep -E '^(port|addressfamily|listenaddress|permitrootlogin|pubkeyauthentication|passwordauthentication|kbdinteractiveauthentication|authorizedkeysfile|maxstartups|maxsessions|allowusers|denyusers|allowgroups|denygroups|usepam|authenticationmethods|loglevel) ' || true
+          echo '=== BOOT JOURNAL SSH/SYSTEMD/NETWORK ==='
+          if [ -d "$root/var/log/journal" ]; then
+            journalctl --directory="$root/var/log/journal" --no-pager -b -1 -n 500 2>/dev/null | grep -Ei 'sahjony-sshd|ssh|sshd|systemd|network|fail2ban|ufw|firewall|emergency|rescue|failed|dependency|mount' | tail -n 300 || true
+            echo '=== CURRENT STORED BOOT TAIL ==='
+            journalctl --directory="$root/var/log/journal" --no-pager -n 500 2>/dev/null | grep -Ei 'sahjony-sshd|ssh|sshd|systemd|network|fail2ban|ufw|firewall|emergency|rescue|failed|dependency|mount' | tail -n 300 || true
+          else
+            echo PERSISTENT_JOURNAL_MISSING=1
+          fi
+          echo '=== FIREWALL/SECURITY CONFIG ==='
+          sed -n '1,240p' "$root/etc/ufw/user.rules" 2>/dev/null || true
+          grep -RniE '^(sshd|ssh|port|banaction|backend|enabled|ignoreip|maxretry|findtime|bantime)' "$root/etc/fail2ban" 2>/dev/null | head -n 240 || true
+          echo '=== AUTHORIZED KEYS METADATA ==='
+          stat -c '%a %U:%G %n' "$root/root" "$root/root/.ssh" "$root/root/.ssh/authorized_keys" 2>/dev/null || true
+          wc -l "$root/root/.ssh/authorized_keys" 2>/dev/null || true
+          echo HOSTINGER_KALI_SSH_FORENSICS_COMPLETE=1
+          REMOTE
+
+      - name: Exit owned Recovery
+        id: recovery_stop
+        if: always() && steps.recovery_start.outputs.owned == 'true'
+        shell: bash
+        run: |
+          set +e
+          body="$(curl -sS -X DELETE -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/recovery")"
+          id="$(jq -r '.id // empty' <<<"$body" 2>/dev/null)"
+          if [[ "$id" =~ ^[0-9]+$ ]]; then
+            echo "action_id=$id" >> "$GITHUB_OUTPUT"
+            echo HOSTINGER_FORENSICS_STOP_ACTION=$id
+          else
+            echo HOSTINGER_FORENSICS_STOP_ACTION_NOT_RETURNED=1
+          fi
+
+      - name: Wait for Recovery stop
+        if: always() && steps.recovery_stop.outputs.action_id != ''
+        env:
+          ACTION_ID: ${{ steps.recovery_stop.outputs.action_id }}
+        shell: bash
+        run: |
+          set +e
+          for i in $(seq 1 120); do
+            a="$(curl -sS -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/actions/$ACTION_ID")"
+            state="$(jq -r '.state // empty' <<<"$a" 2>/dev/null)"
+            echo "forensics_recovery_stop=$i/120 state=${state:-unknown}"
+            case "$state" in success) exit 0;; failed|failure|error|cancelled|canceled) exit 1;; esac
+            sleep 5
+          done
+          exit 1
