@@ -203,7 +203,7 @@ cat >"$REPORT" <<JSON
   },
   "safety": {
     "meta_required": false,
-    "session_repaired_or_repaired": false,
+    "whatsapp_session_repaired": false,
     "container_recreated": false,
     "firewall_mutated": false
   }
