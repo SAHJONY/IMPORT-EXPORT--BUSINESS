@@ -1,4 +1,5 @@
 # Trigger V5 after workflow registration
+# Retrigger after async Hostinger recovery action fix
 name: Hostinger Recovery Docker OpenClaw V5
 
 on:
