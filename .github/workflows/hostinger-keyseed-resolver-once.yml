@@ -1,0 +1,44 @@
+name: Hostinger Keyseed Resolver One-Time Launcher
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/hostinger-keyseed-resolver-once.yml'
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  launch:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Refuse duplicate active bootstrap
+        id: gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          active="$(gh run list --repo "$REPO" --workflow hostinger-ssh-bootstrap-once.yml --limit 30 --json status --jq '[.[] | select(.status == "in_progress" or .status == "queued" or .status == "waiting" or .status == "requested" or .status == "pending")] | length')"
+          echo "ACTIVE_BOOTSTRAP_COUNT=$active"
+          if [[ "$active" != 0 ]]; then
+            echo "launch=false" >> "$GITHUB_OUTPUT"
+            echo HOSTINGER_KEYSEED_RESOLVER_ALREADY_ACTIVE=1
+          else
+            echo "launch=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Dispatch hardened bootstrap exactly once
+        if: steps.gate.outputs.launch == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh workflow run hostinger-ssh-bootstrap-once.yml --repo "$REPO" --ref main
+          echo SAHJONY_HOSTINGER_KEYSEED_RESOLVER_DISPATCHED=1
