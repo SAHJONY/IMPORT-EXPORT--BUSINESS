@@ -1,0 +1,38 @@
+name: Hostinger VM Diagnostic Once
+
+on:
+  push:
+    paths:
+      - '.github/workflows/hostinger-vm-diagnostic-once.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  HOSTINGER_API_BASE: https://developers.hostinger.com
+  VM_ID: '767852'
+  HOST: '69.62.68.67'
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      API_TOKEN: ${{ secrets.HOSTINGER_API_TOKEN }}
+    steps:
+      - name: Read VM and recent Hostinger actions
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq jq netcat-openbsd >/dev/null
+          [[ -n "$API_TOKEN" ]] || { echo HOSTINGER_API_TOKEN_MISSING=1; exit 2; }
+          vm="$(curl -fsS -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID")"
+          echo '=== VM SUMMARY ==='
+          jq '{id,status,state,hostname,ipv4,ipv6,template,plan,data_center,created_at}' <<<"$vm" || true
+          echo '=== RECENT ACTIONS ==='
+          actions="$(curl -fsS -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/actions?page=1")"
+          jq '[.data[]? | {id,name,state,created_at,updated_at}][0:15]' <<<"$actions" || true
+          echo '=== TCP 22 ==='
+          if nc -z -w 5 "$HOST" 22; then echo HOSTINGER_TCP22=OPEN; else echo HOSTINGER_TCP22=CLOSED; fi
