@@ -1,4 +1,4 @@
-name: Hostinger OpenClaw V2 Escalation
+name: Hostinger OpenClaw V2 Escalation (Diagnostic Only)
 
 on:
   workflow_run:
@@ -7,17 +7,15 @@ on:
     types: [completed]
 
 permissions:
-  actions: write
   contents: read
   issues: write
 
 jobs:
-  escalate:
+  classify:
     if: ${{ github.event.workflow_run.conclusion == 'failure' }}
     runs-on: ubuntu-latest
     steps:
-      - name: Inspect failed V2 logs and classify safely
-        id: classify
+      - name: Classify legacy V2 failure without dispatching recovery
         env:
           GH_TOKEN: ${{ github.token }}
           RUN_ID: ${{ github.event.workflow_run.id }}
@@ -31,35 +29,15 @@ jobs:
           grep -q 'HOSTINGER_TCP22_UNREACHABLE=1' /tmp/v2.log && tcp22=true || true
           grep -q 'HOSTINGER_SSH_AUTH_FAILED=1' /tmp/v2.log && auth_failed=true || true
           grep -q 'HOSTINGER_SSH_CONNECTION_FAILED=1' /tmp/v2.log && connection_failed=true || true
-          echo "tcp22=$tcp22" >> "$GITHUB_OUTPUT"
-          echo "auth_failed=$auth_failed" >> "$GITHUB_OUTPUT"
-          echo "connection_failed=$connection_failed" >> "$GITHUB_OUTPUT"
           {
-            echo '## Hostinger V2 escalation classifier'
+            echo '## Hostinger V2 legacy diagnostic'
             echo
             echo "- Source run: \`$RUN_ID\`"
             echo "- TCP/22 unreachable: **$tcp22**"
             echo "- SSH auth failed: **$auth_failed**"
             echo "- Other SSH connection failure: **$connection_failed**"
             echo
-            echo 'Recovery is dispatched only for confirmed TCP/22 unreachability. Authentication failures are not allowed to reboot the VPS.'
+            echo 'Legacy V2 no longer dispatches Recovery V3. Bounded V6 is the canonical recovery path.'
           } >/tmp/classification.md
-          gh issue comment 54 --repo "$REPO" --body-file /tmp/classification.md
-
-      - name: Dispatch canonical Recovery V3 only for TCP22 failure
-        if: ${{ steps.classify.outputs.tcp22 == 'true' }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-        run: |
-          set -euo pipefail
-          gh workflow run hostinger-recovery-docker-openclaw-v3.yml --repo "$REPO" --ref main
-          gh issue comment 54 --repo "$REPO" --body 'Confirmed `HOSTINGER_TCP22_UNREACHABLE=1`; dispatched canonical `Hostinger Recovery Docker OpenClaw V3`. No Docker changes are made until normal Kali SSH is restored.'
-
-      - name: Hold on authentication-only failure
-        if: ${{ steps.classify.outputs.auth_failed == 'true' || steps.classify.outputs.connection_failed == 'true' }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-        run: |
-          gh issue comment 54 --repo "$REPO" --body 'V2 reached the SSH service but did not authenticate cleanly. Recovery Mode was **not** dispatched; next action is SSH authorization repair only.'
+          gh issue comment 54 --repo "$REPO" --body-file /tmp/classification.md || true
+          echo HOSTINGER_LEGACY_AUTO_RECOVERY_DISABLED=1
