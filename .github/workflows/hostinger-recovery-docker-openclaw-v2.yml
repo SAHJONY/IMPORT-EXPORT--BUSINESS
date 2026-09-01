@@ -1,0 +1,232 @@
+name: Hostinger Recovery Docker OpenClaw v2
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/hostinger-recovery-docker-openclaw-v2.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hostinger-recovery-docker-openclaw-v2
+  cancel-in-progress: false
+
+env:
+  HOSTINGER_API_BASE: https://developers.hostinger.com
+  VM_ID: '767852'
+  HOST: '69.62.68.67'
+  USER: root
+
+jobs:
+  recover:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      API_TOKEN: ${{ secrets.HOSTINGER_API_TOKEN }}
+    steps:
+      - name: Prepare ephemeral recovery credential
+        id: creds
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "$API_TOKEN" ]] || { echo 'HOSTINGER_API_TOKEN missing' >&2; exit 2; }
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq sshpass netcat-openbsd >/dev/null
+          install -m 700 -d ~/.ssh
+          ssh-keygen -q -t ed25519 -N '' -f ~/.ssh/hostinger-recovery -C "sahjony-recovery-v2-${GITHUB_RUN_ID}"
+          RECOVERY_PASSWORD="$(openssl rand -hex 16)Aa1!"
+          echo "::add-mask::$RECOVERY_PASSWORD"
+          echo "recovery_password=$RECOVERY_PASSWORD" >> "$GITHUB_OUTPUT"
+
+      - name: Enable temporary SSH firewall
+        id: network
+        shell: bash
+        run: |
+          set -euo pipefail
+          auth=(-H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json')
+          curl -fsS "${auth[@]}" "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID" > /tmp/vm-before.json
+          previous="$(jq -r '.firewall_group_id // .firewall_id // empty' /tmp/vm-before.json)"
+          if [[ -n "$previous" && "$previous" != "null" ]]; then
+            echo "Existing Hostinger firewall detected: $previous" >&2
+            exit 30
+          fi
+          curl -fsS "${auth[@]}" "$HOSTINGER_API_BASE/api/vps/v1/firewall" > /tmp/firewalls.json
+          firewall_id="$(jq -r '(if type=="array" then . else (.data // .items // []) end) | map(select((.name // "") == "SSH Access")) | first | .id // empty' /tmp/firewalls.json)"
+          [[ -n "$firewall_id" ]] || { echo 'SSH_ACCESS_FIREWALL_NOT_FOUND=1' >&2; exit 31; }
+          curl -fsS "${auth[@]}" "$HOSTINGER_API_BASE/api/vps/v1/firewall/$firewall_id" > /tmp/fw.json
+          jq -e '[.. | objects | select(((.port // .ports // .destination_port // "")|tostring|test("(^|[^0-9])22([^0-9]|$)")) and ((.protocol // "")|ascii_downcase|test("tcp|all|any")) and ((.action // .policy // "")|ascii_downcase|test("accept|allow")))] | length > 0' /tmp/fw.json >/dev/null
+          curl -fsS -X POST "${auth[@]}" "$HOSTINGER_API_BASE/api/vps/v1/firewall/$firewall_id/activate/$VM_ID" >/dev/null
+          echo "firewall_id=$firewall_id" >> "$GITHUB_OUTPUT"
+          sleep 10
+
+      - name: Start recovery mode
+        id: recovery_start
+        env:
+          RECOVERY_PASSWORD: ${{ steps.creds.outputs.recovery_password }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          payload="$(jq -n --arg p "$RECOVERY_PASSWORD" '{root_password:$p}')"
+          curl -fsS -X POST -H "Authorization: Bearer $API_TOKEN" -H 'Content-Type: application/json' -H 'Accept: application/json' --data "$payload" "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/recovery" >/dev/null
+
+      - name: Wait for recovery SSH
+        id: recovery_ready
+        shell: bash
+        run: |
+          set -euo pipefail
+          ready=false
+          for i in $(seq 1 60); do
+            state="$(curl -sS -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID" | jq -r '.state // .status // "unknown"' 2>/dev/null || true)"
+            echo "recovery_wait=$i state=$state"
+            if nc -z -w 4 "$HOST" 22 >/dev/null 2>&1; then ready=true; break; fi
+            sleep 10
+          done
+          [[ "$ready" == true ]] || { echo 'RECOVERY_SSH_UNREACHABLE=1' >&2; exit 33; }
+
+      - name: Find original root and repair SSH
+        id: repair
+        env:
+          RECOVERY_PASSWORD: ${{ steps.creds.outputs.recovery_password }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          export SSHPASS="$RECOVERY_PASSWORD"
+          opts=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8)
+
+          ROOT_MOUNT="$(sshpass -e ssh "${opts[@]}" "$USER@$HOST" 'bash -s' <<'REMOTE'
+          set -e
+          is_root() {
+            d="$1"
+            [ -d "$d" ] || return 1
+            [ -f "$d/etc/os-release" ] || return 1
+            [ -d "$d/etc/ssh" ] || return 1
+            printf '%s\n' "$d"
+            return 0
+          }
+
+          is_root /mnt && exit 0
+          for d in /mnt/sda1 /mnt/vda1 /mnt/nvme0n1p1 /mnt/sda /mnt/vda; do
+            is_root "$d" && exit 0
+          done
+
+          while read -r mp; do
+            case "$mp" in
+              /mnt|/mnt/*) is_root "$mp" && exit 0 ;;
+            esac
+          done < <(lsblk -nrpo MOUNTPOINT 2>/dev/null | awk 'NF' | sort -u)
+
+          for d in /mnt/*; do
+            is_root "$d" && exit 0
+          done
+          exit 1
+          REMOTE
+          )" || true
+
+          [[ -n "$ROOT_MOUNT" ]] || { echo 'ORIGINAL_OS_MOUNT_NOT_FOUND=1' >&2; exit 34; }
+          echo "ORIGINAL_OS_MOUNT=$ROOT_MOUNT"
+
+          PUB_B64="$(base64 -w0 ~/.ssh/hostinger-recovery.pub)"
+          sshpass -e ssh "${opts[@]}" "$USER@$HOST" "ROOT_MOUNT='$ROOT_MOUNT' PUB_B64='$PUB_B64' bash -s" <<'REMOTE'
+          set -euo pipefail
+          root="$ROOT_MOUNT"
+          test -f "$root/etc/os-release"
+          test -d "$root/etc/ssh"
+          pub="$(printf '%s' "$PUB_B64" | base64 -d)"
+          install -d -m 700 "$root/root/.ssh"
+          touch "$root/root/.ssh/authorized_keys"
+          chmod 600 "$root/root/.ssh/authorized_keys"
+          grep -qxF "$pub" "$root/root/.ssh/authorized_keys" || printf '%s\n' "$pub" >> "$root/root/.ssh/authorized_keys"
+          install -d "$root/etc/ssh/sshd_config.d"
+          cfg="$root/etc/ssh/sshd_config.d/99-sahjony-recovery.conf"
+          [ ! -f "$cfg" ] || cp -a "$cfg" "$cfg.bak.$(date -u +%Y%m%dT%H%M%SZ)"
+          cat > "$cfg" <<'EOF'
+          PubkeyAuthentication yes
+          PermitRootLogin prohibit-password
+          PasswordAuthentication no
+          EOF
+          chmod 600 "$cfg"
+
+          for unit in ssh.service sshd.service; do
+            target="$(find "$root/lib/systemd/system" "$root/usr/lib/systemd/system" -maxdepth 1 -name "$unit" -print -quit 2>/dev/null || true)"
+            if [ -n "$target" ] && [ -d "$root/etc/systemd/system/multi-user.target.wants" ]; then
+              rel="/${target#"$root/"}"
+              ln -sfn "$rel" "$root/etc/systemd/system/multi-user.target.wants/$unit"
+              break
+            fi
+          done
+          echo 'ORIGINAL_OS_SSH_REPAIRED=1'
+          REMOTE
+
+      - name: Exit recovery mode
+        if: steps.repair.outcome == 'success'
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS -X DELETE -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/recovery" >/dev/null
+
+      - name: Wait for normal Kali SSH
+        id: normal_ssh
+        shell: bash
+        run: |
+          set -euo pipefail
+          ok=false
+          for i in $(seq 1 60); do
+            echo "normal_ssh_wait=$i"
+            if ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=6 -i ~/.ssh/hostinger-recovery "$USER@$HOST" 'printf SAHJONY_NORMAL_SSH_OK' 2>/dev/null | grep -q SAHJONY_NORMAL_SSH_OK; then ok=true; break; fi
+            sleep 10
+          done
+          [[ "$ok" == true ]] || { echo 'NORMAL_KALI_SSH_UNREACHABLE=1' >&2; exit 11; }
+
+      - name: Stabilize Docker OpenClaw
+        id: docker
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/hostinger-recovery "$USER@$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          command -v docker >/dev/null 2>&1 || { echo 'DOCKER_NOT_FOUND=1' >&2; exit 20; }
+          systemctl enable docker >/dev/null 2>&1 || true
+          systemctl start docker >/dev/null 2>&1 || true
+          docker ps -a --format '{{.ID}}|{{.Names}}|{{.Image}}|{{.Status}}|{{.Ports}}'
+          mapfile -t ids < <(docker ps -aq | while read -r id; do
+            line="$(docker inspect "$id" --format '{{.Name}}|{{.Config.Image}}' 2>/dev/null || true)"
+            grep -Eqi 'openclaw|claw' <<<"$line" && printf '%s\n' "$id" || true
+          done)
+          [ "${#ids[@]}" -gt 0 ] || { echo 'OPENCLAW_DOCKER_CONTAINER_NOT_FOUND=1' >&2; exit 21; }
+          for id in "${ids[@]}"; do
+            docker update --restart unless-stopped "$id" >/dev/null
+            [ "$(docker inspect "$id" --format '{{.State.Status}}')" = running ] || docker start "$id" >/dev/null
+            docker inspect "$id" --format 'OPENCLAW name={{.Name}} image={{.Config.Image}} restart={{.HostConfig.RestartPolicy.Name}} status={{.State.Status}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}} ports={{json .NetworkSettings.Ports}}'
+          done
+          systemctl is-enabled docker || true
+          systemctl is-active docker || true
+          echo 'SAHJONY_DOCKER_OPENCLAW_STABILIZED=1'
+          REMOTE
+
+      - name: Verify public SAHJONY health
+        shell: bash
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 12); do
+            body="$(curl -fsS --max-time 20 https://www.sahjony.com/whatsapp/health || true)"
+            printf '%s\n' "$body"
+            grep -q '"gateway_connected"[[:space:]]*:[[:space:]]*true' <<<"$body" && { echo 'SAHJONY_HOSTINGER_OPENCLAW_24X7=READY'; exit 0; }
+            sleep 10
+          done
+          echo 'SAHJONY_PUBLIC_HEALTH_NOT_CONNECTED_YET=1'
+
+      - name: Cleanup recovery and temporary firewall
+        if: always()
+        env:
+          FIREWALL_ID: ${{ steps.network.outputs.firewall_id }}
+        shell: bash
+        run: |
+          set +e
+          curl -sS -X DELETE -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/recovery" >/dev/null 2>&1
+          if [[ -n "$FIREWALL_ID" ]]; then
+            curl -sS -X POST -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' "$HOSTINGER_API_BASE/api/vps/v1/firewall/$FIREWALL_ID/deactivate/$VM_ID" >/dev/null 2>&1
+          fi
+          rm -f ~/.ssh/hostinger-recovery ~/.ssh/hostinger-recovery.pub
+          echo 'HOSTINGER_RECOVERY_V2_CLEANUP_COMPLETE=1'
