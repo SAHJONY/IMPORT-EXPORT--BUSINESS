@@ -1,0 +1,134 @@
+name: Hostinger OpenClaw State Forensics V12
+
+on:
+  push:
+    paths:
+      - '.github/workflows/hostinger-openclaw-state-forensics-v12.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hostinger-vm-767852-mutation
+  cancel-in-progress: false
+
+env:
+  HOSTINGER_API_BASE: https://developers.hostinger.com
+  VM_ID: '767852'
+  HOST: '69.62.68.67'
+  USER: root
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      API_TOKEN: ${{ secrets.HOSTINGER_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare read-only audit payload
+        id: prep
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "$API_TOKEN" ]] || exit 2
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq jq sshpass >/dev/null
+          chmod +x openclaw/hostinger-24x7/openclaw-state-audit.sh
+          bash -n openclaw/hostinger-24x7/openclaw-state-audit.sh
+          RECOVERY_PASSWORD="$(openssl rand -hex 18)Aa1!"
+          echo "::add-mask::$RECOVERY_PASSWORD"
+          echo "recovery_password=$RECOVERY_PASSWORD" >> "$GITHUB_OUTPUT"
+          base64 -w0 openclaw/hostinger-24x7/openclaw-state-audit.sh > /tmp/openclaw-state-audit.b64
+
+      - name: Require idle Hostinger action plane
+        shell: bash
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 90); do
+            a="$(curl -fsS -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/actions?page=1")"
+            busy="$(jq '[.data[]? | select(.state=="sent" or .state=="started" or .state=="pending" or .state=="running" or .state=="queued")] | length' <<<"$a")"
+            if [[ "$busy" == 0 ]]; then echo HOSTINGER_V12_CONTROL_PLANE_IDLE=1; exit 0; fi
+            echo "v12_busy=$busy probe=$i/90"; sleep 5
+          done
+          exit 3
+
+      - name: Enter owned Recovery for offline audit
+        id: start
+        env:
+          RECOVERY_PASSWORD: ${{ steps.prep.outputs.recovery_password }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          payload="$(jq -n --arg p "$RECOVERY_PASSWORD" '{root_password:$p}')"
+          body="$(curl -fsS -X POST -H "Authorization: Bearer $API_TOKEN" -H 'Content-Type: application/json' -H 'Accept: application/json' --data "$payload" "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/recovery")"
+          id="$(jq -r '.id // empty' <<<"$body")"; [[ "$id" =~ ^[0-9]+$ ]] || exit 4
+          echo "action_id=$id" >> "$GITHUB_OUTPUT"
+          echo "owned=true" >> "$GITHUB_OUTPUT"
+
+      - name: Wait Recovery start
+        env:
+          ACTION_ID: ${{ steps.start.outputs.action_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 120); do
+            a="$(curl -fsS -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/actions/$ACTION_ID")"
+            s="$(jq -r '.state // empty' <<<"$a")"; echo "v12_start=$i/120 state=${s:-unknown}"
+            case "$s" in success) exit 0;; failed|failure|error|cancelled|canceled) exit 5;; esac
+            sleep 5
+          done
+          exit 6
+
+      - name: Run redacted audit against original Kali disk
+        env:
+          RECOVERY_PASSWORD: ${{ steps.prep.outputs.recovery_password }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          export SSHPASS="$RECOVERY_PASSWORD"
+          ok=false
+          for i in $(seq 1 60); do
+            if sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=6 -o PreferredAuthentications=password -o PubkeyAuthentication=no "$USER@$HOST" 'printf V12_RECOVERY_OK' 2>/dev/null | grep -q V12_RECOVERY_OK; then ok=true; break; fi
+            sleep 10
+          done
+          [[ "$ok" == true ]] || exit 7
+          AUDIT_B64="$(cat /tmp/openclaw-state-audit.b64)"
+          sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 -o PreferredAuthentications=password -o PubkeyAuthentication=no "$USER@$HOST" "AUDIT_B64='$AUDIT_B64' bash -s" <<'REMOTE'
+          set -euo pipefail
+          root=''
+          for mp in /mnt/sdb1 /mnt; do
+            if [[ -f "$mp/etc/os-release" ]]; then root="$mp"; break; fi
+          done
+          [[ -n "$root" ]] || { echo ORIGINAL_KALI_ROOT_NOT_FOUND=1 >&2; exit 20; }
+          printf '%s' "$AUDIT_B64" | base64 -d > /tmp/openclaw-state-audit
+          chmod 700 /tmp/openclaw-state-audit
+          ROOT_PREFIX="$root" /tmp/openclaw-state-audit
+          REMOTE
+
+      - name: Exit owned Recovery
+        id: stop
+        if: always() && steps.start.outputs.owned == 'true'
+        shell: bash
+        run: |
+          set +e
+          body="$(curl -sS -X DELETE -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/recovery")"
+          id="$(jq -r '.id // empty' <<<"$body" 2>/dev/null)"
+          if [[ "$id" =~ ^[0-9]+$ ]]; then echo "action_id=$id" >> "$GITHUB_OUTPUT"; echo HOSTINGER_V12_STOP_ACTION=$id; fi
+
+      - name: Wait Recovery exit
+        if: always() && steps.stop.outputs.action_id != ''
+        env:
+          ACTION_ID: ${{ steps.stop.outputs.action_id }}
+        shell: bash
+        run: |
+          set +e
+          for i in $(seq 1 120); do
+            a="$(curl -sS -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/actions/$ACTION_ID")"
+            s="$(jq -r '.state // empty' <<<"$a" 2>/dev/null)"; echo "v12_stop=$i/120 state=${s:-unknown}"
+            case "$s" in success) exit 0;; failed|failure|error|cancelled|canceled) exit 1;; esac
+            sleep 5
+          done
+          exit 1
