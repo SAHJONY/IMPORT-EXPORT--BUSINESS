@@ -7,6 +7,9 @@ INTERVAL="${SAHJONY_GUARDIAN_INTERVAL:-30}"
 FAIL_THRESHOLD="${SAHJONY_GUARDIAN_FAIL_THRESHOLD:-3}"
 COOLDOWN="${SAHJONY_GUARDIAN_RESTART_COOLDOWN:-45}"
 PORT="${OPENCLAW_PORT:-18789}"
+NATIVE_HOME="${OPENCLAW_NATIVE_HOME:-/home/node}"
+NATIVE_STATE_DIR="${OPENCLAW_NATIVE_STATE_DIR:-/var/lib/sahjony-openclaw-state}"
+NATIVE_CONFIG_PATH="${OPENCLAW_NATIVE_CONFIG_PATH:-${NATIVE_STATE_DIR}/openclaw.json}"
 
 mkdir -p "$STATE_DIR"
 chmod 700 "$STATE_DIR"
@@ -20,7 +23,7 @@ find_container(){
   command -v docker >/dev/null 2>&1 || return 1
   docker ps -aq 2>/dev/null | while read -r id; do
     [[ -n "$id" ]] || continue
-    meta="$(docker inspect "$id" --format '{{.Name}}|{{.Config.Image}}|{{json .Config.Labels}}' 2>/dev/null || true)"
+    meta="$(docker inspect "$id" --format '{{.Name}}|{{.Config.Image}}' 2>/dev/null || true)"
     if grep -Eqi 'openclaw|open[-_ ]?claw|claw' <<<"$meta"; then
       printf '%s\n' "$id"
       return 0
@@ -34,7 +37,9 @@ native_present(){
 }
 
 runtime_mode(){
-  if native_present && systemctl is-active --quiet openclaw-gateway.service; then
+  # Once a native service is installed it is the sole lifecycle owner.
+  # Never resurrect the Docker standby merely because systemd is transiently down.
+  if native_present; then
     printf native
     return 0
   fi
@@ -44,16 +49,20 @@ runtime_mode(){
     printf docker
     return 0
   fi
-  if native_present; then
-    printf native
-    return 0
-  fi
   printf none
+}
+
+oc_native(){
+  env HOME="$NATIVE_HOME" \
+      OPENCLAW_HOME="$NATIVE_HOME" \
+      OPENCLAW_STATE_DIR="$NATIVE_STATE_DIR" \
+      OPENCLAW_CONFIG_PATH="$NATIVE_CONFIG_PATH" \
+      openclaw "$@"
 }
 
 healthy_native(){
   systemctl is-active --quiet openclaw-gateway.service || return 1
-  openclaw gateway status --deep >/dev/null 2>&1 && return 0
+  oc_native gateway status --deep >/dev/null 2>&1 && return 0
   curl -fsS --connect-timeout 3 --max-time 5 "http://127.0.0.1:${PORT}/" >/dev/null 2>&1
 }
 
@@ -137,10 +146,7 @@ while true; do
         case "$mode" in
           native) repair_native || true ;;
           docker) [[ -n "$cid" ]] && repair_docker "$cid" || true ;;
-          *)
-            systemctl start docker.service >/dev/null 2>&1 || true
-            native_present && systemctl start openclaw-gateway.service >/dev/null 2>&1 || true
-            ;;
+          *) systemctl start docker.service >/dev/null 2>&1 || true ;;
         esac
         repairs=$((repairs + 1))
         last_repair="$now"
