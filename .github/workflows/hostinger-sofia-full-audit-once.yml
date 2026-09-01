@@ -1,0 +1,129 @@
+name: Hostinger SOFIA Full Audit Once
+
+on:
+  push:
+    branches: [ops/sofia-full-restore-20260901]
+    paths:
+      - '.github/workflows/hostinger-sofia-full-audit-once.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      HOST: '69.62.68.67'
+      USER: root
+      PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Prepare SSH
+        shell: bash
+        run: |
+          set -euo pipefail
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/hostinger-audit
+          chmod 600 ~/.ssh/hostinger-audit
+          ssh-keygen -y -f ~/.ssh/hostinger-audit >/dev/null
+
+      - name: Audit Hostinger OpenClaw runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=15 \
+            -i ~/.ssh/hostinger-audit "$USER@$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          STATE=/var/lib/sahjony-openclaw-state
+          CONFIG="$STATE/openclaw.json"
+          WORKSPACE=/home/node/.openclaw/workspace
+          oc(){ env HOME=/home/node OPENCLAW_HOME=/home/node OPENCLAW_STATE_DIR="$STATE" OPENCLAW_CONFIG_PATH="$CONFIG" openclaw "$@"; }
+
+          echo '=== HOSTINGER SOFIA FULL AUDIT ==='
+          echo HOSTINGER_VPS_SCOPE_ONLY=1
+          echo "DATE_UTC=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          echo "OPENCLAW_VERSION=$(oc --version 2>/dev/null | tail -n1 || true)"
+          echo "NODE=$(node -v 2>/dev/null || true)"
+          echo "GATEWAY_ACTIVE=$(systemctl is-active openclaw-gateway.service 2>/dev/null || true)"
+          echo "GATEWAY_ENABLED=$(systemctl is-enabled openclaw-gateway.service 2>/dev/null || true)"
+          echo "CONFIG_EXISTS=$([[ -f "$CONFIG" ]] && echo 1 || echo 0)"
+          echo "WORKSPACE_EXISTS=$([[ -d "$WORKSPACE" ]] && echo 1 || echo 0)"
+
+          echo '--- workspace ---'
+          for f in IDENTITY.md SOUL.md USER.md AGENTS.md MEMORY.md HEARTBEAT.md TOOLS.md; do
+            p="$WORKSPACE/$f"
+            if [[ -f "$p" ]]; then
+              echo "FILE:$f sha256=$(sha256sum "$p" | awk '{print $1}') lines=$(wc -l < "$p")"
+              grep -E 'Sofia|SOFIA|SAHJONY|Trade Concierge|Account Executive|Relationship Memory|Fortune-500|WhatsApp|autonomous|multilingual' "$p" 2>/dev/null | head -n 40 || true
+            else
+              echo "FILE:$f MISSING"
+            fi
+          done
+
+          echo '--- config selected ---'
+          for key in \
+            agents.defaults.model.primary \
+            agents.defaults.model.fallbacks \
+            agents.defaults.sandbox.mode \
+            agents.defaults.memorySearch.enabled \
+            memory.search.enabled \
+            session.dmScope \
+            channels.whatsapp.enabled \
+            channels.whatsapp.dmPolicy \
+            channels.whatsapp.allowFrom \
+            channels.whatsapp.selfChatMode \
+            channels.whatsapp.groupPolicy \
+            plugins.allow \
+            tools.profile \
+            tools.alsoAllow \
+            tools.fs.workspaceOnly; do
+            val="$(oc config get "$key" --json 2>/dev/null || true)"
+            [[ -n "$val" ]] && echo "$key=$val" || echo "$key=<unset>"
+          done
+
+          echo '--- plugins filesystem ---'
+          for d in /home/node/.openclaw/extensions /var/lib/sahjony-openclaw-state/extensions /root/.openclaw/extensions; do
+            if [[ -d "$d" ]]; then
+              echo "DIR:$d"
+              find "$d" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort
+            fi
+          done
+
+          echo '--- plugin registry ---'
+          oc plugins list 2>&1 | sed -E 's/(api[_-]?key|token|secret|password|authorization)[=:][^[:space:]]+/\1=[REDACTED]/Ig' | tail -n 160 || true
+
+          echo '--- models ---'
+          oc models status --plain 2>&1 | sed -E 's/(api[_-]?key|token|secret|password|authorization)[=:][^[:space:]]+/\1=[REDACTED]/Ig' | tail -n 120 || true
+
+          echo '--- memory ---'
+          oc memory status --deep 2>&1 | sed -E 's/(api[_-]?key|token|secret|password|authorization)[=:][^[:space:]]+/\1=[REDACTED]/Ig' | tail -n 120 || true
+
+          echo '--- whatsapp ---'
+          token="$(sed -n 's/^OPENCLAW_GATEWAY_TOKEN=//p' /etc/openclaw-gateway.env 2>/dev/null | head -n1 || true)"
+          if [[ -n "$token" ]]; then
+            env OPENCLAW_GATEWAY_TOKEN="$token" HOME=/home/node OPENCLAW_HOME=/home/node OPENCLAW_STATE_DIR="$STATE" OPENCLAW_CONFIG_PATH="$CONFIG" openclaw channels status --channel whatsapp --probe 2>&1 | tail -n 40 || true
+          else
+            oc channels status --channel whatsapp 2>&1 | tail -n 40 || true
+          fi
+
+          echo '--- service env presence only ---'
+          for k in OPENAI_API_KEY NVIDIA_API_KEY OPENCLAW_GATEWAY_TOKEN; do
+            if systemctl show openclaw-gateway.service -p Environment 2>/dev/null | grep -q "$k=" || grep -Rq "^$k=" /etc/openclaw-gateway.env /etc/systemd/system/openclaw-gateway.service.d 2>/dev/null; then
+              echo "$k=PRESENT"
+            else
+              echo "$k=MISSING"
+            fi
+          done
+
+          echo '--- recent warnings ---'
+          journalctl -u openclaw-gateway.service --since '-30 min' --no-pager 2>/dev/null \
+            | grep -Ei 'warn|error|plugin|whatsapp|model|memory|sofia|reply rescue|diagnostic' \
+            | sed -E 's/(api[_-]?key|token|secret|password|authorization)[=:][^[:space:]]+/\1=[REDACTED]/Ig' \
+            | tail -n 140 || true
+          echo '=== AUDIT COMPLETE ==='
+          REMOTE
+
+      - name: Cleanup SSH
+        if: always()
+        run: rm -f ~/.ssh/hostinger-audit
