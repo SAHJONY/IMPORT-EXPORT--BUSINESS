@@ -41,6 +41,8 @@ jobs:
           bash -n openclaw/hostinger-24x7/hostinger-ephemeral-key-seed.sh
           bash -n openclaw/hostinger-24x7/openclaw-runtime-recovery.sh
           bash -n openclaw/hostinger-24x7/openclaw-runtime-resolver.sh
+          bash -n openclaw/hostinger-24x7/openclaw-docker-metadata-forensics.sh
+          bash -n openclaw/hostinger-24x7/openclaw-state-audit.sh
           bash -n openclaw/hostinger-24x7/provider-bootstrap-stabilize.sh
           install -d -m 700 ~/.ssh
           ssh-keygen -q -t ed25519 -N '' -f ~/.ssh/sahjony-provider-bootstrap -C "sahjony-provider-bootstrap-${GITHUB_RUN_ID}"
@@ -172,9 +174,11 @@ jobs:
             openclaw/hostinger-24x7/install-whatsapp-guardian.sh \
             openclaw/hostinger-24x7/openclaw-runtime-recovery.sh \
             openclaw/hostinger-24x7/openclaw-runtime-resolver.sh \
+            openclaw/hostinger-24x7/openclaw-docker-metadata-forensics.sh \
+            openclaw/hostinger-24x7/openclaw-state-audit.sh \
             openclaw/hostinger-24x7/provider-bootstrap-stabilize.sh \
             "$HOSTINGER_USER@$HOSTINGER_HOST:/tmp/"
-          ssh "${common[@]}" "$HOSTINGER_USER@$HOSTINGER_HOST" 'chmod +x /tmp/provider-bootstrap-stabilize.sh /tmp/openclaw-runtime-recovery.sh /tmp/openclaw-runtime-resolver.sh && /tmp/provider-bootstrap-stabilize.sh'
+          ssh "${common[@]}" "$HOSTINGER_USER@$HOSTINGER_HOST" 'chmod +x /tmp/provider-bootstrap-stabilize.sh /tmp/openclaw-runtime-recovery.sh /tmp/openclaw-runtime-resolver.sh /tmp/openclaw-docker-metadata-forensics.sh /tmp/openclaw-state-audit.sh && /tmp/provider-bootstrap-stabilize.sh'
 
       - name: Remove ephemeral bootstrap keys
         if: always()
