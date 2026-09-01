@@ -124,16 +124,16 @@ jobs:
               probe="$(sshpass -e ssh "${ssh_opts[@]}" "$USER@$recovery_host" 'echo SAHJONY_RECOVERY_AUTH_OK' 2>/dev/null || true)"
               if grep -q SAHJONY_RECOVERY_AUTH_OK <<<"$probe"; then
                 root_mount="$(sshpass -e ssh "${ssh_opts[@]}" "$USER@$recovery_host" 'bash -s' 2>/dev/null <<'REMOTE' || true
-for d in /mnt /mnt/sda /mnt/sda1 /mnt/vda /mnt/vda1 /mnt/nvme0n1 /mnt/nvme0n1p1 /mnt/* /mnt/*/*; do
-  [ -d "$d" ] || continue
-  if [ -f "$d/etc/os-release" ] && [ -d "$d/var" ]; then
-    printf '%s\n' "$d"
-    exit 0
-  fi
-done
-exit 1
-REMOTE
-)"
+          for d in /mnt /mnt/sda /mnt/sda1 /mnt/vda /mnt/vda1 /mnt/nvme0n1 /mnt/nvme0n1p1 /mnt/* /mnt/*/*; do
+            [ -d "$d" ] || continue
+            if [ -f "$d/etc/os-release" ] && [ -d "$d/var" ]; then
+              printf '%s\n' "$d"
+              exit 0
+            fi
+          done
+          exit 1
+          REMOTE
+          )"
                 root_mount="$(printf '%s\n' "$root_mount" | head -n1 | tr -d '\r')"
                 if [[ -n "$root_mount" ]]; then
                   break
@@ -178,9 +178,9 @@ REMOTE
           install -d "$root/etc/ssh/sshd_config.d"
           cfg="$root/etc/ssh/sshd_config.d/99-sahjony-ephemeral-recovery.conf"
           cat >"$cfg" <<'EOF'
-PubkeyAuthentication yes
-PermitRootLogin prohibit-password
-EOF
+          PubkeyAuthentication yes
+          PermitRootLogin prohibit-password
+          EOF
           chmod 600 "$cfg"
 
           if [ -d "$root/etc/systemd/system/multi-user.target.wants" ]; then
@@ -288,15 +288,15 @@ EOF
           ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
             -o ConnectTimeout=6 -i ~/.ssh/hostinger-recovery "$USER@$HOST" \
             "PUB_B64='$PUB_B64' python3 - <<'PY'
-import base64, os, pathlib
-p=pathlib.Path('/root/.ssh/authorized_keys')
-target=base64.b64decode(os.environ['PUB_B64']).decode().strip()
-if p.exists():
-    lines=[x for x in p.read_text().splitlines() if x.strip()!=target]
-    p.write_text(('\n'.join(lines)+'\n') if lines else '')
-pathlib.Path('/etc/ssh/sshd_config.d/99-sahjony-ephemeral-recovery.conf').unlink(missing_ok=True)
-print('EPHEMERAL_GUEST_ACCESS_REMOVED=1')
-PY"
+          import base64, os, pathlib
+          p=pathlib.Path('/root/.ssh/authorized_keys')
+          target=base64.b64decode(os.environ['PUB_B64']).decode().strip()
+          if p.exists():
+              lines=[x for x in p.read_text().splitlines() if x.strip()!=target]
+              p.write_text(('\n'.join(lines)+'\n') if lines else '')
+          pathlib.Path('/etc/ssh/sshd_config.d/99-sahjony-ephemeral-recovery.conf').unlink(missing_ok=True)
+          print('EPHEMERAL_GUEST_ACCESS_REMOVED=1')
+          PY"
           rm -f ~/.ssh/hostinger-recovery ~/.ssh/hostinger-recovery.pub
 
       - name: Ensure recovery mode and temporary network firewall are off
