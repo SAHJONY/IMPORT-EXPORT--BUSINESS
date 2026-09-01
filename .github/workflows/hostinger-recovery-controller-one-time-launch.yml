@@ -23,6 +23,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # One-time relaunch after OpenClaw runtime-recovery syntax repair.
 
           active="$(
             gh run list \
