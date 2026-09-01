@@ -1,0 +1,29 @@
+name: Hostinger V6 One-Shot Trigger
+
+on:
+  push:
+    paths:
+      - '.github/workflows/hostinger-v6-one-shot-trigger.yml'
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Refuse duplicate active V6 and dispatch once
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          active="$(gh run list --repo "$REPO" --workflow hostinger-whatsapp-recovery-v6.yml --limit 20 --json status --jq '[.[] | select(.status == "in_progress" or .status == "queued" or .status == "waiting" or .status == "requested" or .status == "pending")] | length')"
+          if [ "$active" != 0 ]; then
+            echo "HOSTINGER_V6_ALREADY_ACTIVE=$active"
+            exit 0
+          fi
+          gh workflow run hostinger-whatsapp-recovery-v6.yml --repo "$REPO" --ref main
+          echo SAHJONY_HOSTINGER_V6_DISPATCHED=1
