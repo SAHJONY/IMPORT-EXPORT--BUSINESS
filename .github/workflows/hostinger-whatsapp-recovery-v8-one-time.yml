@@ -1,0 +1,461 @@
+name: Hostinger WhatsApp Recovery V8 One-Time
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/hostinger-whatsapp-recovery-v8-one-time.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hostinger-vm-767852-mutation
+  cancel-in-progress: false
+
+env:
+  HOSTINGER_API_BASE: https://developers.hostinger.com
+  VM_ID: '767852'
+  HOST: '69.62.68.67'
+  SSH_USER: root
+
+jobs:
+  recover:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    env:
+      API_TOKEN: ${{ secrets.HOSTINGER_API_TOKEN }}
+      DURABLE_SSH_SECRET: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare resilient recovery credentials
+        id: creds
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "$API_TOKEN" ]] || { echo HOSTINGER_API_TOKEN_MISSING=1 >&2; exit 2; }
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq sshpass netcat-openbsd jq >/dev/null
+          install -d -m 700 ~/.ssh "$RUNNER_TEMP/hostinger-v8"
+          ssh-keygen -q -t ed25519 -N '' -f ~/.ssh/hostinger-recovery-v8 -C "sahjony-v8-${GITHUB_RUN_ID}"
+
+          recovery_password="$(openssl rand -hex 18)Aa1!"
+          echo "::add-mask::$recovery_password"
+          echo "recovery_password=$recovery_password" >> "$GITHUB_OUTPUT"
+
+          private_ready=false
+          public_ready=false
+          format=missing
+          if [[ -n "$DURABLE_SSH_SECRET" ]]; then
+            printf '%s\n' "$DURABLE_SSH_SECRET" | tr -d '\r' > "$RUNNER_TEMP/hostinger-v8/durable.raw"
+            if grep -Eq '^-----BEGIN (OPENSSH |RSA |EC |DSA )?PRIVATE KEY-----' "$RUNNER_TEMP/hostinger-v8/durable.raw"; then
+              cp "$RUNNER_TEMP/hostinger-v8/durable.raw" ~/.ssh/hostinger-durable
+              chmod 600 ~/.ssh/hostinger-durable
+              if ssh-keygen -y -f ~/.ssh/hostinger-durable > ~/.ssh/hostinger-durable.pub 2>/dev/null; then
+                private_ready=true; public_ready=true; format=private_key
+              fi
+            elif grep -Eq '^(ssh-(rsa|ed25519)|ecdsa-sha2-nistp(256|384|521))[[:space:]]' "$RUNNER_TEMP/hostinger-v8/durable.raw"; then
+              cp "$RUNNER_TEMP/hostinger-v8/durable.raw" ~/.ssh/hostinger-durable.pub
+              chmod 600 ~/.ssh/hostinger-durable.pub
+              public_ready=true; format=public_key_only
+            else
+              if base64 -d "$RUNNER_TEMP/hostinger-v8/durable.raw" > "$RUNNER_TEMP/hostinger-v8/durable.decoded" 2>/dev/null; then
+                tr -d '\r' < "$RUNNER_TEMP/hostinger-v8/durable.decoded" > "$RUNNER_TEMP/hostinger-v8/durable.normalized"
+                if grep -Eq '^-----BEGIN (OPENSSH |RSA |EC |DSA )?PRIVATE KEY-----' "$RUNNER_TEMP/hostinger-v8/durable.normalized"; then
+                  cp "$RUNNER_TEMP/hostinger-v8/durable.normalized" ~/.ssh/hostinger-durable
+                  chmod 600 ~/.ssh/hostinger-durable
+                  if ssh-keygen -y -f ~/.ssh/hostinger-durable > ~/.ssh/hostinger-durable.pub 2>/dev/null; then
+                    private_ready=true; public_ready=true; format=base64_private_key
+                  fi
+                elif grep -Eq '^(ssh-(rsa|ed25519)|ecdsa-sha2-nistp(256|384|521))[[:space:]]' "$RUNNER_TEMP/hostinger-v8/durable.normalized"; then
+                  cp "$RUNNER_TEMP/hostinger-v8/durable.normalized" ~/.ssh/hostinger-durable.pub
+                  chmod 600 ~/.ssh/hostinger-durable.pub
+                  public_ready=true; format=base64_public_key_only
+                else
+                  format=unrecognized
+                fi
+              else
+                format=unrecognized
+              fi
+            fi
+          fi
+          rm -f "$RUNNER_TEMP/hostinger-v8/durable.raw" "$RUNNER_TEMP/hostinger-v8/durable.decoded" "$RUNNER_TEMP/hostinger-v8/durable.normalized"
+          echo "durable_private_ready=$private_ready" >> "$GITHUB_OUTPUT"
+          echo "durable_public_ready=$public_ready" >> "$GITHUB_OUTPUT"
+          echo "HOSTINGER_DURABLE_SECRET_FORMAT=$format private_ready=$private_ready public_ready=$public_ready"
+          echo SAHJONY_V8_EPHEMERAL_MANAGEMENT_KEY_READY=1
+
+      - name: Preflight VM identity and action plane
+        id: preflight
+        shell: bash
+        run: |
+          set -euo pipefail
+          vm="$(curl -fsS -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID")"
+          state="$(jq -r '.state // empty' <<<"$vm")"
+          ip="$(jq -r '[.. | objects | .address? // empty | select(type=="string") | select(test("^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+$"))] | first // empty' <<<"$vm")"
+          [[ -z "$ip" || "$ip" == "$HOST" ]] || { echo HOSTINGER_VM_IDENTITY_MISMATCH=$ip >&2; exit 3; }
+          echo "HOSTINGER_VM_STATE=${state:-unknown}"
+
+          actions="$(curl -fsS -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/actions?page=1")"
+          active="$(jq '[.data[]? | select((.state // "") | IN("sent","started","pending","running","queued"))] | length' <<<"$actions")"
+          echo "HOSTINGER_ACTIVE_ACTIONS=$active"
+          [[ "$active" == 0 ]] || { echo HOSTINGER_ACTION_PLANE_BUSY=1 >&2; jq -c '[.data[]? | select((.state // "") | IN("sent","started","pending","running","queued")) | {id,name,state}]' <<<"$actions" >&2 || true; exit 4; }
+
+          tcp=false
+          direct=false
+          nc -z -w 5 "$HOST" 22 >/dev/null 2>&1 && tcp=true || true
+          if [[ "$tcp" == true && "${{ steps.creds.outputs.durable_private_ready }}" == true ]]; then
+            ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=7 -i ~/.ssh/hostinger-durable "$SSH_USER@$HOST" 'printf SAHJONY_V8_DIRECT=READY' 2>/dev/null | grep -q SAHJONY_V8_DIRECT=READY && direct=true || true
+          fi
+          echo "tcp22=$tcp" >> "$GITHUB_OUTPUT"
+          echo "direct_ready=$direct" >> "$GITHUB_OUTPUT"
+          echo "HOSTINGER_TCP22=$tcp HOSTINGER_DIRECT_DURABLE_SSH=$direct"
+
+      - name: Start owned Recovery when direct management is unavailable
+        id: start
+        if: steps.preflight.outputs.direct_ready != 'true'
+        env:
+          RECOVERY_PASSWORD: ${{ steps.creds.outputs.recovery_password }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          actions="$(curl -fsS -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/actions?page=1")"
+          active="$(jq '[.data[]? | select((.state // "") | IN("sent","started","pending","running","queued"))] | length' <<<"$actions")"
+          [[ "$active" == 0 ]] || { echo HOSTINGER_RECOVERY_COLLISION_BLOCKED=1 >&2; exit 8; }
+
+          payload="$(jq -n --arg p "$RECOVERY_PASSWORD" '{root_password:$p}')"
+          tmp="$(mktemp)"
+          code="$(curl -sS -o "$tmp" -w '%{http_code}' -X POST -H "Authorization: Bearer $API_TOKEN" -H 'Content-Type: application/json' -H 'Accept: application/json' --data "$payload" "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/recovery")"
+          body="$(cat "$tmp")"; rm -f "$tmp"
+          [[ "$code" == 200 || "$code" == 201 || "$code" == 202 ]] || { echo "HOSTINGER_RECOVERY_START_HTTP=$code" >&2; jq -c . <<<"$body" >&2 2>/dev/null || true; exit 9; }
+          action_id="$(jq -r '.id // 0' <<<"$body")"
+          action_state="$(jq -r '.state // empty' <<<"$body")"
+          echo 'recovery_owned=true' >> "$GITHUB_OUTPUT"
+          echo "action_id=$action_id" >> "$GITHUB_OUTPUT"
+          echo "HOSTINGER_RECOVERY_V8_START_ACCEPTED id=$action_id state=${action_state:-unknown}"
+
+          if [[ "$action_id" =~ ^[0-9]+$ && "$action_id" -gt 0 && "$action_state" != success ]]; then
+            success=false
+            for i in $(seq 1 120); do
+              a="$(curl -fsS -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/actions/$action_id")"
+              state="$(jq -r '.state // empty' <<<"$a")"
+              echo "recovery_start_probe=$i/120 state=${state:-unknown}"
+              case "$state" in
+                success) success=true; break ;;
+                failed|failure|error|cancelled|canceled) jq -c . <<<"$a" >&2 || true; exit 10 ;;
+              esac
+              sleep 5
+            done
+            [[ "$success" == true ]] || { echo HOSTINGER_RECOVERY_START_TIMEOUT=1 >&2; exit 11; }
+          else
+            echo HOSTINGER_RECOVERY_START_NONPOLLABLE=1
+          fi
+
+      - name: Authenticate owned Recovery SSH
+        id: recovery_ssh
+        if: steps.start.outputs.recovery_owned == 'true'
+        env:
+          RECOVERY_PASSWORD: ${{ steps.creds.outputs.recovery_password }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          export SSHPASS="$RECOVERY_PASSWORD"
+          ready=false
+          for i in $(seq 1 60); do
+            : > "$RUNNER_TEMP/hostinger-v8/recovery-ssh.err"
+            if sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=7 -o PreferredAuthentications=password -o PubkeyAuthentication=no -o NumberOfPasswordPrompts=1 "$SSH_USER@$HOST" 'printf SAHJONY_RECOVERY_V8=READY' 2>"$RUNNER_TEMP/hostinger-v8/recovery-ssh.err" | grep -q SAHJONY_RECOVERY_V8=READY; then
+              ready=true; break
+            fi
+            if (( i == 1 || i % 10 == 0 || i == 60 )); then echo "recovery_ssh_probe=$i/60"; sed -n '1,10p' "$RUNNER_TEMP/hostinger-v8/recovery-ssh.err" || true; fi
+            sleep 10
+          done
+          [[ "$ready" == true ]] || { echo HOSTINGER_RECOVERY_V8_SSH_FAILED=1 >&2; exit 13; }
+          echo 'ready=true' >> "$GITHUB_OUTPUT"
+          echo HOSTINGER_RECOVERY_V8_SSH=READY
+
+      - name: Repair original Kali SSH and seed identities
+        id: repair
+        if: steps.recovery_ssh.outputs.ready == 'true'
+        env:
+          RECOVERY_PASSWORD: ${{ steps.creds.outputs.recovery_password }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          export SSHPASS="$RECOVERY_PASSWORD"
+          EPHEMERAL_B64="$(base64 -w0 ~/.ssh/hostinger-recovery-v8.pub)"
+          DURABLE_B64=''
+          [[ -s ~/.ssh/hostinger-durable.pub ]] && DURABLE_B64="$(base64 -w0 ~/.ssh/hostinger-durable.pub)"
+          sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 -o PreferredAuthentications=password -o PubkeyAuthentication=no "$SSH_USER@$HOST" "EPHEMERAL_B64='$EPHEMERAL_B64' DURABLE_B64='$DURABLE_B64' bash -s" <<'REMOTE'
+          set -euo pipefail
+          root=''
+          for mp in /mnt /mnt/sdb1; do
+            if [[ -f "$mp/etc/os-release" && -d "$mp/root" && -d "$mp/etc/ssh" ]]; then root="$mp"; break; fi
+          done
+          if [[ -z "$root" ]]; then
+            mkdir -p /mnt/sahjony-v8-discovery
+            n=0
+            while read -r dev fs mp type; do
+              case "$type:$fs" in part:ext2|part:ext3|part:ext4|part:xfs|part:btrfs|lvm:ext2|lvm:ext3|lvm:ext4|lvm:xfs|lvm:btrfs) ;; *) continue ;; esac
+              if [[ -z "${mp:-}" ]]; then
+                n=$((n+1)); t="/mnt/sahjony-v8-discovery/$n"; mkdir -p "$t"
+                if [[ "$fs" == xfs ]]; then mount -o nouuid "$dev" "$t" 2>/dev/null || true; else mount "$dev" "$t" 2>/dev/null || true; fi
+              fi
+            done < <(lsblk -prno NAME,FSTYPE,MOUNTPOINT,TYPE 2>/dev/null)
+            while read -r mp; do
+              [[ "$mp" == / ]] && continue
+              if [[ -f "$mp/etc/os-release" && -d "$mp/root" && -d "$mp/etc/ssh" ]]; then root="$mp"; break; fi
+            done < <(findmnt -rn -o TARGET | sort -u)
+          fi
+          [[ -n "$root" ]] || { echo ORIGINAL_KALI_ROOT_NOT_FOUND=1 >&2; exit 20; }
+          echo "ORIGINAL_KALI_ROOT=$root"
+
+          install -d -m 700 "$root/root/.ssh"
+          touch "$root/root/.ssh/authorized_keys"
+          chmod 600 "$root/root/.ssh/authorized_keys"
+          chown -R 0:0 "$root/root/.ssh"
+
+          ephemeral="$(printf '%s' "$EPHEMERAL_B64" | base64 -d)"
+          grep -qxF "$ephemeral" "$root/root/.ssh/authorized_keys" || printf '%s\n' "$ephemeral" >> "$root/root/.ssh/authorized_keys"
+          if [[ -n "$DURABLE_B64" ]]; then
+            durable="$(printf '%s' "$DURABLE_B64" | base64 -d)"
+            grep -qxF "$durable" "$root/root/.ssh/authorized_keys" || printf '%s\n' "$durable" >> "$root/root/.ssh/authorized_keys"
+            echo HOSTINGER_DURABLE_PUBLIC_KEY_SEEDED=1
+          fi
+
+          install -d "$root/etc/ssh/sshd_config.d" "$root/run/sshd" "$root/etc/systemd/system/multi-user.target.wants"
+          cat > "$root/etc/ssh/sshd_config.d/99-sahjony-recovery-v8.conf" <<'EOF'
+          PubkeyAuthentication yes
+          AuthorizedKeysFile .ssh/authorized_keys
+          PermitRootLogin prohibit-password
+          PasswordAuthentication no
+          EOF
+          chmod 600 "$root/etc/ssh/sshd_config.d/99-sahjony-recovery-v8.conf"
+
+          enabled=false
+          for unit in ssh.service sshd.service; do
+            target="$(find "$root/lib/systemd/system" "$root/usr/lib/systemd/system" -maxdepth 1 -name "$unit" -print -quit 2>/dev/null || true)"
+            if [[ -n "$target" ]]; then
+              ln -sfn "/${target#"$root/"}" "$root/etc/systemd/system/multi-user.target.wants/$unit"
+              echo "SSH_UNIT_ENABLED=$unit"
+              enabled=true
+              break
+            fi
+          done
+          [[ "$enabled" == true ]] || { echo SSH_SYSTEMD_UNIT_NOT_FOUND=1 >&2; exit 21; }
+          chroot "$root" /usr/bin/ssh-keygen -A 2>/dev/null || true
+          chroot "$root" /usr/sbin/sshd -t
+          sync
+          echo ORIGINAL_KALI_SSH_V8_REPAIRED=1
+          REMOTE
+          echo 'repaired=true' >> "$GITHUB_OUTPUT"
+
+      - name: Stop only Recovery owned by this run
+        id: stop
+        if: steps.start.outputs.recovery_owned == 'true' && steps.repair.outputs.repaired == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          tmp="$(mktemp)"
+          code="$(curl -sS -o "$tmp" -w '%{http_code}' -X DELETE -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/recovery")"
+          body="$(cat "$tmp")"; rm -f "$tmp"
+          [[ "$code" == 200 || "$code" == 201 || "$code" == 202 ]] || { echo "HOSTINGER_RECOVERY_STOP_HTTP=$code" >&2; jq -c . <<<"$body" >&2 2>/dev/null || true; exit 30; }
+          action_id="$(jq -r '.id // 0' <<<"$body")"
+          action_state="$(jq -r '.state // empty' <<<"$body")"
+          echo "HOSTINGER_RECOVERY_V8_STOP_ACCEPTED id=$action_id state=${action_state:-unknown}"
+          if [[ "$action_id" =~ ^[0-9]+$ && "$action_id" -gt 0 && "$action_state" != success ]]; then
+            success=false
+            for i in $(seq 1 120); do
+              a="$(curl -fsS -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/actions/$action_id")"
+              state="$(jq -r '.state // empty' <<<"$a")"
+              echo "recovery_stop_probe=$i/120 state=${state:-unknown}"
+              case "$state" in
+                success) success=true; break ;;
+                failed|failure|error|cancelled|canceled) jq -c . <<<"$a" >&2 || true; exit 31 ;;
+              esac
+              sleep 5
+            done
+            [[ "$success" == true ]] || { echo HOSTINGER_RECOVERY_STOP_TIMEOUT=1 >&2; exit 32; }
+          else
+            echo HOSTINGER_RECOVERY_STOP_NONPOLLABLE=1
+            sleep 15
+          fi
+          echo 'stop_complete=true' >> "$GITHUB_OUTPUT"
+
+      - name: Establish authenticated normal Kali SSH
+        id: normal
+        if: steps.preflight.outputs.direct_ready != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          probe() {
+            local count="$1"
+            for i in $(seq 1 "$count"); do
+              if nc -z -w 4 "$HOST" 22 >/dev/null 2>&1 && ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=7 -i ~/.ssh/hostinger-recovery-v8 "$SSH_USER@$HOST" 'printf SAHJONY_NORMAL_V8=READY' 2>"$RUNNER_TEMP/hostinger-v8/normal-ssh.err" | grep -q SAHJONY_NORMAL_V8=READY; then return 0; fi
+              if (( i == 1 || i % 10 == 0 || i == count )); then echo "normal_ssh_probe=$i/$count"; sed -n '1,10p' "$RUNNER_TEMP/hostinger-v8/normal-ssh.err" 2>/dev/null || true; fi
+              sleep 5
+            done
+            return 1
+          }
+
+          if ! probe 36; then
+            echo HOSTINGER_V8_ONE_POST_RECOVERY_RESTART=1
+            tmp="$(mktemp)"
+            code="$(curl -sS -o "$tmp" -w '%{http_code}' -X POST -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/restart")"
+            body="$(cat "$tmp")"; rm -f "$tmp"
+            [[ "$code" == 200 || "$code" == 201 || "$code" == 202 ]] || { echo "HOSTINGER_POST_RECOVERY_RESTART_HTTP=$code" >&2; exit 40; }
+            rid="$(jq -r '.id // 0' <<<"$body")"
+            rstate="$(jq -r '.state // empty' <<<"$body")"
+            echo "HOSTINGER_V8_RESTART_ACCEPTED id=$rid state=${rstate:-unknown}"
+            if [[ "$rid" =~ ^[0-9]+$ && "$rid" -gt 0 && "$rstate" != success ]]; then
+              success=false
+              for j in $(seq 1 120); do
+                a="$(curl -fsS -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/actions/$rid")"
+                state="$(jq -r '.state // empty' <<<"$a")"
+                echo "post_recovery_restart_probe=$j/120 state=${state:-unknown}"
+                case "$state" in success) success=true; break;; failed|failure|error|cancelled|canceled) exit 41;; esac
+                sleep 5
+              done
+              [[ "$success" == true ]] || { echo HOSTINGER_POST_RECOVERY_RESTART_TIMEOUT=1 >&2; exit 42; }
+            else
+              sleep 25
+            fi
+            probe 48 || { echo NORMAL_KALI_SSH_UNREACHABLE_AFTER_V8_REPAIR=1 >&2; exit 43; }
+          fi
+          echo 'ready=true' >> "$GITHUB_OUTPUT"
+          echo NORMAL_V8_SSH_READY=1
+
+      - name: Select authenticated management key
+        id: management
+        shell: bash
+        run: |
+          set -euo pipefail
+          key=''
+          if [[ "${{ steps.preflight.outputs.direct_ready }}" == true ]]; then
+            key="$HOME/.ssh/hostinger-durable"
+          elif [[ "${{ steps.normal.outputs.ready }}" == true ]]; then
+            key="$HOME/.ssh/hostinger-recovery-v8"
+          fi
+          [[ -n "$key" && -s "$key" ]] || { echo HOSTINGER_V8_MANAGEMENT_KEY_UNAVAILABLE=1 >&2; exit 44; }
+          echo "key=$key" >> "$GITHUB_OUTPUT"
+          echo HOSTINGER_V8_AUTHENTICATED_MANAGEMENT_PATH=READY
+
+      - name: Stabilize Docker and preserve existing OpenClaw
+        id: stabilize
+        env:
+          KEY: ${{ steps.management.outputs.key }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -i "$KEY" "$SSH_USER@$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          command -v docker >/dev/null 2>&1 || { echo DOCKER_NOT_FOUND=1 >&2; exit 50; }
+          systemctl enable --now docker >/dev/null 2>&1 || true
+          docker info >/dev/null 2>&1 || { echo DOCKER_DAEMON_NOT_READY=1 >&2; exit 51; }
+          mapfile -t ids < <(docker ps -aq | while read -r id; do meta="$(docker inspect "$id" --format '{{.Name}}|{{.Config.Image}}' 2>/dev/null || true)"; grep -Eqi 'openclaw|claw' <<<"$meta" && printf '%s\n' "$id"; done)
+          ((${#ids[@]})) || { echo OPENCLAW_EXISTING_CONTAINER_NOT_FOUND=1 >&2; docker ps -a; exit 52; }
+          for id in "${ids[@]}"; do
+            docker update --restart unless-stopped "$id" >/dev/null
+            [[ "$(docker inspect "$id" --format '{{.State.Running}}' 2>/dev/null || true)" == true ]] || docker start "$id" >/dev/null
+            docker inspect "$id" --format 'OPENCLAW name={{.Name}} status={{.State.Status}} restart={{.HostConfig.RestartPolicy.Name}}'
+          done
+          echo SAHJONY_DOCKER_OPENCLAW_V8_STABILIZED=READY
+          REMOTE
+          echo 'ready=true' >> "$GITHUB_OUTPUT"
+
+      - name: Install guardian and verify local WhatsApp runtime
+        id: guardian
+        if: steps.stabilize.outputs.ready == 'true'
+        env:
+          KEY: ${{ steps.management.outputs.key }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          opts=(-o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -i "$KEY")
+          scp "${opts[@]}" openclaw/hostinger-24x7/whatsapp-guardian.sh openclaw/hostinger-24x7/install-whatsapp-guardian.sh "$SSH_USER@$HOST:/root/"
+          ssh "${opts[@]}" "$SSH_USER@$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          install -d /opt/sahjony/openclaw/hostinger-24x7
+          mv /root/whatsapp-guardian.sh /root/install-whatsapp-guardian.sh /opt/sahjony/openclaw/hostinger-24x7/
+          chmod +x /opt/sahjony/openclaw/hostinger-24x7/*.sh
+          cd /opt/sahjony/openclaw/hostinger-24x7
+          ./install-whatsapp-guardian.sh
+          systemctl is-active --quiet sahjony-whatsapp-guardian.timer
+          /usr/local/sbin/sahjony-whatsapp-guardian
+          test -s /var/lib/sahjony-whatsapp-guardian/last-good
+          now="$(date +%s)"; mtime="$(stat -c %Y /var/lib/sahjony-whatsapp-guardian/last-good)"
+          age=$((now-mtime))
+          echo "SAHJONY_GUARDIAN_LAST_GOOD_AGE_SECONDS=$age"
+          (( age <= 300 )) || { echo GUARDIAN_LAST_GOOD_STALE=1 >&2; exit 60; }
+          echo SAHJONY_HOSTINGER_WHATSAPP_LOCAL_24X7=READY
+          REMOTE
+          echo 'ready=true' >> "$GITHUB_OUTPUT"
+
+      - name: Run final Hostinger-local doctor
+        id: doctor
+        if: steps.guardian.outputs.ready == 'true'
+        env:
+          KEY: ${{ steps.management.outputs.key }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          opts=(-o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -i "$KEY")
+          scp "${opts[@]}" openclaw/hostinger-24x7/hostinger-vps-doctor.sh "$SSH_USER@$HOST:/tmp/sahjony-hostinger-vps-doctor.sh"
+          ssh "${opts[@]}" "$SSH_USER@$HOST" 'chmod 700 /tmp/sahjony-hostinger-vps-doctor.sh; SAHJONY_VPS_DOCTOR_REPORT=/tmp/sahjony-hostinger-vps-doctor.json /tmp/sahjony-hostinger-vps-doctor.sh audit'
+          scp "${opts[@]}" "$SSH_USER@$HOST:/tmp/sahjony-hostinger-vps-doctor.json" "$RUNNER_TEMP/hostinger-v8/doctor.json"
+          jq '{classification,severity,identity,ssh,runtime,safety}' "$RUNNER_TEMP/hostinger-v8/doctor.json"
+          classification="$(jq -r '.classification' "$RUNNER_TEMP/hostinger-v8/doctor.json")"
+          whatsapp="$(jq -r '.runtime.whatsapp_connected' "$RUNNER_TEMP/hostinger-v8/doctor.json")"
+          [[ "$whatsapp" == true ]] || { echo HOSTINGER_LOCAL_WHATSAPP_PROBE_NOT_READY=1 >&2; exit 61; }
+          echo "SAHJONY_V8_DOCTOR_CLASSIFICATION=$classification"
+          echo SAHJONY_HOSTINGER_LOCAL_RUNTIME=READY
+
+      - name: Secondary public health snapshot
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          body="$(curl -fsS --max-time 20 https://www.sahjony.com/whatsapp/health 2>/dev/null || true)"
+          printf '%s\n' "$body" | jq '{status,version,provider,primary_provider,transport_policy,gateway_connected,hostinger_independent_runtime,hostinger_openclaw}' 2>/dev/null || true
+          echo PUBLIC_HEALTH_IS_SECONDARY_EVIDENCE=1
+
+      - name: Upload V8 evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hostinger-whatsapp-recovery-v8-${{ github.run_id }}
+          path: ${{ runner.temp }}/hostinger-v8/
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Cleanup only resources owned by this run
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          if [[ "${{ steps.normal.outputs.ready }}" == true && -f ~/.ssh/hostinger-recovery-v8.pub ]]; then
+            PUB_B64="$(base64 -w0 ~/.ssh/hostinger-recovery-v8.pub)"
+            ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 -i ~/.ssh/hostinger-recovery-v8 "$SSH_USER@$HOST" "PUB_B64='$PUB_B64' bash -s" <<'REMOTE'
+          set +e
+          pub="$(printf '%s' "$PUB_B64" | base64 -d)"
+          if [[ -f /root/.ssh/authorized_keys ]]; then
+            tmp="$(mktemp)"
+            grep -vxF "$pub" /root/.ssh/authorized_keys > "$tmp" || true
+            cat "$tmp" > /root/.ssh/authorized_keys
+            rm -f "$tmp"
+            chmod 600 /root/.ssh/authorized_keys
+          fi
+          rm -f /tmp/sahjony-hostinger-vps-doctor.sh /tmp/sahjony-hostinger-vps-doctor.json
+          echo SAHJONY_V8_EPHEMERAL_GUEST_KEY_REMOVED=1
+          REMOTE
+          fi
+
+          if [[ "${{ steps.start.outputs.recovery_owned }}" == true && "${{ steps.stop.outputs.stop_complete }}" != true ]]; then
+            echo CLEANUP_STOPPING_ONLY_V8_OWNED_RECOVERY=1
+            curl -sS -X DELETE -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/recovery" >/dev/null 2>&1 || true
+          else
+            echo CLEANUP_RECOVERY_DELETE_SKIPPED_NO_OWNERSHIP_OR_ALREADY_STOPPED=1
+          fi
+          rm -f ~/.ssh/hostinger-recovery-v8 ~/.ssh/hostinger-recovery-v8.pub ~/.ssh/hostinger-durable ~/.ssh/hostinger-durable.pub
+          echo HOSTINGER_WHATSAPP_RECOVERY_V8_CLEANUP_COMPLETE=1
