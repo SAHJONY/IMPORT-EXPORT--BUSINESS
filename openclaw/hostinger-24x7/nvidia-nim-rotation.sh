@@ -5,6 +5,9 @@ STATE_DIR="${NVIDIA_NIM_STATE_DIR:-/var/lib/sahjony-nvidia-nim}"
 LOG="${NVIDIA_NIM_LOG:-/var/log/sahjony-nvidia-nim.log}"
 INVENTORY_URL="${NVIDIA_NIM_INVENTORY_URL:-https://integrate.api.nvidia.com/v1/models}"
 LOCK_FILE="${NVIDIA_NIM_LOCK_FILE:-/run/lock/sahjony-nvidia-nim.lock}"
+NATIVE_HOME="${OPENCLAW_NATIVE_HOME:-/home/node}"
+NATIVE_STATE_DIR="${OPENCLAW_NATIVE_STATE_DIR:-/var/lib/sahjony-openclaw-state}"
+NATIVE_CONFIG_PATH="${OPENCLAW_NATIVE_CONFIG_PATH:-${NATIVE_STATE_DIR}/openclaw.json}"
 
 CANDIDATES=(
   'nvidia/nemotron-3-ultra-550b-a55b'
@@ -29,20 +32,21 @@ command -v python3 >/dev/null 2>&1 || fail python3_missing
 
 RUNTIME=""
 CID=""
-if command -v openclaw >/dev/null 2>&1 && systemctl is-active --quiet openclaw-gateway.service 2>/dev/null; then
+if command -v openclaw >/dev/null 2>&1 && systemctl cat openclaw-gateway.service >/dev/null 2>&1; then
   RUNTIME=native
 elif command -v docker >/dev/null 2>&1; then
   CID="$(docker ps --format '{{.ID}} {{.Names}} {{.Image}}' | awk 'tolower($0) ~ /openclaw/ {print $1; exit}')"
   [[ -n "$CID" ]] && RUNTIME=docker
 fi
-if [[ -z "$RUNTIME" ]] && command -v openclaw >/dev/null 2>&1; then
-  RUNTIME=native
-fi
 [[ -n "$RUNTIME" ]] || fail openclaw_runtime_not_found
 
 oc(){
   if [[ "$RUNTIME" == native ]]; then
-    openclaw "$@"
+    env HOME="$NATIVE_HOME" \
+        OPENCLAW_HOME="$NATIVE_HOME" \
+        OPENCLAW_STATE_DIR="$NATIVE_STATE_DIR" \
+        OPENCLAW_CONFIG_PATH="$NATIVE_CONFIG_PATH" \
+        openclaw "$@"
   else
     docker exec "$CID" openclaw "$@"
   fi
@@ -50,6 +54,9 @@ oc(){
 
 if [[ "$RUNTIME" == docker ]]; then
   docker exec "$CID" sh -lc 'command -v openclaw >/dev/null 2>&1' || fail openclaw_cli_missing
+else
+  [[ -f "$NATIVE_CONFIG_PATH" ]] || fail native_config_missing
+  systemctl is-active --quiet openclaw-gateway.service || fail native_gateway_inactive
 fi
 
 oc plugins enable nvidia >/dev/null 2>&1 || true
