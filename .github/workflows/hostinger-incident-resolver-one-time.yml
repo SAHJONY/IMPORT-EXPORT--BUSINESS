@@ -1,0 +1,110 @@
+name: Hostinger Incident Resolver One-Time Execution
+
+on:
+  workflow_run:
+    workflows:
+      - Deployment Doctor
+    types:
+      - completed
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hostinger-vm-767852-mutation
+  cancel-in-progress: false
+
+env:
+  HOSTINGER_VM_ID: '767852'
+  HOSTINGER_HOST: '69.62.68.67'
+  HOSTINGER_USER: root
+  HOSTINGER_API_BASE: https://developers.hostinger.com
+  HOSTINGER_ACTION_IDLE_TIMEOUT: '900'
+  HOSTINGER_ACTION_STABLE_SAMPLES: '2'
+  HOSTINGER_SOLVE_ATTEMPTS: '3'
+
+jobs:
+  solve_once:
+    if: >-
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.head_commit.message == 'ops: arm one-time Hostinger incident resolver' &&
+      github.event.workflow_run.run_attempt == 1
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    env:
+      HOSTINGER_API_TOKEN: ${{ secrets.HOSTINGER_API_TOKEN }}
+      EXISTING_SSH_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Checkout the exact armed revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Validate one-time handoff identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          test '${{ github.event.workflow_run.name }}' = 'Deployment Doctor'
+          test '${{ github.event.workflow_run.head_branch }}' = 'main'
+          test '${{ github.event.workflow_run.run_attempt }}' = '1'
+          test '${{ github.event.workflow_run.head_commit.message }}' = 'ops: arm one-time Hostinger incident resolver'
+          echo SAHJONY_ONE_TIME_RESOLVER_HANDOFF=AUTHORIZED
+
+      - name: Prepare resolver runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "$HOSTINGER_API_TOKEN" ]] || {
+            echo HOSTINGER_API_TOKEN_MISSING=1 >&2
+            exit 4
+          }
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq jq sshpass netcat-openbsd >/dev/null
+          chmod +x openclaw/hostinger-24x7/hostinger-incident-resolver.sh
+          chmod +x openclaw/hostinger-24x7/hostinger-recovery-controller.sh
+          chmod +x openclaw/hostinger-24x7/hostinger-provider-ssh-preflight.sh
+          chmod +x openclaw/hostinger-24x7/ssh-self-heal.sh
+          chmod +x openclaw/hostinger-24x7/hostinger-runtime-bootstrap.sh
+          chmod +x openclaw/hostinger-24x7/openclaw-runtime-recovery.sh
+          chmod +x openclaw/hostinger-24x7/whatsapp-hostinger-only-guardian.sh
+          bash -n openclaw/hostinger-24x7/hostinger-incident-resolver.sh
+          bash -n openclaw/hostinger-24x7/hostinger-recovery-controller.sh
+          bash -n openclaw/hostinger-24x7/hostinger-provider-ssh-preflight.sh
+          if [[ -n "${EXISTING_SSH_KEY:-}" ]]; then
+            install -d -m 700 ~/.ssh
+            printf '%s\n' "$EXISTING_SSH_KEY" > ~/.ssh/hostinger-existing
+            chmod 600 ~/.ssh/hostinger-existing
+            echo "SSH_KEY_PATH=$HOME/.ssh/hostinger-existing" >> "$GITHUB_ENV"
+          fi
+
+      - name: Resolve Hostinger/OpenClaw incident
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/sahjony-hostinger-incident-resolver
+          openclaw/hostinger-24x7/hostinger-incident-resolver.sh solve
+
+      - name: Publish final resolver state
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          report=/tmp/sahjony-hostinger-incident-resolver/report.json
+          {
+            echo '## One-Time Hostinger Incident Resolver'
+            echo
+            if [[ -s "$report" ]]; then
+              echo '```json'
+              cat "$report"
+              echo
+              echo '```'
+            else
+              echo 'No final JSON report was produced.'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove runner key material
+        if: always()
+        shell: bash
+        run: |
+          rm -f ~/.ssh/hostinger-existing ~/.ssh/hostinger-existing.pub
