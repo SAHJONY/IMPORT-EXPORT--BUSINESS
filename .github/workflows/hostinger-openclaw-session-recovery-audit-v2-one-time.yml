@@ -1,0 +1,239 @@
+name: Hostinger OpenClaw Session Recovery Audit V2 One-Time
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/hostinger-openclaw-session-recovery-audit-v2-one-time.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hostinger-vm-767852-mutation
+  cancel-in-progress: false
+
+env:
+  HOSTINGER_API_BASE: https://developers.hostinger.com
+  VM_ID: '767852'
+  HOST: '69.62.68.67'
+  SSH_USER: root
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      API_TOKEN: ${{ secrets.HOSTINGER_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare bounded recovery audit
+        id: prep
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "$API_TOKEN" ]] || { echo HOSTINGER_API_TOKEN_MISSING=1 >&2; exit 2; }
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq sshpass jq netcat-openbsd >/dev/null
+          install -d -m 700 "$RUNNER_TEMP/session-recovery-audit-v2"
+          password="$(openssl rand -hex 18)Aa1!"
+          echo "::add-mask::$password"
+          echo "password=$password" >> "$GITHUB_OUTPUT"
+          echo SAHJONY_SESSION_RECOVERY_AUDIT_PREPARED=1
+
+      - name: Verify VM identity and idle action plane
+        shell: bash
+        run: |
+          set -euo pipefail
+          vm="$(curl -fsS -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID")"
+          state="$(jq -r '.state // empty' <<<"$vm")"
+          ip="$(jq -r '[.. | objects | .address? // empty | select(type=="string") | select(test("^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+$"))] | first // empty' <<<"$vm")"
+          [[ -z "$ip" || "$ip" == "$HOST" ]] || { echo HOSTINGER_VM_IDENTITY_MISMATCH=$ip >&2; exit 3; }
+          actions="$(curl -fsS -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/actions?page=1")"
+          active="$(jq '[.data[]? | select((.state // "") | IN("sent","started","pending","running","queued"))] | length' <<<"$actions")"
+          echo "HOSTINGER_VM_STATE=${state:-unknown} ACTIVE_ACTIONS=$active"
+          [[ "$active" == 0 ]] || { echo HOSTINGER_ACTION_PLANE_BUSY=1 >&2; exit 4; }
+
+      - name: Start owned Recovery
+        id: start
+        env:
+          RECOVERY_PASSWORD: ${{ steps.prep.outputs.password }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          payload="$(jq -n --arg p "$RECOVERY_PASSWORD" '{root_password:$p}')"
+          tmp="$(mktemp)"
+          code="$(curl -sS -o "$tmp" -w '%{http_code}' -X POST -H "Authorization: Bearer $API_TOKEN" -H 'Content-Type: application/json' -H 'Accept: application/json' --data "$payload" "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/recovery")"
+          body="$(cat "$tmp")"; rm -f "$tmp"
+          [[ "$code" == 200 || "$code" == 201 || "$code" == 202 ]] || { echo "HOSTINGER_RECOVERY_AUDIT_START_HTTP=$code" >&2; jq -c . <<<"$body" >&2 2>/dev/null || true; exit 5; }
+          id="$(jq -r '.id // 0' <<<"$body")"
+          state="$(jq -r '.state // empty' <<<"$body")"
+          echo 'owned=true' >> "$GITHUB_OUTPUT"
+          echo "action_id=$id" >> "$GITHUB_OUTPUT"
+          echo "HOSTINGER_RECOVERY_AUDIT_START id=$id state=${state:-unknown}"
+          if [[ "$id" =~ ^[0-9]+$ && "$id" -gt 0 && "$state" != success ]]; then
+            ok=false
+            for i in $(seq 1 120); do
+              a="$(curl -fsS -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/actions/$id")"
+              s="$(jq -r '.state // empty' <<<"$a")"
+              echo "recovery_audit_start_probe=$i/120 state=${s:-unknown}"
+              case "$s" in success) ok=true; break;; failed|failure|error|cancelled|canceled) jq -c . <<<"$a" >&2; exit 6;; esac
+              sleep 5
+            done
+            [[ "$ok" == true ]] || { echo HOSTINGER_RECOVERY_AUDIT_START_TIMEOUT=1 >&2; exit 7; }
+          fi
+
+      - name: Authenticate Recovery SSH
+        id: ssh
+        if: steps.start.outputs.owned == 'true'
+        env:
+          RECOVERY_PASSWORD: ${{ steps.prep.outputs.password }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          export SSHPASS="$RECOVERY_PASSWORD"
+          ready=false
+          for i in $(seq 1 60); do
+            if sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=7 -o PreferredAuthentications=password -o PubkeyAuthentication=no -o NumberOfPasswordPrompts=1 "$SSH_USER@$HOST" 'printf SAHJONY_SESSION_RECOVERY_AUDIT_SSH=READY' 2>"$RUNNER_TEMP/session-recovery-audit-v2/ssh.err" | grep -q SAHJONY_SESSION_RECOVERY_AUDIT_SSH=READY; then
+              ready=true; break
+            fi
+            if (( i == 1 || i % 10 == 0 || i == 60 )); then echo "recovery_audit_ssh_probe=$i/60"; sed -n '1,8p' "$RUNNER_TEMP/session-recovery-audit-v2/ssh.err" || true; fi
+            sleep 10
+          done
+          [[ "$ready" == true ]] || { echo HOSTINGER_SESSION_RECOVERY_AUDIT_SSH_FAILED=1 >&2; exit 8; }
+          echo 'ready=true' >> "$GITHUB_OUTPUT"
+
+      - name: Inspect original OpenClaw persistence read-only
+        id: inspect
+        if: steps.ssh.outputs.ready == 'true'
+        env:
+          RECOVERY_PASSWORD: ${{ steps.prep.outputs.password }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          export SSHPASS="$RECOVERY_PASSWORD"
+          sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 -o PreferredAuthentications=password -o PubkeyAuthentication=no "$SSH_USER@$HOST" 'bash -s' > "$RUNNER_TEMP/session-recovery-audit-v2/report.txt" <<'REMOTE'
+          set -uo pipefail
+          root=''
+          for mp in /mnt/sdb1 /mnt; do
+            if [[ -f "$mp/etc/os-release" && -d "$mp/var" ]]; then root="$mp"; break; fi
+          done
+          if [[ -z "$root" ]]; then
+            echo ORIGINAL_KALI_ROOT_NOT_PREMOUNTED=1
+            exit 20
+          fi
+          echo "ORIGINAL_KALI_ROOT=$root"
+          echo 'AUDIT_MODE=READ_ONLY_METADATA'
+
+          echo '=== EXPECTED PERSISTENT ROOTS ==='
+          for rel in var/lib/sahjony-openclaw-state var/lib/sahjony-openclaw-auth root/.openclaw var/backups/sahjony-openclaw opt/sahjony-openclaw; do
+            p="$root/$rel"
+            if [[ -e "$p" ]]; then
+              printf '%s|' "/$rel"
+              stat -c 'type=%F|mode=%a|uid=%u|gid=%g|mtime=%y' "$p" 2>/dev/null || true
+              if [[ -d "$p" ]]; then du -sk "$p" 2>/dev/null | awk '{print "size_kb="$1}'; fi
+            else
+              echo "/$rel|MISSING"
+            fi
+          done
+
+          echo '=== SESSION/AUTH CANDIDATES METADATA ==='
+          for rel in var/lib/sahjony-openclaw-state var/lib/sahjony-openclaw-auth root/.openclaw; do
+            p="$root/$rel"; [[ -d "$p" ]] || continue
+            find "$p" -xdev -maxdepth 9 -type f \( -iname '*whatsapp*' -o -iname '*baileys*' -o -iname 'creds.json' -o -iname '*session*' -o -iname '*auth*' -o -iname '*signal*' -o -iname '*identity*' \) \
+              -printf '%p|size=%s|mtime=%TY-%Tm-%TdT%TH:%TM:%TSZ|mode=%m|uid=%U|gid=%G\n' 2>/dev/null | sed "s#^$root##" | head -n 500
+          done
+
+          echo '=== OPENCLAW STATE TREE NAMES ONLY ==='
+          for rel in var/lib/sahjony-openclaw-state var/lib/sahjony-openclaw-auth; do
+            p="$root/$rel"; [[ -d "$p" ]] || continue
+            echo "--- /$rel ---"
+            find "$p" -xdev -maxdepth 5 -printf '%y|%p\n' 2>/dev/null | sed "s#|$root#|#" | head -n 600
+          done
+
+          echo '=== OPENCLAW CONFIG STRUCTURE ONLY ==='
+          cfg="$root/var/lib/sahjony-openclaw-state/openclaw.json"
+          if [[ -f "$cfg" ]] && command -v jq >/dev/null 2>&1; then
+            jq -r 'paths | map(tostring) | join(".")' "$cfg" 2>/dev/null | grep -Ei 'channel|whatsapp|plugin|gateway' | head -n 250 || true
+          else
+            echo OPENCLAW_CONFIG_NOT_AVAILABLE=1
+          fi
+
+          echo '=== OPENCLAW BACKUP INVENTORY ==='
+          backup="$root/var/backups/sahjony-openclaw"
+          if [[ -d "$backup" ]]; then
+            find "$backup" -maxdepth 1 -type f -printf '%p|size=%s|mtime=%TY-%Tm-%TdT%TH:%TM:%TSZ\n' 2>/dev/null | sed "s#^$root##" | sort
+            for a in "$backup"/*.tgz; do
+              [[ -f "$a" ]] || continue
+              echo "--- archive=$(basename "$a") matching_names_only ---"
+              tar -tzf "$a" 2>/dev/null | grep -Ei 'whatsapp|baileys|creds\.json|session|auth|openclaw\.json' | head -n 300 || true
+            done
+          fi
+
+          echo '=== CURRENT GUARDIAN STATE ON DISK ==='
+          for rel in var/lib/sahjony-whatsapp-guardian/last-good etc/systemd/system/sahjony-whatsapp-guardian.timer etc/systemd/system/sahjony-whatsapp-guardian.service; do
+            p="$root/$rel"
+            if [[ -e "$p" ]]; then stat -c "/$rel|type=%F|size=%s|mtime=%y" "$p"; else echo "/$rel|MISSING"; fi
+          done
+
+          echo SAHJONY_SESSION_RECOVERY_AUDIT_COMPLETE=1
+          REMOTE
+          cat "$RUNNER_TEMP/session-recovery-audit-v2/report.txt"
+          grep -q SAHJONY_SESSION_RECOVERY_AUDIT_COMPLETE=1 "$RUNNER_TEMP/session-recovery-audit-v2/report.txt"
+          echo 'complete=true' >> "$GITHUB_OUTPUT"
+
+      - name: Stop owned Recovery and return to Kali
+        id: stop
+        if: always() && steps.start.outputs.owned == 'true'
+        shell: bash
+        run: |
+          set +e
+          tmp="$(mktemp)"
+          code="$(curl -sS -o "$tmp" -w '%{http_code}' -X DELETE -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/recovery")"
+          body="$(cat "$tmp")"; rm -f "$tmp"
+          echo "HOSTINGER_SESSION_RECOVERY_AUDIT_STOP_HTTP=$code"
+          id="$(jq -r '.id // 0' <<<"$body" 2>/dev/null)"
+          state="$(jq -r '.state // empty' <<<"$body" 2>/dev/null)"
+          if [[ "$code" == 200 || "$code" == 201 || "$code" == 202 ]]; then
+            if [[ "$id" =~ ^[0-9]+$ && "$id" -gt 0 && "$state" != success ]]; then
+              for i in $(seq 1 120); do
+                a="$(curl -fsS -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/actions/$id" 2>/dev/null)" || { sleep 5; continue; }
+                s="$(jq -r '.state // empty' <<<"$a")"
+                echo "recovery_audit_stop_probe=$i/120 state=${s:-unknown}"
+                [[ "$s" == success ]] && { echo 'stopped=true' >> "$GITHUB_OUTPUT"; exit 0; }
+                case "$s" in failed|failure|error|cancelled|canceled) break;; esac
+                sleep 5
+              done
+            else
+              sleep 15
+              echo 'stopped=true' >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          fi
+          echo HOSTINGER_SESSION_RECOVERY_AUDIT_STOP_UNCONFIRMED=1 >&2
+          exit 30
+
+      - name: Verify normal SSH port returned
+        if: always() && steps.stop.outputs.stopped == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          ready=false
+          for i in $(seq 1 48); do
+            if nc -z -w 4 "$HOST" 22 >/dev/null 2>&1; then ready=true; break; fi
+            echo "normal_tcp22_return_probe=$i/48"
+            sleep 5
+          done
+          [[ "$ready" == true ]] || { echo NORMAL_KALI_TCP22_DID_NOT_RETURN=1 >&2; exit 31; }
+          echo NORMAL_KALI_TCP22_RETURNED=1
+
+      - name: Upload session recovery audit evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hostinger-openclaw-session-recovery-audit-v2-${{ github.run_id }}
+          path: ${{ runner.temp }}/session-recovery-audit-v2/
+          if-no-files-found: warn
+          retention-days: 7
