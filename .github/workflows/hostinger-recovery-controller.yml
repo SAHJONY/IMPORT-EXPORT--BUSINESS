@@ -1,0 +1,78 @@
+name: Hostinger Recovery Controller
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Recovery controller mode
+        required: true
+        default: diagnose
+        type: choice
+        options:
+          - diagnose
+          - repair-ssh
+          - heal-runtime
+          - full
+      confirm_mutation:
+        description: Type RECOVER for repair-ssh, heal-runtime, or full
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hostinger-vm-767852-mutation
+  cancel-in-progress: false
+
+env:
+  HOSTINGER_VM_ID: '767852'
+  HOSTINGER_HOST: '69.62.68.67'
+  HOSTINGER_USER: root
+  HOSTINGER_API_BASE: https://developers.hostinger.com
+
+jobs:
+  controller:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      HOSTINGER_API_TOKEN: ${{ secrets.HOSTINGER_API_TOKEN }}
+      EXISTING_SSH_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate requested mode
+        shell: bash
+        run: |
+          set -euo pipefail
+          mode='${{ inputs.mode }}'
+          confirm='${{ inputs.confirm_mutation }}'
+          case "$mode" in diagnose) ;; repair-ssh|heal-runtime|full) [[ "$confirm" == RECOVER ]] || { echo 'Mutation requires confirm_mutation=RECOVER' >&2; exit 2; } ;; *) exit 3 ;; esac
+
+      - name: Prepare controller runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "$HOSTINGER_API_TOKEN" ]] || { echo HOSTINGER_API_TOKEN_MISSING=1 >&2; exit 4; }
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq jq sshpass netcat-openbsd >/dev/null
+          chmod +x openclaw/hostinger-24x7/hostinger-recovery-controller.sh
+          bash -n openclaw/hostinger-24x7/hostinger-recovery-controller.sh
+          if [[ -n "${EXISTING_SSH_KEY:-}" ]]; then
+            install -d -m 700 ~/.ssh
+            printf '%s\n' "$EXISTING_SSH_KEY" > ~/.ssh/hostinger-existing
+            chmod 600 ~/.ssh/hostinger-existing
+            echo "SSH_KEY_PATH=$HOME/.ssh/hostinger-existing" >> "$GITHUB_ENV"
+          fi
+
+      - name: Run recovery controller
+        shell: bash
+        run: |
+          set -euo pipefail
+          openclaw/hostinger-24x7/hostinger-recovery-controller.sh '${{ inputs.mode }}'
+
+      - name: Remove runner key material
+        if: always()
+        shell: bash
+        run: rm -f ~/.ssh/hostinger-existing
