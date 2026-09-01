@@ -6,6 +6,7 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/whatsapp-client-link-lock-once.yml'
+      - '.github/ops/whatsapp-client-link-lock-trigger.txt'
 
 permissions:
   contents: read
