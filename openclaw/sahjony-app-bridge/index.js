@@ -23,6 +23,7 @@ var index_default = definePluginEntry({
     const appUrl = String(config.appUrl || process.env.SAHJONY_APP_URL || "https://www.sahjony.com").replace(/\/$/, "");
     const secret = String(process.env.SAHJONY_APP_BRIDGE_SECRET || "");
     const accountId = String(config.accountId || "default");
+    const gatewayId = String(config.gatewayId || process.env.SAHJONY_GATEWAY_ID || "default");
     const pollIntervalMs = Math.max(5e3, Math.min(3e5, Number(config.pollIntervalMs || 3e4)));
     const openclawBin = String(
       process.env.OPENCLAW_BIN ||
@@ -87,7 +88,7 @@ var index_default = definePluginEntry({
       }
       try {
         await signedRequest("/whatsapp/openclaw/heartbeat", "POST", {
-          gateway_id: "default",
+          gateway_id: gatewayId,
           account_id: accountId,
           channel_connected: connected,
           business_number: config.businessNumber || "+12816628581",
@@ -181,7 +182,7 @@ var index_default = definePluginEntry({
       await pollOutbox();
       heartbeatTimer = setInterval(() => { void heartbeat(); }, 12e4);
       pollTimer = setInterval(() => { void pollOutbox(); }, pollIntervalMs);
-      api.logger.info(`SAHJONY application bridge started (openclawBin=${openclawBin})`);
+      api.logger.info(`SAHJONY application bridge started (gatewayId=${gatewayId}, openclawBin=${openclawBin})`);
     });
 
     api.on("gateway_stop", async () => {
