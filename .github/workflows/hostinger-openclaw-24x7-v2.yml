@@ -1,0 +1,173 @@
+name: Hostinger OpenClaw 24x7 V2
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/hostinger-openclaw-24x7-v2.yml'
+      - 'openclaw/hostinger-24x7/**'
+      - 'openclaw/sahjony-app-bridge/**'
+  schedule:
+    - cron: '23 * * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hostinger-openclaw-production-v2
+  cancel-in-progress: false
+
+env:
+  HOSTINGER_API_BASE: https://developers.hostinger.com
+  VM_ID: '767852'
+  HOST: '69.62.68.67'
+  USER: root
+
+jobs:
+  recover:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      API_TOKEN: ${{ secrets.HOSTINGER_API_TOKEN }}
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_SCOPE: ${{ secrets.VERCEL_SCOPE }}
+    steps:
+      - name: Validate Hostinger API and VPS identity
+        run: |
+          set -euo pipefail
+          [[ -n "$API_TOKEN" ]] || { echo 'HOSTINGER_API_TOKEN_MISSING=1' >&2; exit 2; }
+          vm="$(curl --fail --silent --show-error -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID")"
+          printf '%s' "$vm" >/tmp/vm.json
+          ip="$(jq -r '[.. | objects | .address? // .ipv4? // .ip? // empty | select(type=="string") | select(test("^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+$"))] | first // empty' /tmp/vm.json)"
+          [[ -z "$ip" || "$ip" == "$HOST" ]] || { echo "HOSTINGER_VM_IDENTITY_MISMATCH=$ip" >&2; exit 3; }
+          echo 'HOSTINGER_VM_IDENTITY_VERIFIED=1'
+
+      - name: Provision ephemeral SSH key
+        id: key
+        run: |
+          set -euo pipefail
+          install -m 700 -d ~/.ssh
+          ssh-keygen -q -t ed25519 -N '' -f ~/.ssh/hostinger -C "sahjony-gha-${GITHUB_RUN_ID}"
+          payload="$(jq -n --arg name "SAHJONY GitHub ephemeral ${GITHUB_RUN_ID}" --arg key "$(cat ~/.ssh/hostinger.pub)" '{name:$name,key:$key}')"
+          created="$(curl --fail --silent --show-error -X POST -H "Authorization: Bearer $API_TOKEN" -H 'Content-Type: application/json' -H 'Accept: application/json' --data "$payload" "$HOSTINGER_API_BASE/api/vps/v1/public-keys")"
+          key_id="$(jq -r '.id // .data.id // empty' <<<"$created")"
+          [[ "$key_id" =~ ^[0-9]+$ ]] || { echo 'HOSTINGER_EPHEMERAL_KEY_CREATE_FAILED=1' >&2; exit 4; }
+          echo "key_id=$key_id" >> "$GITHUB_OUTPUT"
+          attach="$(jq -n --argjson id "$key_id" '{ids:[$id]}')"
+          curl --fail --silent --show-error -X POST -H "Authorization: Bearer $API_TOKEN" -H 'Content-Type: application/json' -H 'Accept: application/json' --data "$attach" "$HOSTINGER_API_BASE/api/vps/v1/public-keys/attach/$VM_ID" >/tmp/attach.json
+          echo 'HOSTINGER_EPHEMERAL_KEY_ATTACHED=1'
+
+      - name: Wait for TCP22 and host key
+        run: |
+          set -euo pipefail
+          tcp=false
+          scanned=false
+          for attempt in $(seq 1 18); do
+            echo "TCP22/host-key probe $attempt/18"
+            if timeout 5 bash -c "</dev/tcp/$HOST/22" 2>/dev/null; then
+              tcp=true
+              if ssh-keyscan -T 8 -H "$HOST" > /tmp/hostkey 2>/dev/null && [[ -s /tmp/hostkey ]]; then
+                cat /tmp/hostkey >> ~/.ssh/known_hosts
+                scanned=true
+                break
+              fi
+            fi
+            sleep 10
+          done
+          [[ "$tcp" == true ]] || { echo 'HOSTINGER_TCP22_UNREACHABLE=1' >&2; exit 50; }
+          [[ "$scanned" == true ]] || { echo 'HOSTINGER_SSH_HOSTKEY_UNAVAILABLE=1' >&2; exit 51; }
+          echo 'HOSTINGER_TCP22_AND_HOSTKEY_READY=1'
+
+      - name: Establish authorized Hostinger SSH
+        run: |
+          set -euo pipefail
+          connected=false
+          last=''
+          for attempt in $(seq 1 18); do
+            echo "Authorized SSH probe $attempt/18"
+            if out="$(ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=8 -i ~/.ssh/hostinger "$USER@$HOST" 'printf SAHJONY_HOSTINGER_SSH_OK' 2>&1)" && grep -q SAHJONY_HOSTINGER_SSH_OK <<<"$out"; then
+              connected=true
+              break
+            fi
+            last="$out"
+            printf '%s\n' "$out" | tail -n 2 || true
+            sleep 10
+          done
+          if [[ "$connected" != true ]]; then
+            if grep -Eqi 'permission denied|publickey' <<<"$last"; then
+              echo 'HOSTINGER_SSH_AUTH_FAILED=1' >&2
+              exit 52
+            fi
+            echo 'HOSTINGER_SSH_CONNECTION_FAILED=1' >&2
+            exit 53
+          fi
+          echo 'SAHJONY_HOSTINGER_AUTHORIZED_SSH=READY'
+
+      - name: Bootstrap existing Docker OpenClaw
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=12 -i ~/.ssh/hostinger "$USER@$HOST" \
+            "env VERCEL_TOKEN='$VERCEL_TOKEN' VERCEL_SCOPE='${VERCEL_SCOPE:-juan-gonzalezs-projects-94b6dfe9}' bash -s" <<'REMOTE'
+          set -euo pipefail
+          tmp="$(mktemp -d)"
+          trap 'rm -rf "$tmp"' EXIT
+          command -v git >/dev/null 2>&1 || { apt-get update -y >/dev/null; apt-get install -y git curl ca-certificates >/dev/null; }
+          git clone --depth 1 --branch main https://github.com/SAHJONY/IMPORT-EXPORT--BUSINESS.git "$tmp/repo"
+          chmod +x "$tmp/repo/openclaw/hostinger-24x7/bootstrap-existing-openclaw.sh"
+          SAHJONY_OPENCLAW_GATEWAY_ID=hostinger-vps REPO_DIR="$tmp/repo" "$tmp/repo/openclaw/hostinger-24x7/bootstrap-existing-openclaw.sh"
+          REMOTE
+
+      - name: Verify Docker OpenClaw runtime
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=12 -i ~/.ssh/hostinger "$USER@$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cid="$(docker ps -aq | while read -r id; do line="$(docker inspect "$id" --format '{{.Name}}|{{.Config.Image}}' 2>/dev/null || true)"; grep -Eqi 'openclaw|claw' <<<"$line" && { echo "$id"; break; }; done)"
+          [[ -n "$cid" ]] || { echo 'HOSTINGER_OPENCLAW_CONTAINER_NOT_FOUND=1' >&2; exit 21; }
+          status="$(docker inspect "$cid" --format '{{.State.Status}}')"
+          restart="$(docker inspect "$cid" --format '{{.HostConfig.RestartPolicy.Name}}')"
+          echo "HOSTINGER_OPENCLAW_CONTAINER=$cid status=$status restart=$restart"
+          [[ "$status" == running ]] || { echo 'HOSTINGER_OPENCLAW_NOT_RUNNING=1' >&2; exit 22; }
+          [[ "$restart" == unless-stopped || "$restart" == always ]] || { echo 'HOSTINGER_OPENCLAW_RESTART_POLICY_INVALID=1' >&2; exit 23; }
+          probe="$(docker exec "$cid" openclaw channels status --probe 2>&1 || true)"
+          printf '%s\n' "$probe"
+          grep -Eqi 'whatsapp.*connected|linked,.*running,.*connected' <<<"$probe" || { echo 'HOSTINGER_WHATSAPP_NOT_CONNECTED=1' >&2; exit 24; }
+          systemctl is-active --quiet sahjony-openclaw-watchdog.timer || { echo 'HOSTINGER_WATCHDOG_NOT_ACTIVE=1' >&2; exit 26; }
+          systemctl is-active --quiet sahjony-openclaw-backup.timer || { echo 'HOSTINGER_BACKUP_TIMER_NOT_ACTIVE=1' >&2; exit 27; }
+          echo 'SAHJONY_HOSTINGER_LOCAL_RUNTIME=READY'
+          REMOTE
+
+      - name: Verify public bridge heartbeat
+        run: |
+          set -euo pipefail
+          sleep 10
+          body="$(curl -fsS --max-time 20 https://www.sahjony.com/whatsapp/health || true)"
+          printf '%s\n' "$body"
+          grep -Eq '"gateway_connected"[[:space:]]*:[[:space:]]*true|"openclaw_fallback"[[:space:]]*:[[:space:]]*\{[^}]*"connected"[[:space:]]*:[[:space:]]*true' <<<"$body" || { echo 'SAHJONY_PUBLIC_GATEWAY_NOT_CONNECTED=1' >&2; exit 28; }
+          echo 'SAHJONY_HOSTINGER_OPENCLAW_24X7=READY'
+
+      - name: Remove ephemeral SSH access
+        if: always()
+        env:
+          KEY_ID: ${{ steps.key.outputs.key_id }}
+        run: |
+          set +e
+          if [[ -f ~/.ssh/hostinger.pub && -f ~/.ssh/hostinger ]]; then
+            pub_b64="$(base64 -w0 ~/.ssh/hostinger.pub)"
+            ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=8 -i ~/.ssh/hostinger "$USER@$HOST" \
+              "PUB_B64='$pub_b64' python3 - <<'PY'
+          import base64, os
+          from pathlib import Path
+          p=Path('/root/.ssh/authorized_keys')
+          if p.exists():
+              target=base64.b64decode(os.environ['PUB_B64']).decode().strip()
+              lines=[x for x in p.read_text().splitlines() if x.strip()!=target]
+              p.write_text(('\n'.join(lines)+'\n') if lines else '')
+          PY" >/dev/null 2>&1
+          fi
+          if [[ "$KEY_ID" =~ ^[0-9]+$ && -n "$API_TOKEN" ]]; then
+            curl --silent --show-error -X DELETE -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' "$HOSTINGER_API_BASE/api/vps/v1/public-keys/$KEY_ID" >/dev/null || true
+          fi
+          rm -f ~/.ssh/hostinger ~/.ssh/hostinger.pub
+          echo 'SAHJONY_HOSTINGER_EPHEMERAL_ACCESS_REMOVED=1'
