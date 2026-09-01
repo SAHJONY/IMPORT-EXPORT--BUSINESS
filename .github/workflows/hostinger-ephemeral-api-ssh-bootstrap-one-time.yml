@@ -23,7 +23,7 @@ env:
 jobs:
   bootstrap:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 18
     env:
       API_TOKEN: ${{ secrets.HOSTINGER_API_TOKEN }}
     steps:
@@ -69,34 +69,54 @@ jobs:
           payload="$(jq -n --arg name "$KEY_NAME" --arg key "$pub" '{name:$name,key:$key}')"
           created="$(curl -fsS -X POST -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' -H 'Content-Type: application/json' --data "$payload" "$HOSTINGER_API_BASE/api/vps/v1/public-keys")"
           key_id="$(jq -r '.id // empty' <<<"$created")"
-          [[ "$key_id" =~ ^[0-9]+$ ]] || { echo HOSTINGER_EPHEMERAL_KEY_CREATE_FAILED=1 >&2; exit 4; }
+          [[ "$key_id" =~ ^[0-9]+$ && "$key_id" -gt 0 ]] || { echo HOSTINGER_EPHEMERAL_KEY_CREATE_FAILED=1 >&2; exit 4; }
           echo "key_id=$key_id" >> "$GITHUB_OUTPUT"
+
           attach_payload="$(jq -n --argjson id "$key_id" '{ids:[$id]}')"
           attached="$(curl -fsS -X POST -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' -H 'Content-Type: application/json' --data "$attach_payload" "$HOSTINGER_API_BASE/api/vps/v1/public-keys/attach/$VM_ID")"
-          action_id="$(jq -r '.id // empty' <<<"$attached")"
-          [[ "$action_id" =~ ^[0-9]+$ ]] || { echo HOSTINGER_EPHEMERAL_ATTACH_ACTION_MISSING=1 >&2; exit 5; }
+          printf '%s\n' "$attached" > "$RUNNER_TEMP/hostinger-ephemeral/attach-response.json"
+          action_id="$(jq -r '.id // 0' <<<"$attached")"
+          action_state="$(jq -r '.state // empty' <<<"$attached")"
           echo "action_id=$action_id" >> "$GITHUB_OUTPUT"
+          echo "action_state=$action_state" >> "$GITHUB_OUTPUT"
           echo "HOSTINGER_EPHEMERAL_KEY_ID=$key_id"
-          echo "HOSTINGER_EPHEMERAL_ATTACH_ACTION=$action_id"
+          echo "HOSTINGER_EPHEMERAL_ATTACH_RESPONSE id=$action_id state=${action_state:-unknown}"
 
-      - name: Wait for key attach action
-        shell: bash
+          # Some Hostinger attach responses return id=0. That value is not a
+          # pollable VM action ID. Only poll strictly positive action IDs.
+          if [[ "$action_id" =~ ^[0-9]+$ && "$action_id" -gt 0 && "$action_state" != success ]]; then
+            for i in $(seq 1 60); do
+              body="$(curl -fsS -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/actions/$action_id")"
+              state="$(jq -r '.state // empty' <<<"$body")"
+              echo "HOSTINGER_EPHEMERAL_ATTACH_ACTION=$i/60 state=${state:-unknown}"
+              case "$state" in
+                success) break ;;
+                failed|failure|error|cancelled|canceled) jq -c '{id,name,state,created_at,updated_at}' <<<"$body" >&2 || true; exit 5 ;;
+              esac
+              sleep 5
+            done
+          fi
+
+      - name: Verify key is attached to this VPS
+        id: verified
         env:
-          ACTION_ID: ${{ steps.attach.outputs.action_id }}
+          KEY_ID: ${{ steps.attach.outputs.key_id }}
+        shell: bash
         run: |
           set -euo pipefail
-          for i in $(seq 1 120); do
-            body="$(curl -fsS -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/actions/$ACTION_ID")"
-            state="$(jq -r '.state // empty' <<<"$body")"
-            echo "HOSTINGER_EPHEMERAL_ATTACH_PROBE=$i/120 state=${state:-unknown}"
-            case "$state" in
-              success) exit 0 ;;
-              failed|failure|error|cancelled|canceled) jq -c '{id,name,state,created_at,updated_at}' <<<"$body" >&2; exit 6 ;;
-            esac
+          attached=false
+          for i in $(seq 1 36); do
+            body="$(curl -fsS -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/public-keys?page=1")"
+            if jq -e --argjson id "$KEY_ID" '.data[]? | select(.id == $id)' >/dev/null <<<"$body"; then
+              attached=true
+              break
+            fi
+            echo "HOSTINGER_EPHEMERAL_ATTACHED_STATE=$i/36 pending"
             sleep 5
           done
-          echo HOSTINGER_EPHEMERAL_ATTACH_TIMEOUT=1 >&2
-          exit 7
+          echo "attached=$attached" >> "$GITHUB_OUTPUT"
+          [[ "$attached" == true ]] || { echo HOSTINGER_EPHEMERAL_KEY_NOT_CONFIRMED_ATTACHED=1 >&2; exit 6; }
+          echo HOSTINGER_EPHEMERAL_KEY_CONFIRMED_ATTACHED=1
 
       - name: Authenticate normal Kali with provider-attached key
         id: auth
