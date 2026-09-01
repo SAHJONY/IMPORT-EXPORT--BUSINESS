@@ -2,6 +2,11 @@ name: Hostinger WhatsApp 24x7 Recovery V6
 
 on:
   workflow_dispatch:
+  workflow_run:
+    workflows:
+      - Hostinger Recovery Docker OpenClaw V5
+    types:
+      - completed
 
 permissions:
   contents: read
@@ -19,6 +24,12 @@ env:
 
 jobs:
   recover:
+    # Automatic successor only for a failed V5 on main from this same repository.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion != 'success' &&
+       github.event.workflow_run.head_branch == 'main' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
     runs-on: ubuntu-24.04
     timeout-minutes: 50
     env:
