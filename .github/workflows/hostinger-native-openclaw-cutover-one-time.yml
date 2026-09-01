@@ -1,0 +1,222 @@
+name: Hostinger Native OpenClaw Cutover One Time
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/hostinger-native-openclaw-cutover-one-time.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hostinger-vm-767852-mutation
+  cancel-in-progress: false
+
+jobs:
+  cutover:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      HOST: '69.62.68.67'
+      USER: root
+      PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare secure SSH
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "$PRIVATE_KEY" ]] || exit 2
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/hostinger-native-cutover
+          chmod 600 ~/.ssh/hostinger-native-cutover
+
+      - name: Install supported native Node and OpenClaw
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -i ~/.ssh/hostinger-native-cutover "$USER@$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          curl -fsSL --retry 4 --retry-delay 2 https://openclaw.ai/install.sh -o /tmp/openclaw-install.sh
+          chmod 700 /tmp/openclaw-install.sh
+          bash /tmp/openclaw-install.sh --no-onboard
+          rm -f /tmp/openclaw-install.sh
+          nodev="$(node --version)"
+          python3 - "$nodev" <<'PY'
+          import re,sys
+          m=re.fullmatch(r'v(\d+)\.(\d+)\.(\d+)',sys.argv[1].strip())
+          assert m, sys.argv[1]
+          v=tuple(map(int,m.groups()))
+          assert (v[0]==22 and v>=(22,22,3)) or (v[0]==24 and v>=(24,15,0)) or (v[0]>=25 and (v[0]>25 or v>=(25,9,0))), v
+          PY
+          command -v openclaw >/dev/null
+          version="$(openclaw --version | tail -n1)"
+          grep -Fq '2026.8.1' <<<"$version" || { echo "UNEXPECTED_OPENCLAW_VERSION=$version" >&2; exit 12; }
+          echo "NATIVE_NODE_VERSION=$nodev"
+          echo "NATIVE_OPENCLAW_VERSION=$version"
+          REMOTE
+
+      - name: Stage native runtime against retained host state
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -i ~/.ssh/hostinger-native-cutover "$USER@$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          STATE=/var/lib/sahjony-openclaw-state
+          AUTH=/var/lib/sahjony-openclaw-auth
+          [[ -d "$STATE" ]] || { echo STATE_DIR_MISSING=1 >&2; exit 20; }
+          [[ -d "$AUTH" ]] || { echo AUTH_DIR_MISSING=1 >&2; exit 21; }
+          [[ -f "$STATE/openclaw.json" ]] || { echo OPENCLAW_CONFIG_MISSING=1 >&2; exit 22; }
+
+          install -d -m 755 /home/node /home/node/.config /var/tmp/openclaw-compile-cache
+          rm -rf /home/node/.openclaw /home/node/.config/openclaw
+          ln -s "$STATE" /home/node/.openclaw
+          ln -s "$AUTH" /home/node/.config/openclaw
+
+          OPENCLAW_HOME=/home/node OPENCLAW_STATE_DIR="$STATE" OPENCLAW_CONFIG_PATH="$STATE/openclaw.json" openclaw config validate >/dev/null
+          echo NATIVE_STATE_BINDINGS=READY
+          REMOTE
+
+      - name: Perform single-gateway native cutover with rollback
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -i ~/.ssh/hostinger-native-cutover "$USER@$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          STATE=/var/lib/sahjony-openclaw-state
+          AUTH=/var/lib/sahjony-openclaw-auth
+          PORT=18789
+          OPENCLAW_BIN="$(command -v openclaw)"
+
+          mapfile -t ids < <(docker ps -aq | while read -r id; do
+            name="$(docker inspect "$id" --format '{{.Name}}|{{.Config.Image}}' 2>/dev/null || true)"
+            grep -Eqi 'openclaw|open[-_]?claw|claw' <<<"$name" && echo "$id" || true
+          done)
+          ((${#ids[@]} == 1)) || { echo "OPENCLAW_CONTAINER_COUNT=${#ids[@]}" >&2; exit 30; }
+          cid="${ids[0]}"
+          docker exec "$cid" sh -lc 'openclaw config validate >/dev/null'
+          docker exec "$cid" sh -lc 'openclaw gateway status --deep >/dev/null'
+
+          systemctl stop sahjony-openclaw-runtime-guardian.service >/dev/null 2>&1 || true
+          rollback(){
+            rc=$?
+            set +e
+            echo "NATIVE_CUTOVER_ROLLBACK=START rc=$rc"
+            systemctl stop openclaw-gateway.service >/dev/null 2>&1 || true
+            systemctl disable openclaw-gateway.service >/dev/null 2>&1 || true
+            docker update --restart unless-stopped "$cid" >/dev/null 2>&1 || true
+            docker start "$cid" >/dev/null 2>&1 || true
+            sleep 8
+            systemctl restart sahjony-openclaw-runtime-guardian.service >/dev/null 2>&1 || true
+            docker exec "$cid" sh -lc 'openclaw gateway status --deep >/dev/null 2>&1' && echo NATIVE_CUTOVER_ROLLBACK=HEALTHY || echo NATIVE_CUTOVER_ROLLBACK=DEGRADED
+            exit "$rc"
+          }
+          trap rollback ERR
+
+          cat >/etc/systemd/system/openclaw-gateway.service <<EOF2
+          [Unit]
+          Description=OpenClaw Gateway - SAHJONY Native 24x7
+          After=network-online.target
+          Wants=network-online.target
+          StartLimitIntervalSec=0
+
+          [Service]
+          Type=simple
+          User=root
+          Environment=HOME=/home/node
+          Environment=OPENCLAW_HOME=/home/node
+          Environment=OPENCLAW_STATE_DIR=$STATE
+          Environment=OPENCLAW_CONFIG_PATH=$STATE/openclaw.json
+          Environment=OPENCLAW_SERVICE_REPAIR_POLICY=external
+          Environment=OPENCLAW_NO_RESPAWN=1
+          Environment=NODE_COMPILE_CACHE=/var/tmp/openclaw-compile-cache
+          ExecStart=$OPENCLAW_BIN gateway --port $PORT
+          Restart=always
+          RestartSec=5
+          RestartPreventExitStatus=78
+          TimeoutStopSec=30
+          TimeoutStartSec=90
+          SuccessExitStatus=0 143
+          OOMPolicy=continue
+          KillMode=control-group
+
+          [Install]
+          WantedBy=multi-user.target
+          EOF2
+
+          systemctl daemon-reload
+          systemctl enable openclaw-gateway.service >/dev/null
+
+          docker update --restart no "$cid" >/dev/null
+          docker stop -t 30 "$cid" >/dev/null
+          systemctl start openclaw-gateway.service
+          sleep 12
+
+          systemctl is-active --quiet openclaw-gateway.service
+          env HOME=/home/node OPENCLAW_HOME=/home/node OPENCLAW_STATE_DIR="$STATE" OPENCLAW_CONFIG_PATH="$STATE/openclaw.json" openclaw gateway status --deep >/dev/null
+          env HOME=/home/node OPENCLAW_HOME=/home/node OPENCLAW_STATE_DIR="$STATE" OPENCLAW_CONFIG_PATH="$STATE/openclaw.json" openclaw channels status --probe >/dev/null
+
+          oldpid="$(systemctl show openclaw-gateway.service -p MainPID --value)"
+          [[ "$oldpid" =~ ^[1-9][0-9]*$ ]]
+          kill -9 "$oldpid"
+          sleep 10
+          systemctl is-active --quiet openclaw-gateway.service
+          newpid="$(systemctl show openclaw-gateway.service -p MainPID --value)"
+          [[ "$newpid" =~ ^[1-9][0-9]*$ ]]
+          [[ "$newpid" != "$oldpid" ]]
+          env HOME=/home/node OPENCLAW_HOME=/home/node OPENCLAW_STATE_DIR="$STATE" OPENCLAW_CONFIG_PATH="$STATE/openclaw.json" openclaw gateway status --deep >/dev/null
+          echo "NATIVE_CRASH_RECOVERY=READY old_pid=$oldpid new_pid=$newpid"
+
+          trap - ERR
+          systemctl restart sahjony-openclaw-runtime-guardian.service
+          sleep 5
+          systemctl is-active --quiet sahjony-openclaw-runtime-guardian.service
+          test -s /var/lib/sahjony-openclaw-guardian/status.json
+          cat /var/lib/sahjony-openclaw-guardian/status.json
+          grep -q '"runtime":"native"' /var/lib/sahjony-openclaw-guardian/status.json
+          grep -q '"healthy":true' /var/lib/sahjony-openclaw-guardian/status.json
+          [[ "$(docker inspect "$cid" --format '{{.State.Running}}')" == false ]]
+          [[ "$(docker inspect "$cid" --format '{{.HostConfig.RestartPolicy.Name}}')" == no ]]
+          echo OPENCLAW_DOCKER_STANDBY=SAFE
+          echo SAHJONY_NATIVE_OPENCLAW_CUTOVER=READY
+          REMOTE
+
+      - name: Reconcile NVIDIA NIM against native runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -i ~/.ssh/hostinger-native-cutover "$USER@$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          systemctl start sahjony-nvidia-nim-rotation.service
+          systemctl is-active --quiet sahjony-nvidia-nim-rotation.timer
+          test -s /var/lib/sahjony-nvidia-nim/status.json
+          cat /var/lib/sahjony-nvidia-nim/status.json
+          grep -q '"runtime":"native"' /var/lib/sahjony-nvidia-nim/status.json
+          echo SAHJONY_NIM_NATIVE_RECONCILIATION=READY
+          REMOTE
+
+      - name: Final native production verification
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -i ~/.ssh/hostinger-native-cutover "$USER@$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          systemctl is-enabled --quiet openclaw-gateway.service
+          systemctl is-active --quiet openclaw-gateway.service
+          systemctl is-enabled --quiet sahjony-openclaw-runtime-guardian.service
+          systemctl is-active --quiet sahjony-openclaw-runtime-guardian.service
+          systemctl is-enabled --quiet sahjony-nvidia-nim-rotation.timer
+          systemctl is-active --quiet sahjony-nvidia-nim-rotation.timer
+          echo 'SAHJONY_NATIVE_RUNTIME=native-node-systemd'
+          echo 'SAHJONY_NATIVE_RESTART=always-5s-plus-guardian'
+          echo 'SAHJONY_BOOT_PERSISTENCE=enabled'
+          echo 'SAHJONY_PRODUCTION_NATIVE_24X7=READY'
+          REMOTE
+
+      - name: Cleanup SSH material
+        if: always()
+        shell: bash
+        run: rm -f ~/.ssh/hostinger-native-cutover
