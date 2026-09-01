@@ -2,8 +2,8 @@
 set -euo pipefail
 
 # SAHJONY Hostinger/OpenClaw authorization recovery agent.
-# This does NOT bypass authentication. It discovers already-authorized connection
-# paths and safely selects the first usable one.
+# This does NOT bypass authentication. It runs only after an authorized Hostinger
+# control path has been established and inspects the Hostinger runtime itself.
 
 log(){ printf '[hostinger-recovery] %s\n' "$*"; }
 
@@ -35,29 +35,17 @@ find_hostinger_connector(){
 }
 
 main(){
-  log "preflight start"
+  log "Hostinger-local preflight start"
   health="$(probe_health)"
-  gateway_connected=false
-  cloud_independent=false
-  if printf '%s' "$health" | grep -Eq '"gateway_connected"[[:space:]]*:[[:space:]]*true|"openclaw_fallback"[[:space:]]*:[[:space:]]*\{[^}]*"connected"[[:space:]]*:[[:space:]]*true'; then
-    gateway_connected=true
-  fi
-  if printf '%s' "$health" | grep -q '"cloud_independent_of_local_mac"[[:space:]]*:[[:space:]]*true'; then
-    cloud_independent=true
-  fi
-  if [[ "$gateway_connected" == true && "$cloud_independent" == true ]]; then
-    log "Hostinger/cloud gateway already healthy and independent of local Mac; no recovery required"
-    exit 0
-  fi
-  if [[ "$gateway_connected" == true ]]; then
-    log "gateway is connected but still depends on local Mac; Hostinger recovery/bootstrap remains required"
+  if [ -n "$health" ]; then
+    log "public SAHJONY health reachable; Hostinger-local inspection remains authoritative"
   fi
 
   existing="$(find_existing_openclaw)"
   if [ -n "$existing" ]; then
-    log "existing OpenClaw runtime detected"
+    log "existing OpenClaw runtime detected on Hostinger"
     if [ -x "$REPO_DIR/openclaw/hostinger-24x7/bootstrap-existing-openclaw.sh" ]; then
-      log "running non-destructive bootstrap"
+      log "running non-destructive Hostinger bootstrap"
       exec "$REPO_DIR/openclaw/hostinger-24x7/bootstrap-existing-openclaw.sh"
     fi
     log "bootstrap script not present at expected path"
@@ -73,12 +61,12 @@ main(){
   ssh_material="$(find_authorized_ssh_material)"
   if [ -n "$ssh_material" ]; then
     log "existing SSH identity detected locally (contents not exposed)"
-    log "an SSH host/user is still required before remote execution can be attempted safely"
+    log "no OpenClaw runtime was detected on this Hostinger host"
     exit 11
   fi
 
-  log "no already-authorized Hostinger control path found"
-  log "authentication cannot be bypassed; waiting for Hostinger Connector or SSH authorization"
+  log "no existing Hostinger OpenClaw runtime detected"
+  log "authentication cannot be bypassed and a second OpenClaw instance will not be installed blindly"
   exit 12
 }
 
