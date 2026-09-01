@@ -2,19 +2,14 @@ name: Hostinger WhatsApp Direct Rescue
 
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - '.github/workflows/hostinger-whatsapp-direct-rescue.yml'
-      - 'openclaw/hostinger-24x7/whatsapp-hostinger-only-guardian.sh'
 
 permissions:
   contents: read
   actions: write
 
-# Serialize Docker-API rescue with V5/V6 disk recovery. A queued V6 may begin
-# only after this non-destructive rescue has released the VPS control lock.
+# One mutation lane for this VPS: Docker rescue, reboot, and Recovery V7.
 concurrency:
-  group: hostinger-recovery-docker-openclaw-v5
+  group: hostinger-vm-767852-mutation
   cancel-in-progress: false
 
 env:
@@ -23,7 +18,7 @@ env:
   HOST: '69.62.68.67'
   USER: root
   APP_URL: https://www.sahjony.com
-  CANONICAL_V6: hostinger-whatsapp-24x7-recovery-v6.yml
+  CANONICAL_RECOVERY: hostinger-whatsapp-recovery-v7.yml
 
 jobs:
   rescue:
@@ -76,9 +71,7 @@ jobs:
           jq . /tmp/docker-projects.json 2>/dev/null || cat /tmp/docker-projects.json
           if [[ "$code" == 200 ]]; then
             candidate="$(jq -r '[.[] | select((.name // "" | test("openclaw|claw|sahjony|whatsapp";"i")) or ([.containers[]? | ((.name // "") + " " + (.image // ""))] | join(" ") | test("openclaw|claw";"i"))) | .name][0] // empty' /tmp/docker-projects.json)"
-            if [[ -z "$candidate" ]]; then
-              candidate="$(jq -r '.[0].name // empty' /tmp/docker-projects.json)"
-            fi
+            if [[ -z "$candidate" ]]; then candidate="$(jq -r '.[0].name // empty' /tmp/docker-projects.json)"; fi
             echo "candidate=$candidate" >> "$GITHUB_OUTPUT"
             [[ -n "$candidate" ]] && echo "HOSTINGER_OPENCLAW_PROJECT=$candidate" || echo HOSTINGER_OPENCLAW_PROJECT_NOT_DISCOVERED=1
           fi
@@ -102,10 +95,7 @@ jobs:
             action="$(curl -fsS -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/actions/$action_id")"
             state="$(jq -r '.state // empty' <<<"$action")"
             echo "docker_restart_action=$action_id probe=$i state=${state:-unknown}"
-            case "$state" in
-              success) success=true; break ;;
-              failed|failure|error|cancelled|canceled) exit 22 ;;
-            esac
+            case "$state" in success) success=true; break;; failed|failure|error|cancelled|canceled) exit 22;; esac
             sleep 5
           done
           [[ "$success" == true ]] || { echo DOCKER_RESTART_ACTION_TIMEOUT=1 >&2; exit 23; }
@@ -153,21 +143,16 @@ jobs:
           install -d -m 700 ~/.ssh
           printf '%s\n' "$HOSTINGER_SSH_PRIVATE_KEY" > ~/.ssh/hostinger
           chmod 600 ~/.ssh/hostinger
-          if ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 -i ~/.ssh/hostinger "$USER@$HOST" 'echo SAHJONY_PERSISTENT_SSH_READY=1'; then
-            echo 'ready=true' >> "$GITHUB_OUTPUT"
-          else
-            echo HOSTINGER_PERSISTENT_SSH_AUTH_FAILED=1
-            echo 'ready=false' >> "$GITHUB_OUTPUT"
-          fi
+          if ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 -i ~/.ssh/hostinger "$USER@$HOST" 'echo SAHJONY_PERSISTENT_SSH_READY=1'; then echo 'ready=true' >> "$GITHUB_OUTPUT"; else echo HOSTINGER_PERSISTENT_SSH_AUTH_FAILED=1; echo 'ready=false' >> "$GITHUB_OUTPUT"; fi
 
-      - name: Install Hostinger-only guardian over persistent SSH
+      - name: Install canonical Hostinger guardian over persistent SSH
         if: steps.ssh_path.outputs.ready == 'true'
         id: guardian
         shell: bash
         run: |
           set -euo pipefail
-          scp -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/hostinger openclaw/hostinger-24x7/whatsapp-hostinger-only-guardian.sh "$USER@$HOST:/root/whatsapp-hostinger-only-guardian.sh"
-          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/hostinger "$USER@$HOST" 'install -d -m 700 /opt/sahjony-openclaw; install -m 700 /root/whatsapp-hostinger-only-guardian.sh /opt/sahjony-openclaw/whatsapp-hostinger-only-guardian.sh; /opt/sahjony-openclaw/whatsapp-hostinger-only-guardian.sh install'
+          scp -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/hostinger openclaw/hostinger-24x7/whatsapp-guardian.sh openclaw/hostinger-24x7/install-whatsapp-guardian.sh "$USER@$HOST:/root/"
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/hostinger "$USER@$HOST" 'install -d /opt/sahjony/openclaw/hostinger-24x7; mv /root/whatsapp-guardian.sh /root/install-whatsapp-guardian.sh /opt/sahjony/openclaw/hostinger-24x7/; chmod +x /opt/sahjony/openclaw/hostinger-24x7/*.sh; cd /opt/sahjony/openclaw/hostinger-24x7 && ./install-whatsapp-guardian.sh; systemctl is-active --quiet sahjony-whatsapp-guardian.timer; /usr/local/sbin/sahjony-whatsapp-guardian; test -s /var/lib/sahjony-whatsapp-guardian/last-good'
           echo 'installed=true' >> "$GITHUB_OUTPUT"
 
       - name: Recheck Hostinger WhatsApp after SSH guardian
@@ -184,7 +169,7 @@ jobs:
           done
           echo "ready=$ready" >> "$GITHUB_OUTPUT"
 
-      - name: Dispatch canonical Recovery V6 only after non-destructive paths fail
+      - name: Dispatch Recovery V7 only after non-destructive paths fail
         if: >-
           steps.health.outputs.ready != 'true' &&
           steps.post_docker_health.outputs.ready != 'true' &&
@@ -193,13 +178,10 @@ jobs:
         run: |
           set -euo pipefail
           echo HOSTINGER_NONDESTRUCTIVE_RESCUE_EXHAUSTED=1
-          code="$(curl -sS -o /tmp/dispatch.json -w '%{http_code}' -X POST -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' -H 'Content-Type: application/json' --data '{"ref":"main"}' "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/workflows/$CANONICAL_V6/dispatches")"
-          echo "CANONICAL_V6_DISPATCH_HTTP=$code"
-          if [[ "$code" != 204 ]]; then
-            cat /tmp/dispatch.json || true
-            exit 40
-          fi
-          echo CANONICAL_HOSTINGER_RECOVERY_V6_QUEUED=1
+          code="$(curl -sS -o /tmp/dispatch.json -w '%{http_code}' -X POST -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' -H 'Content-Type: application/json' --data '{"ref":"main"}' "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/workflows/$CANONICAL_RECOVERY/dispatches")"
+          echo "RECOVERY_V7_DISPATCH_HTTP=$code"
+          if [[ "$code" != 204 ]]; then cat /tmp/dispatch.json || true; exit 40; fi
+          echo HOSTINGER_RECOVERY_V7_QUEUED=1
 
       - name: Final Hostinger-only observation
         if: always()
