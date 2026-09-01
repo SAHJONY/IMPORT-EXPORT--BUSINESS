@@ -238,9 +238,6 @@ jobs:
               fi
               sleep 5
             done
-            if [[ "${authenticated}" -eq 1 ]]; then
-              break
-            fi
           done < <(jq -r '
             (if type == "array" then . else (.data // []) end)[] |
             [(.id | tostring),
