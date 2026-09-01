@@ -6,19 +6,48 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
       PYTHONPATH: ${{ github.workspace }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Install deterministic frontend dependencies
+        run: npm ci --ignore-scripts
+      - name: TypeScript strict check
+        run: npx tsc -p tsconfig.json
+      - name: Production frontend build
+        run: npm run build
+      - name: Production dependency audit
+        run: npm audit --omit=dev --audit-level=high
+
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
           cache: pip
-      - run: python -m pip install -r requirements.txt
-      - run: python -m compileall -q .
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Install backend test dependencies
+        run: python -m pip install -r requirements-dev.txt
+      - name: Python dependency integrity
+        run: python -m pip check
+      - name: Python syntax compilation
+        run: python -m compileall -q .
       - name: Unified API runtime import smoke
         run: python -c "import unified_api; print('Unified API import OK')"
-      - run: python -m pytest -q
+      - name: Backend test suite
+        run: python -m pytest -q

@@ -55,6 +55,23 @@ def _connect():
     )
 
 
+async def database_health() -> dict[str, Any]:
+    """Probe the governed physical ledger without exposing connection details."""
+    def run() -> dict[str, Any]:
+        try:
+            with _connect() as conn, conn.cursor() as cur:
+                cur.execute("SELECT 1 AS ok")
+                row = cur.fetchone()
+            return {"status": "ok", "configured": True, "reachable": bool(row), "storage": "physical_postgres"}
+        except RuntimeError:
+            return {"status": "configuration_required", "configured": False, "reachable": False, "storage": "physical_postgres"}
+        except psycopg.Error as exc:
+            return {"status": "degraded", "configured": True, "reachable": False, "storage": "physical_postgres", "error_type": type(exc).__name__}
+        except Exception as exc:
+            return {"status": "degraded", "configured": True, "reachable": False, "storage": "physical_postgres", "error_type": type(exc).__name__}
+    return await asyncio.to_thread(run)
+
+
 async def insert_row(table: str, row: dict[str, Any]) -> dict[str, Any]:
     if not row:
         raise ValueError("Cannot insert an empty row")

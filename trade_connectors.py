@@ -5,7 +5,7 @@ import io
 import os
 import re
 import time
-import xml.etree.ElementTree as ET
+from defusedxml import ElementTree as ET
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from typing import Any

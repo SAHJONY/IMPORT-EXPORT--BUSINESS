@@ -5,6 +5,7 @@ import os
 
 from fastapi import FastAPI, Header, HTTPException, Request
 
+from auth import verify_owner_token
 from energy_crm_seed import ENERGY_CRM_LEADS, ensure_energy_crm_seed
 from global_energy_crm_seed import GLOBAL_ENERGY_CRM_LEADS, ensure_global_energy_crm_seed
 from worldwide_trade_counterparty_seed import WORLDWIDE_TRADE_COUNTERPARTIES, ensure_worldwide_trade_counterparty_seed
@@ -181,34 +182,61 @@ async def resilient_public_crm_intake(request: Request):
         raise HTTPException(status_code=503, detail={"code": "SUPABASE_TEMPORARILY_UNAVAILABLE", "message": "New CRM intake writes are temporarily unavailable until Supabase persistence recovers.", "fail_closed": True, "error_type": type(exc).__name__})
 
 
+def _crm_seed_jobs():
+    return (
+        ("energy_core", len(ENERGY_CRM_LEADS), ensure_energy_crm_seed),
+        ("global_energy", len(GLOBAL_ENERGY_CRM_LEADS), ensure_global_energy_crm_seed),
+        ("worldwide_trade", len(WORLDWIDE_TRADE_COUNTERPARTIES), ensure_worldwide_trade_counterparty_seed),
+        ("midmarket_oil_dependent", len(MIDMARKET_OIL_DEPENDENT_LEADS), ensure_midmarket_oil_dependent_seed),
+        ("cuba_mipyme_expansion", len(CUBA_MIPYME_EXPANSION_LEADS), ensure_cuba_mipyme_expansion_seed),
+    )
+
+
+async def _run_crm_seed_sync() -> dict[str, dict]:
+    results: dict[str, dict] = {}
+    for name, expected, runner in _crm_seed_jobs():
+        try:
+            results[name] = await runner()
+        except Exception as exc:
+            results[name] = _seed_failure(expected, exc)
+    return results
+
+
+@app.post("/activation/crm-seeds/sync")
+async def sync_crm_seeds(authorization: str | None = Header(None, alias="Authorization")):
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(401, "Missing Authorization")
+    if not verify_owner_token(authorization.removeprefix("Bearer ").strip()):
+        raise HTTPException(403, "Invalid owner credential")
+    if not persistent_backend_status().get("supabase_configured"):
+        raise HTTPException(503, "Supabase persistence is not configured")
+    books = await _run_crm_seed_sync()
+    return {
+        "status": "ok" if not any(int(v.get("failed") or 0) for v in books.values()) else "partial",
+        "service": "crm-seed-sync",
+        "books": books,
+        "expected": sum(int(v.get("expected") or 0) for v in books.values()),
+        "inserted_this_run": sum(int(v.get("inserted") or 0) for v in books.values()),
+        "already_present": sum(int(v.get("already_present") or 0) for v in books.values()),
+        "failed": sum(int(v.get("failed") or 0) for v in books.values()),
+        "owner_authorized": True,
+        "automatic_outreach_authority": False,
+    }
+
+
 @app.get("/activation/health")
 async def activation_health():
     schema_evidence = await production_schema_evidence()
-    crm_seeds: dict[str, dict] = {}
-    # Seeding is safe only when Supabase is configured. Individual seed modules may
-    # still use SQL-specific paths; failures are evidence, never fabricated success.
-    if persistent_backend_status().get("supabase_configured"):
-        for name, expected, runner in (
-            ("energy_core", len(ENERGY_CRM_LEADS), ensure_energy_crm_seed),
-            ("global_energy", len(GLOBAL_ENERGY_CRM_LEADS), ensure_global_energy_crm_seed),
-            ("worldwide_trade", len(WORLDWIDE_TRADE_COUNTERPARTIES), ensure_worldwide_trade_counterparty_seed),
-            ("midmarket_oil_dependent", len(MIDMARKET_OIL_DEPENDENT_LEADS), ensure_midmarket_oil_dependent_seed),
-            ("cuba_mipyme_expansion", len(CUBA_MIPYME_EXPANSION_LEADS), ensure_cuba_mipyme_expansion_seed),
-        ):
-            try:
-                crm_seeds[name] = await runner()
-            except Exception as exc:
-                crm_seeds[name] = _seed_failure(expected, exc)
-
+    crm_seeds = {name: {"status": "not_run_by_health", "expected": expected} for name, expected, _runner in _crm_seed_jobs()}
     connector_health = await trade_connectors.health()
     readiness = evaluate_production_readiness(runtime_ok=True, connector_health=connector_health, persistence_schema_evidence=schema_evidence)
     providers = _provider_state(schema_evidence)
     external = _external_requirements(schema_evidence)
     persistence_ready = bool(providers["persistence"].get("supabase_configured") and providers["persistence"].get("schemas_applied") and providers["persistence"].get("rls_verified"))
     seed_expected = sum(int(v.get("expected") or 0) for v in crm_seeds.values())
-    seed_inserted = sum(int(v.get("inserted") or 0) for v in crm_seeds.values())
-    seed_present = sum(int(v.get("already_present") or 0) for v in crm_seeds.values())
-    seed_failed = sum(int(v.get("failed") or 0) for v in crm_seeds.values())
+    seed_inserted = 0
+    seed_present = None
+    seed_failed = 0
 
     return {
         "status": "ready" if readiness["production_ready"] else "activation_required",
@@ -219,7 +247,7 @@ async def activation_health():
         "canonical_identity": "supabase_auth",
         "canonical_storage": "supabase_storage",
         "schema_evidence": schema_evidence,
-        "crm_seeds": {"books": crm_seeds, "expected": seed_expected, "inserted_this_run": seed_inserted, "already_present": seed_present, "failed": seed_failed, "buyer_seller_worldwide": True, "automatic_deal_promotion": False},
+        "crm_seeds": {"books": crm_seeds, "expected": seed_expected, "inserted_this_run": seed_inserted, "already_present": seed_present, "failed": seed_failed, "sync_on_health": False, "sync_endpoint": "/activation/crm-seeds/sync", "buyer_seller_worldwide": True, "automatic_deal_promotion": False},
         "readiness_score": readiness["score"],
         "passed_gates": readiness["passed_gates"],
         "total_gates": readiness["total_gates"],
