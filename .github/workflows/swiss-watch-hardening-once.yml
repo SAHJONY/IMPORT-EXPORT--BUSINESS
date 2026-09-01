@@ -1,0 +1,264 @@
+name: Swiss Watch Hardening Once
+
+on:
+  push:
+    branches: [audit/swiss-watch-20260901]
+    paths:
+      - '.github/workflows/swiss-watch-hardening-once.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  harden:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: audit/swiss-watch-20260901
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Apply verified hardening changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python <<'PY'
+          from pathlib import Path
+
+          def replace(path: str, old: str, new: str):
+              p=Path(path); text=p.read_text()
+              if old not in text:
+                  raise SystemExit(f'EXPECTED_SOURCE_NOT_FOUND:{path}')
+              p.write_text(text.replace(old,new,1))
+
+          # 1. Type-safe owner headers.
+          replace('src/DealCommandCenter.tsx', '''function authHeaders() {
+            const token = sessionStorage.getItem("sahjony.owner.token") || "";
+            return token
+              ? { Authorization: `Bearer ${token}`, "X-Role": "owner" }
+              : { "X-Role": "owner" };
+          }''', '''function authHeaders(): Record<string, string> {
+            const token = sessionStorage.getItem("sahjony.owner.token") || "";
+            const headers: Record<string, string> = { "X-Role": "owner" };
+            if (token) headers.Authorization = `Bearer ${token}`;
+            return headers;
+          }''')
+
+          # 2. Route-level lazy loading: public site, auth and owner-deals no longer ship as one JS bundle.
+          p=Path('src/main.tsx'); text=p.read_text()
+          for line in ["import App from './App';\n", "import DealCommandCenter from './DealCommandCenter';\n", "import NeonAuthPage from './NeonAuthPage';\n"]:
+              if line not in text: raise SystemExit('EXPECTED_MAIN_IMPORT_NOT_FOUND')
+              text=text.replace(line,'',1)
+          old='''function boot(){
+           if(!rootElement)return;
+           const path=location.pathname;
+           if(path==='/sign-in'||path.startsWith('/sign-in/')){createRoot(rootElement).render(withI18n(<StrictMode><AppBoundary><NeonAuthPage/></AppBoundary></StrictMode>));return}
+           if(path==='/owner'){location.replace('/owner/deals');return}
+           if(path==='/owner/deals'||path.startsWith('/owner/deals/')){createRoot(rootElement).render(withI18n(<StrictMode><AppBoundary><DealCommandCenter/></AppBoundary></StrictMode>));return}
+           const role=protectedRoleFromPath();
+           if(role&&!sessionStorage.getItem(`sahjony.${role}.token`)){
+             const next=encodeURIComponent(location.pathname+location.search);
+             location.replace(`/sign-in?role=${role}&next=${next}`);return
+           }
+           try{createRoot(rootElement).render(withI18n(<StrictMode><AppBoundary><App/></AppBoundary></StrictMode>))}catch(error){console.error('SAHJONY_BOOT_FAILURE',error);hardFallback(i18n.t('emergency.initError'))}
+          }
+          boot();'''
+          new='''async function boot(){
+           if(!rootElement)return;
+           const path=location.pathname;
+           if(path==='/sign-in'||path.startsWith('/sign-in/')){
+             const {default:NeonAuthPage}=await import('./NeonAuthPage');
+             createRoot(rootElement).render(withI18n(<StrictMode><AppBoundary><NeonAuthPage/></AppBoundary></StrictMode>));return
+           }
+           if(path==='/owner'){location.replace('/owner/deals');return}
+           if(path==='/owner/deals'||path.startsWith('/owner/deals/')){
+             const {default:DealCommandCenter}=await import('./DealCommandCenter');
+             createRoot(rootElement).render(withI18n(<StrictMode><AppBoundary><DealCommandCenter/></AppBoundary></StrictMode>));return
+           }
+           const role=protectedRoleFromPath();
+           if(role&&!sessionStorage.getItem(`sahjony.${role}.token`)){
+             const next=encodeURIComponent(location.pathname+location.search);
+             location.replace(`/sign-in?role=${role}&next=${next}`);return
+           }
+           const {default:App}=await import('./App');
+           createRoot(rootElement).render(withI18n(<StrictMode><AppBoundary><App/></AppBoundary></StrictMode>));
+          }
+          void boot().catch(error=>{console.error('SAHJONY_BOOT_FAILURE',error);hardFallback(i18n.t('emergency.initError'))});'''
+          if old not in text: raise SystemExit('EXPECTED_BOOT_NOT_FOUND')
+          p.write_text(text.replace(old,new,1))
+
+          # 3. Vite environment typing.
+          Path('src/vite-env.d.ts').write_text('/// <reference types="vite/client" />\n')
+
+          # 4. Remove known-vulnerable runtime packages and separate test dependencies.
+          p=Path('requirements.txt'); req=p.read_text()
+          if 'pypdf>=5.9,<6' not in req: raise SystemExit('EXPECTED_PYPDF_RANGE_NOT_FOUND')
+          req=req.replace('pypdf>=5.9,<6','pypdf>=6.16.1,<7')
+          req=req.replace('pytest>=8.4,<9\n','')
+          if 'defusedxml' not in req: req += 'defusedxml>=0.7,<1\n'
+          p.write_text(req)
+          Path('requirements-dev.txt').write_text('-r requirements.txt\npytest>=9.0.3,<10\n')
+
+          # 5. Harden external XML parsing.
+          replace('trade_connectors.py','import xml.etree.ElementTree as ET\n','from defusedxml import ElementTree as ET\n')
+
+          # 6. SHA-1 was only an identifier hash; replace with SHA-256 to remove weak-hash debt.
+          replace('cuba_mipymes_api.py','hashlib.sha1(f"{k}|{inc[\'external_reference\']}".encode()).hexdigest()[:24]','hashlib.sha256(f"{k}|{inc[\'external_reference\']}".encode()).hexdigest()[:24]')
+
+          # 7. Physical ledger gets a real, secret-safe dependency probe.
+          p=Path('physical_postgres.py'); text=p.read_text()
+          marker='''\n\nasync def insert_row(table: str, row: dict[str, Any]) -> dict[str, Any]:'''
+          probe='''\n\nasync def database_health() -> dict[str, Any]:
+              """Probe the governed physical ledger without exposing connection details."""
+              def run() -> dict[str, Any]:
+                  try:
+                      with _connect() as conn, conn.cursor() as cur:
+                          cur.execute("SELECT 1 AS ok")
+                          row = cur.fetchone()
+                      return {"status": "ok", "configured": True, "reachable": bool(row), "storage": "physical_postgres"}
+                  except RuntimeError:
+                      return {"status": "configuration_required", "configured": False, "reachable": False, "storage": "physical_postgres"}
+                  except psycopg.Error as exc:
+                      return {"status": "degraded", "configured": True, "reachable": False, "storage": "physical_postgres", "error_type": type(exc).__name__}
+                  except Exception as exc:
+                      return {"status": "degraded", "configured": True, "reachable": False, "storage": "physical_postgres", "error_type": type(exc).__name__}
+              return await asyncio.to_thread(run)
+          '''
+          if marker not in text: raise SystemExit('PHYSICAL_POSTGRES_MARKER_NOT_FOUND')
+          p.write_text(text.replace(marker,probe+marker,1))
+
+          # 8. Finance health becomes dependency-aware and fail-closed on an unavailable ledger.
+          replace('finance_api.py','from fastapi import FastAPI, Header, HTTPException, Query\n','from fastapi import FastAPI, Header, HTTPException, Query\nfrom fastapi.responses import JSONResponse\n')
+          replace('finance_api.py','from physical_postgres import insert_row, select_rows, update_rows\n','from physical_postgres import database_health, insert_row, select_rows, update_rows\n')
+          old='''@app.get('/finance/health')
+          async def health():
+              return {
+                  'status':'ok',
+                  'service':'trade-finance-ledger',
+                  'storage':'physical_neon_postgres',
+                  'currency':'USD',
+                  'double_entry':True,
+                  'owner_posting_only':True,
+                  'posted_journal_edits':False,
+                  'reversal_required_for_corrections':True,
+                  'beneficiary_maker_checker':True,
+                  'beneficiary_requester_cannot_verify':True,
+                  'beneficiary_verifier_cannot_approve':True,
+              }'''
+          new='''@app.get('/finance/health')
+          async def health():
+              dependency = await database_health()
+              body = {
+                  'status': dependency['status'],
+                  'service':'trade-finance-ledger',
+                  'storage':'physical_postgres',
+                  'dependency': dependency,
+                  'currency':'USD',
+                  'double_entry':True,
+                  'owner_posting_only':True,
+                  'posted_journal_edits':False,
+                  'reversal_required_for_corrections':True,
+                  'beneficiary_maker_checker':True,
+                  'beneficiary_requester_cannot_verify':True,
+                  'beneficiary_verifier_cannot_approve':True,
+              }
+              if dependency['status'] != 'ok':
+                  return JSONResponse(status_code=503, content=body)
+              return body'''
+          replace('finance_api.py',old,new)
+
+          # 9. CI now validates both frontend and backend, and production requirements exclude test-only pytest.
+          Path('.github/workflows/ci.yml').write_text('''name: trade-os-ci
+
+          on:
+            push:
+              branches: [main, feat/agentic-global-trade-os]
+            pull_request:
+              branches: [main]
+
+          jobs:
+            test:
+              runs-on: ubuntu-24.04
+              env:
+                PYTHONPATH: ${{ github.workspace }}
+              steps:
+                - uses: actions/checkout@v4
+                - uses: actions/setup-node@v4
+                  with:
+                    node-version: '24'
+                    cache: npm
+                    cache-dependency-path: package-lock.json
+                - run: npm ci
+                - run: npm audit --omit=dev --audit-level=high
+                - run: npx tsc -p tsconfig.json
+                - run: npm run build
+                - uses: actions/setup-python@v5
+                  with:
+                    python-version: '3.12'
+                    cache: pip
+                    cache-dependency-path: requirements-dev.txt
+                - run: python -m pip install -r requirements-dev.txt
+                - run: python -m pip check
+                - run: python -m compileall -q .
+                - name: Unified API runtime import smoke
+                  run: python -c "import unified_api; print('Unified API import OK')"
+                - run: python -m pytest -q
+          ''')
+
+          # Audit must install test dependencies after runtime/test split.
+          p=Path('.github/workflows/swiss-watch-audit.yml'); text=p.read_text()
+          text=text.replace('run_check PIP_INSTALL python -m pip install -r requirements.txt','run_check PIP_INSTALL python -m pip install -r requirements-dev.txt')
+          text=text.replace('pip-audit -r requirements.txt --progress-spinner off','pip-audit -r requirements.txt --progress-spinner off')
+          if 'cp package-lock.json audit-output/package-lock.json' not in text:
+              text=text.replace("npm audit --omit=dev --json > audit-output/npm-audit.json 2>/dev/null || true", "npm audit --omit=dev --json > audit-output/npm-audit.json 2>/dev/null || true\n          [[ -f package-lock.json ]] && cp package-lock.json audit-output/package-lock.json || true")
+          p.write_text(text)
+          PY
+
+      - name: Generate deterministic npm lockfile
+        run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+
+      - name: Validate frontend
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --ignore-scripts
+          npx tsc -p tsconfig.json
+          npm run build
+          npm audit --omit=dev --audit-level=high
+
+      - name: Validate Python and security-sensitive changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install -r requirements-dev.txt
+          python -m pip check
+          python -m compileall -q .
+          python -m pytest -q
+          python - <<'PY'
+          from physical_postgres import database_health
+          import asyncio
+          result=asyncio.run(database_health())
+          assert result['status'] in {'ok','configuration_required','degraded'}
+          assert 'password' not in str(result).lower()
+          print('DATABASE_HEALTH_SECRET_SAFE=PASS')
+          PY
+
+      - name: Commit hardened branch only after validation
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'SAHJONY CAPITAL LLC.'
+          git config user.email 'sahjonyllc@outlook.com'
+          git add src/main.tsx src/DealCommandCenter.tsx src/vite-env.d.ts requirements.txt requirements-dev.txt package-lock.json trade_connectors.py cuba_mipymes_api.py physical_postgres.py finance_api.py .github/workflows/ci.yml .github/workflows/swiss-watch-audit.yml
+          git diff --cached --check
+          git commit -m 'harden: correctness security health and frontend performance'
+          git push origin HEAD:audit/swiss-watch-20260901
