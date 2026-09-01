@@ -1,0 +1,269 @@
+name: Hostinger OpenClaw Install One-Time
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/hostinger-openclaw-install-one-time.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hostinger-vm-767852-mutation
+  cancel-in-progress: false
+
+env:
+  HOSTINGER_VM_ID: '767852'
+  HOSTINGER_HOST: '69.62.68.67'
+  HOSTINGER_USER: root
+  HOSTINGER_API_BASE: https://developers.hostinger.com
+
+jobs:
+  install_openclaw:
+    if: github.event.head_commit.message == 'ops: install OpenClaw on Hostinger'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    env:
+      HOSTINGER_API_TOKEN: ${{ secrets.HOSTINGER_API_TOKEN }}
+    steps:
+      - name: Checkout exact install revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Prepare ephemeral Hostinger management identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "$HOSTINGER_API_TOKEN" ]] || { echo HOSTINGER_API_TOKEN_MISSING=1 >&2; exit 2; }
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq jq sshpass netcat-openbsd >/dev/null
+          install -d -m 700 ~/.ssh
+          ssh-keygen -q -t ed25519 -N '' -f ~/.ssh/openclaw-install -C "sahjony-openclaw-install-${GITHUB_RUN_ID}"
+          echo "SSH_KEY_PATH=$HOME/.ssh/openclaw-install" >> "$GITHUB_ENV"
+          chmod +x openclaw/hostinger-24x7/hostinger-recovery-controller.sh
+          chmod +x openclaw/hostinger-24x7/ssh-self-heal.sh
+          chmod +x openclaw/hostinger-24x7/hostinger-runtime-bootstrap.sh
+          chmod +x openclaw/hostinger-24x7/openclaw-runtime-recovery.sh
+          chmod +x openclaw/hostinger-24x7/whatsapp-hostinger-only-guardian.sh
+          bash -n openclaw/hostinger-24x7/hostinger-recovery-controller.sh
+
+      - name: Establish authenticated native Kali SSH
+        shell: bash
+        run: |
+          set -euo pipefail
+          openclaw/hostinger-24x7/hostinger-recovery-controller.sh repair-ssh
+
+      - name: Install official OpenClaw Docker runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          opts=(-o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -i "$SSH_KEY_PATH")
+          ssh "${opts[@]}" "$HOSTINGER_USER@$HOSTINGER_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          export DEBIAN_FRONTEND=noninteractive
+
+          echo 'SAHJONY_OPENCLAW_INSTALL_STAGE=preflight'
+          systemctl enable --now docker.service
+          docker version --format '{{.Server.Version}}'
+          if ! docker compose version >/dev/null 2>&1; then
+            apt-get update -qq
+            apt-get install -y -qq docker-compose-v2 >/dev/null 2>&1 || apt-get install -y -qq docker-compose >/dev/null
+          fi
+          docker compose version
+
+          install -d -m 700 /opt/sahjony-openclaw
+          install -d -m 700 /var/lib/sahjony-openclaw-state
+          install -d -m 700 /var/lib/sahjony-openclaw-auth
+          install -d -m 700 /var/backups/sahjony-openclaw
+
+          if [[ -d /root/.openclaw && -n "$(find /root/.openclaw -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ]]; then
+            ts="$(date -u +%Y%m%dT%H%M%SZ)"
+            tar -C /root -czf "/var/backups/sahjony-openclaw/root-openclaw-$ts.tgz" .openclaw
+            chmod 600 "/var/backups/sahjony-openclaw/root-openclaw-$ts.tgz"
+            echo SAHJONY_EXISTING_OPENCLAW_STATE_BACKED_UP=1
+          fi
+
+          chown -R 1000:1000 /var/lib/sahjony-openclaw-state /var/lib/sahjony-openclaw-auth
+          cd /opt/sahjony-openclaw
+
+          if [[ ! -s .env ]]; then
+            token="$(openssl rand -hex 32)"
+            umask 077
+            printf 'OPENCLAW_IMAGE=ghcr.io/openclaw/openclaw:latest\nOPENCLAW_GATEWAY_TOKEN=%s\nOPENCLAW_GATEWAY_BIND=lan\nOPENCLAW_GATEWAY_PORT=18789\nOPENCLAW_TZ=UTC\nOPENCLAW_DISABLE_BONJOUR=1\n' "$token" > .env
+          fi
+          chmod 600 .env
+
+          cat > docker-compose.yml <<'COMPOSE'
+          services:
+            openclaw-gateway:
+              image: ${OPENCLAW_IMAGE:-ghcr.io/openclaw/openclaw:latest}
+              env_file:
+                - .env
+              environment:
+                HOME: /home/node
+                OPENCLAW_HOME: /home/node
+                OPENCLAW_STATE_DIR: /home/node/.openclaw
+                OPENCLAW_CONFIG_PATH: /home/node/.openclaw/openclaw.json
+                OPENCLAW_CONFIG_DIR: /home/node/.openclaw
+                OPENCLAW_WORKSPACE_DIR: /home/node/.openclaw/workspace
+                OPENCLAW_GATEWAY_PORT: '18789'
+                OPENCLAW_GATEWAY_TOKEN: ${OPENCLAW_GATEWAY_TOKEN}
+                OPENCLAW_DISABLE_BONJOUR: '1'
+                OPENCLAW_NO_RESPAWN: '1'
+                NODE_COMPILE_CACHE: /tmp/openclaw-compile-cache
+                TZ: ${OPENCLAW_TZ:-UTC}
+              volumes:
+                - /var/lib/sahjony-openclaw-state:/home/node/.openclaw
+                - /var/lib/sahjony-openclaw-auth:/home/node/.config/openclaw
+              cap_drop:
+                - NET_RAW
+                - NET_ADMIN
+              security_opt:
+                - no-new-privileges:true
+              extra_hosts:
+                - host.docker.internal:host-gateway
+              ports:
+                - '127.0.0.1:18789:18789'
+              init: true
+              restart: unless-stopped
+              command: ['node','dist/index.js','gateway','--bind','lan','--port','18789']
+              healthcheck:
+                test: ['CMD','node','dist/docker-healthcheck.js']
+                interval: 30s
+                timeout: 5s
+                retries: 5
+                start_period: 20s
+
+            openclaw-cli:
+              image: ${OPENCLAW_IMAGE:-ghcr.io/openclaw/openclaw:latest}
+              network_mode: service:openclaw-gateway
+              env_file:
+                - .env
+              environment:
+                HOME: /home/node
+                OPENCLAW_HOME: /home/node
+                OPENCLAW_STATE_DIR: /home/node/.openclaw
+                OPENCLAW_CONFIG_PATH: /home/node/.openclaw/openclaw.json
+                OPENCLAW_CONFIG_DIR: /home/node/.openclaw
+                OPENCLAW_WORKSPACE_DIR: /home/node/.openclaw/workspace
+                OPENCLAW_GATEWAY_PORT: '18789'
+                OPENCLAW_GATEWAY_TOKEN: ${OPENCLAW_GATEWAY_TOKEN}
+                BROWSER: echo
+                TZ: ${OPENCLAW_TZ:-UTC}
+              volumes:
+                - /var/lib/sahjony-openclaw-state:/home/node/.openclaw
+                - /var/lib/sahjony-openclaw-auth:/home/node/.config/openclaw
+              cap_drop:
+                - NET_RAW
+                - NET_ADMIN
+              security_opt:
+                - no-new-privileges:true
+              stdin_open: true
+              tty: true
+              init: true
+              entrypoint: ['node','dist/index.js']
+              depends_on:
+                - openclaw-gateway
+          COMPOSE
+          chmod 600 docker-compose.yml
+
+          echo 'SAHJONY_OPENCLAW_INSTALL_STAGE=pull'
+          docker compose pull openclaw-gateway openclaw-cli
+
+          echo 'SAHJONY_OPENCLAW_INSTALL_STAGE=baseline'
+          docker compose run -T --rm --no-deps --entrypoint node openclaw-gateway \
+            dist/index.js setup --baseline --workspace /home/node/.openclaw/workspace >/tmp/openclaw-baseline.log 2>&1 || {
+              cat /tmp/openclaw-baseline.log >&2
+              exit 20
+            }
+
+          docker compose run -T --rm --no-deps --entrypoint node openclaw-gateway \
+            dist/index.js config set --batch-json '[{"path":"gateway.mode","value":"local"},{"path":"gateway.bind","value":"lan"},{"path":"gateway.auth.mode","value":"token"}]' >/tmp/openclaw-config.log 2>&1 || {
+              cat /tmp/openclaw-config.log >&2
+              exit 21
+            }
+
+          echo 'SAHJONY_OPENCLAW_INSTALL_STAGE=whatsapp_plugin'
+          set +e
+          docker compose run -T --rm --no-deps --entrypoint node openclaw-gateway \
+            dist/index.js plugins install clawhub:@openclaw/whatsapp >/tmp/openclaw-whatsapp-plugin.log 2>&1
+          plugin_rc=$?
+          set -e
+          if [[ $plugin_rc -eq 0 ]]; then
+            echo SAHJONY_OPENCLAW_WHATSAPP_PLUGIN=INSTALLED
+          else
+            echo SAHJONY_OPENCLAW_WHATSAPP_PLUGIN=DEFERRED
+            tail -n 40 /tmp/openclaw-whatsapp-plugin.log | sed -E 's/(token|secret|key|password)=([^ ]+)/\1=[REDACTED]/Ig' || true
+          fi
+
+          echo 'SAHJONY_OPENCLAW_INSTALL_STAGE=start'
+          docker compose up -d openclaw-gateway
+
+          healthy=false
+          for i in $(seq 1 30); do
+            status="$(docker inspect openclaw-openclaw-gateway-1 --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' 2>/dev/null || true)"
+            echo "OPENCLAW_HEALTH_PROBE=$i/30 status=${status:-unknown}"
+            if [[ "$status" == healthy ]]; then healthy=true; break; fi
+            if [[ "$status" == exited || "$status" == dead ]]; then break; fi
+            sleep 5
+          done
+
+          if [[ "$healthy" != true ]]; then
+            echo SAHJONY_OPENCLAW_GATEWAY_NOT_HEALTHY=1 >&2
+            docker compose ps >&2 || true
+            docker compose logs --tail=120 openclaw-gateway 2>&1 | sed -E 's/(token|secret|key|password)[=:][^[:space:]]+/\1=[REDACTED]/Ig' >&2 || true
+            exit 22
+          fi
+
+          docker update --restart unless-stopped openclaw-openclaw-gateway-1 >/dev/null
+          restart_policy="$(docker inspect openclaw-openclaw-gateway-1 --format '{{.HostConfig.RestartPolicy.Name}}')"
+          image="$(docker inspect openclaw-openclaw-gateway-1 --format '{{.Config.Image}}')"
+          echo "SAHJONY_OPENCLAW_CONTAINER=openclaw-openclaw-gateway-1"
+          echo "SAHJONY_OPENCLAW_IMAGE=$image"
+          echo "SAHJONY_OPENCLAW_RESTART_POLICY=$restart_policy"
+          echo SAHJONY_OPENCLAW_DOCKER_RUNTIME=READY
+
+          set +e
+          docker compose run -T --rm openclaw-cli gateway probe >/tmp/openclaw-probe.log 2>&1
+          probe_rc=$?
+          set -e
+          if [[ $probe_rc -eq 0 ]]; then
+            echo SAHJONY_OPENCLAW_GATEWAY_PROBE=READY
+          else
+            echo SAHJONY_OPENCLAW_GATEWAY_PROBE=DEGRADED
+            tail -n 40 /tmp/openclaw-probe.log | sed -E 's/(token|secret|key|password)[=:][^[:space:]]+/\1=[REDACTED]/Ig' || true
+          fi
+          REMOTE
+
+      - name: Verify installed runtime from native Kali
+        shell: bash
+        run: |
+          set -euo pipefail
+          opts=(-o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -i "$SSH_KEY_PATH")
+          ssh "${opts[@]}" "$HOSTINGER_USER@$HOSTINGER_HOST" 'set -euo pipefail; systemctl is-active --quiet docker.service; cd /opt/sahjony-openclaw; docker compose ps; test "$(docker inspect openclaw-openclaw-gateway-1 --format "{{.State.Health.Status}}")" = healthy; test "$(docker inspect openclaw-openclaw-gateway-1 --format "{{.HostConfig.RestartPolicy.Name}}")" = unless-stopped; printf "SAHJONY_HOSTINGER_OPENCLAW_INSTALL=READY\n"'
+
+      - name: Remove ephemeral management identity
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          if [[ -s ~/.ssh/openclaw-install.pub && -s ~/.ssh/openclaw-install ]]; then
+            pub_b64="$(base64 -w0 ~/.ssh/openclaw-install.pub)"
+            ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 -i ~/.ssh/openclaw-install "$HOSTINGER_USER@$HOSTINGER_HOST" "PUB_B64='$pub_b64' bash -s" <<'REMOTE'
+          set -euo pipefail
+          auth=/root/.ssh/authorized_keys
+          if [[ -f "$auth" ]]; then
+            pub="$(printf '%s' "$PUB_B64" | base64 -d)"
+            tmp="$(mktemp)"
+            grep -vxF "$pub" "$auth" > "$tmp" || true
+            cat "$tmp" > "$auth"
+            chmod 600 "$auth"
+            rm -f "$tmp"
+          fi
+          echo SAHJONY_OPENCLAW_INSTALL_EPHEMERAL_KEY_REMOVED=1
+          REMOTE
+          fi
+          rm -f ~/.ssh/openclaw-install ~/.ssh/openclaw-install.pub
