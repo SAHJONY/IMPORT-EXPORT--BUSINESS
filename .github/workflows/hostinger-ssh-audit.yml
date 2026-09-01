@@ -22,6 +22,11 @@ on:
         required: false
         default: false
         type: boolean
+      restart_vm:
+        description: Restart the selected VPS before testing SSH
+        required: false
+        default: false
+        type: boolean
       print_public_key_only:
         description: Print the non-secret deployment public key and stop
         required: false
@@ -53,6 +58,7 @@ jobs:
           REQUESTED_VM_ID: ${{ inputs.vm_id }}
           ENSURE_SSH_FIREWALL: ${{ inputs.ensure_ssh_firewall }}
           EXIT_EMERGENCY_MODE: ${{ inputs.exit_emergency_mode }}
+          RESTART_VM: ${{ inputs.restart_vm }}
           PRINT_PUBLIC_KEY_ONLY: ${{ inputs.print_public_key_only }}
         run: |
           set -euo pipefail
@@ -137,6 +143,19 @@ jobs:
             fi
             echo "Hostinger VPS ${target_vm_id} is running in normal mode." >> "${GITHUB_STEP_SUMMARY}"
             sleep 15
+          fi
+
+          if [[ "${RESTART_VM}" == "true" ]]; then
+            if [[ -z "${target_vm_id}" ]]; then
+              echo "Multiple VPS instances exist; rerun with an explicit vm_id." >> "${GITHUB_STEP_SUMMARY}"
+              exit 1
+            fi
+            curl --fail --silent --show-error \
+              --request POST \
+              --header "${auth_header}" \
+              "${api_root}/virtual-machines/${target_vm_id}/restart" >/dev/null
+            echo "Requested a restart of Hostinger VPS ${target_vm_id}." >> "${GITHUB_STEP_SUMMARY}"
+            sleep 30
           fi
 
           if [[ "${REPAIR_ACCESS}" == "true" ]]; then
