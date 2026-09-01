@@ -1,0 +1,231 @@
+name: Hostinger VPS Doctor
+
+on:
+  workflow_dispatch:
+    inputs:
+      repair_mode:
+        description: Run audit only or bounded heal after authenticated SSH
+        required: true
+        default: audit
+        type: choice
+        options:
+          - audit
+          - heal
+      escalate_to_v7:
+        description: If normal SSH is unavailable and the Hostinger action plane is quiet, dispatch canonical Recovery V7
+        required: true
+        default: false
+        type: boolean
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/hostinger-vps-doctor.yml'
+      - 'openclaw/hostinger-24x7/hostinger-vps-doctor.sh'
+      - 'openclaw/skills/hostinger-vps-doctor/SKILL.md'
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: hostinger-vm-767852-mutation
+  cancel-in-progress: false
+
+env:
+  HOSTINGER_API_BASE: https://developers.hostinger.com
+  VM_ID: '767852'
+  HOST: '69.62.68.67'
+  SSH_USER: root
+
+jobs:
+  doctor:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      API_TOKEN: ${{ secrets.HOSTINGER_API_TOKEN }}
+      DURABLE_PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate doctor source
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n openclaw/hostinger-24x7/hostinger-vps-doctor.sh
+          echo SAHJONY_VPS_DOCTOR_SOURCE_VALID=1
+
+      - name: Prepare diagnostics
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq jq netcat-openbsd >/dev/null
+          mkdir -p "$RUNNER_TEMP/vps-doctor" ~/.ssh
+          chmod 700 ~/.ssh
+          if [[ -n "$DURABLE_PRIVATE_KEY" ]]; then
+            printf '%s\n' "$DURABLE_PRIVATE_KEY" > ~/.ssh/hostinger-durable
+            chmod 600 ~/.ssh/hostinger-durable
+            echo DURABLE_KEY_PRESENT=true >> "$GITHUB_ENV"
+          else
+            echo DURABLE_KEY_PRESENT=false >> "$GITHUB_ENV"
+          fi
+
+      - name: Inspect Hostinger control plane without mutation
+        id: control
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "$API_TOKEN" ]] || { echo HOSTINGER_API_TOKEN_MISSING=1 >&2; exit 2; }
+          vm="$(curl -fsS -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID")"
+          state="$(jq -r '.state // empty' <<<"$vm")"
+          ip="$(jq -r '[.. | objects | .address? // empty | select(type=="string") | select(test("^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+$"))] | first // empty' <<<"$vm")"
+          [[ -z "$ip" || "$ip" == "$HOST" ]] || { echo "HOSTINGER_VM_IDENTITY_MISMATCH=$ip" >&2; exit 3; }
+          actions="$(curl -fsS -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/actions?page=1")"
+          active="$(jq '[.data[]? | select((.state // "") | IN("sent","started","pending","running","queued"))] | length' <<<"$actions")"
+          quiet=true
+          [[ "$active" == 0 ]] || quiet=false
+          echo "vm_state=${state:-unknown}" >> "$GITHUB_OUTPUT"
+          echo "action_plane_quiet=$quiet" >> "$GITHUB_OUTPUT"
+          echo "active_actions=$active" >> "$GITHUB_OUTPUT"
+          echo "HOSTINGER_VM_STATE=${state:-unknown}"
+          echo "HOSTINGER_ACTIVE_ACTIONS=$active"
+          if [[ "$quiet" != true ]]; then
+            jq -c '[.data[]? | select((.state // "") | IN("sent","started","pending","running","queued")) | {id,name,state,created_at,updated_at}]' <<<"$actions"
+          fi
+
+      - name: Probe external network surface
+        id: net
+        shell: bash
+        run: |
+          set -euo pipefail
+          tcp22=false; tcp80=false; tcp443=false
+          nc -z -w 5 "$HOST" 22 >/dev/null 2>&1 && tcp22=true || true
+          nc -z -w 5 "$HOST" 80 >/dev/null 2>&1 && tcp80=true || true
+          nc -z -w 5 "$HOST" 443 >/dev/null 2>&1 && tcp443=true || true
+          echo "tcp22=$tcp22" >> "$GITHUB_OUTPUT"
+          echo "tcp80=$tcp80" >> "$GITHUB_OUTPUT"
+          echo "tcp443=$tcp443" >> "$GITHUB_OUTPUT"
+          echo "HOSTINGER_EXTERNAL_TCP22=$tcp22 TCP80=$tcp80 TCP443=$tcp443"
+
+      - name: Authenticate normal Kali SSH
+        id: ssh
+        shell: bash
+        run: |
+          set -euo pipefail
+          ok=false
+          reason=unknown
+          if [[ "${{ steps.net.outputs.tcp22 }}" != true ]]; then
+            reason=tcp22_unreachable
+          elif [[ "$DURABLE_KEY_PRESENT" != true ]]; then
+            reason=durable_key_missing
+          else
+            : >"$RUNNER_TEMP/vps-doctor/ssh.err"
+            if ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 -i ~/.ssh/hostinger-durable "$SSH_USER@$HOST" 'printf SAHJONY_NORMAL_SSH_OK' 2>"$RUNNER_TEMP/vps-doctor/ssh.err" | grep -q SAHJONY_NORMAL_SSH_OK; then
+              ok=true
+              reason=authenticated
+            else
+              reason=ssh_auth_failed
+              sed -n '1,8p' "$RUNNER_TEMP/vps-doctor/ssh.err" | sed -E 's/(token|password|secret|key)[^ ]*/[redacted]/Ig' || true
+            fi
+          fi
+          echo "ssh_ok=$ok" >> "$GITHUB_OUTPUT"
+          echo "reason=$reason" >> "$GITHUB_OUTPUT"
+          echo "HOSTINGER_NORMAL_SSH=$ok REASON=$reason"
+
+      - name: Run local VPS doctor over authenticated SSH
+        if: steps.ssh.outputs.ssh_ok == 'true'
+        id: local
+        shell: bash
+        run: |
+          set -euo pipefail
+          mode=audit
+          if [[ "$GITHUB_EVENT_NAME" == workflow_dispatch && "${{ inputs.repair_mode }}" == heal ]]; then mode=heal; fi
+          scp -q -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/hostinger-durable \
+            openclaw/hostinger-24x7/hostinger-vps-doctor.sh "$SSH_USER@$HOST:/tmp/sahjony-hostinger-vps-doctor.sh"
+          if [[ -f openclaw/hostinger-24x7/whatsapp-hostinger-only-guardian.sh ]]; then
+            scp -q -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/hostinger-durable \
+              openclaw/hostinger-24x7/whatsapp-hostinger-only-guardian.sh "$SSH_USER@$HOST:/tmp/whatsapp-hostinger-only-guardian.sh"
+          fi
+          set +e
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/hostinger-durable "$SSH_USER@$HOST" \
+            "chmod 700 /tmp/sahjony-hostinger-vps-doctor.sh /tmp/whatsapp-hostinger-only-guardian.sh 2>/dev/null || true; SAHJONY_VPS_DOCTOR_REPORT=/tmp/sahjony-vps-doctor.json SAHJONY_WHATSAPP_GUARDIAN=/tmp/whatsapp-hostinger-only-guardian.sh bash /tmp/sahjony-hostinger-vps-doctor.sh '$mode'" \
+            >"$RUNNER_TEMP/vps-doctor/local.stdout" 2>"$RUNNER_TEMP/vps-doctor/local.stderr"
+          rc=$?
+          set -e
+          cat "$RUNNER_TEMP/vps-doctor/local.stderr" || true
+          scp -q -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/hostinger-durable \
+            "$SSH_USER@$HOST:/tmp/sahjony-vps-doctor.json" "$RUNNER_TEMP/vps-doctor/local.json" || true
+          classification="$(jq -r '.classification // "local_report_missing"' "$RUNNER_TEMP/vps-doctor/local.json" 2>/dev/null || echo local_report_missing)"
+          severity="$(jq -r '.severity // "critical"' "$RUNNER_TEMP/vps-doctor/local.json" 2>/dev/null || echo critical)"
+          echo "classification=$classification" >> "$GITHUB_OUTPUT"
+          echo "severity=$severity" >> "$GITHUB_OUTPUT"
+          echo "local_rc=$rc" >> "$GITHUB_OUTPUT"
+          echo "SAHJONY_LOCAL_CLASSIFICATION=$classification SEVERITY=$severity RC=$rc"
+
+      - name: Build authoritative diagnostic report
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          classification="${{ steps.local.outputs.classification }}"
+          severity="${{ steps.local.outputs.severity }}"
+          if [[ -z "$classification" ]]; then
+            case "${{ steps.ssh.outputs.reason }}" in
+              tcp22_unreachable) classification=external_tcp22_unreachable; severity=critical ;;
+              durable_key_missing) classification=durable_ssh_key_missing; severity=critical ;;
+              ssh_auth_failed) classification=durable_ssh_auth_failed; severity=critical ;;
+              *) classification=diagnostic_incomplete; severity=critical ;;
+            esac
+          fi
+          jq -n \
+            --arg vm_state "${{ steps.control.outputs.vm_state }}" \
+            --argjson action_plane_quiet "${{ steps.control.outputs.action_plane_quiet || 'false' }}" \
+            --argjson active_actions "${{ steps.control.outputs.active_actions || '0' }}" \
+            --argjson tcp22 "${{ steps.net.outputs.tcp22 || 'false' }}" \
+            --argjson tcp80 "${{ steps.net.outputs.tcp80 || 'false' }}" \
+            --argjson tcp443 "${{ steps.net.outputs.tcp443 || 'false' }}" \
+            --argjson ssh_ok "${{ steps.ssh.outputs.ssh_ok || 'false' }}" \
+            --arg ssh_reason "${{ steps.ssh.outputs.reason }}" \
+            --arg classification "$classification" \
+            --arg severity "$severity" \
+            --slurpfile local "$RUNNER_TEMP/vps-doctor/local.json" \
+            '{schema_version:1, target:{vm_id:"767852",hostname:"srv767852.hstgr.cloud",ipv4:"69.62.68.67",os:"Kali Linux"}, control_plane:{vm_state:$vm_state,action_plane_quiet:$action_plane_quiet,active_actions:$active_actions}, external:{tcp22:$tcp22,tcp80:$tcp80,tcp443:$tcp443}, normal_ssh:{authenticated:$ssh_ok,reason:$ssh_reason}, classification:$classification,severity:$severity, local:(if ($local|length)>0 then $local[0] else null end), safety:{blind_reboot:false,recovery_started:false,firewall_mutated:false,container_recreated:false,whatsapp_repaired:false,meta_required:false}}' \
+            >"$RUNNER_TEMP/vps-doctor/report.json"
+          cat "$RUNNER_TEMP/vps-doctor/report.json"
+          {
+            echo '## Hostinger VPS Doctor'
+            echo
+            echo "- VM state: `${{ steps.control.outputs.vm_state }}`"
+            echo "- Action plane quiet: `${{ steps.control.outputs.action_plane_quiet }}`"
+            echo "- TCP/22: `${{ steps.net.outputs.tcp22 }}`"
+            echo "- Normal SSH authenticated: `${{ steps.ssh.outputs.ssh_ok }}` (`${{ steps.ssh.outputs.reason }}`)"
+            echo "- Classification: `$classification`"
+            echo "- Severity: `$severity`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hostinger-vps-doctor-${{ github.run_id }}
+          path: ${{ runner.temp }}/vps-doctor/
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Optional bounded handoff to canonical Recovery V7
+        if: >-
+          github.event_name == 'workflow_dispatch' &&
+          inputs.escalate_to_v7 == true &&
+          steps.ssh.outputs.ssh_ok != 'true' &&
+          steps.control.outputs.action_plane_quiet == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo 'Normal SSH is unavailable after evidence capture. Dispatching canonical race-safe Recovery V7 exactly once.'
+          gh api --method POST \
+            -H 'Accept: application/vnd.github+json' \
+            "/repos/${GITHUB_REPOSITORY}/actions/workflows/hostinger-whatsapp-recovery-v7.yml/dispatches" \
+            -f ref=main
+          echo SAHJONY_RECOVERY_V7_HANDOFF_DISPATCHED=1
