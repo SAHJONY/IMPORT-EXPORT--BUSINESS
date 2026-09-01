@@ -60,7 +60,22 @@ jobs:
           file_value() {
             local key="$1" file="$2"
             [[ -r "$file" ]] || return 1
-            awk -F= -v k="$key" '$1==k{sub(/^[^=]*=/,""); gsub(/^[[:space:]"'"']+|[[:space:]"'"']+$/,""); print; exit}' "$file"
+            python3 - "$key" "$file" <<'PY'
+import pathlib, sys
+key, path = sys.argv[1], pathlib.Path(sys.argv[2])
+for raw in path.read_text(errors='ignore').splitlines():
+    line = raw.strip()
+    if not line or line.startswith('#') or '=' not in line:
+        continue
+    k, v = line.split('=', 1)
+    if k.strip() == key:
+        v = v.strip()
+        if len(v) >= 2 and v[0] == v[-1] and v[0] in ('"', "'"):
+            v = v[1:-1]
+        print(v, end='')
+        raise SystemExit(0)
+raise SystemExit(1)
+PY
           }
 
           recover_existing_env_value() {
@@ -69,7 +84,6 @@ jobs:
               value="$(file_value "$key" "$f" 2>/dev/null || true)"
               [[ -n "$value" ]] && { printf '%s' "$value"; return 0; }
             done
-            # Read-only fallback: recover the same credential from the stopped legacy container environment.
             if command -v docker >/dev/null 2>&1; then
               cid="$(docker ps -aq 2>/dev/null | while read -r id; do
                 meta="$(docker inspect "$id" --format '{{.Name}}|{{.Config.Image}}' 2>/dev/null || true)"
@@ -77,7 +91,7 @@ jobs:
               done)"
               if [[ -n "$cid" ]]; then
                 value="$(docker inspect "$cid" --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null \
-                  | awk -F= -v k="$key" '$1==k{sub(/^[^=]*=/,""); print; exit}')"
+                  | sed -n "s/^${key}=//p" | head -n1)"
                 [[ -n "$value" ]] && { printf '%s' "$value"; return 0; }
               fi
             fi
@@ -88,14 +102,12 @@ jobs:
           [[ -f "$CONFIG" ]] || { echo OPENCLAW_CONFIG_MISSING=1 >&2; exit 21; }
           systemctl cat openclaw-gateway.service >/dev/null 2>&1 || { echo OPENCLAW_GATEWAY_SERVICE_MISSING=1 >&2; exit 20; }
 
-          # Fix only the WhatsApp plugin directory ownership inherited from the old container.
           ext="$STATE/extensions/whatsapp"
           if [[ -d "$ext" ]] && find "$ext" -xdev \( ! -uid 0 -o ! -gid 0 \) -print -quit | grep -q .; then
             chown -R root:root "$ext"
             echo WHATSAPP_PLUGIN_OWNERSHIP_REPAIRED=1
           fi
 
-          # Restore the SAME existing Gateway credential only when LAN auth is currently absent.
           bind="$(oc config get gateway.bind 2>/dev/null || true)"
           cfg_token="$(oc config get gateway.auth.token 2>/dev/null || true)"
           cfg_password="$(oc config get gateway.auth.password 2>/dev/null || true)"
@@ -121,8 +133,6 @@ jobs:
           fi
           unset cfg_token cfg_password
 
-          # The host is OpenClaw 2026.8.1. Pin only WhatsApp to the matching official 2026.8.1 plugin.
-          # This avoids the current ClawHub release that requires plugin API >=2026.8.2.
           oc plugins install npm:@openclaw/whatsapp@2026.8.1 --force --pin >/dev/null
           echo WHATSAPP_PLUGIN_PINNED=2026.8.1
           oc plugins enable whatsapp >/dev/null
