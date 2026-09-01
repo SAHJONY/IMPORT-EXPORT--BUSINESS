@@ -1,0 +1,149 @@
+name: Hostinger Kali SSH Lifecycle Forensics V9B
+
+on:
+  push:
+    paths:
+      - '.github/workflows/hostinger-ssh-lifecycle-forensics-v9b.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hostinger-vm-767852-mutation
+  cancel-in-progress: false
+
+env:
+  HOSTINGER_API_BASE: https://developers.hostinger.com
+  VM_ID: '767852'
+  HOST: '69.62.68.67'
+  USER: root
+
+jobs:
+  trace:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      API_TOKEN: ${{ secrets.HOSTINGER_API_TOKEN }}
+    steps:
+      - name: Prepare
+        id: creds
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "$API_TOKEN" ]] || exit 2
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq sshpass jq >/dev/null
+          RECOVERY_PASSWORD="$(openssl rand -hex 18)Aa1!"
+          echo "::add-mask::$RECOVERY_PASSWORD"
+          echo "recovery_password=$RECOVERY_PASSWORD" >> "$GITHUB_OUTPUT"
+
+      - name: Require idle action plane
+        shell: bash
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 60); do
+            a="$(curl -fsS -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/actions?page=1")"
+            busy="$(jq '[.data[]? | select(.state=="sent" or .state=="started" or .state=="pending" or .state=="running" or .state=="queued")] | length' <<<"$a")"
+            if [ "$busy" = 0 ]; then echo HOSTINGER_V9B_IDLE=1; exit 0; fi
+            echo "v9b_busy=$busy probe=$i/60"
+            sleep 5
+          done
+          exit 3
+
+      - name: Enter Recovery
+        id: start
+        env:
+          RECOVERY_PASSWORD: ${{ steps.creds.outputs.recovery_password }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          payload="$(jq -n --arg p "$RECOVERY_PASSWORD" '{root_password:$p}')"
+          body="$(curl -fsS -X POST -H "Authorization: Bearer $API_TOKEN" -H 'Content-Type: application/json' -H 'Accept: application/json' --data "$payload" "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/recovery")"
+          id="$(jq -r '.id // empty' <<<"$body")"
+          [[ "$id" =~ ^[0-9]+$ ]] || exit 4
+          echo "action_id=$id" >> "$GITHUB_OUTPUT"
+          echo "owned=true" >> "$GITHUB_OUTPUT"
+
+      - name: Wait Recovery
+        env:
+          ACTION_ID: ${{ steps.start.outputs.action_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 120); do
+            a="$(curl -fsS -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/actions/$ACTION_ID")"
+            s="$(jq -r '.state // empty' <<<"$a")"
+            echo "v9b_start=$i/120 state=${s:-unknown}"
+            case "$s" in success) exit 0;; failed|failure|error|cancelled|canceled) exit 5;; esac
+            sleep 5
+          done
+          exit 6
+
+      - name: Trace exact previous normal boot
+        env:
+          RECOVERY_PASSWORD: ${{ steps.creds.outputs.recovery_password }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          export SSHPASS="$RECOVERY_PASSWORD"
+          ok=false
+          for i in $(seq 1 60); do
+            if sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=6 -o PreferredAuthentications=password -o PubkeyAuthentication=no "$USER@$HOST" 'printf OK' 2>/dev/null | grep -q OK; then ok=true; break; fi
+            sleep 10
+          done
+          [[ "$ok" == true ]] || exit 7
+          sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 -o PreferredAuthentications=password -o PubkeyAuthentication=no "$USER@$HOST" 'bash -s' <<'REMOTE'
+          set -u
+          root=/mnt/sdb1
+          [ -f "$root/etc/os-release" ] || { echo ROOT_MISSING=1; exit 20; }
+          echo '=== BOOT LIST ==='
+          journalctl --directory="$root/var/log/journal" --list-boots --no-pager 2>/dev/null | tail -n 12 || true
+          echo '=== PREVIOUS BOOT NATIVE SSH EXACT ==='
+          journalctl --directory="$root/var/log/journal" -b -1 -u ssh.service --no-pager -o short-iso-precise 2>/dev/null || true
+          echo '=== PREVIOUS BOOT SAHJONY SSH EXACT ==='
+          journalctl --directory="$root/var/log/journal" -b -1 -u sahjony-sshd.service --no-pager -o short-iso-precise 2>/dev/null | tail -n 500 || true
+          echo '=== PREVIOUS BOOT UFW EXACT ==='
+          journalctl --directory="$root/var/log/journal" -b -1 -u ufw.service --no-pager -o short-iso-precise 2>/dev/null || true
+          echo '=== PREVIOUS BOOT CLOUD INIT EXACT ==='
+          journalctl --directory="$root/var/log/journal" -b -1 -u cloud-init.service -u cloud-config.service -u cloud-final.service --no-pager -o short-iso-precise 2>/dev/null | tail -n 500 || true
+          echo '=== PREVIOUS BOOT NETWORK EXACT ==='
+          journalctl --directory="$root/var/log/journal" -b -1 -u systemd-networkd.service -u NetworkManager.service -u networking.service --no-pager -o short-iso-precise 2>/dev/null | tail -n 500 || true
+          echo '=== PREVIOUS BOOT SSH PROCESS EVENTS ==='
+          journalctl --directory="$root/var/log/journal" -b -1 --no-pager -o short-iso-precise 2>/dev/null | grep -Ei 'ssh\.service|sshd\[|sahjony-sshd|port 22|SIGTERM|terminated|stopping.*ssh|stopped.*ssh|killed process.*sshd|oom|out of memory|fail2ban|ufw.*22|DPT=22|network.*down|link.*down|shutdown|reboot|poweroff' | tail -n 900 || true
+          echo '=== UNIT ENABLEMENT LINKS ==='
+          find "$root/etc/systemd/system" -maxdepth 2 -type l \( -name 'ssh.service' -o -name 'ssh.socket' -o -name 'sshd.service' -o -name 'sahjony-sshd.service' \) -printf '%p -> %l\n' 2>/dev/null | sort || true
+          echo '=== NATIVE UNIT FILE ==='
+          sed -n '1,260p' "$root/usr/lib/systemd/system/ssh.service" 2>/dev/null || true
+          echo '=== DROPINS ==='
+          find "$root/etc/systemd/system/ssh.service.d" -maxdepth 1 -type f -print -exec sh -c 'echo --- "$1"; sed -n "1,220p" "$1"' _ {} \; 2>/dev/null || true
+          echo '=== HOST KEYS ==='
+          ls -l "$root"/etc/ssh/ssh_host_* 2>/dev/null || true
+          echo V9B_SSH_LIFECYCLE_TRACE_COMPLETE=1
+          REMOTE
+
+      - name: Exit Recovery
+        id: stop
+        if: always() && steps.start.outputs.owned == 'true'
+        shell: bash
+        run: |
+          set +e
+          body="$(curl -sS -X DELETE -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/recovery")"
+          id="$(jq -r '.id // empty' <<<"$body" 2>/dev/null)"
+          if [[ "$id" =~ ^[0-9]+$ ]]; then echo "action_id=$id" >> "$GITHUB_OUTPUT"; fi
+
+      - name: Wait Recovery exit
+        if: always() && steps.stop.outputs.action_id != ''
+        env:
+          ACTION_ID: ${{ steps.stop.outputs.action_id }}
+        shell: bash
+        run: |
+          set +e
+          for i in $(seq 1 120); do
+            a="$(curl -sS -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/actions/$ACTION_ID")"
+            s="$(jq -r '.state // empty' <<<"$a" 2>/dev/null)"
+            echo "v9b_stop=$i/120 state=${s:-unknown}"
+            case "$s" in success) exit 0;; failed|failure|error|cancelled|canceled) exit 1;; esac
+            sleep 5
+          done
+          exit 1
