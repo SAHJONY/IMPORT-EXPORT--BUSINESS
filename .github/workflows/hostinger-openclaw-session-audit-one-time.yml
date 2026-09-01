@@ -1,0 +1,208 @@
+name: Hostinger OpenClaw Session Audit One-Time
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/hostinger-openclaw-session-audit-one-time.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hostinger-vm-767852-mutation
+  cancel-in-progress: false
+
+env:
+  HOSTINGER_API_BASE: https://developers.hostinger.com
+  VM_ID: '767852'
+  HOST: '69.62.68.67'
+  SSH_USER: root
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      API_TOKEN: ${{ secrets.HOSTINGER_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare ephemeral audit identity
+        id: prep
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "$API_TOKEN" ]] || { echo HOSTINGER_API_TOKEN_MISSING=1 >&2; exit 2; }
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq jq netcat-openbsd >/dev/null
+          install -d -m 700 ~/.ssh "$RUNNER_TEMP/openclaw-session-audit"
+          ssh-keygen -q -t ed25519 -N '' -f ~/.ssh/session-audit -C "sahjony-session-audit-${GITHUB_RUN_ID}"
+          echo "key_name=SAHJONY Session Audit ${GITHUB_RUN_ID}" >> "$GITHUB_OUTPUT"
+          echo SAHJONY_SESSION_AUDIT_EPHEMERAL_KEY=READY
+
+      - name: Confirm Hostinger action plane idle
+        shell: bash
+        run: |
+          set -euo pipefail
+          body="$(curl -fsS -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/actions?page=1")"
+          active="$(jq '[.data[]? | select((.state // "") | IN("sent","started","pending","running","queued"))] | length' <<<"$body")"
+          echo "HOSTINGER_SESSION_AUDIT_ACTIVE_ACTIONS=$active"
+          [[ "$active" == 0 ]] || { echo HOSTINGER_ACTION_PLANE_BUSY=1 >&2; exit 3; }
+
+      - name: Register and attach ephemeral audit key
+        id: attach
+        env:
+          KEY_NAME: ${{ steps.prep.outputs.key_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          pub="$(cat ~/.ssh/session-audit.pub)"
+          payload="$(jq -n --arg name "$KEY_NAME" --arg key "$pub" '{name:$name,key:$key}')"
+          created="$(curl -fsS -X POST -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' -H 'Content-Type: application/json' --data "$payload" "$HOSTINGER_API_BASE/api/vps/v1/public-keys")"
+          key_id="$(jq -r '.id // empty' <<<"$created")"
+          [[ "$key_id" =~ ^[0-9]+$ && "$key_id" -gt 0 ]] || { echo HOSTINGER_SESSION_AUDIT_KEY_CREATE_FAILED=1 >&2; exit 4; }
+          echo "key_id=$key_id" >> "$GITHUB_OUTPUT"
+          attach_payload="$(jq -n --argjson id "$key_id" '{ids:[$id]}')"
+          response="$(curl -fsS -X POST -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' -H 'Content-Type: application/json' --data "$attach_payload" "$HOSTINGER_API_BASE/api/vps/v1/public-keys/attach/$VM_ID")"
+          printf '%s\n' "$response" > "$RUNNER_TEMP/openclaw-session-audit/attach-response.json"
+          echo "HOSTINGER_SESSION_AUDIT_ATTACH_ID=$(jq -r '.id // 0' <<<"$response")"
+
+      - name: Authenticate normal Kali directly after provider attach
+        id: ssh
+        shell: bash
+        run: |
+          set -euo pipefail
+          ready=false
+          for i in $(seq 1 36); do
+            if nc -z -w 4 "$HOST" 22 >/dev/null 2>&1; then
+              if ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=7 -i ~/.ssh/session-audit "$SSH_USER@$HOST" 'printf SAHJONY_SESSION_AUDIT_SSH=READY' 2>"$RUNNER_TEMP/openclaw-session-audit/ssh.err" | grep -q SAHJONY_SESSION_AUDIT_SSH=READY; then
+                ready=true
+                echo "HOSTINGER_SESSION_AUDIT_SSH=READY probe=$i"
+                break
+              fi
+              echo "HOSTINGER_SESSION_AUDIT_TCP22=OPEN auth_pending probe=$i/36"
+            else
+              echo "HOSTINGER_SESSION_AUDIT_TCP22=CLOSED probe=$i/36"
+            fi
+            sleep 5
+          done
+          echo "ready=$ready" >> "$GITHUB_OUTPUT"
+          if [[ "$ready" != true ]]; then
+            echo HOSTINGER_PROVIDER_ATTACH_DID_NOT_AUTHORIZE_GUEST_SSH=1 >&2
+            sed -n '1,12p' "$RUNNER_TEMP/openclaw-session-audit/ssh.err" >&2 || true
+            exit 20
+          fi
+
+      - name: Audit OpenClaw persistence and WhatsApp session metadata
+        if: steps.ssh.outputs.ready == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh_opts=(-o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -i ~/.ssh/session-audit)
+          ssh "${ssh_opts[@]}" "$SSH_USER@$HOST" 'bash -s' > "$RUNNER_TEMP/openclaw-session-audit/report.txt" <<'REMOTE'
+          set -uo pipefail
+          echo '=== HOST ==='
+          printf 'hostname='; hostname
+          printf 'utc='; date -u +%FT%TZ
+          echo
+
+          echo '=== OPENCLAW CONTAINERS ==='
+          docker ps -a --format '{{.ID}}|{{.Names}}|{{.Image}}|{{.Status}}' | grep -Ei 'openclaw|claw' || true
+          cid="$(docker ps -aq | while read -r id; do meta="$(docker inspect "$id" --format '{{.Name}}|{{.Config.Image}}' 2>/dev/null || true)"; grep -Eqi 'openclaw|claw' <<<"$meta" && { echo "$id"; break; }; done)"
+          if [[ -n "$cid" ]]; then
+            echo "OPENCLAW_CONTAINER_ID=$cid"
+            docker inspect "$cid" --format 'name={{.Name}} image={{.Config.Image}} status={{.State.Status}} restart={{.HostConfig.RestartPolicy.Name}}'
+            echo '--- mounts ---'
+            docker inspect "$cid" --format '{{range .Mounts}}{{.Type}}|{{.Source}}|{{.Destination}}|rw={{.RW}}{{println}}{{end}}'
+            echo '--- openclaw channel probe ---'
+            docker exec "$cid" sh -lc 'if command -v openclaw >/dev/null 2>&1; then openclaw channels status --probe; elif [ -x /root/.openclaw/bin/openclaw ]; then /root/.openclaw/bin/openclaw channels status --probe; elif [ -x /home/node/.openclaw/bin/openclaw ]; then /home/node/.openclaw/bin/openclaw channels status --probe; else node dist/index.js channels status --probe; fi' 2>&1 | sed -E 's/(token|secret|password|key)[=:][^[:space:]]+/\1=[REDACTED]/Ig' || true
+            echo '--- channels login help ---'
+            docker exec "$cid" sh -lc 'if command -v openclaw >/dev/null 2>&1; then openclaw channels login --help; else node dist/index.js channels login --help; fi' 2>&1 | head -n 100 || true
+          else
+            echo OPENCLAW_CONTAINER_NOT_FOUND=1
+          fi
+          echo
+
+          echo '=== PERSISTENT STATE ROOTS ==='
+          for root in /var/lib/sahjony-openclaw-state /var/lib/sahjony-openclaw-auth /root/.openclaw; do
+            if [[ -e "$root" ]]; then
+              printf '%s|' "$root"; stat -c 'type=%F|mode=%a|uid=%u|gid=%g|mtime=%y' "$root" 2>/dev/null || true
+              printf '%s|' "$root"; du -sk "$root" 2>/dev/null | awk '{print "size_kb="$1}' || true
+              printf '%s|' "$root"; find "$root" -xdev -type f 2>/dev/null | wc -l | awk '{print "file_count="$1}'
+            fi
+          done
+          echo
+
+          echo '=== WHATSAPP/AUTH FILE METADATA ONLY ==='
+          for root in /var/lib/sahjony-openclaw-state /var/lib/sahjony-openclaw-auth /root/.openclaw; do
+            [[ -d "$root" ]] || continue
+            find "$root" -xdev -maxdepth 7 -type f \( -iname '*whatsapp*' -o -iname '*baileys*' -o -iname 'creds.json' -o -iname '*session*' -o -iname '*auth*' \) -printf '%p|size=%s|mtime=%TY-%Tm-%TdT%TH:%TM:%TSZ|mode=%m|uid=%U|gid=%G\n' 2>/dev/null | head -n 250
+          done
+          echo
+
+          echo '=== STATE DIRECTORY TREE NAMES ONLY ==='
+          for root in /var/lib/sahjony-openclaw-state /var/lib/sahjony-openclaw-auth; do
+            [[ -d "$root" ]] || continue
+            echo "--- $root ---"
+            find "$root" -xdev -maxdepth 4 -printf '%y|%p\n' 2>/dev/null | head -n 350
+          done
+          echo
+
+          echo '=== OPENCLAW BACKUPS ==='
+          if [[ -d /var/backups/sahjony-openclaw ]]; then
+            find /var/backups/sahjony-openclaw -maxdepth 1 -type f -printf '%p|size=%s|mtime=%TY-%Tm-%TdT%TH:%TM:%TSZ\n' 2>/dev/null | sort
+            for archive in /var/backups/sahjony-openclaw/*.tgz; do
+              [[ -f "$archive" ]] || continue
+              echo "--- archive=$archive names_only ---"
+              tar -tzf "$archive" 2>/dev/null | grep -Ei 'whatsapp|baileys|creds|session|auth|openclaw.json' | head -n 150 || true
+            done
+          fi
+          echo
+
+          echo '=== GUARDIAN ==='
+          systemctl is-active sahjony-whatsapp-guardian.timer 2>/dev/null || true
+          systemctl is-enabled sahjony-whatsapp-guardian.timer 2>/dev/null || true
+          [[ -f /var/lib/sahjony-whatsapp-guardian/last-good ]] && stat -c 'last_good_mtime=%Y' /var/lib/sahjony-whatsapp-guardian/last-good || echo last_good_missing=1
+          echo SAHJONY_OPENCLAW_SESSION_AUDIT_COMPLETE=1
+          REMOTE
+          cat "$RUNNER_TEMP/openclaw-session-audit/report.txt"
+
+      - name: Upload redacted session audit evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hostinger-openclaw-session-audit-${{ github.run_id }}
+          path: ${{ runner.temp }}/openclaw-session-audit/
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Remove ephemeral audit identity
+        if: always()
+        env:
+          KEY_ID: ${{ steps.attach.outputs.key_id }}
+        shell: bash
+        run: |
+          set +e
+          if [[ "${{ steps.ssh.outputs.ready }}" == true && -s ~/.ssh/session-audit.pub ]]; then
+            pub_b64="$(base64 -w0 ~/.ssh/session-audit.pub)"
+            ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 -i ~/.ssh/session-audit "$SSH_USER@$HOST" "PUB_B64='$pub_b64' bash -s" <<'REMOTE'
+          set +e
+          pub="$(printf '%s' "$PUB_B64" | base64 -d)"
+          auth=/root/.ssh/authorized_keys
+          if [[ -f "$auth" ]]; then
+            tmp="$(mktemp)"
+            grep -vxF "$pub" "$auth" > "$tmp" || true
+            cat "$tmp" > "$auth"
+            chmod 600 "$auth"
+            rm -f "$tmp"
+          fi
+          echo SAHJONY_SESSION_AUDIT_GUEST_KEY_REMOVED=1
+          REMOTE
+          fi
+          if [[ "$KEY_ID" =~ ^[0-9]+$ && "$KEY_ID" -gt 0 ]]; then
+            curl -sS -X DELETE -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' "$HOSTINGER_API_BASE/api/vps/v1/public-keys/$KEY_ID" >/dev/null 2>&1 || true
+            echo SAHJONY_SESSION_AUDIT_ACCOUNT_KEY_DELETE_REQUESTED=1
+          fi
+          rm -f ~/.ssh/session-audit ~/.ssh/session-audit.pub
