@@ -1,0 +1,30 @@
+name: WhatsApp Number Activation Lint
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'openclaw/hostinger-24x7/whatsapp-number-activate.sh'
+      - 'openclaw/sahjony-app-bridge/health-sidecar.py'
+      - '.github/workflows/whatsapp-number-activation-lint.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate Bash activator
+        run: bash -n openclaw/hostinger-24x7/whatsapp-number-activate.sh
+      - name: Validate Python health sidecar
+        run: python3 -m py_compile openclaw/sahjony-app-bridge/health-sidecar.py
+      - name: Verify immutable-session safeguards
+        run: |
+          set -euo pipefail
+          file=openclaw/hostinger-24x7/whatsapp-number-activate.sh
+          grep -q 'hostinger-vps' "$file"
+          grep -q 'linked_whatsapp_session_not_connected_no_relink_attempted' "$file"
+          ! grep -Eiq 'openclaw[[:space:]]+channels[[:space:]]+(login|logout)|link-device|scan.*qr' "$file"
+          echo SAHJONY_WHATSAPP_ACTIVATION_TOOLING_VALIDATED=1
