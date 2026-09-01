@@ -10,12 +10,16 @@ on:
       - '.github/workflows/hostinger-whatsapp-recovery-v7.yml'
       - '.github/workflows/hostinger-whatsapp-pair-live.yml'
       - 'openclaw/hostinger-24x7/whatsapp-24x7-control-plane.sh'
+      - 'openclaw/hostinger-24x7/whatsapp-24x7-orchestrator.sh'
       - 'openclaw/hostinger-24x7/whatsapp-hostinger-only-guardian.sh'
+      - 'openclaw/hostinger-24x7/whatsapp-guardian.sh'
+      - 'openclaw/hostinger-24x7/install-whatsapp-guardian.sh'
       - 'openclaw/hostinger-24x7/whatsapp-pairing-controller.sh'
       - 'openclaw/hostinger-24x7/hostinger-recovery-controller.sh'
       - 'openclaw/hostinger-24x7/openclaw-runtime-recovery.sh'
       - 'openclaw/hostinger-24x7/runtime-plan-doctor.sh'
       - 'openclaw/hostinger-24x7/ssh-self-heal.sh'
+      - 'openclaw/skills/whatsapp-24x7/SKILL.md'
 
 permissions:
   contents: read
@@ -33,7 +37,10 @@ jobs:
           set -euo pipefail
           for f in \
             openclaw/hostinger-24x7/whatsapp-24x7-control-plane.sh \
+            openclaw/hostinger-24x7/whatsapp-24x7-orchestrator.sh \
             openclaw/hostinger-24x7/whatsapp-hostinger-only-guardian.sh \
+            openclaw/hostinger-24x7/whatsapp-guardian.sh \
+            openclaw/hostinger-24x7/install-whatsapp-guardian.sh \
             openclaw/hostinger-24x7/whatsapp-pairing-controller.sh \
             openclaw/hostinger-24x7/hostinger-recovery-controller.sh \
             openclaw/hostinger-24x7/openclaw-runtime-recovery.sh \
@@ -63,6 +70,53 @@ jobs:
           if 'whatsapp-pairing-controller.sh' not in workflow:
               raise SystemExit('PAIRING_CONTROLLER_NOT_WIRED=1')
           print('PAIRING_ANTI_LOOP_POLICY=PASS')
+          PY
+
+      - name: Validate Hostinger-local authority invariants
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import pathlib
+
+          orch = pathlib.Path('openclaw/hostinger-24x7/whatsapp-24x7-orchestrator.sh').read_text()
+          guardian = pathlib.Path('openclaw/hostinger-24x7/whatsapp-guardian.sh').read_text()
+          installer = pathlib.Path('openclaw/hostinger-24x7/install-whatsapp-guardian.sh').read_text()
+
+          required_orchestrator = [
+              'PAIRING_REQUIRED',
+              'CONTAINER_MISSING',
+              'CHANNEL_DEGRADED',
+              'authoritative_transport:"hostinger_openclaw"',
+              'meta_cloud_required:false',
+              'vercel_required:false',
+              'restart_container_once',
+              'status.json',
+          ]
+          for marker in required_orchestrator:
+              if marker not in orch:
+                  raise SystemExit(f'ORCHESTRATOR_INVARIANT_MISSING={marker}')
+
+          forbidden = [
+              'docker rm', 'docker compose down', 'docker-compose down',
+              'web.logout', '"force":true', "'force':true",
+          ]
+          for marker in forbidden:
+              if marker in orch:
+                  raise SystemExit(f'ORCHESTRATOR_DESTRUCTIVE_MARKER={marker}')
+
+          if 'SAHJONY_HOSTINGER_HEARTBEAT=DEFERRED' not in guardian:
+              raise SystemExit('GUARDIAN_HEARTBEAT_MUST_BE_NONFATAL=1')
+          if 'SAHJONY_HOSTINGER_LOCAL_RUNTIME=READY' not in guardian:
+              raise SystemExit('GUARDIAN_LOCAL_READY_MARKER_MISSING=1')
+          if 'SAHJONY_HOSTINGER_LOCAL_GATE=READY' not in installer:
+              raise SystemExit('INSTALLER_LOCAL_GATE_MISSING=1')
+          if 'SECONDARY_ONLY' not in installer:
+              raise SystemExit('INSTALLER_PUBLIC_HEALTH_MUST_BE_SECONDARY=1')
+          if 'signed_hostinger_heartbeat_not_published' in installer:
+              raise SystemExit('INSTALLER_PUBLIC_HEARTBEAT_GATE_REGRESSION=1')
+
+          print('HOSTINGER_LOCAL_AUTHORITY_POLICY=PASS')
           PY
 
       - name: Reject unsafe early-exit pipelines in runtime planner
