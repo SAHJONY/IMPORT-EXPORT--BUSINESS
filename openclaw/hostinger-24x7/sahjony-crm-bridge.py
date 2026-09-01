@@ -75,14 +75,12 @@ def container_env_value(container: str, key: str) -> str:
     value = parse_env_text(output, key)
     if value:
         return value
-    script = (
-        'key="$1"; '
-        'for f in "$HOME/.openclaw/.env" /root/.openclaw/.env /home/node/.openclaw/.env; do '
-        '[ -r "$f" ] || continue; '
-        'awk -F= -v k="$key" '\''$1==k{sub(/^[^=]*=/,""); gsub(/^["'\'' ]+|["'\'' ]+$/,""); print; exit}'\'' "$f"; '
-        'done'
-    )
-    return run(["docker", "exec", container, "sh", "-lc", script, "sh", key]).splitlines()[0].strip() if run(["docker", "exec", container, "sh", "-lc", script, "sh", key]) else ""
+    for path in ("$HOME/.openclaw/.env", "/root/.openclaw/.env", "/home/node/.openclaw/.env"):
+        text = run(["docker", "exec", container, "sh", "-lc", f"cat {path} 2>/dev/null || true"])
+        value = parse_env_text(text, key)
+        if value:
+            return value
+    return ""
 
 
 def discover_value(*keys: str) -> str:
@@ -110,8 +108,7 @@ def bridge_secret() -> str:
 
 
 def app_url() -> str:
-    value = discover_value("SAHJONY_APP_URL") or DEFAULT_APP_URL
-    return value.rstrip("/")
+    return (discover_value("SAHJONY_APP_URL") or DEFAULT_APP_URL).rstrip("/")
 
 
 def state_dir() -> pathlib.Path:
@@ -157,11 +154,24 @@ def request_json(method: str, path: str, payload: dict[str, Any] | None = None) 
         "Accept": "application/json",
         "X-SAHJONY-Timestamp": timestamp,
         "X-SAHJONY-Nonce": nonce,
-        "X-SAHJONY-CRM-Signature": signature(secret, timestamp=timestamp, nonce=nonce, method=method, path=path, raw=raw),
+        "X-SAHJONY-CRM-Signature": signature(
+            secret,
+            timestamp=timestamp,
+            nonce=nonce,
+            method=method,
+            path=path,
+            raw=raw,
+        ),
     }
+    del secret
     if payload is not None:
         headers["Content-Type"] = "application/json"
-    req = urllib.request.Request(app_url() + path, data=raw if payload is not None else None, headers=headers, method=method.upper())
+    req = urllib.request.Request(
+        app_url() + path,
+        data=raw if payload is not None else None,
+        headers=headers,
+        method=method.upper(),
+    )
     try:
         with urllib.request.urlopen(req, timeout=25) as response:
             body = response.read().decode("utf-8", errors="replace")
@@ -276,7 +286,10 @@ def flush_queue() -> dict[str, Any]:
 
     tmp = path.with_suffix(".tmp")
     if remaining:
-        tmp.write_text("".join(json.dumps(item, separators=(",", ":"), ensure_ascii=False) + "\n" for item in remaining), encoding="utf-8")
+        tmp.write_text(
+            "".join(json.dumps(item, separators=(",", ":"), ensure_ascii=False) + "\n" for item in remaining),
+            encoding="utf-8",
+        )
         os.chmod(tmp, 0o600)
         tmp.replace(path)
     else:
@@ -317,10 +330,7 @@ def doctor() -> dict[str, Any]:
 
 def payload_from_args(args: argparse.Namespace) -> dict[str, Any]:
     if getattr(args, "json", None):
-        if args.json == "-":
-            raw = sys.stdin.read()
-        else:
-            raw = args.json
+        raw = sys.stdin.read() if args.json == "-" else args.json
         data = json.loads(raw)
         if not isinstance(data, dict):
             raise ValueError("payload_must_be_json_object")
@@ -334,8 +344,8 @@ def parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="Authorized SAHJONY OpenClaw CRM bridge")
     sub = p.add_subparsers(dest="action", required=True)
     sub.add_parser("health")
-    c = sub.add_parser("contact")
-    c.add_argument("phone")
+    contact = sub.add_parser("contact")
+    contact.add_argument("phone")
     for action in ("sync", "note", "intake"):
         item = sub.add_parser(action)
         item.add_argument("--json", required=True, help="JSON object, or '-' to read JSON from stdin")
@@ -355,7 +365,7 @@ def main() -> int:
             payload = payload_from_args(args)
             result = perform(args.action, payload if args.action != "health" else None)
         print(json.dumps(result, separators=(",", ":"), ensure_ascii=False))
-        return 0 if result.get("status") not in {"error"} else 1
+        return 0 if result.get("status") != "error" else 1
     except Exception as exc:
         print(json.dumps({"status": "error", "error": str(exc).split(":", 1)[0]}, separators=(",", ":")))
         return 1
