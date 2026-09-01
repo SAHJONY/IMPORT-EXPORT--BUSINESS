@@ -17,7 +17,7 @@ concurrency:
 env:
   HOST: '69.62.68.67'
   SSH_USER: root
-  RETEST_REASON: 'normalize-repository-secret-format'
+  RETEST_REASON: 'classify-secret-format-without-exposure'
 
 jobs:
   test_auth:
@@ -38,15 +38,41 @@ jobs:
           fi
           install -d -m 700 ~/.ssh
           python3 - <<'PY'
-          import os, pathlib
+          import base64, os, pathlib
           raw = os.environ['HOSTINGER_SSH_PRIVATE_KEY']
-          raw = raw.replace('\r\n', '\n').replace('\r', '\n')
-          if '\\n' in raw and '\n' not in raw.strip('\\n'):
-              raw = raw.replace('\\n', '\n')
-          elif '\\n' in raw and '-----BEGIN' in raw and raw.count('\n') < 2:
-              raw = raw.replace('\\n', '\n')
-          raw = raw.strip() + '\n'
-          pathlib.Path.home().joinpath('.ssh/hostinger-persistent').write_text(raw)
+          raw = raw.replace('\r\n', '\n').replace('\r', '\n').strip()
+          if '\\n' in raw and raw.count('\n') < 2:
+              raw = raw.replace('\\n', '\n').strip()
+
+          def classify(value: str) -> str:
+              first = value.splitlines()[0].strip() if value.splitlines() else ''
+              if first == '-----BEGIN OPENSSH PRIVATE KEY-----': return 'OPENSSH_PRIVATE_KEY'
+              if first.startswith('-----BEGIN ') and first.endswith(' PRIVATE KEY-----'): return 'PEM_PRIVATE_KEY'
+              if first.startswith('PuTTY-User-Key-File-'): return 'PUTTY_PPK'
+              if first.startswith(('ssh-ed25519 ', 'ssh-rsa ', 'ecdsa-sha2-')): return 'PUBLIC_KEY_NOT_PRIVATE'
+              return 'UNKNOWN'
+
+          kind = classify(raw)
+          if kind == 'UNKNOWN':
+              try:
+                  compact = ''.join(raw.split())
+                  decoded = base64.b64decode(compact, validate=True).decode('utf-8')
+                  decoded = decoded.replace('\r\n', '\n').replace('\r', '\n').strip()
+                  decoded_kind = classify(decoded)
+                  if decoded_kind in {'OPENSSH_PRIVATE_KEY', 'PEM_PRIVATE_KEY'}:
+                      raw, kind = decoded, 'BASE64_' + decoded_kind
+              except Exception:
+                  pass
+
+          print('HOSTINGER_SSH_SECRET_FORMAT=' + kind)
+          print('HOSTINGER_SSH_SECRET_LINE_COUNT=' + str(len(raw.splitlines())))
+          if kind == 'PUBLIC_KEY_NOT_PRIVATE':
+              raise SystemExit(21)
+          if kind == 'PUTTY_PPK':
+              raise SystemExit(22)
+          if kind == 'UNKNOWN':
+              raise SystemExit(23)
+          pathlib.Path.home().joinpath('.ssh/hostinger-persistent').write_text(raw + '\n')
           PY
           chmod 600 ~/.ssh/hostinger-persistent
           ssh-keygen -y -f ~/.ssh/hostinger-persistent >/dev/null
