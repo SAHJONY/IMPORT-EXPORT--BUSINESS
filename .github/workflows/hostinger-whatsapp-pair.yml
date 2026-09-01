@@ -31,6 +31,32 @@ jobs:
           chmod 600 ~/.ssh/hostinger
           ssh-keygen -y -f ~/.ssh/hostinger >/dev/null
 
+      - name: Synchronize VPS clock for WhatsApp authentication
+        shell: bash
+        run: |
+          set -euo pipefail
+          opts=(-o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -i "$HOME/.ssh/hostinger")
+          ssh "${opts[@]}" "$USER@$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          export DEBIAN_FRONTEND=noninteractive
+          if ! command -v chronyc >/dev/null 2>&1; then
+            apt-get update -qq
+            apt-get install -y -qq chrony >/dev/null
+          fi
+          systemctl enable --now chrony.service
+          chronyc -a burst 4/4 >/dev/null 2>&1 || true
+          chronyc -a makestep >/dev/null 2>&1 || true
+          synchronized=false
+          for attempt in $(seq 1 20); do
+            leap="$(chronyc tracking 2>/dev/null | awk -F: '/Leap status/{gsub(/^[ \t]+/,"",$2); print $2}')"
+            if [[ "$leap" == Normal ]]; then synchronized=true; break; fi
+            sleep 3
+          done
+          [[ "$synchronized" == true ]] || { chronyc tracking >&2 || true; echo VPS_CLOCK_NOT_SYNCHRONIZED=1 >&2; exit 30; }
+          timedatectl set-timezone UTC
+          echo VPS_CLOCK_SYNCHRONIZED=1
+          REMOTE
+
       - name: Start one WhatsApp pairing session
         shell: bash
         run: |
