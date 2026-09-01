@@ -1,84 +1,16 @@
-name: WhatsApp Meta Cloud Recovery
+name: WhatsApp Meta Cloud Recovery [RETIRED]
 
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/whatsapp-meta-cloud-recovery.yml'
-      - 'whatsapp_cloud_primary_api.py'
-      - 'whatsapp_api.py'
 
 permissions:
   contents: read
 
 jobs:
-  recover-meta-cloud:
+  retired:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Vercel CLI
-        run: npm install --global vercel@latest
-
-      - name: Detect cloud credential availability without exposing values
-        id: creds
-        env:
-          WHATSAPP_ACCESS_TOKEN: ${{ secrets.WHATSAPP_ACCESS_TOKEN }}
-          WHATSAPP_PHONE_NUMBER_ID: ${{ secrets.WHATSAPP_PHONE_NUMBER_ID }}
-          WHATSAPP_BUSINESS_ACCOUNT_ID: ${{ secrets.WHATSAPP_BUSINESS_ACCOUNT_ID }}
-          WHATSAPP_WEBHOOK_VERIFY_TOKEN: ${{ secrets.WHATSAPP_WEBHOOK_VERIFY_TOKEN }}
-          WHATSAPP_APP_SECRET: ${{ secrets.WHATSAPP_APP_SECRET }}
-          WHATSAPP_APP_ID: ${{ secrets.WHATSAPP_APP_ID }}
-          WHATSAPP_EMBEDDED_SIGNUP_CONFIG_ID: ${{ secrets.WHATSAPP_EMBEDDED_SIGNUP_CONFIG_ID }}
-          WHATSAPP_GRAPH_API_VERSION: ${{ secrets.WHATSAPP_GRAPH_API_VERSION }}
-        run: |
-          required=(WHATSAPP_ACCESS_TOKEN WHATSAPP_PHONE_NUMBER_ID WHATSAPP_WEBHOOK_VERIFY_TOKEN WHATSAPP_APP_SECRET WHATSAPP_GRAPH_API_VERSION)
-          missing=0
-          for name in "${required[@]}"; do
-            if [ -z "${!name}" ]; then
-              echo "Missing configured secret: $name"
-              missing=1
-            fi
-          done
-          if [ "$missing" -eq 0 ]; then echo 'ready=true' >> "$GITHUB_OUTPUT"; else echo 'ready=false' >> "$GITHUB_OUTPUT"; fi
-
-      - name: Sync Meta Cloud secrets to Vercel Production
-        if: steps.creds.outputs.ready == 'true'
-        env:
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
-          WHATSAPP_ACCESS_TOKEN: ${{ secrets.WHATSAPP_ACCESS_TOKEN }}
-          WHATSAPP_PHONE_NUMBER_ID: ${{ secrets.WHATSAPP_PHONE_NUMBER_ID }}
-          WHATSAPP_BUSINESS_ACCOUNT_ID: ${{ secrets.WHATSAPP_BUSINESS_ACCOUNT_ID }}
-          WHATSAPP_WEBHOOK_VERIFY_TOKEN: ${{ secrets.WHATSAPP_WEBHOOK_VERIFY_TOKEN }}
-          WHATSAPP_APP_SECRET: ${{ secrets.WHATSAPP_APP_SECRET }}
-          WHATSAPP_APP_ID: ${{ secrets.WHATSAPP_APP_ID }}
-          WHATSAPP_EMBEDDED_SIGNUP_CONFIG_ID: ${{ secrets.WHATSAPP_EMBEDDED_SIGNUP_CONFIG_ID }}
-          WHATSAPP_GRAPH_API_VERSION: ${{ secrets.WHATSAPP_GRAPH_API_VERSION }}
-        run: |
-          set -euo pipefail
-          vercel link --yes --token "$VERCEL_TOKEN" --scope "$VERCEL_ORG_ID" --project "$VERCEL_PROJECT_ID"
-          sync_env () {
-            name="$1"; value="${!name:-}"
-            [ -z "$value" ] && return 0
-            vercel env rm "$name" production --yes --token "$VERCEL_TOKEN" >/dev/null 2>&1 || true
-            printf '%s' "$value" | vercel env add "$name" production --sensitive --token "$VERCEL_TOKEN" >/dev/null
-          }
-          for n in WHATSAPP_ACCESS_TOKEN WHATSAPP_PHONE_NUMBER_ID WHATSAPP_BUSINESS_ACCOUNT_ID WHATSAPP_WEBHOOK_VERIFY_TOKEN WHATSAPP_APP_SECRET WHATSAPP_APP_ID WHATSAPP_EMBEDDED_SIGNUP_CONFIG_ID WHATSAPP_GRAPH_API_VERSION; do sync_env "$n"; done
-          printf '%s' 'meta_cloud' | vercel env add WHATSAPP_PROVIDER production --token "$VERCEL_TOKEN" >/dev/null 2>&1 || true
-
-      - name: Redeploy production after credential recovery
-        if: steps.creds.outputs.ready == 'true'
-        env:
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
-        run: vercel --prod --yes --token "$VERCEL_TOKEN"
-
-      - name: Explain safe hold when secrets are absent
-        if: steps.creds.outputs.ready != 'true'
-        run: |
-          echo 'Meta Cloud credentials are not present in GitHub Actions secrets.'
-          echo 'No credentials were exposed and no unsafe fallback was attempted.'
+      - run: |
+          echo WHATSAPP_META_CLOUD_RECOVERY_RETIRED=1
+          echo META_NOT_CONTROLLED=1
+          echo AUTHORITATIVE_TRANSPORT=HOSTINGER_OPENCLAW
