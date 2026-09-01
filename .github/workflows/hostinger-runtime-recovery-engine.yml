@@ -1,0 +1,66 @@
+name: Hostinger Runtime Recovery Engine
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'openclaw/hostinger-24x7/openclaw-runtime-recovery.sh'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hostinger-vm-767852-mutation
+  cancel-in-progress: false
+
+env:
+  HOSTINGER_VM_ID: '767852'
+  HOSTINGER_HOST: '69.62.68.67'
+  HOSTINGER_USER: root
+  HOSTINGER_API_BASE: https://developers.hostinger.com
+
+jobs:
+  recover:
+    if: ${{ github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, 'harden OpenClaw runtime recovery engine') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      HOSTINGER_API_TOKEN: ${{ secrets.HOSTINGER_API_TOKEN }}
+      EXISTING_SSH_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate recovery engine
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n openclaw/hostinger-24x7/openclaw-runtime-recovery.sh
+          bash -n openclaw/hostinger-24x7/runtime-plan-doctor.sh
+          bash -n openclaw/hostinger-24x7/hostinger-recovery-controller.sh
+
+      - name: Prepare controller runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "${HOSTINGER_API_TOKEN:-}" ]] || { echo HOSTINGER_API_TOKEN_MISSING=1 >&2; exit 2; }
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq jq sshpass netcat-openbsd >/dev/null
+          chmod +x openclaw/hostinger-24x7/*.sh
+          if [[ -n "${EXISTING_SSH_KEY:-}" ]]; then
+            install -d -m 700 ~/.ssh
+            printf '%s\n' "$EXISTING_SSH_KEY" > ~/.ssh/hostinger-existing
+            chmod 600 ~/.ssh/hostinger-existing
+            echo "SSH_KEY_PATH=$HOME/.ssh/hostinger-existing" >> "$GITHUB_ENV"
+          fi
+
+      - name: Run one serialized recovery
+        shell: bash
+        run: |
+          set -euo pipefail
+          openclaw/hostinger-24x7/hostinger-recovery-controller.sh full
+
+      - name: Remove runner key material
+        if: always()
+        shell: bash
+        run: rm -f ~/.ssh/hostinger-existing ~/.ssh/hostinger-existing.pub
