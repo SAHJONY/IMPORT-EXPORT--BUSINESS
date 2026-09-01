@@ -1,0 +1,41 @@
+name: Hostinger Authorize iMac SSH Key Once
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/hostinger-authorize-imac-key-once.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  authorize-key:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      HOST: '69.62.68.67'
+      USER: root
+      PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+      IMAC_PUBKEY: 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBPOGMySMoDdRApLFPoYsXqmQV1eUpJLu/w3Ciz4l9eM juangonzalez@Juans-iMac.local'
+    steps:
+      - name: Prepare SSH
+        shell: bash
+        run: |
+          set -euo pipefail
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/hostinger-imac-key
+          chmod 600 ~/.ssh/hostinger-imac-key
+
+      - name: Authorize iMac public key
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=15 \
+            -i ~/.ssh/hostinger-imac-key "$USER@$HOST" \
+            "install -d -m 700 /root/.ssh; touch /root/.ssh/authorized_keys; chmod 600 /root/.ssh/authorized_keys; grep -qxF '$IMAC_PUBKEY' /root/.ssh/authorized_keys || printf '%s\\n' '$IMAC_PUBKEY' >> /root/.ssh/authorized_keys; grep -qxF '$IMAC_PUBKEY' /root/.ssh/authorized_keys && echo IMAC_SSH_KEY_AUTHORIZED=1"
+
+      - name: Cleanup SSH
+        if: always()
+        shell: bash
+        run: rm -f ~/.ssh/hostinger-imac-key
