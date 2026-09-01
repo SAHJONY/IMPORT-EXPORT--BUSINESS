@@ -100,13 +100,17 @@ jobs:
               (if type == "array" then . else (.data // []) end)[] |
               select((.id | tostring) == $id) | .state
             ' <<<"${vm_response}")"
-            if [[ "${vm_state}" == "recovery" || "${vm_state}" == "stopping_recovery" ]]; then
-              curl --fail --silent --show-error \
-                --request DELETE \
-                --header "${auth_header}" \
-                "${api_root}/virtual-machines/${target_vm_id}/recovery" >/dev/null
-              echo "Requested exit from Hostinger emergency mode for VPS ${target_vm_id}." >> "${GITHUB_STEP_SUMMARY}"
+            recovery_status="$(curl --silent --show-error \
+              --output "${RUNNER_TEMP}/recovery-response.json" \
+              --write-out '%{http_code}' \
+              --request DELETE \
+              --header "${auth_header}" \
+              "${api_root}/virtual-machines/${target_vm_id}/recovery")"
+            if [[ "${recovery_status}" != "200" && "${recovery_status}" != "422" ]]; then
+              echo "Hostinger recovery-stop request failed with HTTP ${recovery_status}." >&2
+              exit 1
             fi
+            echo "Requested exit from Hostinger emergency mode for VPS ${target_vm_id} (HTTP ${recovery_status})." >> "${GITHUB_STEP_SUMMARY}"
             for attempt in {1..30}; do
               vm_detail="$(curl --fail --silent --show-error \
                 --header "${auth_header}" \
@@ -234,7 +238,9 @@ jobs:
               fi
               sleep 5
             done
-            [[ "${authenticated}" -eq 1 ]] && break
+            if [[ "${authenticated}" -eq 1 ]]; then
+              break
+            fi
           done < <(jq -r '
             (if type == "array" then . else (.data // []) end)[] |
             [(.id | tostring),
