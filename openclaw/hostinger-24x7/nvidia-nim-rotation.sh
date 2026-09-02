@@ -58,6 +58,65 @@ else
   systemctl is-active --quiet openclaw-gateway.service || fail native_gateway_inactive
 fi
 
+# OpenClaw 2026.8.1 can synthesize its generic external-run-failure copy after
+# ordinary outbound plugin hooks have already settled. On this dedicated
+# WhatsApp authority host, suppress that runtime-owned copy at the source and
+# let the bounded SAHJONY reply-rescue path produce the customer-visible answer.
+# The patch is idempotent and leaves a per-file backup beside every modified
+# bundle so an operator can restore the vendor bytes if OpenClaw changes later.
+if [[ "$RUNTIME" == native ]]; then
+  OPENCLAW_BIN_REAL="$(readlink -f "$(command -v openclaw)")"
+  OPENCLAW_PACKAGE_DIR="$(dirname "$OPENCLAW_BIN_REAL")"
+  if [[ ! -d "$OPENCLAW_PACKAGE_DIR/dist" && -d "$(dirname "$OPENCLAW_PACKAGE_DIR")/dist" ]]; then
+    OPENCLAW_PACKAGE_DIR="$(dirname "$OPENCLAW_PACKAGE_DIR")"
+  fi
+  OPENCLAW_DIST="$OPENCLAW_PACKAGE_DIR/dist"
+  [[ -d "$OPENCLAW_DIST" ]] || fail openclaw_dist_not_found
+
+  PATCH_RESULT="$(OPENCLAW_DIST="$OPENCLAW_DIST" python3 - <<'PY'
+from pathlib import Path
+import os, shutil
+
+dist = Path(os.environ['OPENCLAW_DIST'])
+generic = '⚠️ Something went wrong while processing your request. Please try again, or use /new to start a fresh session.'
+replacement = 'NO_REPLY'
+patched = 0
+already = 0
+for path in dist.glob('*.js'):
+    try:
+        text = path.read_text(encoding='utf-8')
+    except Exception:
+        continue
+    if generic not in text:
+        continue
+    backup = path.with_name(path.name + '.sahjony-pre-generic-failure-guard')
+    if not backup.exists():
+        shutil.copy2(path, backup)
+    path.write_text(text.replace(generic, replacement), encoding='utf-8')
+    patched += 1
+
+remaining = []
+for path in dist.glob('*.js'):
+    try:
+        if generic in path.read_text(encoding='utf-8'):
+            remaining.append(path.name)
+    except Exception:
+        pass
+if remaining:
+    raise SystemExit('generic_failure_copy_remaining=' + ','.join(remaining))
+
+# A zero patch count is valid on later runs because the bundle may already be
+# patched, or a future upstream OpenClaw version may have removed this copy.
+print(f'patched={patched};remaining={len(remaining)}')
+PY
+)" || fail openclaw_generic_failure_guard_failed
+  printf '%s\n' "$PATCH_RESULT" > "$STATE_DIR/openclaw-generic-failure-guard.status"
+  chmod 600 "$STATE_DIR/openclaw-generic-failure-guard.status"
+  log "OPENCLAW_GENERIC_FAILURE_COPY=SUPPRESSED $PATCH_RESULT"
+else
+  log 'OPENCLAW_GENERIC_FAILURE_COPY=SKIPPED runtime=docker'
+fi
+
 oc plugins enable nvidia >/dev/null 2>&1 || true
 
 auth_present=false
