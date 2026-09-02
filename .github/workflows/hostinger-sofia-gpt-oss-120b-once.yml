@@ -1,10 +1,10 @@
 name: Hostinger Sofia GPT-OSS-120B One Time
 
 on:
-  workflow_run:
-    workflows: ['trade-os-ci']
-    types: [completed]
+  push:
     branches: [main]
+    paths:
+      - 'openclaw/hostinger-24x7/switch-sofia-gpt-oss-120b.sh'
   workflow_dispatch:
 
 permissions:
@@ -16,7 +16,6 @@ concurrency:
 
 jobs:
   cutover:
-    if: contains(github.event.workflow_run.head_commit.message, 'ARM_SOFIA_GPT_OSS_120B')
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     env:
@@ -24,16 +23,19 @@ jobs:
       SSH_USER: root
       PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
       NVIDIA_API_KEY_GH: ${{ secrets.NVIDIA_API_KEY }}
-      TARGET_NVIDIA_MODEL: openai/gpt-oss-120b
-      TARGET_OPENCLAW_MODEL: nvidia/openai/gpt-oss-120b
     steps:
-      - name: Validate required credentials
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      - name: Validate credentials and cutover script
         run: |
           set -euo pipefail
           [[ -n "$PRIVATE_KEY" ]] || { echo HOSTINGER_SSH_PRIVATE_KEY_MISSING=1 >&2; exit 2; }
           [[ "$NVIDIA_API_KEY_GH" == nvapi-* ]] || { echo NVIDIA_API_KEY_MISSING_OR_INVALID=1 >&2; exit 3; }
+          bash -n openclaw/hostinger-24x7/switch-sofia-gpt-oss-120b.sh
 
-      - name: Prepare secure SSH and NVIDIA credential
+      - name: Prepare secure SSH assets
         run: |
           set -euo pipefail
           umask 077
@@ -43,130 +45,12 @@ jobs:
           chmod 600 ~/.ssh/hostinger-sofia-gptoss "$RUNNER_TEMP/nvidia-key"
           ssh-keygen -y -f ~/.ssh/hostinger-sofia-gptoss >/dev/null
 
-      - name: Transfer NVIDIA credential securely
+      - name: Transfer and execute safe cutover
         run: |
           set -euo pipefail
           opts=(-o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=12 -i ~/.ssh/hostinger-sofia-gptoss)
-          scp "${opts[@]}" "$RUNNER_TEMP/nvidia-key" "$SSH_USER@$HOST:/root/sofia-gptoss-nvidia-key"
-
-      - name: Cut over Sofia to NVIDIA GPT-OSS-120B and verify WhatsApp
-        env:
-          TARGET_NVIDIA_MODEL: openai/gpt-oss-120b
-          TARGET_OPENCLAW_MODEL: nvidia/openai/gpt-oss-120b
-        run: |
-          set -euo pipefail
-          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=12 -i ~/.ssh/hostinger-sofia-gptoss "$SSH_USER@$HOST" \
-            "TARGET_NVIDIA_MODEL='$TARGET_NVIDIA_MODEL' TARGET_OPENCLAW_MODEL='$TARGET_OPENCLAW_MODEL' bash -s" <<'REMOTE'
-          set -euo pipefail
-          STATE=/var/lib/sahjony-openclaw-state
-          CONFIG="$STATE/openclaw.json"
-          KEY_FILE=/root/sofia-gptoss-nvidia-key
-          BACKUP="$STATE/openclaw.json.pre-gpt-oss-120b.$(date -u +%Y%m%dT%H%M%SZ)"
-          SMOKE=/tmp/sofia-gptoss-smoke.json
-          MUTATED=0
-          cleanup(){ rm -f "$KEY_FILE" "$SMOKE"; }
-          rollback(){
-            rc=$?
-            if [[ "$MUTATED" == 1 && -s "$BACKUP" ]]; then
-              cp -f "$BACKUP" "$CONFIG"
-              systemctl restart openclaw-gateway.service || true
-              echo SOFIA_GPT_OSS_ROLLBACK=1 >&2
-            fi
-            cleanup
-            exit "$rc"
-          }
-          trap rollback ERR INT TERM
-          trap cleanup EXIT
-
-          [[ -s "$CONFIG" ]] || { echo OPENCLAW_CONFIG_MISSING=1 >&2; exit 20; }
-          [[ -s "$KEY_FILE" ]] || { echo NVIDIA_KEY_TRANSFER_MISSING=1 >&2; exit 21; }
-          command -v openclaw >/dev/null 2>&1 || { echo OPENCLAW_CLI_MISSING=1 >&2; exit 22; }
-          systemctl is-active --quiet openclaw-gateway.service || { echo OPENCLAW_GATEWAY_INACTIVE=1 >&2; exit 23; }
-
-          oc(){ env HOME=/home/node OPENCLAW_HOME=/home/node OPENCLAW_STATE_DIR="$STATE" OPENCLAW_CONFIG_PATH="$CONFIG" openclaw "$@"; }
-          cp -a "$CONFIG" "$BACKUP"
-          chmod 600 "$BACKUP"
-
-          oc plugins enable nvidia >/dev/null 2>&1 || true
-          cat "$KEY_FILE" | oc models auth paste-api-key --provider nvidia --profile-id nvidia:nim >/dev/null
-          oc models auth order set --provider nvidia nvidia:nim >/dev/null
-          oc config set models.providers.nvidia '{"baseUrl":"https://integrate.api.nvidia.com/v1","api":"openai-completions"}' --strict-json --merge >/dev/null
-          oc config validate >/dev/null
-
-          nkey="$(tr -d '\r\n' <"$KEY_FILE")"
-          http_code="$(curl -sS -o "$SMOKE" -w '%{http_code}' --connect-timeout 10 --max-time 150 \
-            -H "Authorization: Bearer $nkey" \
-            -H 'Content-Type: application/json' \
-            -d "{\"model\":\"$TARGET_NVIDIA_MODEL\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply exactly SOFIA_GPT_OSS_OK\"}],\"max_tokens\":128,\"temperature\":1,\"top_p\":1}" \
-            https://integrate.api.nvidia.com/v1/chat/completions || true)"
-          [[ "$http_code" == 200 ]] || { echo "NVIDIA_GPT_OSS_SMOKE_HTTP=$http_code" >&2; exit 24; }
-
-          python3 - "$SMOKE" <<'PY'
-import json, sys
-p=sys.argv[1]
-with open(p, encoding='utf-8') as f:
-    obj=json.load(f)
-if not obj.get('choices'):
-    raise SystemExit('NVIDIA_GPT_OSS_SMOKE_NO_CHOICES')
-PY
-
-          before="$(oc config get agents.defaults.model.primary 2>/dev/null || true)"
-          oc config set agents.defaults.model.primary "$TARGET_OPENCLAW_MODEL" >/dev/null
-          oc config validate >/dev/null
-          MUTATED=1
-
-          configured="$(oc config get agents.defaults.model.primary 2>/dev/null || true)"
-          [[ "$configured" == "$TARGET_OPENCLAW_MODEL" ]] || { echo "SOFIA_MODEL_CONFIG_MISMATCH=$configured" >&2; exit 25; }
-
-          systemctl restart openclaw-gateway.service
-          sleep 12
-          systemctl is-active --quiet openclaw-gateway.service || { echo OPENCLAW_GATEWAY_RESTART_FAILED=1 >&2; exit 26; }
-
-          configured_after="$(oc config get agents.defaults.model.primary 2>/dev/null || true)"
-          [[ "$configured_after" == "$TARGET_OPENCLAW_MODEL" ]] || { echo "SOFIA_MODEL_POST_RESTART_MISMATCH=$configured_after" >&2; exit 27; }
-
-          wa=''
-          for attempt in 1 2 3 4 5 6 7 8; do
-            wa="$(curl -fsS --connect-timeout 10 --max-time 30 https://www.sahjony.com/whatsapp/health 2>/dev/null || true)"
-            if HEALTH="$wa" python3 - <<'PY'
-import json, os
-try:
-    h=json.loads(os.environ.get('HEALTH',''))
-except Exception:
-    raise SystemExit(1)
-n=h.get('hostinger_openclaw') or {}
-ok=(h.get('status')=='ok' and h.get('send_ready') is True and h.get('webhook_ready') is True and n.get('gateway_id')=='hostinger-vps' and n.get('connected') is True and n.get('heartbeat_fresh') is True)
-raise SystemExit(0 if ok else 1)
-PY
-            then
-              break
-            fi
-            sleep 10
-          done
-          HEALTH="$wa" python3 - <<'PY'
-import json, os
-h=json.loads(os.environ.get('HEALTH') or '{}')
-n=h.get('hostinger_openclaw') or {}
-assert h.get('status')=='ok', 'WHATSAPP_HEALTH_NOT_OK'
-assert h.get('send_ready') is True, 'WHATSAPP_SEND_NOT_READY'
-assert h.get('webhook_ready') is True, 'WHATSAPP_WEBHOOK_NOT_READY'
-assert n.get('gateway_id')=='hostinger-vps', 'WRONG_WHATSAPP_AUTHORITY'
-assert n.get('connected') is True, 'HOSTINGER_OPENCLAW_NOT_CONNECTED'
-assert n.get('heartbeat_fresh') is True, 'HOSTINGER_HEARTBEAT_STALE'
-PY
-
-          MUTATED=0
-          trap - ERR INT TERM
-          echo "SOFIA_MODEL_BEFORE=$before"
-          echo "SOFIA_PRIMARY_PROVIDER=NVIDIA"
-          echo "SOFIA_PRIMARY_MODEL=$configured_after"
-          echo "NVIDIA_MODEL_ID=$TARGET_NVIDIA_MODEL"
-          echo OPENCLAW_GATEWAY_ACTIVE=1
-          echo WHATSAPP_CONNECTED=1
-          echo WHATSAPP_SEND_READY=1
-          echo WHATSAPP_WEBHOOK_READY=1
-          echo SOFIA_GPT_OSS_120B_CUTOVER=SUCCESS
-          REMOTE
+          scp "${opts[@]}" openclaw/hostinger-24x7/switch-sofia-gpt-oss-120b.sh "$RUNNER_TEMP/nvidia-key" "$SSH_USER@$HOST:/root/"
+          ssh "${opts[@]}" "$SSH_USER@$HOST" 'chmod 700 /root/switch-sofia-gpt-oss-120b.sh && NVIDIA_KEY_FILE=/root/nvidia-key /root/switch-sofia-gpt-oss-120b.sh'
 
       - name: Cleanup
         if: always()
