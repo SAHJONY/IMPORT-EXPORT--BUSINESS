@@ -1,4 +1,4 @@
-name: Hostinger Remaining Gateway Client Inspect Once
+name: Hostinger Runtime Guardian Inspect Once
 
 on:
   push:
@@ -24,46 +24,28 @@ jobs:
         run: |
           set -euo pipefail
           install -d -m 700 ~/.ssh
-          printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/hostinger-client-inspect
-          chmod 600 ~/.ssh/hostinger-client-inspect
-          ssh-keygen -y -f ~/.ssh/hostinger-client-inspect >/dev/null
-
-      - name: Identify remaining local Gateway client
+          printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/hostinger-runtime-inspect
+          chmod 600 ~/.ssh/hostinger-runtime-inspect
+          ssh-keygen -y -f ~/.ssh/hostinger-runtime-inspect >/dev/null
+      - name: Inspect runtime guardian
         shell: bash
         run: |
           set -euo pipefail
-          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=15 -i ~/.ssh/hostinger-client-inspect "$USER@$HOST" 'bash -s' <<'REMOTE'
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=15 -i ~/.ssh/hostinger-runtime-inspect "$USER@$HOST" 'bash -s' <<'REMOTE'
           set -euo pipefail
-          redact(){ sed -E \
-            -e 's/(Bearer[[:space:]]+)[A-Za-z0-9._~+\/-]+/\1[REDACTED]/Ig' \
-            -e 's/((api[_-]?key|token|secret|password|authorization)["[:space:]]*[:=]["[:space:]]*)[^,"[:space:]]+/\1[REDACTED]/Ig'; }
+          redact(){ sed -E -e 's/(Bearer[[:space:]]+)[A-Za-z0-9._~+\/-]+/\1[REDACTED]/Ig' -e 's/(OPENCLAW_GATEWAY_TOKEN=)[^[:space:]]+/\1[REDACTED]/g'; }
           echo HOSTINGER_VPS_SCOPE_ONLY=1
-          echo REMAINING_WS_ERRORS_BEGIN
-          journalctl -u openclaw-gateway.service --since '2026-09-02 02:25:25' --no-pager 2>/dev/null \
-            | grep -Ei '\[ws\].*(device identity required|missing scope: operator\.read|reason=connect failed|FORBIDDEN)' \
-            | tail -n 30 | redact || true
-          echo REMAINING_WS_ERRORS_END
-
-          echo CURRENT_LOCAL_CONNECTIONS_BEGIN
-          ss -tnp 2>/dev/null | grep -E '(127\.0\.0\.1|\[::1\]).*:18789|:18789.*(127\.0\.0\.1|\[::1\])' | head -n 40 || true
-          echo CURRENT_LOCAL_CONNECTIONS_END
-
-          echo SSH_TUNNEL_PROCESSES_BEGIN
-          ps -eo pid,ppid,user,cmd --no-headers | grep -E '[s]shd:|[s]sh .*1878[90]|[o]penclaw|[n]ode' | head -n 80 | redact || true
-          echo SSH_TUNNEL_PROCESSES_END
-
-          echo ACTIVE_SAHJONY_TIMERS_BEGIN
-          systemctl list-timers --all --no-pager 2>/dev/null | grep -Ei '(sahjony|openclaw)' || true
-          echo ACTIVE_SAHJONY_TIMERS_END
-
-          echo STALE_GUARDIAN_TIMER_STATE_BEGIN
-          systemctl is-enabled sahjony-whatsapp-guardian.timer 2>/dev/null || true
-          systemctl is-active sahjony-whatsapp-guardian.timer 2>/dev/null || true
-          docker inspect sahjony-openclaw-gateway --format 'running={{.State.Running}} restart={{.HostConfig.RestartPolicy.Name}}' 2>/dev/null || true
-          echo STALE_GUARDIAN_TIMER_STATE_END
+          echo RUNTIME_GUARDIAN_UNITS_BEGIN
+          grep -RIl '/usr/local/sbin/sahjony-openclaw-runtime-guardian' /etc/systemd/system /lib/systemd/system 2>/dev/null | while read -r f; do echo UNIT_FILE="$f"; cat "$f" | redact; done
+          echo RUNTIME_GUARDIAN_UNITS_END
+          echo RUNTIME_GUARDIAN_SCRIPT_BEGIN
+          nl -ba /usr/local/sbin/sahjony-openclaw-runtime-guardian | sed -n '1,220p' | redact
+          echo RUNTIME_GUARDIAN_SCRIPT_END
+          echo RUNTIME_GUARDIAN_PROCESS_BEGIN
+          ps -eo pid,ppid,user,lstart,cmd --no-headers | grep '[s]ahjony-openclaw-runtime-guardian' | redact || true
+          echo RUNTIME_GUARDIAN_PROCESS_END
           echo INSPECTION_COMPLETE=1
           REMOTE
-
       - name: Cleanup SSH
         if: always()
-        run: rm -f ~/.ssh/hostinger-client-inspect
+        run: rm -f ~/.ssh/hostinger-runtime-inspect
