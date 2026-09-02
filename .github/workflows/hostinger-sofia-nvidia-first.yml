@@ -72,8 +72,8 @@ jobs:
           install -d -m 700 "$workspace"
           install -m 600 /root/SOFIA_SOUL.md "$workspace/SOUL.md"
           if [[ "$workspace" != /home/node/.openclaw/workspace ]]; then
-            install -d -o node -g node -m 700 /home/node/.openclaw/workspace
-            install -o node -g node -m 600 /root/SOFIA_SOUL.md /home/node/.openclaw/workspace/SOUL.md
+            install -d -m 700 /home/node/.openclaw/workspace
+            install -m 600 /root/SOFIA_SOUL.md /home/node/.openclaw/workspace/SOUL.md
           fi
           owner="$(tr -d '\r\n' </root/owner-number)"
           [[ "$owner" =~ ^\+[1-9][0-9]{7,14}$ ]] || { echo OWNER_NUMBER_TRANSFER_INVALID=1 >&2; exit 21; }
