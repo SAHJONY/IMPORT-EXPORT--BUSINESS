@@ -95,6 +95,9 @@ jobs:
           rm -rf "$STATE/extensions/sahjony-whatsapp-reply-rescue"
           install -d -m 700 "$STATE/extensions"
           cp -a /tmp/sahjony-whatsapp-reply-rescue "$STATE/extensions/sahjony-whatsapp-reply-rescue"
+          chown -R 0:0 "$STATE/extensions/sahjony-whatsapp-reply-rescue"
+          find "$STATE/extensions/sahjony-whatsapp-reply-rescue" -type d -exec chmod 755 {} +
+          find "$STATE/extensions/sahjony-whatsapp-reply-rescue" -type f -exec chmod 644 {} +
           CONFIG="$CONFIG" python3 - <<'PY'
           import json, os
           path=os.environ['CONFIG']
