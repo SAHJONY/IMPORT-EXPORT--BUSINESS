@@ -35,3 +35,11 @@ def test_fortune_500_executive_style_is_enforced() -> None:
     instructions = owner_executive_instructions()
     assert "Fortune 500" in instructions
     assert "owner-only" in instructions
+
+
+def test_human_quality_without_deceptive_impersonation() -> None:
+    quality = OWNER_ASSISTANT_CONTRACT["executive_style"]["human_quality"]
+    assert quality["natural_conversation"] is True
+    assert quality["emotional_intelligence"] is True
+    assert quality["human_impersonation"] is False
+    assert "Never falsely claim" in owner_executive_instructions()
