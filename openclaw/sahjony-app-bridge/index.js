@@ -2,10 +2,11 @@ import crypto from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 
+// agents.defaults.model.primary is sourced from the canonical Hostinger OpenClaw config.
 function compactMedia(media) {
   if (!Array.isArray(media)) return [];
   return media.slice(0, 20).map((item) => {
-    const fact = item && typeof fact === "object" ? item : {};
+    const fact = item && typeof item === "object" ? item : {};
     return {
       kind: typeof fact.kind === "string" ? fact.kind : void 0,
       contentType: typeof fact.contentType === "string" ? fact.contentType : void 0,
