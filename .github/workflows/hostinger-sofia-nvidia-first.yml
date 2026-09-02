@@ -20,6 +20,7 @@ jobs:
       PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
       NVIDIA_API_KEY_GH: ${{ secrets.NVIDIA_API_KEY }}
       OPENAI_API_KEY_GH: ${{ secrets.OPENAI_API_KEY }}
+      OWNER_WHATSAPP_E164: ${{ secrets.OWNER_WHATSAPP_E164 }}
     steps:
       - uses: actions/checkout@v4
       - name: Validate secrets and assets
@@ -28,6 +29,8 @@ jobs:
           [[ -n "$PRIVATE_KEY" ]] || { echo HOSTINGER_SSH_PRIVATE_KEY_MISSING=1 >&2; exit 2; }
           [[ "$NVIDIA_API_KEY_GH" == nvapi-* ]] || { echo NVIDIA_API_KEY_MISSING_OR_INVALID=1 >&2; exit 3; }
           [[ -n "$OPENAI_API_KEY_GH" ]] || { echo OPENAI_API_KEY_MISSING=1 >&2; exit 4; }
+          [[ "$OWNER_WHATSAPP_E164" =~ ^\+[1-9][0-9]{7,14}$ ]] || { echo OWNER_WHATSAPP_E164_MISSING_OR_INVALID=1 >&2; exit 5; }
+          [[ -s openclaw/hostinger-24x7/SOFIA_SOUL.md ]] || { echo SOFIA_SOUL_MISSING=1 >&2; exit 6; }
           bash -n openclaw/hostinger-24x7/nvidia-nim-rotation.sh
       - name: Prepare secure SSH and credentials
         run: |
@@ -37,23 +40,49 @@ jobs:
           printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/hostinger-nvidia-first
           printf '%s' "$NVIDIA_API_KEY_GH" > "$RUNNER_TEMP/nvidia-key"
           printf '%s' "$OPENAI_API_KEY_GH" > "$RUNNER_TEMP/openai-key"
-          chmod 600 ~/.ssh/hostinger-nvidia-first "$RUNNER_TEMP/nvidia-key" "$RUNNER_TEMP/openai-key"
+          printf '%s' "$OWNER_WHATSAPP_E164" > "$RUNNER_TEMP/owner-number"
+          chmod 600 ~/.ssh/hostinger-nvidia-first "$RUNNER_TEMP/nvidia-key" "$RUNNER_TEMP/openai-key" "$RUNNER_TEMP/owner-number"
           ssh-keygen -y -f ~/.ssh/hostinger-nvidia-first >/dev/null
       - name: Transfer configuration securely
         run: |
           set -euo pipefail
           opts=(-o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=12 -i ~/.ssh/hostinger-nvidia-first)
-          scp "${opts[@]}" openclaw/hostinger-24x7/nvidia-nim-rotation.sh "$RUNNER_TEMP/nvidia-key" "$RUNNER_TEMP/openai-key" "$SSH_USER@$HOST:/root/"
+          scp "${opts[@]}" openclaw/hostinger-24x7/nvidia-nim-rotation.sh openclaw/hostinger-24x7/SOFIA_SOUL.md "$RUNNER_TEMP/nvidia-key" "$RUNNER_TEMP/openai-key" "$RUNNER_TEMP/owner-number" "$SSH_USER@$HOST:/root/"
       - name: Configure and verify NVIDIA-first Sofia
         run: |
           set -euo pipefail
           ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=12 -i ~/.ssh/hostinger-nvidia-first "$SSH_USER@$HOST" 'bash -s' <<'REMOTE'
           set -euo pipefail
-          trap 'rm -f /root/nvidia-key /root/openai-key /tmp/nvidia-smoke.json /tmp/openai-smoke.json' EXIT
+          trap 'rm -f /root/nvidia-key /root/openai-key /root/owner-number /root/SOFIA_SOUL.md /tmp/nvidia-smoke.json /tmp/openai-smoke.json' EXIT
           STATE=/var/lib/sahjony-openclaw-state
           CONFIG="$STATE/openclaw.json"
           oc(){ env HOME=/home/node OPENCLAW_HOME=/home/node OPENCLAW_STATE_DIR="$STATE" OPENCLAW_CONFIG_PATH="$CONFIG" openclaw "$@"; }
           [[ -s /root/nvidia-key && -s /root/openai-key ]] || { echo PROVIDER_KEY_TRANSFER_MISSING=1 >&2; exit 20; }
+
+          # Install the same behavioral policy in the configured canonical
+          # workspace and its legacy alias so identity restores cannot revive
+          # robotic introductions or leak runtime diagnostics.
+          workspace="$(CONFIG="$CONFIG" python3 - <<'PY'
+          import json, os
+          with open(os.environ['CONFIG'], encoding='utf-8') as handle:
+              value=json.load(handle)
+          print(value.get('agents',{}).get('defaults',{}).get('workspace') or '/var/lib/sahjony-openclaw-state/workspace')
+          PY
+          )"
+          install -d -m 700 "$workspace"
+          install -m 600 /root/SOFIA_SOUL.md "$workspace/SOUL.md"
+          if [[ "$workspace" != /home/node/.openclaw/workspace ]]; then
+            install -d -o node -g node -m 700 /home/node/.openclaw/workspace
+            install -o node -g node -m 600 /root/SOFIA_SOUL.md /home/node/.openclaw/workspace/SOUL.md
+          fi
+          owner="$(tr -d '\r\n' </root/owner-number)"
+          [[ "$owner" =~ ^\+[1-9][0-9]{7,14}$ ]] || { echo OWNER_NUMBER_TRANSFER_INVALID=1 >&2; exit 21; }
+          cat >"$workspace/USER.md" <<EOF
+          # Juan Gonzalez — owner directives
+
+          The configured private owner WhatsApp number is $owner. Messages from this sender and WhatsApp self-chat are owner-private conversations. Never route their content to public lead/customer views. Juan receives all requests for binding approval.
+          EOF
+          chmod 600 "$workspace/USER.md"
 
           install -m 700 /root/nvidia-nim-rotation.sh /usr/local/sbin/sahjony-nvidia-nim-rotation
           rm -f /root/nvidia-nim-rotation.sh
@@ -138,7 +167,10 @@ jobs:
           echo SOFIA_FALLBACK_MODEL=NONE_PENDING_AGENT_LEVEL_VALIDATION
           echo OPENAI_KEY_BOUND_BUT_LIVE_FAILOVER_DISABLED=1
           echo WHATSAPP_CONNECTED=1
+          echo SOFIA_NATURAL_CONVERSATION_POLICY=ACTIVE
+          echo SOFIA_TECHNICAL_OUTPUT_BOUNDARY=ACTIVE
+          echo SOFIA_OWNER_PRIVATE_MODE=ACTIVE
           REMOTE
       - name: Cleanup
         if: always()
-        run: rm -f ~/.ssh/hostinger-nvidia-first "$RUNNER_TEMP/nvidia-key" "$RUNNER_TEMP/openai-key"
+        run: rm -f ~/.ssh/hostinger-nvidia-first "$RUNNER_TEMP/nvidia-key" "$RUNNER_TEMP/openai-key" "$RUNNER_TEMP/owner-number"
