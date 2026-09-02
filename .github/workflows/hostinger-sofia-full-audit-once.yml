@@ -142,6 +142,23 @@ jobs:
             | grep -Ei 'warn|error|plugin|whatsapp|model|memory|sofia|reply rescue|diagnostic' \
             | sed -E 's/(api[_-]?key|token|secret|password|authorization)[=:][^[:space:]]+/\1=[REDACTED]/Ig' \
             | tail -n 140 || true
+          echo '--- technical-message residue (paths only) ---'
+          grep -RIl --exclude='*.log' --exclude='openclaw.json' \
+            'Missing API key for OpenAI on the gateway' \
+            "$STATE" /home/node/.openclaw 2>/dev/null | head -n 80 || true
+          echo '--- state layout ---'
+          find "$STATE" -maxdepth 4 -type f \
+            -printf '%p %s bytes\n' 2>/dev/null \
+            | sed -E 's#(auth|credential|secret|token|key)[^/ ]*#REDACTED#Ig' \
+            | tail -n 180 || true
+          echo '--- services and timers related to Sofia/OpenClaw ---'
+          systemctl list-units --all --type=service --type=timer --no-legend 2>/dev/null \
+            | grep -Ei 'openclaw|sofia|sahjony|whatsapp' | head -n 120 || true
+          echo '--- exact event window ---'
+          journalctl --since '2026-09-02 07:52:45 UTC' --until '2026-09-02 07:53:45 UTC' \
+            --no-pager 2>/dev/null \
+            | sed -E 's/(api[_-]?key|token|secret|password|authorization)[=:][^[:space:]]+/\1=[REDACTED]/Ig' \
+            | tail -n 240 || true
           echo '=== AUDIT COMPLETE ==='
           REMOTE
 
