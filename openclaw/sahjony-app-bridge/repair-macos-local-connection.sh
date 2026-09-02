@@ -116,10 +116,10 @@ if [[ -z "$HEALTH_RESPONSE" ]]; then
   exit 6
 fi
 
-printf '%s' "$HEALTH_RESPONSE" | python3 - <<'PY'
+STATUS=0
+if ! python3 - "$HEALTH_RESPONSE" <<'PY'
 import json, sys
-raw = sys.stdin.read()
-d = json.loads(raw)
+d = json.loads(sys.argv[1])
 local = d.get("openclaw_default") or {}
 hostinger = d.get("hostinger_openclaw") or {}
 print("PRODUCTION_STATUS=" + str(d.get("status")))
@@ -132,7 +132,9 @@ print("HOSTINGER_MODEL=" + str(hostinger.get("model")))
 if local.get("gateway_id") != "default" or local.get("heartbeat_fresh") is not True:
     raise SystemExit(20)
 PY
-STATUS=$?
+then
+  STATUS=$?
+fi
 
 if [[ "$STATUS" -ne 0 ]]; then
   echo "ERROR: the local Mac heartbeat is still not fresh under gateway_id=default." >&2
