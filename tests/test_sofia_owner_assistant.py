@@ -1,4 +1,4 @@
-from sofia_owner_assistant import OWNER_ASSISTANT_CONTRACT, build_owner_mission, classify_owner_request
+from sofia_owner_assistant import OWNER_ASSISTANT_CONTRACT, build_owner_mission, classify_owner_request, owner_executive_instructions
 
 
 def test_owner_assistant_is_private_and_free() -> None:
@@ -23,3 +23,15 @@ def test_blended_request_keeps_owner_visibility() -> None:
 def test_irreversible_actions_require_owner_confirmation() -> None:
     mission = build_owner_mission("Pay an invoice", "business")
     assert mission["execution_policy"]["money_legal_medical_security_or_irreversible_actions"] == "explicit_owner_confirmation"
+
+
+def test_fortune_500_executive_style_is_enforced() -> None:
+    style = OWNER_ASSISTANT_CONTRACT["executive_style"]
+    assert style["standard"] == "fortune_500_private_office"
+    assert style["briefing_order"][0] == "bottom_line"
+    assert "hype" in style["avoid"]
+    mission = build_owner_mission("Review today's priorities")
+    assert mission["response_standard"]["lead_with"] == "bottom_line"
+    instructions = owner_executive_instructions()
+    assert "Fortune 500" in instructions
+    assert "owner-only" in instructions
