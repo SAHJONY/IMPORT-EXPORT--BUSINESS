@@ -1,16 +1,14 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, time, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError, available_timezones
 
 from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel, Field
 
-app = FastAPI(title="SAHJONY Global World Clock & Trade Timezone OS", version="1.0.0", docs_url=None, redoc_url=None)
+app = FastAPI(title="SAHJONY Global World Clock & Trade Timezone OS", version="1.0.1", docs_url=None, redoc_url=None)
 
-# Representative business timezone fallbacks for common trade countries.
-# Precise lead/account timezone should always override these fallbacks.
 COUNTRY_TZ = {
     "US":"America/Chicago","CA":"America/Toronto","MX":"America/Mexico_City","CU":"America/Havana",
     "GT":"America/Guatemala","BZ":"America/Belize","SV":"America/El_Salvador","HN":"America/Tegucigalpa",
@@ -113,21 +111,16 @@ class LeadTimeProfile(BaseModel):
     urgency: str = Field(default="normal", pattern="^(low|normal|high|critical)$")
 
 
-@app.get("/crm/world-clock/health")
+@app.get("/world-clock/health")
 async def health():
     return {
-        "status":"ok",
-        "service":"global-world-clock-trade-os",
-        "iana_timezone_database":True,
-        "timezone_count":len(available_timezones()),
-        "dst_aware":True,
-        "lead_local_working_hours":True,
-        "24x7_follow_the_sun_routing":True,
-        "binding_actions_allowed":False,
+        "status":"ok","service":"global-world-clock-trade-os",
+        "iana_timezone_database":True,"timezone_count":len(available_timezones()),"dst_aware":True,
+        "lead_local_working_hours":True,"24x7_follow_the_sun_routing":True,"binding_actions_allowed":False,
     }
 
 
-@app.get("/crm/world-clock/zones")
+@app.get("/world-clock/zones")
 async def zones(q: str | None = None, limit: int = Query(1000, ge=1, le=1000)):
     names = sorted(available_timezones())
     if q:
@@ -136,12 +129,12 @@ async def zones(q: str | None = None, limit: int = Query(1000, ge=1, le=1000)):
     return {"count":len(names[:limit]),"total_matching":len(names),"zones":names[:limit]}
 
 
-@app.get("/crm/world-clock/now")
+@app.get("/world-clock/now")
 async def now(tz: str = Query("America/Chicago")):
     return zone_snapshot(tz, utc_now())
 
 
-@app.get("/crm/world-clock/hubs")
+@app.get("/world-clock/hubs")
 async def hubs():
     current = utc_now()
     rows = []
@@ -152,7 +145,7 @@ async def hubs():
     return {"as_of_utc":current.isoformat(),"count":len(rows),"hubs":rows}
 
 
-@app.post("/crm/world-clock/lead-window")
+@app.post("/world-clock/lead-window")
 async def lead_window(profile: LeadTimeProfile):
     tz_name = profile.timezone
     inferred = False
@@ -166,12 +159,9 @@ async def lead_window(profile: LeadTimeProfile):
     local = current.astimezone(z)
     active = is_working(local, profile.preferred_start_hour, profile.preferred_end_hour, profile.include_weekends)
     nxt = None if active else next_work_start(local, profile.preferred_start_hour, profile.include_weekends)
-    if profile.urgency == "critical":
-        recommended = "IMMEDIATE_REVIEW"
-    elif active:
-        recommended = "CONTACT_WINDOW_OPEN"
-    else:
-        recommended = "QUEUE_FOR_NEXT_LOCAL_WORK_WINDOW"
+    if profile.urgency == "critical": recommended = "IMMEDIATE_REVIEW"
+    elif active: recommended = "CONTACT_WINDOW_OPEN"
+    else: recommended = "QUEUE_FOR_NEXT_LOCAL_WORK_WINDOW"
     return {
         "lead_id":profile.lead_id,"company":profile.company,"timezone":tz_name,"timezone_inferred":inferred,
         "local_time":local.isoformat(),"utc_offset":offset_label(local),"within_preferred_hours":active,
@@ -183,7 +173,7 @@ async def lead_window(profile: LeadTimeProfile):
     }
 
 
-@app.get("/crm/world-clock/follow-the-sun")
+@app.get("/world-clock/follow-the-sun")
 async def follow_the_sun():
     current = utc_now()
     active, next_up = [], []
@@ -198,8 +188,7 @@ async def follow_the_sun():
     next_up.sort(key=lambda x: x.get("next_work_start_utc") or "")
     return {
         "status":"ok","as_of_utc":current.isoformat(),"operating_model":"FOLLOW_THE_SUN_24X7",
-        "active_trade_hubs_now":active,
-        "next_trade_hubs_opening":next_up[:12],
+        "active_trade_hubs_now":active,"next_trade_hubs_opening":next_up[:12],
         "instruction":"SOFIA should prioritize inbound and consented follow-up where local business hours are open, then hand off the queue as the earth rotates.",
         "binding_actions_allowed":False,
     }
