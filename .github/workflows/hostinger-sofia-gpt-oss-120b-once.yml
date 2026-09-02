@@ -1,4 +1,4 @@
-name: Hostinger Sofia GPT-OSS-120B One Time
+name: Hostinger Sofia WhatsApp Final Repair
 
 on:
   push:
@@ -15,9 +15,9 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  cutover:
+  final-repair:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 20
     env:
       HOST: '69.62.68.67'
       SSH_USER: root
@@ -28,30 +28,54 @@ jobs:
         with:
           submodules: false
 
-      - name: Validate credentials and cutover script
+      - name: Validate production repair assets
         run: |
           set -euo pipefail
           [[ -n "$PRIVATE_KEY" ]] || { echo HOSTINGER_SSH_PRIVATE_KEY_MISSING=1 >&2; exit 2; }
           [[ "$NVIDIA_API_KEY_GH" == nvapi-* ]] || { echo NVIDIA_API_KEY_MISSING_OR_INVALID=1 >&2; exit 3; }
-          bash -n openclaw/hostinger-24x7/switch-sofia-gpt-oss-120b.sh
+          bash -n openclaw/hostinger-24x7/deploy-whatsapp-runtime-hardening.sh
+          bash -n openclaw/hostinger-24x7/nvidia-nim-rotation.sh
+          [[ -s openclaw/sahjony-app-bridge/health-sidecar.py ]]
+          [[ -s openclaw/sahjony-whatsapp-output-guard/index.js ]]
+          [[ -s openclaw/sahjony-whatsapp-reply-rescue/index.js ]]
 
-      - name: Prepare secure SSH assets
+      - name: Prepare secure repair bundle
         run: |
           set -euo pipefail
           umask 077
           install -d -m 700 ~/.ssh
-          printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/hostinger-sofia-gptoss
+          printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/hostinger-final-repair
           printf '%s' "$NVIDIA_API_KEY_GH" > "$RUNNER_TEMP/nvidia-key"
-          chmod 600 ~/.ssh/hostinger-sofia-gptoss "$RUNNER_TEMP/nvidia-key"
-          ssh-keygen -y -f ~/.ssh/hostinger-sofia-gptoss >/dev/null
+          chmod 600 ~/.ssh/hostinger-final-repair "$RUNNER_TEMP/nvidia-key"
+          ssh-keygen -y -f ~/.ssh/hostinger-final-repair >/dev/null
+          tar -czf "$RUNNER_TEMP/whatsapp-hardening.tgz" \
+            openclaw/sahjony-whatsapp-output-guard \
+            openclaw/sahjony-whatsapp-reply-rescue \
+            openclaw/sahjony-app-bridge
 
-      - name: Transfer and execute safe cutover
+      - name: Execute final Hostinger repair with SSH retry
         run: |
           set -euo pipefail
-          opts=(-o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=12 -i ~/.ssh/hostinger-sofia-gptoss)
-          scp "${opts[@]}" openclaw/hostinger-24x7/switch-sofia-gpt-oss-120b.sh "$RUNNER_TEMP/nvidia-key" "$SSH_USER@$HOST:/root/"
-          ssh "${opts[@]}" "$SSH_USER@$HOST" 'chmod 700 /root/switch-sofia-gpt-oss-120b.sh && NVIDIA_KEY_FILE=/root/nvidia-key /root/switch-sofia-gpt-oss-120b.sh'
+          opts=(-o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=12 -o ConnectionAttempts=1 -i ~/.ssh/hostinger-final-repair)
+          connected=0
+          for attempt in 1 2 3 4 5 6 7 8; do
+            echo "SSH_FINAL_REPAIR_ATTEMPT=$attempt"
+            if ssh "${opts[@]}" "$SSH_USER@$HOST" 'printf HOSTINGER_SSH_OK' 2>/dev/null | grep -q HOSTINGER_SSH_OK; then
+              connected=1
+              break
+            fi
+            sleep 15
+          done
+          [[ "$connected" == 1 ]] || { echo HOSTINGER_SSH_UNREACHABLE_AFTER_RETRIES=1 >&2; exit 30; }
+          scp "${opts[@]}" \
+            openclaw/hostinger-24x7/deploy-whatsapp-runtime-hardening.sh \
+            openclaw/hostinger-24x7/nvidia-nim-rotation.sh \
+            "$RUNNER_TEMP/whatsapp-hardening.tgz" \
+            "$RUNNER_TEMP/nvidia-key" \
+            "$SSH_USER@$HOST:/root/"
+          ssh "${opts[@]}" "$SSH_USER@$HOST" \
+            'chmod 700 /root/deploy-whatsapp-runtime-hardening.sh /root/nvidia-nim-rotation.sh && /root/deploy-whatsapp-runtime-hardening.sh'
 
       - name: Cleanup
         if: always()
-        run: rm -f ~/.ssh/hostinger-sofia-gptoss "$RUNNER_TEMP/nvidia-key"
+        run: rm -f ~/.ssh/hostinger-final-repair "$RUNNER_TEMP/nvidia-key" "$RUNNER_TEMP/whatsapp-hardening.tgz"
