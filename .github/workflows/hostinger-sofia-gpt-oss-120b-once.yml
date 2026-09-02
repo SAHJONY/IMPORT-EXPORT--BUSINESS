@@ -1,11 +1,11 @@
-# one-time cutover trigger: 2026-09-02
 name: Hostinger Sofia GPT-OSS-120B One Time
 
 on:
-  push:
+  workflow_run:
+    workflows: ['trade-os-ci']
+    types: [completed]
     branches: [main]
-    paths:
-      - '.github/workflows/hostinger-sofia-gpt-oss-120b-once.yml'
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -16,6 +16,7 @@ concurrency:
 
 jobs:
   cutover:
+    if: contains(github.event.workflow_run.head_commit.message, 'ARM_SOFIA_GPT_OSS_120B')
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     env:
