@@ -1,4 +1,4 @@
-name: Hostinger Runtime Guardian Inspect Once
+name: Hostinger Runtime Guardian Script Inspect Once
 
 on:
   push:
@@ -24,28 +24,28 @@ jobs:
         run: |
           set -euo pipefail
           install -d -m 700 ~/.ssh
-          printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/hostinger-runtime-inspect
-          chmod 600 ~/.ssh/hostinger-runtime-inspect
-          ssh-keygen -y -f ~/.ssh/hostinger-runtime-inspect >/dev/null
-      - name: Inspect runtime guardian
+          printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/hostinger-runtime-script
+          chmod 600 ~/.ssh/hostinger-runtime-script
+          ssh-keygen -y -f ~/.ssh/hostinger-runtime-script >/dev/null
+      - name: Read runtime guardian script
         shell: bash
         run: |
           set -euo pipefail
-          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=15 -i ~/.ssh/hostinger-runtime-inspect "$USER@$HOST" 'bash -s' <<'REMOTE'
-          set -euo pipefail
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=15 -i ~/.ssh/hostinger-runtime-script "$USER@$HOST" 'bash -s' <<'REMOTE'
+          set -u
           redact(){ sed -E -e 's/(Bearer[[:space:]]+)[A-Za-z0-9._~+\/-]+/\1[REDACTED]/Ig' -e 's/(OPENCLAW_GATEWAY_TOKEN=)[^[:space:]]+/\1[REDACTED]/g'; }
           echo HOSTINGER_VPS_SCOPE_ONLY=1
-          echo RUNTIME_GUARDIAN_UNITS_BEGIN
-          grep -RIl '/usr/local/sbin/sahjony-openclaw-runtime-guardian' /etc/systemd/system /lib/systemd/system 2>/dev/null | while read -r f; do echo UNIT_FILE="$f"; cat "$f" | redact; done
-          echo RUNTIME_GUARDIAN_UNITS_END
           echo RUNTIME_GUARDIAN_SCRIPT_BEGIN
-          nl -ba /usr/local/sbin/sahjony-openclaw-runtime-guardian | sed -n '1,220p' | redact
+          nl -ba /usr/local/sbin/sahjony-openclaw-runtime-guardian | sed -n '1,260p' | redact
           echo RUNTIME_GUARDIAN_SCRIPT_END
-          echo RUNTIME_GUARDIAN_PROCESS_BEGIN
-          ps -eo pid,ppid,user,lstart,cmd --no-headers | grep '[s]ahjony-openclaw-runtime-guardian' | redact || true
-          echo RUNTIME_GUARDIAN_PROCESS_END
+          echo RUNTIME_GUARDIAN_UNIT_BEGIN
+          cat /etc/systemd/system/sahjony-openclaw-runtime-guardian.service | redact
+          echo RUNTIME_GUARDIAN_UNIT_END
+          echo RUNTIME_GUARDIAN_LOG_BEGIN
+          journalctl -u sahjony-openclaw-runtime-guardian.service -n 80 --no-pager 2>/dev/null | redact || true
+          echo RUNTIME_GUARDIAN_LOG_END
           echo INSPECTION_COMPLETE=1
           REMOTE
       - name: Cleanup SSH
         if: always()
-        run: rm -f ~/.ssh/hostinger-runtime-inspect
+        run: rm -f ~/.ssh/hostinger-runtime-script
