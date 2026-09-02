@@ -1,3 +1,4 @@
+# Final production hardening trigger after NVIDIA reconciliation.
 name: Hostinger WhatsApp Runtime Hardening
 
 on:
