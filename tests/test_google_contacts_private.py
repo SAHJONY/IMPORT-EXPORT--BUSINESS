@@ -24,6 +24,14 @@ def test_sofia_secret_can_read_but_not_promote(monkeypatch):
     assert blocked.value.status_code==403
 
 
+def test_public_and_employee_access_are_rejected(monkeypatch):
+    monkeypatch.setenv("SOFIA_OWNER_CONTACTS_SECRET","s"*40)
+    for bearer in (None,"Bearer employee-token","Bearer customer-token"):
+        with pytest.raises(HTTPException) as blocked:
+            api._auth(bearer,None)
+        assert blocked.value.status_code==403
+
+
 def test_personal_contact_cannot_be_promoted(monkeypatch):
     monkeypatch.setattr(api,"_auth",lambda *_args,**_kwargs:"owner")
     with pytest.raises(HTTPException) as blocked:
