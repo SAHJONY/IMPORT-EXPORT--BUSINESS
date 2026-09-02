@@ -124,8 +124,19 @@ jobs:
           fi
           pid="$(systemctl show openclaw-gateway.service -p MainPID --value)"
           tr '\0' '\n' <"/proc/$pid/environ" | grep -q '^OPENAI_API_KEY='
-          wa="$(oc channels status --channel whatsapp --probe 2>&1 || true)"
-          grep -Eiq 'connected|ready|healthy|linked.*running' <<<"$wa" || { echo WHATSAPP_NOT_CONNECTED_AFTER_RESTART=1 >&2; exit 24; }
+          wa=''
+          for attempt in 1 2 3 4 5 6; do
+            wa="$(oc channels status --channel whatsapp --probe 2>&1 || true)"
+            if grep -Eiq 'connected|ready|healthy|linked.*running' <<<"$wa"; then
+              break
+            fi
+            sleep 10
+          done
+          if ! grep -Eiq 'connected|ready|healthy|linked.*running' <<<"$wa"; then
+            printf 'WHATSAPP_STATUS=%s\n' "$(printf '%s' "$wa" | tr '\n' ' ' | cut -c1-600)" >&2
+            echo WHATSAPP_NOT_CONNECTED_AFTER_RESTART=1 >&2
+            exit 24
+          fi
           echo "SOFIA_PRIMARY_PROVIDER=$provider"
           echo "SOFIA_PRIMARY_MODEL=$configured"
           echo SOFIA_FALLBACK_MODEL=openai/gpt-5.6-sol
