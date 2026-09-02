@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-# diagnostics trigger: 2026-09-02T18:50Z
+# diagnostics/final-repair trigger: 2026-09-02T19:09Z
 
 STATE=/var/lib/sahjony-openclaw-state
 CONFIG="$STATE/openclaw.json"
