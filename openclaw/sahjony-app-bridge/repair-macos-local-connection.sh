@@ -116,8 +116,7 @@ if [[ -z "$HEALTH_RESPONSE" ]]; then
   exit 6
 fi
 
-STATUS=0
-if ! python3 - "$HEALTH_RESPONSE" <<'PY'
+if python3 - "$HEALTH_RESPONSE" <<'PY'
 import json, sys
 d = json.loads(sys.argv[1])
 local = d.get("openclaw_default") or {}
@@ -133,6 +132,8 @@ if local.get("gateway_id") != "default" or local.get("heartbeat_fresh") is not T
     raise SystemExit(20)
 PY
 then
+  STATUS=0
+else
   STATUS=$?
 fi
 
