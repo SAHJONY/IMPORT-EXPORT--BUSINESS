@@ -117,7 +117,11 @@ jobs:
           print(value.get('agents',{}).get('defaults',{}).get('model',{}).get('primary',''))
           PY
           )"
-          [[ "$configured" == "$primary" ]] || { echo SOFIA_PRIMARY_CONFIG_MISMATCH=1 >&2; exit 23; }
+          if [[ "$provider" == NVIDIA ]]; then
+            [[ "$configured" == nvidia/* ]] || { echo SOFIA_PRIMARY_PROVIDER_MISMATCH=1 >&2; exit 23; }
+          else
+            [[ "$configured" == openai/* ]] || { echo SOFIA_PRIMARY_PROVIDER_MISMATCH=1 >&2; exit 23; }
+          fi
           pid="$(systemctl show openclaw-gateway.service -p MainPID --value)"
           tr '\0' '\n' <"/proc/$pid/environ" | grep -q '^OPENAI_API_KEY='
           wa="$(oc channels status --channel whatsapp --probe 2>&1 || true)"
