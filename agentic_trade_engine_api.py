@@ -22,8 +22,8 @@ HIGH_STAKES = {'COMPLIANCE_REVIEW','PAYMENT_REVIEW','EXECUTIVE_DECISION'}
 EXTERNAL_COMMITMENTS = {'SEND_EMAIL','SEND_RFQ','PLACE_ORDER','SEND_PAYMENT','RELEASE_SHIPMENT','APPROVE_COMPLIANCE','SIGN_CONTRACT','DISCLOSE_COUNTERPARTY'}
 
 OPENAI_FRONTIER = lambda: os.getenv('OPENAI_PRIMARY_MODEL','gpt-5.6-sol').strip() or 'gpt-5.6-sol'
-OPENAI_BALANCED = lambda: os.getenv('OPENAI_FAST_MODEL','gpt-5.6-terra').strip() or 'gpt-5.6-terra'
-OPENAI_ECONOMY = lambda: os.getenv('OPENAI_ECONOMY_MODEL','gpt-5.6-luna').strip() or 'gpt-5.6-luna'
+OPENAI_BALANCED = OPENAI_FRONTIER
+OPENAI_ECONOMY = OPENAI_FRONTIER
 ANTHROPIC_FABLE = lambda: os.getenv('ANTHROPIC_FRONTIER_MODEL','claude-fable-5').strip() or 'claude-fable-5'
 ANTHROPIC_OPUS = lambda: os.getenv('ANTHROPIC_PRIMARY_MODEL','claude-opus-5').strip() or 'claude-opus-5'
 ANTHROPIC_SONNET = lambda: os.getenv('ANTHROPIC_FAST_MODEL','claude-sonnet-5').strip() or 'claude-sonnet-5'
@@ -57,12 +57,8 @@ class OrchestrateIn(BaseModel):
 
 def route(task: str, mode: str) -> tuple[list[tuple[str,str]], bool]:
     high = task in HIGH_STAKES
-    if mode == 'OPENAI': return [('openai', OPENAI_FRONTIER())], high
     if mode == 'ANTHROPIC': return [('anthropic', ANTHROPIC_FABLE() if high else ANTHROPIC_OPUS())], high
     if mode == 'CONSENSUS' or high: return [('openai', OPENAI_FRONTIER()),('anthropic', ANTHROPIC_FABLE())], high
-    if task in {'CATALOG_ENRICHMENT','RFQ_BUILD'}: return [('openai', OPENAI_BALANCED())], high
-    if task in {'SUPPLIER_SOURCING','BUYER_QUALIFICATION','NEGOTIATION'}: return [('anthropic', ANTHROPIC_OPUS())], high
-    if task in {'LOGISTICS_PLAN'}: return [('anthropic', ANTHROPIC_SONNET())], high
     return [('openai', OPENAI_FRONTIER())], high
 
 
@@ -90,10 +86,12 @@ async def health():
         'openai_frontier':OPENAI_FRONTIER(),
         'openai_balanced':OPENAI_BALANCED(),
         'openai_economy':OPENAI_ECONOMY(),
+        'primary_reasoning_authority':'gpt-5.6-sol',
         'anthropic_fable':ANTHROPIC_FABLE(),
         'anthropic_opus':ANTHROPIC_OPUS(),
         'anthropic_sonnet':ANTHROPIC_SONNET(),
-        'fable_for_high_stakes_and_long_horizon':True,
+        'anthropic_role':'independent_review_consensus_and_resilience',
+        'responses_api':True,
         'dual_model_consensus_for_high_stakes':True,
         'autonomous_internal_research':True,
         'autonomous_external_commitments':False,

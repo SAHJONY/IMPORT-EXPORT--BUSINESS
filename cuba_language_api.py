@@ -72,7 +72,7 @@ async def _translate_with_openai(texts: list[str]) -> list[str]:
     key = os.getenv("OPENAI_API_KEY", "").strip()
     if not key:
         raise HTTPException(503, "Spanish UI translation provider is not configured")
-    model = os.getenv("OPENAI_FAST_MODEL", "gpt-5.6-terra").strip() or "gpt-5.6-terra"
+    model = os.getenv("OPENAI_PRIMARY_MODEL", "gpt-5.6-sol").strip() or "gpt-5.6-sol"
     prompt = (
         "Translate every item in the JSON array into clear, professional, natural Spanish suitable for Cuban business users. "
         "Translate UI navigation, buttons, labels, form prompts, placeholders, help text, statuses and descriptions. "

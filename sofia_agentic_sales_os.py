@@ -260,8 +260,8 @@ def sales_os_health() -> dict[str, Any]:
         "version": "2.0.0",
         "model_roles": {
             "strategic": "gpt-5.6-sol",
-            "conversational": "gpt-5.6-terra",
-            "high_volume": "gpt-5.6-luna",
+            "conversational": "gpt-5.6-sol",
+            "high_volume": "gpt-5.6-sol",
         },
         "explainable_scoring": True,
         "progressive_discovery": True,

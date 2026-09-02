@@ -52,8 +52,8 @@ def _nvidia_key() -> str: return os.getenv("NVIDIA_API_KEY", "").strip()
 def choose_openai_model(complexity: str = "normal") -> tuple[str, str]:
     c = (complexity or "normal").lower()
     if c in {"critical", "complex", "negotiation", "rfq", "sourcing", "compliance", "quote"}: return SOL, "high"
-    if c in {"fast", "high_volume", "triage"}: return LUNA, "low"
-    return TERRA, "medium"
+    if c in {"fast", "high_volume", "triage"}: return SOL, "low"
+    return SOL, "medium"
 
 
 def choose_anthropic_models(complexity: str = "normal") -> list[str]:
@@ -144,9 +144,8 @@ async def analyze_sales_conversation(*,transcript:str,current_stage:str="NEW",co
     if oa and an:return _consensus(oa,an)
     if oa:return oa
     if an:return an
-    result=await _nvidia_analyze(transcript,current_stage,relationship_memory)
-    return result or _deterministic(transcript,current_stage)
+    return _deterministic(transcript,current_stage)
 
 
 def frontier_status():
-    return {"openai":{"primary_brain":SOL,"balanced_executor":TERRA,"high_volume_executor":LUNA,"responses_api":True},"anthropic":{"frontier_general":FABLE,"restricted_frontier":MYTHOS,"daily_frontier":OPUS,"fast_frontier":SONNET,"messages_api":True},"co_brain_consensus":True,"parallel_reasoning":True,"nvidia_resilience":NVIDIA_FALLBACKS,"openai_key_configured":bool(_openai_key()),"anthropic_key_configured":bool(_anthropic_key()),"nvidia_key_configured":bool(_nvidia_key()),"binding_quotes_fail_closed":True,"sofia_human_conversation_policy":True,"relationship_memory_injection":True}
+    return {"openai":{"primary_brain":SOL,"balanced_executor":SOL,"high_volume_executor":SOL,"responses_api":True},"primary_reasoning_authority":SOL,"anthropic":{"frontier_general":FABLE,"restricted_frontier":MYTHOS,"daily_frontier":OPUS,"fast_frontier":SONNET,"messages_api":True},"anthropic_role":"independent_review_consensus_and_resilience","co_brain_consensus":True,"deterministic_continuity_fallback":True,"openai_key_configured":bool(_openai_key()),"anthropic_key_configured":bool(_anthropic_key()),"binding_quotes_fail_closed":True,"sofia_human_conversation_policy":True,"relationship_memory_injection":True}

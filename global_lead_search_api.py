@@ -305,7 +305,7 @@ Rules:
 {cuba_rules}
 Return only the requested structured candidate data.'''
     request_payload = {
-        'model': os.getenv('OPENAI_FAST_MODEL', '').strip() or os.getenv('OPENAI_PRIMARY_MODEL', '').strip() or 'gpt-5.6-sol',
+        'model': os.getenv('OPENAI_PRIMARY_MODEL', '').strip() or 'gpt-5.6-sol',
         'input': prompt,
         'tools': [{'type': 'web_search'}],
         'tool_choice': 'auto',

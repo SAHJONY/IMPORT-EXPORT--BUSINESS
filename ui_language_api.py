@@ -74,7 +74,7 @@ def _openai_configured() -> bool:
 
 
 def _model() -> str:
-    return os.getenv("OPENAI_FAST_MODEL", "gpt-5.6-terra").strip() or "gpt-5.6-terra"
+    return os.getenv("OPENAI_PRIMARY_MODEL", "gpt-5.6-sol").strip() or "gpt-5.6-sol"
 
 
 async def _translate_with_openai(texts: list[str], target_locale: str, source_locale: str | None) -> list[str]:

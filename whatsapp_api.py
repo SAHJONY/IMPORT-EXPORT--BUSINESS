@@ -562,7 +562,7 @@ async def _generate_ai_reply(text: str, contact_name: str | None) -> str:
     key = os.getenv("OPENAI_API_KEY", "").strip()
     if not key:
         return ""
-    model = os.getenv("WHATSAPP_AI_MODEL", "").strip() or os.getenv("OPENAI_FAST_MODEL", "").strip() or "gpt-5.6-terra"
+    model = os.getenv("OPENAI_PRIMARY_MODEL", "").strip() or "gpt-5.6-sol"
     system = (
         "You are the multilingual WhatsApp AI Agent for SAHJONY Global Trade. "
         "Reply in the customer's language. Be concise, professional, commercially useful, and transparent that you are an AI assistant representing SAHJONY Global Trade. "

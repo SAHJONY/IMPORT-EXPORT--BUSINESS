@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 from auth import verify_owner_token
 from insforge_backend import get_backend
 
-app = FastAPI(title='SAHJONY Multi-Model AI Brain', version='1.0.0', docs_url=None, redoc_url=None)
+app = FastAPI(title='SAHJONY GPT-5.6 Sol Business Brain', version='2.0.0', docs_url=None, redoc_url=None)
 
 Role = Literal['owner', 'employee']
 TaskType = Literal[
@@ -78,8 +78,8 @@ def anthropic_configured() -> bool:
 
 MODEL_STACK = {
     'openai_primary': lambda: model('OPENAI_PRIMARY_MODEL', 'gpt-5.6-sol'),
-    'openai_fast': lambda: model('OPENAI_FAST_MODEL', 'gpt-5.6-terra'),
-    'openai_economy': lambda: model('OPENAI_ECONOMY_MODEL', 'gpt-5.6-luna'),
+    'openai_fast': lambda: model('OPENAI_PRIMARY_MODEL', 'gpt-5.6-sol'),
+    'openai_economy': lambda: model('OPENAI_PRIMARY_MODEL', 'gpt-5.6-sol'),
     'anthropic_frontier': lambda: model('ANTHROPIC_FRONTIER_MODEL', 'claude-fable-5'),
     'anthropic_primary': lambda: model('ANTHROPIC_PRIMARY_MODEL', 'claude-opus-5'),
     'anthropic_fast': lambda: model('ANTHROPIC_FAST_MODEL', 'claude-sonnet-5'),
@@ -106,6 +106,7 @@ async def call_openai(prompt: str, model_id: str, max_tokens: int) -> dict:
         raise RuntimeError('OPENAI_API_KEY is not configured')
     payload = {
         'model': model_id,
+        'reasoning': {'effort': 'medium'},
         'input': [
             {'role': 'system', 'content': [{'type': 'input_text', 'text': SYSTEM_POLICY}]},
             {'role': 'user', 'content': [{'type': 'input_text', 'text': prompt}]},
@@ -143,17 +144,10 @@ async def call_anthropic(prompt: str, model_id: str, max_tokens: int) -> dict:
 
 
 def route(task: str, mode: str, high_stakes: bool) -> tuple[str, str, str | None, str | None]:
-    if mode == 'OPENAI':
-        return 'openai', MODEL_STACK['openai_primary'](), None, None
     if mode == 'ANTHROPIC':
-        chosen = MODEL_STACK['anthropic_frontier']() if high_stakes else MODEL_STACK['anthropic_primary']()
-        return 'anthropic', chosen, None, None
+        return 'anthropic', MODEL_STACK['anthropic_primary'](), None, None
     if mode == 'CONSENSUS' or high_stakes:
         return 'openai', MODEL_STACK['openai_primary'](), 'anthropic', MODEL_STACK['anthropic_frontier']()
-    if task in {'SUPPLIER_RESEARCH', 'TRADE_RESEARCH', 'DOCUMENT_ANALYSIS', 'NEGOTIATION_SUPPORT'}:
-        return 'anthropic', MODEL_STACK['anthropic_primary'](), None, None
-    if task in {'CUSTOMER_RESPONSE', 'LOGISTICS_ANALYSIS'}:
-        return 'openai', MODEL_STACK['openai_fast'](), None, None
     return 'openai', MODEL_STACK['openai_primary'](), None, None
 
 
@@ -168,10 +162,14 @@ async def audit(row: dict):
 async def health():
     return {
         'status': 'ok',
-        'service': 'sahjony-multi-model-ai-brain',
+        'service': 'sahjony-gpt-5.6-sol-business-brain',
+        'version': '2.0.0',
         'openai_configured': openai_configured(),
         'anthropic_configured': anthropic_configured(),
         'models': {k: v() for k, v in MODEL_STACK.items()},
+        'primary_reasoning_authority': 'gpt-5.6-sol',
+        'anthropic_role': 'independent_review_consensus_and_resilience',
+        'responses_api': True,
         'consensus_for_high_stakes': True,
         'autonomous_release_authority': False,
         'fail_closed': True,
