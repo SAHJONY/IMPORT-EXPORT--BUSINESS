@@ -5,9 +5,12 @@ on:
     branches: [main]
     paths:
       - 'openclaw/hostinger-24x7/deploy-whatsapp-runtime-hardening.sh'
+      - 'openclaw/hostinger-24x7/nvidia-nim-rotation.sh'
       - 'openclaw/sahjony-app-bridge/index.js'
+      - 'openclaw/sahjony-app-bridge/health-sidecar.py'
       - 'openclaw/sahjony-whatsapp-output-guard/index.js'
       - 'openclaw/sahjony-whatsapp-reply-rescue/index.js'
+      - '.github/workflows/hostinger-whatsapp-runtime-hardening.yml'
   workflow_dispatch:
 
 permissions:
@@ -20,7 +23,7 @@ concurrency:
 jobs:
   harden:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 18
     env:
       HOST: '69.62.68.67'
       SSH_USER: root
@@ -37,9 +40,11 @@ jobs:
           [[ -n "$PRIVATE_KEY" ]] || { echo HOSTINGER_SSH_PRIVATE_KEY_MISSING=1 >&2; exit 2; }
           [[ "$NVIDIA_API_KEY_GH" == nvapi-* ]] || { echo NVIDIA_API_KEY_MISSING_OR_INVALID=1 >&2; exit 3; }
           bash -n openclaw/hostinger-24x7/deploy-whatsapp-runtime-hardening.sh
+          bash -n openclaw/hostinger-24x7/nvidia-nim-rotation.sh
           [[ -s openclaw/sahjony-whatsapp-output-guard/index.js ]]
           [[ -s openclaw/sahjony-whatsapp-reply-rescue/index.js ]]
           [[ -s openclaw/sahjony-app-bridge/index.js ]]
+          [[ -s openclaw/sahjony-app-bridge/health-sidecar.py ]]
 
       - name: Prepare secure transfer
         run: |
@@ -55,17 +60,30 @@ jobs:
             openclaw/sahjony-whatsapp-reply-rescue \
             openclaw/sahjony-app-bridge
 
-      - name: Deploy hardening to Hostinger OpenClaw
+      - name: Deploy hardening to Hostinger OpenClaw with SSH retry
         run: |
           set -euo pipefail
-          opts=(-o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=15 -i ~/.ssh/hostinger-whatsapp-hardening)
+          opts=(-o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=12 -o ConnectionAttempts=1 -i ~/.ssh/hostinger-whatsapp-hardening)
+
+          connected=0
+          for attempt in 1 2 3 4 5 6 7 8; do
+            echo "SSH_HARDENING_ATTEMPT=$attempt"
+            if ssh "${opts[@]}" "$SSH_USER@$HOST" 'printf HOSTINGER_SSH_OK' 2>/dev/null | grep -q HOSTINGER_SSH_OK; then
+              connected=1
+              break
+            fi
+            sleep 15
+          done
+          [[ "$connected" == 1 ]] || { echo HOSTINGER_SSH_UNREACHABLE_AFTER_RETRIES=1 >&2; exit 30; }
+
           scp "${opts[@]}" \
             openclaw/hostinger-24x7/deploy-whatsapp-runtime-hardening.sh \
+            openclaw/hostinger-24x7/nvidia-nim-rotation.sh \
             "$RUNNER_TEMP/whatsapp-hardening.tgz" \
             "$RUNNER_TEMP/nvidia-key" \
             "$SSH_USER@$HOST:/root/"
           ssh "${opts[@]}" "$SSH_USER@$HOST" \
-            'chmod 700 /root/deploy-whatsapp-runtime-hardening.sh && /root/deploy-whatsapp-runtime-hardening.sh'
+            'chmod 700 /root/deploy-whatsapp-runtime-hardening.sh /root/nvidia-nim-rotation.sh && /root/deploy-whatsapp-runtime-hardening.sh'
 
       - name: Cleanup
         if: always()
