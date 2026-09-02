@@ -101,3 +101,5 @@ fi
 echo
 
 echo 'DISCOVERY_COMPLETE=1'
+
+# Operational touch: trigger the guarded Hostinger recovery workflow when normal SSH hardening is unreachable.
