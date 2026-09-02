@@ -182,9 +182,17 @@ jobs:
           fi
           pid="$(systemctl show openclaw-gateway.service -p MainPID --value)"
           tr '\0' '\n' <"/proc/$pid/environ" | grep -q '^OPENAI_API_KEY='
+          gateway_token="$(CONFIG="$CONFIG" python3 - <<'PY'
+          import json, os
+          with open(os.environ['CONFIG'], encoding='utf-8') as handle:
+              value=json.load(handle)
+          print(value.get('gateway',{}).get('auth',{}).get('token',''))
+          PY
+          )"
+          [[ -n "$gateway_token" ]] || { echo GATEWAY_AUTH_TOKEN_MISSING=1 >&2; exit 24; }
           wa=''
           for attempt in 1 2 3 4 5 6; do
-            wa="$(oc channels status --channel whatsapp --probe 2>&1 || true)"
+            wa="$(oc channels status --channel whatsapp --probe --token "$gateway_token" 2>&1 || true)"
             if grep -Eiq 'connected|ready|healthy|enabled, configured, linked|linked.*running' <<<"$wa"; then
               break
             fi
