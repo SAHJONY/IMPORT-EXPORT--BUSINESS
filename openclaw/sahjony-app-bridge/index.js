@@ -4,7 +4,7 @@ import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 function compactMedia(media) {
   if (!Array.isArray(media)) return [];
   return media.slice(0, 20).map((item) => {
-    const fact = item && typeof item === "object" ? item : {};
+    const fact = item && typeof fact === "object" ? item : {};
     return {
       kind: typeof fact.kind === "string" ? fact.kind : void 0,
       contentType: typeof fact.contentType === "string" ? fact.contentType : void 0,
@@ -72,6 +72,7 @@ var index_default = definePluginEntry({
     async function heartbeat() {
       let connected = false;
       let gatewayVersion;
+      let activeModel;
       try {
         const probe = await api.runtime.system.runCommandWithTimeout(openclawBin, ["channels", "status", "--probe"], { timeoutMs: 2e4 });
         const output = `${probe.stdout || ""}\n${probe.stderr || ""}`;
@@ -79,10 +80,21 @@ var index_default = definePluginEntry({
           throw new Error(`unusable WhatsApp status probe (code=${probe.code})`);
         }
         connected = /whatsapp[^\n]*\bconnected\b/i.test(output) || /\blinked,\s*running,\s*connected\b/i.test(output);
+
         const version = await api.runtime.system.runCommandWithTimeout(openclawBin, ["--version"], { timeoutMs: 1e4 });
         gatewayVersion = String(version.stdout || "").trim().slice(0, 80) || void 0;
         if (version.code !== 0 || !gatewayVersion) {
           throw new Error(`unusable OpenClaw version probe (code=${version.code})`);
+        }
+
+        const modelProbe = await api.runtime.system.runCommandWithTimeout(
+          openclawBin,
+          ["config", "get", "agents.defaults.model.primary"],
+          { timeoutMs: 1e4 }
+        );
+        activeModel = String(modelProbe.stdout || "").trim().replace(/^['\"]|['\"]$/g, "") || void 0;
+        if (modelProbe.code !== 0 || !activeModel) {
+          activeModel = String(api.runtime?.agent?.defaults?.model || "").trim() || void 0;
         }
       } catch (error) {
         api.logger.warn(`SAHJONY gateway probe unavailable; heartbeat deferred to sidecar: ${error instanceof Error ? error.message : "unknown error"}`);
@@ -95,7 +107,7 @@ var index_default = definePluginEntry({
           channel_connected: connected,
           business_number: businessNumber,
           business_name: businessName,
-          model: api.runtime.agent.defaults.model,
+          model: activeModel,
           gateway_version: gatewayVersion
         });
       } catch (error) {
