@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { readFile } from "node:fs/promises";
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 
 type BridgeConfig = {
@@ -40,14 +41,21 @@ export default definePluginEntry({
     const appUrl = String(config.appUrl || process.env.SAHJONY_APP_URL || "https://www.sahjony.com").replace(/\/$/, "");
     const secret = String(process.env.SAHJONY_APP_BRIDGE_SECRET || "");
     const accountId = String(config.accountId || process.env.SAHJONY_WHATSAPP_ACCOUNT_ID || "default");
-    const gatewayId = String(config.gatewayId || process.env.SAHJONY_GATEWAY_ID || "hostinger-vps");
+    const isMacDesktop = process.platform === "darwin";
+    const openclawStateDir = String(
+      process.env.OPENCLAW_STATE_DIR ||
+      (isMacDesktop && process.env.HOME ? `${process.env.HOME}/.openclaw` : "/var/lib/sahjony-openclaw-state")
+    );
+    const gatewayId = String(
+      config.gatewayId ||
+      process.env.SAHJONY_GATEWAY_ID ||
+      (isMacDesktop ? "default" : "hostinger-vps")
+    );
     const businessNumber = String(config.businessNumber || process.env.SAHJONY_WHATSAPP_BUSINESS_NUMBER || "+12816628581");
     const businessName = String(config.businessName || process.env.SAHJONY_WHATSAPP_BUSINESS_NAME || "SAHJONY LLC");
     const pollIntervalMs = Math.max(5_000, Math.min(300_000, Number(config.pollIntervalMs || 30_000)));
-    const openclawBin = String(
-      process.env.OPENCLAW_BIN ||
-      (process.env.HOME ? `${process.env.HOME}/.openclaw/bin/openclaw` : "openclaw")
-    );
+    const openclawBin = String(process.env.OPENCLAW_BIN || `${openclawStateDir}/bin/openclaw`);
+    const canonicalConfigPath = String(process.env.OPENCLAW_CONFIG_PATH || `${openclawStateDir}/openclaw.json`);
     let stopped = false;
     let polling = false;
     let pollTimer: ReturnType<typeof setInterval> | undefined;
@@ -87,6 +95,18 @@ export default definePluginEntry({
       }
     }
 
+    async function readActiveModel(): Promise<string | undefined> {
+      try {
+        const raw = await readFile(canonicalConfigPath, "utf8");
+        const data = JSON.parse(raw) as { agents?: { defaults?: { model?: { primary?: unknown } } } };
+        const model = data?.agents?.defaults?.model?.primary;
+        if (typeof model === "string" && model.trim()) return model.trim();
+      } catch (error) {
+        api.logger.warn(`SAHJONY canonical model read failed: ${error instanceof Error ? error.message : "unknown error"}`);
+      }
+      return String(api.runtime?.agent?.defaults?.model || "").trim() || undefined;
+    }
+
     async function heartbeat(): Promise<void> {
       let connected = false;
       let gatewayVersion: string | undefined;
@@ -113,7 +133,7 @@ export default definePluginEntry({
           channel_connected: connected,
           business_number: businessNumber,
           business_name: businessName,
-          model: api.runtime.agent.defaults.model,
+          model: await readActiveModel(),
           gateway_version: gatewayVersion,
         });
       } catch (error) {
@@ -202,7 +222,7 @@ export default definePluginEntry({
       await pollOutbox();
       heartbeatTimer = setInterval(() => { void heartbeat(); }, 120_000);
       pollTimer = setInterval(() => { void pollOutbox(); }, pollIntervalMs);
-      api.logger.info(`SAHJONY application bridge started (gatewayId=${gatewayId}, openclawBin=${openclawBin})`);
+      api.logger.info(`SAHJONY application bridge started (gatewayId=${gatewayId}, stateDir=${openclawStateDir}, openclawBin=${openclawBin}, canonicalConfig=${canonicalConfigPath})`);
     });
 
     api.on("gateway_stop", async () => {
