@@ -1,0 +1,149 @@
+{
+  "as_of": "2026-09-01",
+  "market": "Cuba",
+  "record_type": "market_price_intelligence",
+  "commercial_stage": "research_only",
+  "currency": "USD unless otherwise stated",
+  "notes": [
+    "These are public market/reference prices, not firm supplier quotations.",
+    "Freight, insurance, duties, Cuban import fees, financing, inspection, banking and SAHJONY margin are excluded unless explicitly stated.",
+    "U.S.-origin exports to Cuba require product- and counterparty-specific sanctions/export-control review before commitment. Agricultural commodities may be eligible under TSRA, subject to applicable rules.",
+    "Do not represent any benchmark as buyer-accepted pricing or collected revenue."
+  ],
+  "demand_evidence": {
+    "us_goods_exports_to_cuba_2026_jan_jun_usd_millions": 525.1,
+    "usda_2024_top_exports": [
+      {"product":"Poultry meat and products","value_usd_millions":313.49,"volume_mt":253343},
+      {"product":"Pork and pork products","value_usd_millions":27.76,"volume_mt":9170},
+      {"product":"Dairy products","value_usd_millions":21.92,"volume_mt":7520},
+      {"product":"Baked goods","value_usd_millions":4.18,"volume_mt":1594}
+    ],
+    "2026_trade_signals": ["Corn","Soybean oilcake","Solar cells","Diesel generator sets","Private-sector equipment/products"]
+  },
+  "products": [
+    {
+      "category": "Food",
+      "product": "Long-grain milled rice",
+      "origin_reference": "United States",
+      "benchmark": {"low_usd_per_mt":660,"avg_usd_per_mt":789,"high_usd_per_mt":920},
+      "basis": "Observed U.S. export transaction signal, July 2026",
+      "priority": "A",
+      "business_case": "Staple food with persistent Cuban demand; containerized distribution suitable for private importers.",
+      "source": "https://insights.tridge.com/product-country-monthly-update-market-insights/long-grain-milled-rice/US/2026-07"
+    },
+    {
+      "category": "Food",
+      "product": "Frozen poultry / chicken",
+      "origin_reference": "United States",
+      "benchmark": {"reference_status":"RFQ_REQUIRED"},
+      "basis": "USDA confirms poultry is the dominant U.S. agricultural export to Cuba; live supplier quote required for current cut/spec/packing.",
+      "priority": "A",
+      "business_case": "Largest evidenced U.S.-to-Cuba agricultural category by value and volume.",
+      "source": "https://www.fas.usda.gov/regions/cuba"
+    },
+    {
+      "category": "Food",
+      "product": "Pork products",
+      "origin_reference": "United States / global",
+      "benchmark": {"reference_status":"RFQ_REQUIRED"},
+      "basis": "USDA Cuba trade data confirms established import flow.",
+      "priority": "A-",
+      "business_case": "Existing Cuban import category; opportunity depends on cut, packing, cold-chain and delivered economics.",
+      "source": "https://www.fas.usda.gov/regions/cuba"
+    },
+    {
+      "category": "Food",
+      "product": "Milk powder / dairy",
+      "origin_reference": "United States / global",
+      "benchmark": {"reference_status":"RFQ_REQUIRED"},
+      "basis": "USDA Cuba trade data and Cuba 2026 planning documents identify dairy/milk powder as import-relevant categories.",
+      "priority": "A-",
+      "business_case": "High-need staple category; requires specification, shelf life, sanitary documentation and buyer volume.",
+      "source": "https://www.fas.usda.gov/regions/cuba"
+    },
+    {
+      "category": "Agriculture",
+      "product": "Corn / animal-feed inputs",
+      "origin_reference": "United States / Brazil / Argentina",
+      "benchmark": {"reference_status":"RFQ_REQUIRED"},
+      "basis": "2026 trade reporting confirms corn and soybean oilcake exports to Cuba.",
+      "priority": "A-",
+      "business_case": "Recurring feed/food-industry demand; best handled as bulk or containerized commodity with bank-secured payment.",
+      "source": "https://www.cubatrade.org/blog/2026/6/12/1rrm6o6swm00lmfl17bo8e0b7snu75"
+    },
+    {
+      "category": "Energy / Solar",
+      "product": "Bifacial solar panels 600W",
+      "origin_reference": "U.S. warehouse",
+      "benchmark": {"usd_per_watt":0.295,"usd_per_panel":177.0,"pallet_qty":36,"usd_per_pallet":6372.0},
+      "basis": "Public EX-Works pallet price, current 2026 listing",
+      "priority": "A",
+      "business_case": "Power shortages create strong practical demand; pallet/container model supports low-capital brokerage.",
+      "source": "https://www.voltpathsolar.com/"
+    },
+    {
+      "category": "Energy / Solar",
+      "product": "Solar panels 500-549W wholesale benchmark",
+      "origin_reference": "U.S. wholesale market",
+      "benchmark": {"median_usd_per_watt":0.20,"overall_panel_median_usd_per_watt":0.27},
+      "basis": "Q3 2026 wholesale price index",
+      "priority": "A",
+      "business_case": "Useful target-buy benchmark for negotiating container/pallet supplier pricing.",
+      "source": "https://www.portlandiaelectric.supply/pages/price-index"
+    },
+    {
+      "category": "Energy / Solar",
+      "product": "LONGi 435W bifacial panel",
+      "origin_reference": "U.S. reseller market",
+      "benchmark": {"usd_per_panel":102.99,"usd_per_watt":0.237,"pallet_qty":30,"minimum_purchase_usd":3089.70},
+      "basis": "Advertised full-pallet market survey, August 25 2026; shipping excluded",
+      "priority": "A",
+      "business_case": "Low entry-ticket pallet transaction suitable for testing Cuban private-sector demand.",
+      "source": "https://ecobusinesslinks.com/solar-panels-price-survey/"
+    },
+    {
+      "category": "Energy / Backup Power",
+      "product": "Standby generators",
+      "origin_reference": "U.S. wholesale market",
+      "benchmark": {"median_usd_per_kw":393,"median_unit_size_kw":39},
+      "basis": "Q3 2026 wholesale equipment index",
+      "priority": "A",
+      "business_case": "Documented generator exports to Cuba plus chronic backup-power need; exact diesel/gas model RFQ required.",
+      "source": "https://www.portlandiaelectric.supply/pages/price-index"
+    },
+    {
+      "category": "Energy / Storage",
+      "product": "Home battery storage",
+      "origin_reference": "U.S. wholesale market",
+      "benchmark": {"median_usd_per_kwh":473,"lifepo4_median_usd_per_kwh":481},
+      "basis": "Q3 2026 wholesale equipment index",
+      "priority": "A-",
+      "business_case": "High-value companion product to solar; requires inverter/BMS compatibility and export review.",
+      "source": "https://www.portlandiaelectric.supply/pages/price-index"
+    },
+    {
+      "category": "Electrical",
+      "product": "String inverters",
+      "origin_reference": "U.S. wholesale market",
+      "benchmark": {"median_usd_per_kw":344},
+      "basis": "Q3 2026 wholesale equipment index",
+      "priority": "A-",
+      "business_case": "Bundling panels + inverter + storage improves ticket size and margin protection.",
+      "source": "https://www.portlandiaelectric.supply/pages/price-index"
+    }
+  ],
+  "recommended_offer_bundles": [
+    {"bundle":"Cuba Solar Starter Pallet","components":["435-600W bifacial panels","string inverter","PV wire/protection"],"pricing_status":"benchmark_only","target_model":"supplier direct-to-buyer; SAHJONY protected margin"},
+    {"bundle":"Cuba Backup Power Package","components":["generator","automatic transfer switch","spares/filters"],"pricing_status":"RFQ_REQUIRED","target_model":"container/pallet or project quote"},
+    {"bundle":"Cuba Essential Food Container","components":["rice","poultry","pork or dairy depending cold-chain"],"pricing_status":"mixed benchmark/RFQ","target_model":"buyer pre-qualification plus supplier-direct fulfillment"}
+  ],
+  "sources": [
+    "https://www.fas.usda.gov/regions/cuba",
+    "https://www.census.gov/foreign-trade/balance/c2390.html",
+    "https://www.cubatrade.org/blog/2026/6/12/1rrm6o6swm00lmfl17bo8e0b7snu75",
+    "https://insights.tridge.com/product-country-monthly-update-market-insights/long-grain-milled-rice/US/2026-07",
+    "https://www.voltpathsolar.com/",
+    "https://www.portlandiaelectric.supply/pages/price-index",
+    "https://ecobusinesslinks.com/solar-panels-price-survey/"
+  ]
+}
