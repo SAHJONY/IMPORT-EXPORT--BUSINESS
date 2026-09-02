@@ -110,15 +110,11 @@ jobs:
           sleep 12
           systemctl is-active --quiet openclaw-gateway.service
 
-          raw="$(oc config get agents.defaults.model.primary --json 2>/dev/null || true)"
-          configured="$(RAW="$raw" python3 - <<'PY'
+          configured="$(CONFIG="$CONFIG" python3 - <<'PY'
           import json, os
-          raw=os.environ.get('RAW','').strip()
-          try:
-              value=json.loads(raw)
-          except Exception:
-              value=raw.strip('"')
-          print(value if isinstance(value,str) else '')
+          with open(os.environ['CONFIG'], encoding='utf-8') as handle:
+              value=json.load(handle)
+          print(value.get('agents',{}).get('defaults',{}).get('model',{}).get('primary',''))
           PY
           )"
           [[ "$configured" == "$primary" ]] || { echo SOFIA_PRIMARY_CONFIG_MISMATCH=1 >&2; exit 23; }
