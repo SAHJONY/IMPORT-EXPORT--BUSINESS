@@ -4,6 +4,8 @@ set -euo pipefail
 APP_URL="https://www.sahjony.com"
 BUSINESS_NUMBER="+12816628581"
 BUSINESS_NAME="SAHJONY LLC"
+LOCAL_GATEWAY_ID="default"
+LOCAL_ACCOUNT_ID="default"
 VERCEL_SCOPE="juan-gonzalezs-projects-94b6dfe9"
 VERCEL_PROJECT="import-export-business"
 PRODUCTION_DEPLOYMENT="https://import-export-business.vercel.app"
@@ -83,7 +85,7 @@ trap cleanup EXIT
 if [[ -f "${OPENCLAW_ENV_FILE}" ]]; then
   BRIDGE_SECRET="$(sed -n 's/^SAHJONY_APP_BRIDGE_SECRET=//p' "${OPENCLAW_ENV_FILE}" | tail -n 1)"
   cp "${OPENCLAW_ENV_FILE}" "${OPENCLAW_ENV_FILE}.backup.$(date +%Y%m%d%H%M%S)"
-  awk '!/^SAHJONY_APP_URL=|^SAHJONY_APP_BRIDGE_SECRET=/' "${OPENCLAW_ENV_FILE}" >"${TEMP_ENV_FILE}"
+  awk '!/^SAHJONY_APP_URL=|^SAHJONY_APP_BRIDGE_SECRET=|^SAHJONY_GATEWAY_ID=|^SAHJONY_WHATSAPP_ACCOUNT_ID=/' "${OPENCLAW_ENV_FILE}" >"${TEMP_ENV_FILE}"
 fi
 
 if [[ ! "${BRIDGE_SECRET}" =~ ^[0-9a-fA-F]{64}$ ]]; then
@@ -97,6 +99,8 @@ fi
   cat "${TEMP_ENV_FILE}"
   printf 'SAHJONY_APP_URL=%s\n' "${APP_URL}"
   printf 'SAHJONY_APP_BRIDGE_SECRET=%s\n' "${BRIDGE_SECRET}"
+  printf 'SAHJONY_GATEWAY_ID=%s\n' "${LOCAL_GATEWAY_ID}"
+  printf 'SAHJONY_WHATSAPP_ACCOUNT_ID=%s\n' "${LOCAL_ACCOUNT_ID}"
 } >"${OPENCLAW_ENV_FILE}"
 chmod 600 "${OPENCLAW_ENV_FILE}"
 
@@ -147,7 +151,7 @@ openclaw config set commands.ownerAllowFrom \
 openclaw config set channels.whatsapp.accounts.default.pluginHooks.messageReceived true --strict-json
 openclaw config set plugins.entries.sahjony-app-bridge.enabled true --strict-json
 openclaw config set plugins.entries.sahjony-app-bridge.config \
-  "{\"appUrl\":\"${APP_URL}\",\"accountId\":\"default\",\"businessNumber\":\"${BUSINESS_NUMBER}\",\"businessName\":\"${BUSINESS_NAME}\",\"pollIntervalMs\":30000}" \
+  "{\"appUrl\":\"${APP_URL}\",\"accountId\":\"${LOCAL_ACCOUNT_ID}\",\"gatewayId\":\"${LOCAL_GATEWAY_ID}\",\"businessNumber\":\"${BUSINESS_NUMBER}\",\"businessName\":\"${BUSINESS_NAME}\",\"pollIntervalMs\":30000}" \
   --strict-json \
   --merge
 
@@ -189,33 +193,43 @@ fi
 openclaw plugins inspect sahjony-app-bridge --runtime --json
 openclaw channels status --probe || true
 
+# Local Mac is a diagnostic/fallback runtime, not the sole production authority.
+# Success here means production received a fresh heartbeat under gateway_id=default;
+# global send_ready may remain governed by the Hostinger production gateway.
 BRIDGE_READY=0
 for attempt in {1..12}; do
   HEALTH_RESPONSE="$(curl --fail --silent --show-error "${APP_URL}/whatsapp/health" || true)"
   if [[ -n "${HEALTH_RESPONSE}" ]]; then
     printf '%s\n' "${HEALTH_RESPONSE}"
-  fi
-  if [[ "${HEALTH_RESPONSE}" == *'"gateway_connected":true'* && "${HEALTH_RESPONSE}" == *'"send_ready":true'* ]]; then
-    BRIDGE_READY=1
-    break
+    if printf '%s' "${HEALTH_RESPONSE}" | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+g = d.get("openclaw_default") or {}
+raise SystemExit(0 if g.get("gateway_id") == "default" and g.get("heartbeat_fresh") is True else 1)
+'; then
+      BRIDGE_READY=1
+      break
+    fi
   fi
   sleep 5
 done
 if [[ "${BRIDGE_READY}" -ne 1 ]]; then
   if [[ "${DEPLOYMENT_REFRESHED}" -eq 1 ]]; then
-    echo "The SAHJONY application did not receive a send-ready connected gateway heartbeat within 60 seconds." >&2
+    echo "The SAHJONY application did not receive a fresh local-Mac heartbeat under gateway_id=default within 60 seconds." >&2
     exit 1
   fi
-  echo "Local OpenClaw is ready; the application bridge is waiting for the Vercel deployment limit to reset." >&2
+  echo "Local OpenClaw is ready; application heartbeat verification is pending the next successful Vercel deployment." >&2
 fi
 
 pmset -g custom
 
 echo "SAHJONY OpenClaw bridge installed and configured to start automatically."
+echo "LOCAL_GATEWAY_ID=${LOCAL_GATEWAY_ID}"
+echo "LOCAL_GATEWAY_ROLE=diagnostic_fallback_non_authoritative"
 if [[ "${DEPLOYMENT_REFRESHED}" -eq 1 ]]; then
   echo "Vercel production was refreshed with the saved bridge secret."
 else
   echo "Vercel production refresh is pending because the account deployment limit was reached."
 fi
 echo "Verify after deployment: ${APP_URL}/whatsapp/health"
-echo "APP_WHATSAPP_BRIDGE_READY=${BRIDGE_READY}"
+echo "APP_LOCAL_OPENCLAW_HEARTBEAT_READY=${BRIDGE_READY}"
