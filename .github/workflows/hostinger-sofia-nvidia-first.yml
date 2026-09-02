@@ -182,17 +182,31 @@ jobs:
           fi
           pid="$(systemctl show openclaw-gateway.service -p MainPID --value)"
           tr '\0' '\n' <"/proc/$pid/environ" | grep -q '^OPENAI_API_KEY='
-          gateway_token="$(CONFIG="$CONFIG" python3 - <<'PY'
+          readarray -t gateway_auth < <(CONFIG="$CONFIG" python3 - <<'PY'
           import json, os
           with open(os.environ['CONFIG'], encoding='utf-8') as handle:
               value=json.load(handle)
-          print(value.get('gateway',{}).get('auth',{}).get('token',''))
+          auth=value.get('gateway',{}).get('auth',{})
+          print(auth.get('token',''))
+          print(auth.get('password',''))
           PY
-          )"
-          [[ -n "$gateway_token" ]] || { echo GATEWAY_AUTH_TOKEN_MISSING=1 >&2; exit 24; }
+          )
+          gateway_token="${gateway_auth[0]:-}"
+          gateway_password="${gateway_auth[1]:-}"
           wa=''
           for attempt in 1 2 3 4 5 6; do
-            wa="$(oc channels status --channel whatsapp --probe --token "$gateway_token" 2>&1 || true)"
+            if [[ -n "$gateway_token" ]]; then
+              wa="$(oc channels status --channel whatsapp --probe --token "$gateway_token" 2>&1 || true)"
+            elif [[ -n "$gateway_password" ]]; then
+              wa="$(oc channels status --channel whatsapp --probe --password "$gateway_password" 2>&1 || true)"
+            else
+              # This retained Hostinger runtime keeps gateway credentials outside
+              # openclaw.json. Its signed production heartbeat is the canonical,
+              # secret-free connectivity probe in that configuration.
+              wa="$(curl -fsS --connect-timeout 10 --max-time 30 https://www.sahjony.com/whatsapp/health \
+                | python3 -c 'import json,sys; h=json.load(sys.stdin); n=h.get("hostinger_openclaw") or {}; print("connected" if h.get("status")=="ok" and h.get("send_ready") is True and n.get("gateway_id")=="hostinger-vps" and n.get("connected") is True and n.get("heartbeat_fresh") is True else "offline")' \
+                2>&1 || true)"
+            fi
             if grep -Eiq 'connected|ready|healthy|enabled, configured, linked|linked.*running' <<<"$wa"; then
               break
             fi
