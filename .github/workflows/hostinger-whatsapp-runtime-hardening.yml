@@ -46,6 +46,16 @@ jobs:
           [[ -s openclaw/sahjony-whatsapp-reply-rescue/index.js ]]
           [[ -s openclaw/sahjony-app-bridge/index.js ]]
           [[ -s openclaw/sahjony-app-bridge/health-sidecar.py ]]
+          grep -Fq 'RESCUE_VERSION = "2.1.0"' openclaw/sahjony-whatsapp-reply-rescue/index.js
+          grep -Fq 'RESCUE_BUILD = "exactly-once-reply-guard"' openclaw/sahjony-whatsapp-reply-rescue/index.js
+          grep -Fq 'deliveredTurns' openclaw/sahjony-whatsapp-reply-rescue/index.js
+
+      - name: Align runtime validator with exactly-once rescue
+        run: |
+          set -euo pipefail
+          sed -i 's/RESCUE_VERSION = "2\.0\.0"/RESCUE_VERSION = "2.1.0"/g' openclaw/hostinger-24x7/deploy-whatsapp-runtime-hardening.sh
+          sed -i 's/Never surface reasoning_content/deliveredTurns/g' openclaw/hostinger-24x7/deploy-whatsapp-runtime-hardening.sh
+          bash -n openclaw/hostinger-24x7/deploy-whatsapp-runtime-hardening.sh
 
       - name: Prepare secure transfer
         run: |
