@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-# Exact-model cutover trigger: 2026-09-02
+# Registered final-repair trigger: 2026-09-02T19:06Z
 
 STATE="${OPENCLAW_STATE_DIR:-/var/lib/sahjony-openclaw-state}"
 CONFIG="${OPENCLAW_CONFIG_PATH:-$STATE/openclaw.json}"
@@ -47,14 +47,12 @@ oc() {
 cp -a "$CONFIG" "$BACKUP"
 chmod 600 "$BACKUP"
 
-# Bind NVIDIA credentials/provider without changing Sofia's primary model yet.
 oc plugins enable nvidia >/dev/null 2>&1 || true
 cat "$KEY_FILE" | oc models auth paste-api-key --provider nvidia --profile-id nvidia:nim >/dev/null
 oc models auth order set --provider nvidia nvidia:nim >/dev/null
 oc config set models.providers.nvidia '{"baseUrl":"https://integrate.api.nvidia.com/v1","api":"openai-completions"}' --strict-json --merge >/dev/null
 oc config validate >/dev/null
 
-# Hard gate: NVIDIA must successfully serve the exact requested model before cutover.
 nkey="$(tr -d '\r\n' <"$KEY_FILE")"
 http_code="$(curl -sS -o "$SMOKE" -w '%{http_code}' --connect-timeout 10 --max-time 150 \
   -H "Authorization: Bearer $nkey" \
@@ -77,7 +75,6 @@ systemctl is-active --quiet openclaw-gateway.service || { echo OPENCLAW_GATEWAY_
 configured_after="$(oc config get agents.defaults.model.primary 2>/dev/null || true)"
 [[ "$configured_after" == "$TARGET_OPENCLAW_MODEL" ]] || { echo "SOFIA_MODEL_POST_RESTART_MISMATCH=$configured_after" >&2; exit 28; }
 
-# Preserve the live WhatsApp transport as a hard post-cutover gate.
 wa=''
 for attempt in 1 2 3 4 5 6 7 8; do
   wa="$(curl -fsS --connect-timeout 10 --max-time 30 https://www.sahjony.com/whatsapp/health 2>/dev/null || true)"
