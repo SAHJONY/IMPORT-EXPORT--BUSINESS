@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'openclaw/hostinger-24x7/diagnose-whatsapp-runtime.sh'
+      - '.github/workflows/hostinger-whatsapp-runtime-diagnostics.yml'
   workflow_dispatch:
 
 permissions:
@@ -13,7 +14,7 @@ permissions:
 jobs:
   diagnose:
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 12
     env:
       HOST: '69.62.68.67'
       SSH_USER: root
@@ -27,7 +28,7 @@ jobs:
           set -euo pipefail
           [[ -n "$PRIVATE_KEY" ]] || { echo HOSTINGER_SSH_PRIVATE_KEY_MISSING=1 >&2; exit 2; }
           bash -n openclaw/hostinger-24x7/diagnose-whatsapp-runtime.sh
-      - name: Run sanitized diagnostics
+      - name: Run sanitized diagnostics with SSH retry
         run: |
           set -euo pipefail
           umask 077
@@ -35,9 +36,21 @@ jobs:
           printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/hostinger-whatsapp-diagnostics
           chmod 600 ~/.ssh/hostinger-whatsapp-diagnostics
           ssh-keygen -y -f ~/.ssh/hostinger-whatsapp-diagnostics >/dev/null
-          opts=(-o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=15 -i ~/.ssh/hostinger-whatsapp-diagnostics)
+          opts=(-o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=12 -o ConnectionAttempts=1 -i ~/.ssh/hostinger-whatsapp-diagnostics)
+
+          connected=0
+          for attempt in 1 2 3 4 5 6 7 8; do
+            echo "SSH_DIAGNOSTIC_ATTEMPT=$attempt"
+            if ssh "${opts[@]}" "$SSH_USER@$HOST" 'printf HOSTINGER_SSH_OK' 2>/dev/null | grep -q HOSTINGER_SSH_OK; then
+              connected=1
+              break
+            fi
+            sleep 15
+          done
+          [[ "$connected" == 1 ]] || { echo HOSTINGER_SSH_UNREACHABLE_AFTER_RETRIES=1 >&2; exit 30; }
+
           scp "${opts[@]}" openclaw/hostinger-24x7/diagnose-whatsapp-runtime.sh "$SSH_USER@$HOST:/root/diagnose-whatsapp-runtime.sh"
-          ssh "${opts[@]}" "$SSH_USER@$HOST" 'chmod 700 /root/diagnose-whatsapp-runtime.sh && /root/diagnose-whatsapp-runtime.sh; rm -f /root/diagnose-whatsapp-runtime.sh'
+          ssh "${opts[@]}" "$SSH_USER@$HOST" 'chmod 700 /root/diagnose-whatsapp-runtime.sh && /root/diagnose-whatsapp-runtime.sh; rc=$?; rm -f /root/diagnose-whatsapp-runtime.sh; exit $rc'
       - name: Cleanup
         if: always()
         run: rm -f ~/.ssh/hostinger-whatsapp-diagnostics
