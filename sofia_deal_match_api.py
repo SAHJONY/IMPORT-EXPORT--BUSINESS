@@ -9,8 +9,9 @@ from fastapi import FastAPI, Header, HTTPException, Query
 
 from auth import verify_owner_token
 from insforge_backend import get_backend, persistent_backend_status
+from world_clock_trade_api import app as world_clock_app
 
-app = FastAPI(title='SAHJONY SOFIA Deal Supplier Match OS', version='1.0.0', docs_url=None, redoc_url=None)
+app = FastAPI(title='SAHJONY SOFIA Deal Supplier Match OS', version='1.1.0', docs_url=None, redoc_url=None)
 ORG = 'org_sahjony_global_trade'
 
 
@@ -176,7 +177,7 @@ async def run_refresh(limit: int = 1000) -> dict[str, Any]:
 @app.get('/crm/sofia-deal-match/health')
 async def health():
     p = persistent_backend_status()
-    return {'status':'ok' if p.get('configured') else 'configuration_required','service':'sofia-deal-supplier-match-os','version':'1.0.0','canonical_backend':'supabase','daily_refresh_ready':True,'zero_own_capital_target':True,'fee_protection_required':True,'binding_actions_allowed':False}
+    return {'status':'ok' if p.get('configured') else 'configuration_required','service':'sofia-deal-supplier-match-os','version':'1.1.0','canonical_backend':'supabase','daily_refresh_ready':True,'global_world_clock_connected':True,'follow_the_sun_24x7':True,'zero_own_capital_target':True,'fee_protection_required':True,'binding_actions_allowed':False}
 
 
 @app.get('/crm/sofia-deal-match')
@@ -198,3 +199,7 @@ async def cron(authorization: str | None = Header(None, alias='Authorization')):
     actor = owner_or_cron(authorization)
     result = await run_refresh(1500)
     return {**result,'triggered_by':actor,'schedule':'daily'}
+
+# Mount the global clock under the already-routed SOFIA function so production can use it
+# without requiring a separate serverless route. Original route names remain inside the prefix.
+app.include_router(world_clock_app.router, prefix='/crm/sofia-deal-match')
