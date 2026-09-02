@@ -1,4 +1,4 @@
-name: Hostinger SOFIA Codex Warning Trace Once
+name: Hostinger Gateway Background Auth Trace Once
 
 on:
   push:
@@ -24,100 +24,57 @@ jobs:
         run: |
           set -euo pipefail
           install -d -m 700 ~/.ssh
-          printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/hostinger-sofia-trace
-          chmod 600 ~/.ssh/hostinger-sofia-trace
-          ssh-keygen -y -f ~/.ssh/hostinger-sofia-trace >/dev/null
+          printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/hostinger-bgtrace
+          chmod 600 ~/.ssh/hostinger-bgtrace
+          ssh-keygen -y -f ~/.ssh/hostinger-bgtrace >/dev/null
 
-      - name: Trace exact warning source
+      - name: Trace background clients
         shell: bash
         run: |
           set -euo pipefail
-          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=15 -i ~/.ssh/hostinger-sofia-trace "$USER@$HOST" 'bash -s' <<'REMOTE'
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=15 -i ~/.ssh/hostinger-bgtrace "$USER@$HOST" 'bash -s' <<'REMOTE'
           set -euo pipefail
-          STATE=/var/lib/sahjony-openclaw-state
-          CONFIG="$STATE/openclaw.json"
-          token="$(sed -n 's/^OPENCLAW_GATEWAY_TOKEN=//p' /etc/openclaw-gateway.env 2>/dev/null | head -n1 || true)"
-          oc(){ env HOME=/home/node OPENCLAW_HOME=/home/node OPENCLAW_STATE_DIR="$STATE" OPENCLAW_CONFIG_PATH="$CONFIG" "$@"; }
           redact(){ sed -E \
             -e 's/(Bearer[[:space:]]+)[A-Za-z0-9._~+\/-]+/\1[REDACTED]/Ig' \
             -e 's/((api[_-]?key|token|secret|password|authorization)["[:space:]]*[:=]["[:space:]]*)[^,"[:space:]]+/\1[REDACTED]/Ig' \
+            -e 's/(OPENCLAW_GATEWAY_TOKEN=)[^[:space:]]+/\1[REDACTED]/g' \
             -e 's/(sk-[A-Za-z0-9_-]{8})[A-Za-z0-9_-]+/\1[REDACTED]/g'; }
 
           echo HOSTINGER_VPS_SCOPE_ONLY=1
-          echo CONTEXT_AROUND_235225_BEGIN
-          journalctl -u openclaw-gateway.service --since '2026-09-01 23:51:30' --until '2026-09-01 23:53:20' --no-pager 2>/dev/null | tail -n 160 | redact
-          echo CONTEXT_AROUND_235225_END
-
-          echo EXACT_CODEX_ERRORS_BEGIN
-          journalctl -u openclaw-gateway.service --since '2026-09-01 20:00:00' --no-pager 2>/dev/null \
-            | grep -Ei '(openai-codex|codex|no api key|api key.*(missing|not found)|auth profile|oauth|gpt-5\.4)' \
+          echo GATEWAY_WS_AUTH_ERRORS_BEGIN
+          journalctl -u openclaw-gateway.service --since '2026-09-01 23:40:00' --no-pager 2>/dev/null \
+            | grep -Ei '\[ws\].*(FORBIDDEN|device identity required|missing scope|connect failed)' \
             | tail -n 120 | redact || true
-          echo EXACT_CODEX_ERRORS_END
+          echo GATEWAY_WS_AUTH_ERRORS_END
 
-          echo CODEX_CONFIG_BEGIN
-          if cfg="$(oc openclaw config get plugins.entries.codex --json 2>/dev/null)"; then
-            CFG="$cfg" python3 - <<'PY'
-          import json,os
-          try: x=json.loads(os.environ['CFG'])
-          except Exception: print('CODEX_CONFIG_PARSE=FAIL'); raise SystemExit
-          if isinstance(x,dict):
-              for k,v in x.items():
-                  if any(s in k.lower() for s in ('key','token','secret','password','auth')):
-                      print(f'CODEX_CONFIG_{k.upper()}=[REDACTED/PRESENT]' if v else f'CODEX_CONFIG_{k.upper()}=EMPTY')
-                  elif isinstance(v,(str,int,float,bool)) or v is None:
-                      print(f'CODEX_CONFIG_{k.upper()}={v}')
-                  else:
-                      print(f'CODEX_CONFIG_{k.upper()}_TYPE={type(v).__name__}')
-          else: print('CODEX_CONFIG_TYPE='+type(x).__name__)
-          PY
-          else
-            echo CODEX_CONFIG=ABSENT
-          fi
-          echo CODEX_CONFIG_END
+          for svc in sahjony-openclaw-health-sidecar.service sahjony-whatsapp-guardian.service sahjony-ssh-runtime-guard.service sahjony-nvidia-nim-rotation.service; do
+            echo "SERVICE=$svc"
+            if systemctl cat "$svc" >/tmp/unit 2>/dev/null; then
+              echo UNIT_BEGIN
+              cat /tmp/unit | grep -E '^(\[|Description=|ExecStart=|Environment(File)?=|User=|WorkingDirectory=)' | redact
+              echo UNIT_END
+              echo LOG_BEGIN
+              journalctl -u "$svc" --since '2026-09-01 23:40:00' --no-pager 2>/dev/null | tail -n 80 | redact || true
+              echo LOG_END
+            else
+              echo UNIT_ABSENT=1
+            fi
+          done
+          rm -f /tmp/unit
 
-          echo AUTHENTICATED_CRON_SCAN_BEGIN
-          if [[ -n "$token" ]] && env OPENCLAW_GATEWAY_TOKEN="$token" HOME=/home/node OPENCLAW_HOME=/home/node OPENCLAW_STATE_DIR="$STATE" OPENCLAW_CONFIG_PATH="$CONFIG" openclaw cron list --json >/tmp/cron.json 2>/tmp/cron.err; then
-            python3 - <<'PY'
-          import json,re
-          from pathlib import Path
-          d=json.loads(Path('/tmp/cron.json').read_text())
-          pat=re.compile(r'(openai-codex|codex|gpt-5\.4|oauth)',re.I)
-          found=[]
-          def walk(x,path='$'):
-              if isinstance(x,dict):
-                  for k,v in x.items(): walk(v,f'{path}.{k}')
-              elif isinstance(x,list):
-                  for i,v in enumerate(x): walk(v,f'{path}[{i}]')
-              elif isinstance(x,str) and pat.search(x): found.append(path)
-          walk(d)
-          print('CRON_AUTHENTICATED=PASS')
-          print('CRON_CODEX_FIELD_COUNT='+str(len(found)))
-          for p in found[:40]: print('CRON_CODEX_FIELD_PATH='+p)
-          # Safe job inventory: id/name/enabled/model only.
-          jobs=d.get('jobs',d) if isinstance(d,dict) else d
-          if isinstance(jobs,list):
-              print('CRON_JOB_COUNT='+str(len(jobs)))
-              for j in jobs:
-                  if not isinstance(j,dict): continue
-                  ident=j.get('id','?'); name=j.get('name','?'); enabled=j.get('enabled','?')
-                  model=j.get('model')
-                  if model is None and isinstance(j.get('payload'),dict): model=j['payload'].get('model')
-                  print(f'CRON_JOB={ident}|name={name}|enabled={enabled}|model={model}')
-          PY
-          else
-            echo CRON_AUTHENTICATED=FAIL
-            head -n 10 /tmp/cron.err | redact || true
-          fi
-          rm -f /tmp/cron.json /tmp/cron.err
-          echo AUTHENTICATED_CRON_SCAN_END
-
-          echo CODEX_PLUGIN_DETAIL_BEGIN
-          oc openclaw plugins --help 2>/dev/null | head -n 60 | redact || true
-          echo CODEX_PLUGIN_DETAIL_END
+          echo BACKGROUND_SCRIPT_AUTH_SCAN_BEGIN
+          for f in /usr/local/sbin/sahjony-openclaw-health-sidecar /usr/local/sbin/sahjony-whatsapp-guardian /usr/local/sbin/sahjony-ssh-runtime-guard /usr/local/sbin/sahjony-nvidia-nim-rotation; do
+            [[ -f "$f" ]] || continue
+            echo "SCRIPT=$f"
+            if grep -q 'OPENCLAW_GATEWAY_TOKEN' "$f"; then echo HAS_GATEWAY_TOKEN_REFERENCE=1; else echo HAS_GATEWAY_TOKEN_REFERENCE=0; fi
+            if grep -Eq 'openclaw[[:space:]].*(status|health|cron|channels|gateway|models)|curl.*18789|ws://' "$f"; then echo CALLS_GATEWAY=1; else echo CALLS_GATEWAY=0; fi
+            grep -En 'openclaw[[:space:]].*(status|health|cron|channels|gateway|models)|curl.*18789|OPENCLAW_GATEWAY_TOKEN|ws://' "$f" 2>/dev/null | head -n 25 | redact || true
+          done
+          echo BACKGROUND_SCRIPT_AUTH_SCAN_END
 
           echo TRACE_COMPLETE=1
           REMOTE
 
       - name: Cleanup SSH
         if: always()
-        run: rm -f ~/.ssh/hostinger-sofia-trace
+        run: rm -f ~/.ssh/hostinger-bgtrace
