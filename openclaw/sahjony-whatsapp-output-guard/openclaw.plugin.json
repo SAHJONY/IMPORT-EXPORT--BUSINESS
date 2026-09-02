@@ -1,7 +1,11 @@
 {
   "id": "sahjony-whatsapp-output-guard",
   "name": "SAHJONY WhatsApp Output Guard",
-  "version": "1.0.0",
   "description": "Blocks internal runtime diagnostics from customer and owner WhatsApp messages.",
-  "entry": "./index.js"
+  "activation": { "onStartup": true },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  }
 }
