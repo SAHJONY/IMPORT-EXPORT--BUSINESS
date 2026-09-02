@@ -9,14 +9,14 @@ NATIVE_HOME="${OPENCLAW_NATIVE_HOME:-/home/node}"
 NATIVE_STATE_DIR="${OPENCLAW_NATIVE_STATE_DIR:-/var/lib/sahjony-openclaw-state}"
 NATIVE_CONFIG_PATH="${OPENCLAW_NATIVE_CONFIG_PATH:-${NATIVE_STATE_DIR}/openclaw.json}"
 
+# Keep the rotation pool deliberately small. These NVIDIA NIMs have produced
+# successful inference on this account/runtime. Do not re-add inventory-only
+# models: an inventory listing does not guarantee account-level serving access.
+# In particular, moonshotai/kimi-k2.6 produced provider 404s in production.
 CANDIDATES=(
-  'nvidia/nemotron-3-ultra-550b-a55b'
-  'deepseek-ai/deepseek-v4-pro'
-  'moonshotai/kimi-k2.6'
-  'z-ai/glm-5.2'
-  'nvidia/nemotron-3-super-120b-a12b'
   'nvidia/nemotron-3.5-lightning-30b-a3b'
-  'minimaxai/minimax-m3'
+  'nvidia/nemotron-3-super-120b-a12b'
+  'nvidia/nemotron-3-ultra-550b-a55b'
 )
 
 mkdir -p "$STATE_DIR" "$(dirname "$LOCK_FILE")"
@@ -109,17 +109,13 @@ else
 fi
 ((${#selected[@]} > 0)) || fail no_curated_models_available
 
-model_json="$(oc config get agents.defaults.model --json 2>/dev/null || echo '{}')"
-MODEL_JSON="$model_json" NVIDIA_LIST="$(printf '%s\n' "${selected[@]}")" python3 - <<'PY' > "$STATE_DIR/target.json"
+# Replace the NVIDIA fallback pool instead of merging old candidates. This
+# prevents removed/invalid inventory-only models from surviving indefinitely.
+NVIDIA_LIST="$(printf '%s\n' "${selected[@]}")" python3 - <<'PY' > "$STATE_DIR/target.json"
 import json, os
-try: obj=json.loads(os.environ.get('MODEL_JSON') or '{}')
-except Exception: obj={}
-old=obj.get('fallbacks') if isinstance(obj,dict) else []
-if not isinstance(old,list): old=[]
-non=[x for x in old if isinstance(x,str) and not x.startswith('nvidia/')]
 nv=[x for x in os.environ.get('NVIDIA_LIST','').splitlines() if x]
 seen=set(); out=[]
-for x in non+nv:
+for x in nv:
     if x not in seen:
         seen.add(x); out.append(x)
 print(json.dumps(out,separators=(',',':')))
@@ -137,7 +133,7 @@ if [[ "$auth_present" == true ]]; then
   touch "$STATE_DIR/auth-ready"; rm -f "$STATE_DIR/auth-required"
 else
   touch "$STATE_DIR/auth-required"; rm -f "$STATE_DIR/auth-ready"
-  log 'NVIDIA_NIM_AUTH=REQUIRED rotation pool configured but inference waits for NVIDIA API key'
+  log 'NVIDIA_NIM_AUTH=REQUIRED validated fallback pool retained but inference waits for NVIDIA API key'
 fi
 
 AUTH_PRESENT="$auth_present" PRIMARY="$primary" COUNT="${#selected[@]}" RUNTIME="$RUNTIME" python3 - <<'PY' > "$STATE_DIR/status.json.tmp"
@@ -148,7 +144,7 @@ print(json.dumps({
   'auth_ready': os.environ['AUTH_PRESENT']=='true',
   'primary_preserved': os.environ.get('PRIMARY',''),
   'runtime': os.environ.get('RUNTIME','unknown'),
-  'rotation_mode':'live_inventory_plus_runtime_failover',
+  'rotation_mode':'validated_curated_runtime_failover',
   'candidate_count': int(os.environ['COUNT']),
   'updated_at': datetime.datetime.now(datetime.timezone.utc).isoformat(),
 }, separators=(',',':')))
