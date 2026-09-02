@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { readFile } from "node:fs/promises";
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 
 function compactMedia(media) {
@@ -27,10 +28,8 @@ var index_default = definePluginEntry({
     const businessNumber = String(config.businessNumber || process.env.SAHJONY_WHATSAPP_BUSINESS_NUMBER || "+12816628581");
     const businessName = String(config.businessName || process.env.SAHJONY_WHATSAPP_BUSINESS_NAME || "SAHJONY LLC");
     const pollIntervalMs = Math.max(5e3, Math.min(3e5, Number(config.pollIntervalMs || 3e4)));
-    const openclawBin = String(
-      process.env.OPENCLAW_BIN ||
-      (process.env.HOME ? `${process.env.HOME}/.openclaw/bin/openclaw` : "openclaw")
-    );
+    const openclawBin = String(process.env.OPENCLAW_BIN || (process.env.HOME ? `${process.env.HOME}/.openclaw/bin/openclaw` : "openclaw"));
+    const canonicalConfigPath = String(process.env.OPENCLAW_CONFIG_PATH || "/var/lib/sahjony-openclaw-state/openclaw.json");
     let stopped = false;
     let polling = false;
     let pollTimer;
@@ -69,33 +68,29 @@ var index_default = definePluginEntry({
       }
     }
 
+    async function readActiveModel() {
+      try {
+        const raw = await readFile(canonicalConfigPath, "utf8");
+        const data = JSON.parse(raw);
+        const model = data?.agents?.defaults?.model?.primary;
+        if (typeof model === "string" && model.trim()) return model.trim();
+      } catch (error) {
+        api.logger.warn(`SAHJONY canonical model read failed: ${error instanceof Error ? error.message : "unknown error"}`);
+      }
+      return String(api.runtime?.agent?.defaults?.model || "").trim() || void 0;
+    }
+
     async function heartbeat() {
       let connected = false;
       let gatewayVersion;
-      let activeModel;
       try {
         const probe = await api.runtime.system.runCommandWithTimeout(openclawBin, ["channels", "status", "--probe"], { timeoutMs: 2e4 });
         const output = `${probe.stdout || ""}\n${probe.stderr || ""}`;
-        if (probe.code !== 0 || !/whatsapp/i.test(output)) {
-          throw new Error(`unusable WhatsApp status probe (code=${probe.code})`);
-        }
+        if (probe.code !== 0 || !/whatsapp/i.test(output)) throw new Error(`unusable WhatsApp status probe (code=${probe.code})`);
         connected = /whatsapp[^\n]*\bconnected\b/i.test(output) || /\blinked,\s*running,\s*connected\b/i.test(output);
-
         const version = await api.runtime.system.runCommandWithTimeout(openclawBin, ["--version"], { timeoutMs: 1e4 });
         gatewayVersion = String(version.stdout || "").trim().slice(0, 80) || void 0;
-        if (version.code !== 0 || !gatewayVersion) {
-          throw new Error(`unusable OpenClaw version probe (code=${version.code})`);
-        }
-
-        const modelProbe = await api.runtime.system.runCommandWithTimeout(
-          openclawBin,
-          ["config", "get", "agents.defaults.model.primary"],
-          { timeoutMs: 1e4 }
-        );
-        activeModel = String(modelProbe.stdout || "").trim().replace(/^['\"]|['\"]$/g, "") || void 0;
-        if (modelProbe.code !== 0 || !activeModel) {
-          activeModel = String(api.runtime?.agent?.defaults?.model || "").trim() || void 0;
-        }
+        if (version.code !== 0 || !gatewayVersion) throw new Error(`unusable OpenClaw version probe (code=${version.code})`);
       } catch (error) {
         api.logger.warn(`SAHJONY gateway probe unavailable; heartbeat deferred to sidecar: ${error instanceof Error ? error.message : "unknown error"}`);
         return;
@@ -107,7 +102,7 @@ var index_default = definePluginEntry({
           channel_connected: connected,
           business_number: businessNumber,
           business_name: businessName,
-          model: activeModel,
+          model: await readActiveModel(),
           gateway_version: gatewayVersion
         });
       } catch (error) {
@@ -133,18 +128,13 @@ var index_default = definePluginEntry({
         const data = await response.json();
         for (const command of data.commands || []) {
           try {
-            const sent = await api.runtime.system.runCommandWithTimeout(openclawBin, [
-              "message", "send", "--channel", "whatsapp", "--account", command.account_id || accountId,
-              "--target", command.recipient, "--message", command.body, "--json"
-            ], { timeoutMs: 45e3 });
+            const sent = await api.runtime.system.runCommandWithTimeout(openclawBin, ["message", "send", "--channel", "whatsapp", "--account", command.account_id || accountId, "--target", command.recipient, "--message", command.body, "--json"], { timeoutMs: 45e3 });
             if (sent.code !== 0) throw new Error(String(sent.stderr || `OpenClaw exited with ${sent.code}`).slice(0, 1e3));
             let messageId;
             try {
               const parsed = JSON.parse(String(sent.stdout || "{}"));
               messageId = String(parsed.messageId || parsed.message_id || "") || void 0;
-            } catch {
-              messageId = void 0;
-            }
+            } catch { messageId = void 0; }
             await acknowledge(command, "sent", messageId);
           } catch (error) {
             await acknowledge(command, "failed", void 0, error instanceof Error ? error.message : "OpenClaw send failed");
@@ -152,9 +142,7 @@ var index_default = definePluginEntry({
         }
       } catch (error) {
         api.logger.warn(`SAHJONY outbox poll failed: ${error instanceof Error ? error.message : "unknown error"}`);
-      } finally {
-        polling = false;
-      }
+      } finally { polling = false; }
     }
 
     api.on("message_received", async (event, ctx) => {
@@ -196,7 +184,7 @@ var index_default = definePluginEntry({
       await pollOutbox();
       heartbeatTimer = setInterval(() => { void heartbeat(); }, 12e4);
       pollTimer = setInterval(() => { void pollOutbox(); }, pollIntervalMs);
-      api.logger.info(`SAHJONY application bridge started (gatewayId=${gatewayId}, openclawBin=${openclawBin})`);
+      api.logger.info(`SAHJONY application bridge started (gatewayId=${gatewayId}, openclawBin=${openclawBin}, canonicalConfig=${canonicalConfigPath})`);
     });
 
     api.on("gateway_stop", async () => {
