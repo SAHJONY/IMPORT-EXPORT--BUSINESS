@@ -1,3 +1,4 @@
 Hostinger WhatsApp final repair trigger
-2026-09-02T19:04Z
+2026-09-02T19:05Z
+Attempt: indexed-workflow-trigger-2
 Targets: GPT-OSS-120B, per-account-channel-peer sessions, validated NVIDIA fallbacks, runtime error suppression, reply rescue, canonical health sidecar.
