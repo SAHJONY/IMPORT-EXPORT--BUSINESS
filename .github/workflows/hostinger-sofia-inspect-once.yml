@@ -41,6 +41,7 @@ jobs:
           WORKSPACE=/home/node/.openclaw/workspace
           EXT=/home/node/.openclaw/extensions
           oc(){ env HOME=/home/node OPENCLAW_HOME=/home/node OPENCLAW_STATE_DIR="$STATE" OPENCLAW_CONFIG_PATH="$CONFIG" "$@"; }
+          count_files(){ local pat="$1"; shift; local out; out="$(grep -RIlEi --exclude='*.log' --exclude='*.jsonl' --exclude-dir=node_modules "$pat" "$@" 2>/dev/null || true)"; if [[ -z "$out" ]]; then printf '0'; else printf '%s\n' "$out" | wc -l | tr -d ' '; fi; }
 
           echo HOSTINGER_VPS_SCOPE_ONLY=1
           systemctl is-active --quiet openclaw-gateway.service
@@ -52,8 +53,7 @@ jobs:
           fallbacks="$(oc openclaw config get agents.defaults.model.fallbacks --json 2>/dev/null || printf '[]')"
           PRIMARY="$primary" FALLBACKS="$fallbacks" python3 - <<'PY'
           import json, os
-          p=json.loads(os.environ['PRIMARY'])
-          f=json.loads(os.environ['FALLBACKS'])
+          p=json.loads(os.environ['PRIMARY']); f=json.loads(os.environ['FALLBACKS'])
           print('PRIMARY_MODEL='+str(p))
           print('FALLBACK_MODELS='+(','.join(f) if isinstance(f,list) else str(f)))
           print('NVIDIA_PRIMARY='+('PASS' if isinstance(p,str) and p.startswith('nvidia/') else 'FAIL'))
@@ -63,45 +63,43 @@ jobs:
           envfiles="$(systemctl show openclaw-gateway.service -p EnvironmentFiles --value 2>/dev/null || true)"
           [[ "$envfiles" == *'/etc/openclaw-openai.env'* ]] && echo OPENAI_ENV_FILE_BOUND=1 || echo OPENAI_ENV_FILE_BOUND=0
           [[ -s /etc/openclaw-openai.env ]] && grep -q '^OPENAI_API_KEY=' /etc/openclaw-openai.env && echo OPENAI_ENV_FILE_HAS_KEY=1 || echo OPENAI_ENV_FILE_HAS_KEY=0
-
           pid="$(systemctl show -p MainPID --value openclaw-gateway.service)"
           if [[ "$pid" =~ ^[0-9]+$ ]] && [[ "$pid" -gt 1 ]]; then
-            tr '\0' '\n' < "/proc/$pid/environ" | grep -q '^OPENAI_API_KEY=' && echo OPENAI_KEY_IN_GATEWAY_PROCESS=1 || echo OPENAI_KEY_IN_GATEWAY_PROCESS=0
-            tr '\0' '\n' < "/proc/$pid/environ" | grep -Eq '^(NVIDIA_API_KEY|NVIDIA_NIM_API_KEY)=' && echo NVIDIA_KEY_IN_GATEWAY_PROCESS=1 || echo NVIDIA_KEY_IN_GATEWAY_PROCESS=0
+            if tr '\0' '\n' < "/proc/$pid/environ" | grep -q '^OPENAI_API_KEY='; then echo OPENAI_KEY_IN_GATEWAY_PROCESS=1; else echo OPENAI_KEY_IN_GATEWAY_PROCESS=0; fi
           else
             echo OPENAI_KEY_IN_GATEWAY_PROCESS=0
-            echo NVIDIA_KEY_IN_GATEWAY_PROCESS=0
           fi
 
           code=NO_KEY
           if [[ -s /etc/openclaw-openai.env ]]; then
-            set +u
-            . /etc/openclaw-openai.env
-            set -u
+            set +u; . /etc/openclaw-openai.env; set -u
             if [[ -n "${OPENAI_API_KEY:-}" ]]; then
-              code="$(curl -sS --max-time 30 -o /tmp/openai-auth-probe.json -w '%{http_code}' \
+              code="$(curl -sS --connect-timeout 10 --max-time 60 -o /tmp/openai-auth-probe.json -w '%{http_code}' \
                 https://api.openai.com/v1/responses \
                 -H "Authorization: Bearer $OPENAI_API_KEY" \
                 -H 'Content-Type: application/json' \
-                -d '{"model":"gpt-5.6-sol","input":"Reply only OK","max_output_tokens":8}' || true)"
+                -d '{"model":"gpt-5.6-sol","input":"Reply exactly SAHJONY_OPENAI_OK","max_output_tokens":24}' || true)"
               rm -f /tmp/openai-auth-probe.json
             fi
           fi
           echo OPENAI_GPT56_HTTP="$code"
 
-          active_roots=()
-          [[ -d "$WORKSPACE" ]] && active_roots+=("$WORKSPACE")
-          [[ -d "$EXT" ]] && active_roots+=("$EXT")
-          if ((${#active_roots[@]})); then
-            login_count="$(grep -RIlE --exclude='*.log' --exclude='*.jsonl' --exclude-dir=node_modules '/login[[:space:]]+codex' "${active_roots[@]}" 2>/dev/null | wc -l | tr -d ' ')"
-            gpt54_count="$(grep -RIlE --exclude='*.log' --exclude='*.jsonl' --exclude-dir=node_modules 'gpt-5\.4' "${active_roots[@]}" 2>/dev/null | wc -l | tr -d ' ')"
-            oauth_count="$(grep -RIlEi --exclude='*.log' --exclude='*.jsonl' --exclude-dir=node_modules '(oauth.*openai|openai.*oauth|auth.*not configured)' "${active_roots[@]}" 2>/dev/null | wc -l | tr -d ' ')"
+          roots=(); [[ -d "$WORKSPACE" ]] && roots+=("$WORKSPACE"); [[ -d "$EXT" ]] && roots+=("$EXT")
+          if ((${#roots[@]})); then
+            echo STALE_LOGIN_CODEX_ACTIVE_FILE_COUNT="$(count_files '/login[[:space:]]+codex' "${roots[@]}")"
+            echo STALE_GPT54_ACTIVE_FILE_COUNT="$(count_files 'gpt-5\.4' "${roots[@]}")"
+            echo STALE_OAUTH_ACTIVE_FILE_COUNT="$(count_files '(oauth.*openai|openai.*oauth|auth.*not configured)' "${roots[@]}")"
+            matches="$(grep -RIlEi --exclude='*.log' --exclude='*.jsonl' --exclude-dir=node_modules '(/login[[:space:]]+codex|gpt-5\.4|oauth.*openai|openai.*oauth|auth.*not configured)' "${roots[@]}" 2>/dev/null || true)"
+            if [[ -n "$matches" ]]; then
+              echo STALE_ACTIVE_PATHS_BEGIN
+              printf '%s\n' "$matches" | head -n 20
+              echo STALE_ACTIVE_PATHS_END
+            fi
           else
-            login_count=0; gpt54_count=0; oauth_count=0
+            echo STALE_LOGIN_CODEX_ACTIVE_FILE_COUNT=0
+            echo STALE_GPT54_ACTIVE_FILE_COUNT=0
+            echo STALE_OAUTH_ACTIVE_FILE_COUNT=0
           fi
-          echo STALE_LOGIN_CODEX_ACTIVE_FILE_COUNT="$login_count"
-          echo STALE_GPT54_ACTIVE_FILE_COUNT="$gpt54_count"
-          echo STALE_OAUTH_ACTIVE_FILE_COUNT="$oauth_count"
 
           warnings="$(journalctl -u openclaw-gateway.service -n 1000 --no-pager 2>/dev/null | grep -Eic '(openai|codex|oauth|credential|auth.*(missing|fail|not configured)|gpt-5\.4)' || true)"
           echo RECENT_AUTH_WARNING_COUNT="$warnings"
