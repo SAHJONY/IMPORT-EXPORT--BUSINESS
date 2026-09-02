@@ -92,8 +92,27 @@ jobs:
           oc config set channels.whatsapp.responsePrefix '' >/dev/null
           rm -rf /tmp/sahjony-whatsapp-reply-rescue
           tar -xzf /root/sahjony-whatsapp-reply-rescue.tgz -C /tmp
-          oc plugins install /tmp/sahjony-whatsapp-reply-rescue --force --acknowledge-install-policy-warning >/dev/null
-          oc plugins enable sahjony-whatsapp-reply-rescue >/dev/null
+          rm -rf "$STATE/extensions/sahjony-whatsapp-reply-rescue"
+          install -d -m 700 "$STATE/extensions"
+          cp -a /tmp/sahjony-whatsapp-reply-rescue "$STATE/extensions/sahjony-whatsapp-reply-rescue"
+          CONFIG="$CONFIG" python3 - <<'PY'
+          import json, os
+          path=os.environ['CONFIG']
+          with open(path, encoding='utf-8') as handle:
+              data=json.load(handle)
+          plugins=data.setdefault('plugins', {})
+          allow=plugins.setdefault('allow', [])
+          if 'sahjony-whatsapp-reply-rescue' not in allow:
+              allow.append('sahjony-whatsapp-reply-rescue')
+          entry=plugins.setdefault('entries', {}).setdefault('sahjony-whatsapp-reply-rescue', {})
+          entry['enabled']=True
+          entry['config']={'accountId':'default','businessNumber':'+12816628581','rescueDelayMs':15000}
+          entry.setdefault('hooks', {})['allowConversationAccess']=True
+          with open(path, 'w', encoding='utf-8') as handle:
+              json.dump(data, handle, indent=2)
+              handle.write('\n')
+          PY
+          oc config validate >/dev/null
 
           install -m 700 /root/nvidia-nim-rotation.sh /usr/local/sbin/sahjony-nvidia-nim-rotation
           rm -f /root/nvidia-nim-rotation.sh
