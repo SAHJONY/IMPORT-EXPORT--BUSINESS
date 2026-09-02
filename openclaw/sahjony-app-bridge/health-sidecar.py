@@ -20,7 +20,8 @@ import urllib.request
 from pathlib import Path
 
 HOME = Path.home()
-STATE_DIR = Path(os.environ.get("OPENCLAW_STATE_DIR", HOME / ".openclaw"))
+STATE_DIR = Path(os.environ.get("OPENCLAW_STATE_DIR", "/var/lib/sahjony-openclaw-state" if Path("/var/lib/sahjony-openclaw-state").exists() else HOME / ".openclaw"))
+CONFIG_PATH = Path(os.environ.get("OPENCLAW_CONFIG_PATH", STATE_DIR / "openclaw.json"))
 ENV_FILE = STATE_DIR / ".env"
 OPENCLAW_BIN = os.environ.get("OPENCLAW_BIN", str(STATE_DIR / "bin" / "openclaw"))
 APP_URL = os.environ.get("SAHJONY_APP_URL", "https://www.sahjony.com").rstrip("/")
@@ -28,7 +29,6 @@ GATEWAY_ID = os.environ.get("SAHJONY_GATEWAY_ID", "hostinger-vps")
 ACCOUNT_ID = os.environ.get("SAHJONY_WHATSAPP_ACCOUNT_ID", "default")
 BUSINESS_NUMBER = os.environ.get("SAHJONY_WHATSAPP_BUSINESS_NUMBER", "+12816628581")
 BUSINESS_NAME = os.environ.get("SAHJONY_WHATSAPP_BUSINESS_NAME", "SAHJONY LLC")
-MODEL = os.environ.get("SAHJONY_REASONING_MODEL", "gpt-5.6-sol")
 
 
 def read_env(path: Path) -> dict[str, str]:
@@ -44,6 +44,19 @@ def read_env(path: Path) -> dict[str, str]:
     return values
 
 
+def active_model(env: dict[str, str]) -> str | None:
+    """Read the authoritative agent primary model from OpenClaw's canonical config."""
+    try:
+        data = json.loads(CONFIG_PATH.read_text(errors="replace"))
+        model = (((data.get("agents") or {}).get("defaults") or {}).get("model") or {}).get("primary")
+        if isinstance(model, str) and model.strip():
+            return model.strip()
+    except Exception:
+        pass
+    fallback = os.environ.get("SAHJONY_REASONING_MODEL") or env.get("SAHJONY_REASONING_MODEL")
+    return fallback.strip() if isinstance(fallback, str) and fallback.strip() else None
+
+
 def run_openclaw(*args: str, timeout: int = 20) -> tuple[int, str]:
     try:
         proc = subprocess.run(
@@ -53,7 +66,12 @@ def run_openclaw(*args: str, timeout: int = 20) -> tuple[int, str]:
             stderr=subprocess.STDOUT,
             timeout=timeout,
             check=False,
-            env={**os.environ, "HOME": str(HOME)},
+            env={
+                **os.environ,
+                "HOME": str(HOME),
+                "OPENCLAW_STATE_DIR": str(STATE_DIR),
+                "OPENCLAW_CONFIG_PATH": str(CONFIG_PATH),
+            },
         )
         return proc.returncode, proc.stdout or ""
     except Exception as exc:
@@ -96,7 +114,7 @@ def signed_post(secret: str, payload: dict[str, object]) -> tuple[int, str]:
             "Content-Type": "application/json",
             "X-SAHJONY-Timestamp": timestamp,
             "X-SAHJONY-Signature": f"sha256={digest}",
-            "User-Agent": "SAHJONY-OpenClaw-Health-Sidecar/2.0",
+            "User-Agent": "SAHJONY-OpenClaw-Health-Sidecar/2.1",
         },
     )
     try:
@@ -116,7 +134,7 @@ def main() -> int:
     account_id = os.environ.get("SAHJONY_WHATSAPP_ACCOUNT_ID") or env.get("SAHJONY_WHATSAPP_ACCOUNT_ID") or ACCOUNT_ID
     business_number = os.environ.get("SAHJONY_WHATSAPP_BUSINESS_NUMBER") or env.get("SAHJONY_WHATSAPP_BUSINESS_NUMBER") or BUSINESS_NUMBER
     business_name = os.environ.get("SAHJONY_WHATSAPP_BUSINESS_NAME") or env.get("SAHJONY_WHATSAPP_BUSINESS_NAME") or BUSINESS_NAME
-    model = os.environ.get("SAHJONY_REASONING_MODEL") or env.get("SAHJONY_REASONING_MODEL") or MODEL
+    model = active_model(env)
     global APP_URL
     if app_url:
         APP_URL = app_url.rstrip("/")
@@ -144,6 +162,8 @@ def main() -> int:
         "http_status": http_status,
         "gateway_id": gateway_id,
         "business_number_configured": bool(business_number),
+        "model_source": "canonical_openclaw_config" if model else "unresolved",
+        "model": model,
         "channel_connected": payload["channel_connected"],
         "probe": state,
         "response_excerpt": response[:500],
