@@ -1,0 +1,267 @@
+name: Hostinger Recovery Preserve Firewall
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/hostinger-recovery-preserve-firewall.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hostinger-recovery-preserve-firewall
+  cancel-in-progress: false
+
+env:
+  HOSTINGER_API_BASE: https://developers.hostinger.com
+  VM_ID: '767852'
+  HOST: '69.62.68.67'
+  USER: root
+
+jobs:
+  recover:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      API_TOKEN: ${{ secrets.HOSTINGER_API_TOKEN }}
+    steps:
+      - name: Prepare ephemeral recovery credential
+        id: creds
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "$API_TOKEN" ]] || { echo 'HOSTINGER_API_TOKEN_MISSING=1' >&2; exit 2; }
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq sshpass netcat-openbsd >/dev/null
+          install -m 700 -d ~/.ssh
+          ssh-keygen -q -t ed25519 -N '' -f ~/.ssh/hostinger-recovery -C "sahjony-recovery-${GITHUB_RUN_ID}"
+          RECOVERY_PASSWORD="$(openssl rand -hex 16)Aa1!"
+          echo "::add-mask::$RECOVERY_PASSWORD"
+          echo "recovery_password=$RECOVERY_PASSWORD" >> "$GITHUB_OUTPUT"
+          echo 'SAHJONY_RECOVERY_CREDENTIALS_READY=1'
+
+      - name: Validate existing Hostinger firewall without replacing it
+        id: firewall
+        shell: bash
+        run: |
+          set -euo pipefail
+          auth=(-H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json')
+          curl --fail --silent --show-error "${auth[@]}" \
+            "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID" > /tmp/vm-before.json
+          firewall_id="$(jq -r '.firewall_group_id // .firewall_id // empty' /tmp/vm-before.json)"
+          [[ -n "$firewall_id" && "$firewall_id" != "null" ]] || { echo 'HOSTINGER_EXISTING_FIREWALL_NOT_FOUND=1' >&2; exit 30; }
+          curl --fail --silent --show-error "${auth[@]}" \
+            "$HOSTINGER_API_BASE/api/vps/v1/firewall/$firewall_id" > /tmp/firewall.json
+          jq -e '
+            [.. | objects | select(
+              ((.port // .ports // .destination_port // "") | tostring | test("(^|[^0-9])22([^0-9]|$)"))
+              and ((.protocol // "") | ascii_downcase | test("tcp|all|any"))
+              and ((.action // .policy // "") | ascii_downcase | test("accept|allow"))
+            )] | length > 0' /tmp/firewall.json >/dev/null \
+            || { echo "EXISTING_FIREWALL_TCP22_NOT_VERIFIED=1 firewall_id=$firewall_id" >&2; exit 31; }
+          echo "firewall_id=$firewall_id" >> "$GITHUB_OUTPUT"
+          echo "HOSTINGER_EXISTING_FIREWALL_PRESERVED=1 firewall_id=$firewall_id"
+
+      - name: Start Hostinger recovery mode
+        id: recovery_start
+        shell: bash
+        env:
+          RECOVERY_PASSWORD: ${{ steps.creds.outputs.recovery_password }}
+        run: |
+          set -euo pipefail
+          payload="$(jq -n --arg p "$RECOVERY_PASSWORD" '{root_password:$p}')"
+          curl --fail --silent --show-error -X POST \
+            -H "Authorization: Bearer $API_TOKEN" \
+            -H 'Content-Type: application/json' \
+            -H 'Accept: application/json' \
+            --data "$payload" \
+            "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/recovery" >/tmp/recovery-start.json
+          echo 'HOSTINGER_RECOVERY_MODE_REQUESTED=1'
+
+      - name: Wait for authenticated recovery SSH and mounted original OS
+        id: recovery_ready
+        shell: bash
+        env:
+          RECOVERY_PASSWORD: ${{ steps.creds.outputs.recovery_password }}
+        run: |
+          set -euo pipefail
+          export SSHPASS="$RECOVERY_PASSWORD"
+          auth=(-H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json')
+          ssh_opts=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=6)
+          recovery_host="$HOST"
+          root_mount=""
+          for attempt in $(seq 1 60); do
+            curl --silent --show-error "${auth[@]}" \
+              "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID" > /tmp/vm-recovery.json || true
+            api_ip="$(jq -r '[.. | objects | .ipv4? // .ip? // .address? // empty | select(type=="string") | select(test("^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+$"))] | first // empty' /tmp/vm-recovery.json 2>/dev/null || true)"
+            [[ -n "$api_ip" ]] && recovery_host="$api_ip"
+            echo "RECOVERY_SSH_GATE=$attempt host=$recovery_host"
+            if nc -z -w 4 "$recovery_host" 22 >/dev/null 2>&1; then
+              if sshpass -e ssh "${ssh_opts[@]}" "$USER@$recovery_host" 'printf SAHJONY_RECOVERY_AUTH_OK' 2>/dev/null | grep -q SAHJONY_RECOVERY_AUTH_OK; then
+                root_mount="$(sshpass -e ssh "${ssh_opts[@]}" "$USER@$recovery_host" 'bash -s' 2>/dev/null <<'REMOTE' || true
+          set -e
+          for d in /mnt /mnt/sda /mnt/sda1 /mnt/vda /mnt/vda1 /mnt/nvme0n1 /mnt/nvme0n1p1 /mnt/* /mnt/*/*; do
+            [ -d "$d" ] || continue
+            if [ -f "$d/etc/os-release" ] && [ -d "$d/var" ] && [ -d "$d/root" ]; then
+              printf '%s\n' "$d"
+              exit 0
+            fi
+          done
+          exit 1
+          REMOTE
+          )"
+                root_mount="$(printf '%s\n' "$root_mount" | head -n1 | tr -d '\r')"
+                [[ -n "$root_mount" ]] && break
+              fi
+            fi
+            sleep 10
+          done
+          [[ -n "$root_mount" ]] || { echo 'HOSTINGER_RECOVERY_AUTH_OR_OS_MOUNT_NOT_READY=1' >&2; exit 34; }
+          echo "recovery_host=$recovery_host" >> "$GITHUB_OUTPUT"
+          echo "root_mount=$root_mount" >> "$GITHUB_OUTPUT"
+          echo "HOSTINGER_RECOVERY_AUTH_READY=1 root_mount=$root_mount"
+
+      - name: Repair original OS SSH with ephemeral key
+        id: repair
+        shell: bash
+        env:
+          RECOVERY_PASSWORD: ${{ steps.creds.outputs.recovery_password }}
+          RECOVERY_HOST: ${{ steps.recovery_ready.outputs.recovery_host }}
+          ROOT_MOUNT: ${{ steps.recovery_ready.outputs.root_mount }}
+        run: |
+          set -euo pipefail
+          export SSHPASS="$RECOVERY_PASSWORD"
+          PUB_B64="$(base64 -w0 ~/.ssh/hostinger-recovery.pub)"
+          sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 \
+            "$USER@$RECOVERY_HOST" "ROOT_MOUNT='$ROOT_MOUNT' PUB_B64='$PUB_B64' bash -s" <<'REMOTE'
+          set -euo pipefail
+          root="$ROOT_MOUNT"
+          pub="$(printf '%s' "$PUB_B64" | base64 -d)"
+          test -f "$root/etc/os-release"
+          install -d -m 700 "$root/root/.ssh"
+          touch "$root/root/.ssh/authorized_keys"
+          chmod 600 "$root/root/.ssh/authorized_keys"
+          grep -qxF "$pub" "$root/root/.ssh/authorized_keys" || printf '%s\n' "$pub" >> "$root/root/.ssh/authorized_keys"
+          install -d "$root/etc/ssh/sshd_config.d"
+          cat > "$root/etc/ssh/sshd_config.d/99-sahjony-ephemeral-recovery.conf" <<'EOF'
+          PubkeyAuthentication yes
+          PermitRootLogin prohibit-password
+          EOF
+          chmod 600 "$root/etc/ssh/sshd_config.d/99-sahjony-ephemeral-recovery.conf"
+          if [ -d "$root/etc/systemd/system/multi-user.target.wants" ]; then
+            for unit in ssh.service sshd.service; do
+              target="$(find "$root/lib/systemd/system" "$root/usr/lib/systemd/system" -maxdepth 1 -name "$unit" -print -quit 2>/dev/null || true)"
+              if [ -n "$target" ]; then
+                rel="/${target#"$root/"}"
+                ln -sfn "$rel" "$root/etc/systemd/system/multi-user.target.wants/$unit"
+                break
+              fi
+            done
+          fi
+          echo 'ORIGINAL_OS_SSH_REPAIRED=1'
+          REMOTE
+
+      - name: Exit recovery mode
+        id: recovery_stop
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error -X DELETE \
+            -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' \
+            "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/recovery" >/tmp/recovery-stop.json
+          echo 'HOSTINGER_RECOVERY_MODE_STOP_REQUESTED=1'
+
+      - name: Wait for normal SSH
+        id: normal_ssh
+        shell: bash
+        run: |
+          set -euo pipefail
+          connected=false
+          for attempt in $(seq 1 60); do
+            echo "NORMAL_SSH_GATE=$attempt"
+            if out="$(ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=6 \
+              -i ~/.ssh/hostinger-recovery "$USER@$HOST" 'printf SAHJONY_NORMAL_SSH_OK' 2>&1)" \
+              && grep -q SAHJONY_NORMAL_SSH_OK <<<"$out"; then
+              connected=true
+              break
+            fi
+            printf '%s\n' "$out" | tail -n1 || true
+            sleep 10
+          done
+          [[ "$connected" == true ]] || { echo 'NORMAL_KALI_SSH_UNREACHABLE=1' >&2; exit 11; }
+          echo 'NORMAL_KALI_SSH_AUTHORIZED=1'
+
+      - name: Stabilize Docker and OpenClaw
+        id: docker
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            -i ~/.ssh/hostinger-recovery "$USER@$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          command -v docker >/dev/null 2>&1 || { echo 'DOCKER_NOT_FOUND=1' >&2; exit 20; }
+          systemctl enable docker >/dev/null 2>&1 || true
+          systemctl start docker >/dev/null 2>&1 || true
+          mapfile -t ids < <(docker ps -aq | while read -r id; do
+            line="$(docker inspect "$id" --format '{{.Name}}|{{.Config.Image}}' 2>/dev/null || true)"
+            grep -Eqi 'openclaw|claw' <<<"$line" && printf '%s\n' "$id" || true
+          done)
+          [ "${#ids[@]}" -gt 0 ] || { echo 'OPENCLAW_DOCKER_CONTAINER_NOT_FOUND=1' >&2; exit 21; }
+          for id in "${ids[@]}"; do
+            docker update --restart unless-stopped "$id" >/dev/null
+            [ "$(docker inspect "$id" --format '{{.State.Status}}')" = running ] || docker start "$id" >/dev/null
+            docker inspect "$id" --format 'OPENCLAW name={{.Name}} restart={{.HostConfig.RestartPolicy.Name}} status={{.State.Status}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}'
+          done
+          echo 'SAHJONY_DOCKER_OPENCLAW_STABILIZED=1'
+          REMOTE
+
+      - name: Verify public WhatsApp health
+        id: verify
+        shell: bash
+        run: |
+          set -euo pipefail
+          ready=false
+          for attempt in $(seq 1 18); do
+            body="$(curl -fsS --max-time 20 https://www.sahjony.com/whatsapp/health || true)"
+            printf '%s\n' "$body"
+            if grep -q '"gateway_connected"[[:space:]]*:[[:space:]]*true' <<<"$body" \
+              && grep -q '"send_ready"[[:space:]]*:[[:space:]]*true' <<<"$body"; then
+              ready=true
+              break
+            fi
+            sleep 10
+          done
+          [[ "$ready" == true ]] || { echo 'SAHJONY_PUBLIC_WHATSAPP_HEALTH_NOT_READY=1' >&2; exit 40; }
+          echo 'SAHJONY_HOSTINGER_OPENCLAW_24X7=READY'
+
+      - name: Remove ephemeral access
+        if: always() && steps.normal_ssh.outcome == 'success'
+        shell: bash
+        run: |
+          set +e
+          PUB_B64="$(base64 -w0 ~/.ssh/hostinger-recovery.pub 2>/dev/null)"
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=6 \
+            -i ~/.ssh/hostinger-recovery "$USER@$HOST" "PUB_B64='$PUB_B64' python3 - <<'PY'
+          import base64, os, pathlib
+          p=pathlib.Path('/root/.ssh/authorized_keys')
+          target=base64.b64decode(os.environ['PUB_B64']).decode().strip()
+          if p.exists():
+              lines=[x for x in p.read_text().splitlines() if x.strip()!=target]
+              p.write_text(('\n'.join(lines)+'\n') if lines else '')
+              p.chmod(0o600)
+          cfg=pathlib.Path('/etc/ssh/sshd_config.d/99-sahjony-ephemeral-recovery.conf')
+          if cfg.exists(): cfg.unlink()
+          PY"
+          echo 'SAHJONY_EPHEMERAL_ACCESS_REMOVED=1'
+
+      - name: Ensure recovery mode is off
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          curl --silent --show-error -X DELETE \
+            -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' \
+            "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/recovery" >/dev/null 2>&1
+          rm -f ~/.ssh/hostinger-recovery ~/.ssh/hostinger-recovery.pub
+          echo 'HOSTINGER_RECOVERY_CLEANUP_COMPLETE=1'
