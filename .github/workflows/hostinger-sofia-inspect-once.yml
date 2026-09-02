@@ -1,4 +1,4 @@
-name: Hostinger WhatsApp Guardian Auth Repair Once
+name: Hostinger WhatsApp Guardian Failure Inspect Once
 
 on:
   push:
@@ -11,7 +11,7 @@ permissions:
   contents: read
 
 jobs:
-  repair:
+  inspect:
     runs-on: ubuntu-24.04
     timeout-minutes: 8
     env:
@@ -24,100 +24,38 @@ jobs:
         run: |
           set -euo pipefail
           install -d -m 700 ~/.ssh
-          printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/hostinger-guardian-repair
-          chmod 600 ~/.ssh/hostinger-guardian-repair
-          ssh-keygen -y -f ~/.ssh/hostinger-guardian-repair >/dev/null
+          printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/hostinger-guardian-inspect
+          chmod 600 ~/.ssh/hostinger-guardian-inspect
+          ssh-keygen -y -f ~/.ssh/hostinger-guardian-inspect >/dev/null
 
-      - name: Authenticate guardian and verify one full timer cycle
+      - name: Inspect guardian error only
         shell: bash
         run: |
           set -euo pipefail
-          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=15 -i ~/.ssh/hostinger-guardian-repair "$USER@$HOST" 'bash -s' <<'REMOTE'
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=15 -i ~/.ssh/hostinger-guardian-inspect "$USER@$HOST" 'bash -s' <<'REMOTE'
           set -euo pipefail
-          SERVICE=sahjony-whatsapp-guardian.service
-          TIMER=sahjony-whatsapp-guardian.timer
-          DROPIN_DIR=/etc/systemd/system/${SERVICE}.d
-          DROPIN=${DROPIN_DIR}/10-gateway-auth.conf
-          ts="$(date -u +%Y%m%dT%H%M%SZ)"
-          backup=/var/backups/openclaw-whatsapp-guardian-auth/$ts
-
+          redact(){ sed -E \
+            -e 's/(Bearer[[:space:]]+)[A-Za-z0-9._~+\/-]+/\1[REDACTED]/Ig' \
+            -e 's/((api[_-]?key|token|secret|password|authorization)["[:space:]]*[:=]["[:space:]]*)[^,"[:space:]]+/\1[REDACTED]/Ig' \
+            -e 's/(OPENCLAW_GATEWAY_TOKEN=)[^[:space:]]+/\1[REDACTED]/g'; }
           echo HOSTINGER_VPS_SCOPE_ONLY=1
-          systemctl is-active --quiet openclaw-gateway.service
-          echo OPENCLAW_GATEWAY_ACTIVE=1
-          [[ -s /etc/openclaw-gateway.env ]] && grep -q '^OPENCLAW_GATEWAY_TOKEN=' /etc/openclaw-gateway.env
-          echo GATEWAY_TOKEN_FILE_PRESENT=1
+          systemctl is-active --quiet openclaw-gateway.service && echo OPENCLAW_GATEWAY_ACTIVE=1
+          systemctl show sahjony-whatsapp-guardian.service -p EnvironmentFiles --value | grep -q '/etc/openclaw-gateway.env' && echo GUARDIAN_GATEWAY_ENV_BOUND=1 || echo GUARDIAN_GATEWAY_ENV_BOUND=0
 
-          install -d -m 700 "$backup"
-          if [[ -f "$DROPIN" ]]; then cp -a "$DROPIN" "$backup/10-gateway-auth.conf.before"; fi
-          systemctl cat "$SERVICE" > "$backup/service.before.txt"
-          echo GUARDIAN_BACKUP_CREATED=1
+          echo GUARDIAN_SCRIPT_RELEVANT_BEGIN
+          nl -ba /usr/local/sbin/sahjony-whatsapp-guardian | sed -n '1,110p' | redact
+          echo GUARDIAN_SCRIPT_RELEVANT_END
 
-          install -d -m 755 "$DROPIN_DIR"
-          cat > "$DROPIN" <<'EOF'
-          [Service]
-          EnvironmentFile=-/etc/openclaw-gateway.env
-          EOF
-          chmod 644 "$DROPIN"
-          systemctl daemon-reload
+          echo GUARDIAN_LAST_FAILURE_BEGIN
+          journalctl -u sahjony-whatsapp-guardian.service -n 80 --no-pager 2>/dev/null | redact
+          echo GUARDIAN_LAST_FAILURE_END
 
-          if systemctl show "$SERVICE" -p EnvironmentFiles --value | grep -q '/etc/openclaw-gateway.env'; then
-            echo GUARDIAN_GATEWAY_ENV_BOUND=1
-          else
-            echo GUARDIAN_GATEWAY_ENV_BOUND=0
-            exit 20
-          fi
-
-          verify_start="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          systemctl start "$SERVICE"
-          result="$(systemctl show "$SERVICE" -p Result --value)"
-          echo GUARDIAN_MANUAL_RESULT="$result"
-          [[ "$result" == success ]]
-
-          systemctl is-enabled --quiet "$TIMER"
-          systemctl is-active --quiet "$TIMER"
-          echo GUARDIAN_TIMER_ACTIVE=1
-
-          # Observe the next scheduled run as well, not just the manual invocation.
-          sleep 75
-          recent="$(journalctl -u "$SERVICE" --since "$verify_start" --no-pager 2>/dev/null || true)"
-          starts="$(grep -c 'Starting sahjony-whatsapp-guardian.service' <<<"$recent" || true)"
-          fails="$(grep -Ec '(Failed to start|status=2/INVALIDARGUMENT|Failed with result)' <<<"$recent" || true)"
-          finishes="$(grep -c 'Finished sahjony-whatsapp-guardian.service' <<<"$recent" || true)"
-          echo GUARDIAN_RUNS_OBSERVED="$starts"
-          echo GUARDIAN_SUCCESSFUL_FINISHES="$finishes"
-          echo GUARDIAN_FAILURE_MARKERS="$fails"
-          [[ "$starts" -ge 2 ]]
-          [[ "$fails" -eq 0 ]]
-
-          ws_errors="$(journalctl -u openclaw-gateway.service --since "$verify_start" --no-pager 2>/dev/null | grep -Ec '\[ws\].*(device identity required|missing scope: operator\.read|reason=connect failed)' || true)"
-          echo POST_FIX_WS_AUTH_ERROR_COUNT="$ws_errors"
-
-          # Preserve model topology; this repair must never change it.
-          STATE=/var/lib/sahjony-openclaw-state
-          CONFIG="$STATE/openclaw.json"
-          primary="$(env HOME=/home/node OPENCLAW_HOME=/home/node OPENCLAW_STATE_DIR="$STATE" OPENCLAW_CONFIG_PATH="$CONFIG" openclaw config get agents.defaults.model.primary --json 2>/dev/null)"
-          fallbacks="$(env HOME=/home/node OPENCLAW_HOME=/home/node OPENCLAW_STATE_DIR="$STATE" OPENCLAW_CONFIG_PATH="$CONFIG" openclaw config get agents.defaults.model.fallbacks --json 2>/dev/null)"
-          PRIMARY="$primary" FALLBACKS="$fallbacks" python3 - <<'PY'
-          import json,os
-          p=json.loads(os.environ['PRIMARY']); f=json.loads(os.environ['FALLBACKS'])
-          assert isinstance(p,str) and p.startswith('nvidia/'), p
-          assert isinstance(f,list) and 'openai/gpt-5.6-sol' in f, f
-          print('NVIDIA_PRIMARY_PRESERVED=1')
-          print('OPENAI_GPT56_FALLBACK_PRESERVED=1')
-          PY
-
-          token="$(sed -n 's/^OPENCLAW_GATEWAY_TOKEN=//p' /etc/openclaw-gateway.env | head -n1)"
-          wa="$(env OPENCLAW_GATEWAY_TOKEN="$token" HOME=/home/node OPENCLAW_HOME=/home/node OPENCLAW_STATE_DIR="$STATE" OPENCLAW_CONFIG_PATH="$CONFIG" openclaw channels status --channel whatsapp --probe 2>&1 || true)"
-          if grep -Eiq 'whatsapp.*(connected|healthy)|linked.*running.*connected' <<<"$wa"; then
-            echo WHATSAPP_CONNECTED_HEALTHY=1
-          else
-            echo WHATSAPP_CONNECTED_HEALTHY=0
-            printf '%s\n' "$wa" | tail -n 20
-            exit 21
-          fi
-          echo GUARDIAN_AUTH_REPAIR_COMPLETE=1
+          echo GUARDIAN_STATUS_BEGIN
+          systemctl status sahjony-whatsapp-guardian.service --no-pager -l 2>&1 | redact || true
+          echo GUARDIAN_STATUS_END
+          echo INSPECTION_COMPLETE=1
           REMOTE
 
       - name: Cleanup SSH
         if: always()
-        run: rm -f ~/.ssh/hostinger-guardian-repair
+        run: rm -f ~/.ssh/hostinger-guardian-inspect
