@@ -27,6 +27,16 @@
       ]
     },
     {
+      "source": "/higgsfield-cloud(.*)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-store, no-cache, must-revalidate, max-age=0"
+        },
+        { "key": "X-Robots-Tag", "value": "noindex, nofollow" }
+      ]
+    },
+    {
       "source": "/owner/whatsapp(.*)",
       "headers": [
         {
@@ -250,6 +260,7 @@
     { "src": "/whatsapp(.*)", "dest": "whatsapp_cloud_primary_api.py" },
     { "src": "/owner/profit-machine(.*)", "dest": "unified_api.py" },
     { "src": "/owner-auth(.*)", "dest": "unified_api.py" },
+    { "src": "/higgsfield-cloud(.*)", "dest": "unified_api.py" },
     { "src": "/crm(.*)", "dest": "unified_api.py" },
     { "src": "/country-crm(.*)", "dest": "unified_api.py" },
     { "src": "/trade-agent(.*)", "dest": "unified_api.py" },

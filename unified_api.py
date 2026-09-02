@@ -13,6 +13,7 @@ from email_agent_api import app as email_agent_app
 from gmail_transport_api import app as gmail_transport_app
 from google_contacts_api import app as google_contacts_app
 from owner_auth_api import app as owner_auth_app
+from higgsfield_cloud_api import app as higgsfield_cloud_app
 from communication_api import app as communications_app
 from communication_os_security_api import app as communication_os_security_app
 from communication_os_api import app as communication_os_app
@@ -169,7 +170,7 @@ async def platform_health():
 
 for subapp in (
     google_contacts_app,
-    activation_app, telegram_app, business_email_app, email_agent_app, gmail_transport_app, owner_auth_app, core_app, customer_crm_app, crm_quality_10x_app, external_trade_prospects_app, profit_machine_app, record_registry_app, latam_trade_research_app, country_crm_app, global_lead_search_app, cloudflare_crawler_app, worldwide_connect_app, cuba_private_fuels_app, cuba_mipymes_app, cuba_sofia_sales_bridge_app, competition_intelligence_app, sofia_deal_match_app, world_clock_trade_app,
+    activation_app, telegram_app, business_email_app, email_agent_app, gmail_transport_app, owner_auth_app, higgsfield_cloud_app, core_app, customer_crm_app, crm_quality_10x_app, external_trade_prospects_app, profit_machine_app, record_registry_app, latam_trade_research_app, country_crm_app, global_lead_search_app, cloudflare_crawler_app, worldwide_connect_app, cuba_private_fuels_app, cuba_mipymes_app, cuba_sofia_sales_bridge_app, competition_intelligence_app, sofia_deal_match_app, world_clock_trade_app,
     energy_app, energy_origination_app, energy_intelligence_app, energy_provider_hub_app, energy_provider_ingestion_app, energy_provider_catalog_app, energy_ofac_screening_app, energy_eia_app, energy_deal_flow_app, energy_revenue_intelligence_app,
     communications_app, communication_os_security_app, communication_os_app, communication_agentic_app, communication_platform_app, direct_text_app, wifi_connectivity_app, cuba_communications_app, voice_inbound_app, voice_agent_app, direct_voice_app, voice_autonomy_app, whatsapp_voice_orchestrator_app, documents_app, document_storage_app, shipments_app, compliance_app, commercial_app, language_app, collaboration_app, finance_app,
     countries_app, cuba_current_app, cuba_transition_app, cuba_trade_desk_app, cuba_private_business_app, cuba_private_sector_lead_app, lead_scout_app, managed_trade_app, intermediary_app, global_sourcing_app, global_marketplace_app, business_readiness_app, us_import_app,
