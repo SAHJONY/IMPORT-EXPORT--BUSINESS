@@ -49,7 +49,7 @@ jobs:
           set -euo pipefail
           ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=12 -i ~/.ssh/hostinger-nvidia-first "$SSH_USER@$HOST" 'bash -s' <<'REMOTE'
           set -euo pipefail
-          trap 'rm -f /root/nvidia-key /root/openai-key /tmp/nvidia-smoke.json' EXIT
+          trap 'rm -f /root/nvidia-key /root/openai-key /tmp/nvidia-smoke.json /tmp/openai-smoke.json' EXIT
           STATE=/var/lib/sahjony-openclaw-state
           CONFIG="$STATE/openclaw.json"
           oc(){ env HOME=/home/node OPENCLAW_HOME=/home/node OPENCLAW_STATE_DIR="$STATE" OPENCLAW_CONFIG_PATH="$CONFIG" openclaw "$@"; }
@@ -62,6 +62,11 @@ jobs:
           oc models auth order set --provider nvidia nvidia:nim >/dev/null
           oc config set models.providers.nvidia '{"baseUrl":"https://integrate.api.nvidia.com/v1","api":"openai-completions"}' --strict-json --merge >/dev/null
 
+          # Bind OpenAI in OpenClaw's credential store as well as systemd. The
+          # gateway does not reliably inherit an API key from an env file alone.
+          cat /root/openai-key | oc models auth paste-api-key --provider openai --profile-id openai:api >/dev/null
+          oc models auth order set --provider openai openai:api >/dev/null
+
           umask 077
           { printf 'OPENAI_API_KEY='; cat /root/openai-key; printf '\n'; } >/etc/openclaw-openai.env
           chmod 600 /etc/openclaw-openai.env
@@ -69,10 +74,35 @@ jobs:
           printf '[Service]\nEnvironmentFile=/etc/openclaw-openai.env\n' >/etc/systemd/system/openclaw-gateway.service.d/20-openai-auth.conf
 
           /usr/local/sbin/sahjony-nvidia-nim-rotation
-          primary="$(head -n1 /var/lib/sahjony-nvidia-nim/nvidia-order.txt | tr -d '\r\n')"
-          [[ "$primary" == nvidia/* ]] || { echo NVIDIA_PRIMARY_UNRESOLVED=1 >&2; exit 21; }
+          nkey="$(tr -d '\r\n' </root/nvidia-key)"
+          primary=''
+          while IFS= read -r candidate; do
+            candidate="$(printf '%s' "$candidate" | tr -d '\r\n')"
+            [[ "$candidate" == nvidia/* ]] || continue
+            model="${candidate#nvidia/}"
+            code="$(curl -sS -o /tmp/nvidia-smoke.json -w '%{http_code}' --connect-timeout 10 --max-time 120 -H "Authorization: Bearer $nkey" -H 'Content-Type: application/json' -d "{\"model\":\"$model\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply exactly SOFIA_NVIDIA_OK\"}],\"max_tokens\":64,\"temperature\":0}" https://integrate.api.nvidia.com/v1/chat/completions || true)"
+            if [[ "$code" == 200 ]]; then
+              primary="$candidate"
+              break
+            fi
+            echo "NVIDIA_CANDIDATE_UNAVAILABLE=$candidate HTTP=$code"
+          done </var/lib/sahjony-nvidia-nim/nvidia-order.txt
+
+          okey="$(tr -d '\r\n' </root/openai-key)"
+          openai_code="$(curl -sS -o /tmp/openai-smoke.json -w '%{http_code}' --connect-timeout 10 --max-time 45 -H "Authorization: Bearer $okey" https://api.openai.com/v1/models || true)"
+          [[ "$openai_code" == 200 ]] || { echo OPENAI_AUTH_SMOKE_HTTP="$openai_code" >&2; exit 21; }
+
+          if [[ -n "$primary" ]]; then
+            fallbacks='["openai/gpt-5.6-sol"]'
+            provider=NVIDIA
+          else
+            # Keep Sofia operational when NVIDIA NIM is temporarily saturated.
+            primary='openai/gpt-5.6-sol'
+            fallbacks='[]'
+            provider=OPENAI_TEMPORARY
+          fi
           oc config set agents.defaults.model.primary "$primary" >/dev/null
-          oc config set agents.defaults.model.fallbacks '["openai/gpt-5.6-sol"]' --strict-json >/dev/null
+          oc config set agents.defaults.model.fallbacks "$fallbacks" --strict-json >/dev/null
           oc config validate >/dev/null
 
           systemctl daemon-reload
@@ -80,10 +110,6 @@ jobs:
           sleep 12
           systemctl is-active --quiet openclaw-gateway.service
 
-          nkey="$(tr -d '\r\n' </root/nvidia-key)"
-          model="${primary#nvidia/}"
-          code="$(curl -sS -o /tmp/nvidia-smoke.json -w '%{http_code}' --connect-timeout 10 --max-time 120 -H "Authorization: Bearer $nkey" -H 'Content-Type: application/json' -d "{\"model\":\"$model\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply exactly SOFIA_NVIDIA_OK\"}],\"max_tokens\":64,\"temperature\":0}" https://integrate.api.nvidia.com/v1/chat/completions || true)"
-          [[ "$code" == 200 ]] || { echo NVIDIA_PRIMARY_SMOKE_HTTP="$code" >&2; exit 22; }
           raw="$(oc config get agents.defaults.model.primary --json 2>/dev/null || true)"
           configured="$(RAW="$raw" python3 - <<'PY'
           import json, os
@@ -95,12 +121,12 @@ jobs:
           print(value if isinstance(value,str) else '')
           PY
           )"
-          [[ "$configured" == nvidia/* ]] || { echo NVIDIA_PRIMARY_CONFIG_MISMATCH=1 >&2; exit 23; }
+          [[ "$configured" == "$primary" ]] || { echo SOFIA_PRIMARY_CONFIG_MISMATCH=1 >&2; exit 23; }
           pid="$(systemctl show openclaw-gateway.service -p MainPID --value)"
           tr '\0' '\n' <"/proc/$pid/environ" | grep -q '^OPENAI_API_KEY='
           wa="$(oc channels status --channel whatsapp --probe 2>&1 || true)"
           grep -Eiq 'connected|ready|healthy|linked.*running' <<<"$wa" || { echo WHATSAPP_NOT_CONNECTED_AFTER_RESTART=1 >&2; exit 24; }
-          echo SOFIA_PRIMARY_PROVIDER=NVIDIA
+          echo "SOFIA_PRIMARY_PROVIDER=$provider"
           echo "SOFIA_PRIMARY_MODEL=$configured"
           echo SOFIA_FALLBACK_MODEL=openai/gpt-5.6-sol
           echo OPENAI_FALLBACK_KEY_BOUND=1
