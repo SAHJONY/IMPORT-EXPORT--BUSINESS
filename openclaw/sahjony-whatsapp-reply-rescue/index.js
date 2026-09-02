@@ -3,7 +3,7 @@ import { promisify } from "node:util";
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 
 const execFile = promisify(execFileCb);
-const RESCUE_VERSION = "2.0.0";
+const RESCUE_VERSION = "2.1.0";
 const MEMORY_TTL_MS = 30 * 60 * 1000;
 const MAX_HISTORY_MESSAGES = 12;
 const MAX_HISTORY_CHARS = 9000;
@@ -34,7 +34,39 @@ function inspectableEventText(event) {
     event?.payload?.message
   ];
   try { values.push(JSON.stringify(event?.payload || {})); } catch {}
+  try { values.push(JSON.stringify(event || {})); } catch {}
   return values.map(normalizeText).filter(Boolean).join("\n");
+}
+
+function channelEvidence(event, ctx) {
+  return [
+    ctx?.channel,
+    ctx?.messageProvider,
+    ctx?.provider,
+    ctx?.channelId,
+    ctx?.accountId,
+    ctx?.sessionKey,
+    event?.channel,
+    event?.messageProvider,
+    event?.provider,
+    event?.channelId,
+    event?.accountId,
+    event?.sessionKey,
+    event?.payload?.channel,
+    event?.payload?.messageProvider,
+    event?.payload?.provider,
+    event?.payload?.sessionKey
+  ].filter((value) => value !== undefined && value !== null && String(value).trim() !== "").map(String);
+}
+
+function isWhatsAppContext(event, ctx) {
+  return channelEvidence(event, ctx).some((value) => /whatsapp/i.test(value));
+}
+
+function hasExplicitNonWhatsAppContext(event, ctx) {
+  const evidence = channelEvidence(event, ctx);
+  if (!evidence.length) return false;
+  return !evidence.some((value) => /whatsapp/i.test(value));
 }
 
 function boundedHistory(history) {
@@ -141,6 +173,13 @@ export default definePluginEntry({
       return String(event?.messageId || ctx?.messageId || `${key}:${now()}`);
     }
 
+    function resolveTarget(event, ctx) {
+      return String(
+        event?.to || event?.recipientId || event?.target || event?.payload?.to || event?.payload?.recipientId ||
+        ctx?.recipientId || ctx?.target || ""
+      );
+    }
+
     function remember(key, role, text) {
       const clean = normalizeText(text).slice(0, 2400);
       if (!key || !clean || INTERNAL_OUTPUT.test(clean)) return;
@@ -167,6 +206,32 @@ export default definePluginEntry({
         if (item.sender === target) keys.push(key);
       }
       return keys;
+    }
+
+    function findPending(event, ctx) {
+      const key = resolveKey(event, ctx);
+      if (key && pending.has(key)) return { key, item: pending.get(key) };
+
+      const target = resolveTarget(event, ctx);
+      if (target) {
+        const matches = keysForTarget(target);
+        if (matches.length === 1) return { key: matches[0], item: pending.get(matches[0]) };
+      }
+
+      // Some terminal OpenClaw runtime failures arrive without channel/session
+      // metadata. If exactly one WhatsApp turn is pending, it is safe to bind the
+      // terminal failure to that turn instead of leaking the generic /new notice.
+      if (pending.size === 1 && !hasExplicitNonWhatsAppContext(event, ctx)) {
+        const [onlyKey, onlyItem] = pending.entries().next().value;
+        return { key: onlyKey, item: onlyItem };
+      }
+      return { key: "", item: null };
+    }
+
+    function shouldHandleWhatsAppRuntimeOutput(event, ctx) {
+      if (isWhatsAppContext(event, ctx)) return true;
+      if (hasExplicitNonWhatsAppContext(event, ctx)) return false;
+      return pending.size > 0;
     }
 
     async function sendViaOpenClaw(target, text) {
@@ -213,7 +278,7 @@ export default definePluginEntry({
     }
 
     api.on("message_received", async (event, ctx) => {
-      if (ctx.channel !== "whatsapp" && ctx.messageProvider !== "whatsapp") return;
+      if (!isWhatsAppContext(event, ctx)) return;
       pruneState();
       const sender = String(event.senderId || ctx.senderId || "");
       const content = String(event.content || "").trim();
@@ -241,38 +306,34 @@ export default definePluginEntry({
     });
 
     api.on("reply_payload_sending", async (event, ctx) => {
-      if (ctx.channel !== "whatsapp" && ctx.messageProvider !== "whatsapp") return;
-      const key = resolveKey(event, ctx);
-      if (INTERNAL_OUTPUT.test(inspectableEventText(event))) {
-        api.logger.warn("SAHJONY_REPLY_RESCUE blocked internal WhatsApp output");
-        const current = key ? pending.get(key) : null;
-        if (current) queueMicrotask(() => { void rescueNow(current, key, "blocked_runtime_error"); });
-        return { cancel: true, cancelReason: "internal_runtime_output" };
-      }
-      return undefined;
+      if (!INTERNAL_OUTPUT.test(inspectableEventText(event))) return undefined;
+      if (!shouldHandleWhatsAppRuntimeOutput(event, ctx)) return undefined;
+      api.logger.warn("SAHJONY_REPLY_RESCUE blocked internal WhatsApp output");
+      const found = findPending(event, ctx);
+      if (found.item) queueMicrotask(() => { void rescueNow(found.item, found.key, "blocked_runtime_error"); });
+      return { cancel: true, cancelReason: "internal_runtime_output" };
     });
 
     api.on("message_sending", async (event, ctx) => {
-      if (ctx.channel !== "whatsapp" && ctx.messageProvider !== "whatsapp") return;
-      const key = resolveKey(event, ctx);
-      if (INTERNAL_OUTPUT.test(inspectableEventText(event))) {
-        api.logger.warn("SAHJONY_REPLY_RESCUE blocked internal WhatsApp message");
-        const current = key ? pending.get(key) : null;
-        if (current) queueMicrotask(() => { void rescueNow(current, key, "blocked_runtime_error"); });
-        return { cancel: true, cancelReason: "internal_runtime_output" };
-      }
-      return undefined;
+      if (!INTERNAL_OUTPUT.test(inspectableEventText(event))) return undefined;
+      if (!shouldHandleWhatsAppRuntimeOutput(event, ctx)) return undefined;
+      api.logger.warn("SAHJONY_REPLY_RESCUE blocked internal WhatsApp message");
+      const found = findPending(event, ctx);
+      if (found.item) queueMicrotask(() => { void rescueNow(found.item, found.key, "blocked_runtime_error"); });
+      return { cancel: true, cancelReason: "internal_runtime_output" };
     });
 
     api.on("message_sent", async (event, ctx) => {
-      if (ctx.channel !== "whatsapp" && ctx.messageProvider !== "whatsapp") return;
+      const found = findPending(event, ctx);
+      if (!isWhatsAppContext(event, ctx) && !found.item) return;
       const visibleText = inspectableEventText(event);
       if (INTERNAL_OUTPUT.test(visibleText)) {
         api.logger.error("SAHJONY_REPLY_RESCUE observed an internal runtime message after send stage; keeping rescue pending");
+        if (found.item) queueMicrotask(() => { void rescueNow(found.item, found.key, "post_send_runtime_error"); });
         return;
       }
 
-      const key = resolveKey(event, ctx);
+      const key = found.key || resolveKey(event, ctx);
       const to = String(event.to || ctx.channelId || event.recipientId || "");
       if (key && visibleText) remember(key, "assistant", visibleText);
       if (key) clearPending(key);
@@ -288,6 +349,6 @@ export default definePluginEntry({
       for (const key of [...pending.keys()]) clearPending(key);
     });
 
-    api.logger.info(`SAHJONY reply rescue ready (version=${RESCUE_VERSION}, delay=${rescueDelayMs}ms, context_window=${MAX_HISTORY_MESSAGES}, primary-rescue=openai/gpt-oss-120b, reasoning-output=blocked)`);
+    api.logger.info(`SAHJONY reply rescue ready (version=${RESCUE_VERSION}, delay=${rescueDelayMs}ms, context_window=${MAX_HISTORY_MESSAGES}, primary-rescue=openai/gpt-oss-120b, reasoning-output=blocked, metadata-less-terminal-recovery=active)`);
   }
 });
