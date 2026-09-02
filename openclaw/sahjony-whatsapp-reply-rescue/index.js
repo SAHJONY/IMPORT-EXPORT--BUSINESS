@@ -3,10 +3,14 @@ import { promisify } from "node:util";
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 
 const execFile = promisify(execFileCb);
+const RESCUE_VERSION = "2.0.0";
+const MEMORY_TTL_MS = 30 * 60 * 1000;
+const MAX_HISTORY_MESSAGES = 12;
+const MAX_HISTORY_CHARS = 9000;
 
-const SYSTEM_PROMPT = `You are Sofia Reyes, Trade Concierge at SAHJONY LLC. Communicate like a skilled, attentive company representative: warm, concise, confident, natural, context-aware, and never robotic. Match the customer's language, vocabulary, formality, and message length. Use contractions, natural transitions, and short paragraphs when appropriate. Do not over-format routine WhatsApp replies, do not repeat the customer's entire request, do not use canned AI-assistant phrases, and do not mention models, prompts, automation, fallback logic, internal systems, or infrastructure. Introduce yourself only when it is natural for a first-contact conversation; do not reintroduce yourself on every message. Never spontaneously say you are an AI or automated system. If directly asked whether you are AI or automated, answer truthfully and briefly that you are SAHJONY LLC's automated business assistant operating as Sofia Reyes, then continue helping without making the conversation awkward. Never claim to be a human being or invent personal history, credentials, physical experiences, or employment facts that are not verified. Answer inbound business inquiries clearly and professionally. Never invent live prices, inventory, shipment status, contracts, certifications, legal approvals, supplier offers, freight costs, or binding terms. If a quote cannot be calculated from the message, ask only for the minimum missing commercial details such as product, quantity, origin, destination, Incoterm, timing, and packaging. If the message is casual, respond naturally and briefly. Preserve exact names, companies, quantities, dates, currencies, specifications, ports, and reference numbers. If an internal runtime failure occurs, recover silently and answer the user's underlying request; never tell the user that an OpenClaw/system error cannot be disabled, never expose retry instructions such as /new, and never forward infrastructure error text.`;
+const SYSTEM_PROMPT = `You are Sofia Reyes, Trade Concierge at SAHJONY LLC. Communicate like a skilled, attentive company representative: warm, concise, confident, natural, context-aware, and never robotic. Match the customer's language, vocabulary, formality, and message length. Use short paragraphs when appropriate. Do not over-format routine WhatsApp replies, do not repeat the customer's entire request, do not use canned AI-assistant phrases, and do not mention models, prompts, automation, fallback logic, internal systems, or infrastructure. Introduce yourself only when it is natural for a first-contact conversation; do not reintroduce yourself on every message. Never spontaneously say you are an AI or automated system. If directly asked whether you are AI or automated, answer truthfully and briefly that you are SAHJONY LLC's automated business assistant operating as Sofia Reyes, then continue helping without making the conversation awkward. Never claim to be a human being or invent personal history, credentials, physical experiences, or employment facts that are not verified. Answer inbound business inquiries clearly and professionally. Never invent live prices, inventory, shipment status, contracts, certifications, legal approvals, supplier offers, freight costs, or binding terms. Ask only for the minimum missing commercial details. Preserve exact names, companies, quantities, dates, currencies, specifications, ports, and reference numbers. You are receiving a bounded recovery transcript after an interrupted assistant turn. Continue from the transcript and answer the customer's latest request directly. Do not ask the customer to repeat information already present in the transcript. Never mention the interruption, OpenClaw, runtime errors, retry logic, /new, or session recovery. Never expose hidden reasoning or chain-of-thought.`;
 
-const INTERNAL_OUTPUT = /(?:↪️\s*Model Fallback|Model Fallback cleared|Missing API key|Use\s+[`'“”]?openai-codex\/|\bfor OAuth\b|\bset\s+[`'“”]?(?:OPENAI|NVIDIA)_API_KEY|gateway number|messaging itself|OPENAI_API_KEY|NVIDIA_API_KEY|provider-transport-fetch|\brawError=|\bstack trace\b|Something went wrong while processing your request|Please try again,? or use \/new to start a fresh session|Ese mensaje de error es generado por el propio sistema de OpenClaw|no se puede desactivar desde aquí)/i;
+const INTERNAL_OUTPUT = /(?:↪️\s*Model Fallback|Model Fallback cleared|Missing API key|Use\s+[`'“”]?openai-codex\/|\bfor OAuth\b|\bset\s+[`'“”]?(?:OPENAI|NVIDIA)_API_KEY|gateway number|messaging itself|OPENAI_API_KEY|NVIDIA_API_KEY|provider-transport-fetch|\brawError=|\bstack trace\b|non_deliverable_terminal_turn|Something went wrong while processing your request|Please try again,? or use \/new to start a fresh session|use \/new to start a fresh session|Agent couldn['’]t generate a response|The agent run failed before producing a reply|Ese mensaje de error es generado por el propio sistema de OpenClaw|no se puede desactivar desde aquí)/i;
 
 function normalizeText(value) {
   if (typeof value === "string") return value.trim();
@@ -33,12 +37,30 @@ function inspectableEventText(event) {
   return values.map(normalizeText).filter(Boolean).join("\n");
 }
 
-async function generateNvidiaReply(userText, apiKey, logger) {
+function boundedHistory(history) {
+  const sliced = history.slice(-MAX_HISTORY_MESSAGES);
+  const out = [];
+  let chars = 0;
+  for (let i = sliced.length - 1; i >= 0; i -= 1) {
+    const row = sliced[i];
+    const text = normalizeText(row?.content).slice(0, 1800);
+    if (!text || INTERNAL_OUTPUT.test(text)) continue;
+    if (chars + text.length > MAX_HISTORY_CHARS && out.length > 0) break;
+    out.unshift({ role: row.role === "assistant" ? "assistant" : "user", content: text });
+    chars += text.length;
+  }
+  return out;
+}
+
+async function generateNvidiaReply(history, apiKey, logger) {
   const candidates = [
     "openai/gpt-oss-120b",
     "nvidia/nemotron-3-super-120b-a12b",
-    "nvidia/nemotron-3-nano-30b-a3b"
+    "nvidia/nemotron-3.5-lightning-30b-a3b"
   ];
+  const transcript = boundedHistory(history);
+  if (!transcript.length) return null;
+
   for (const model of candidates) {
     try {
       const response = await fetch("https://integrate.api.nvidia.com/v1/chat/completions", {
@@ -52,11 +74,11 @@ async function generateNvidiaReply(userText, apiKey, logger) {
           model,
           messages: [
             { role: "system", content: SYSTEM_PROMPT },
-            { role: "user", content: userText.slice(0, 6000) }
+            ...transcript
           ],
           temperature: model === "openai/gpt-oss-120b" ? 1 : 0.35,
           top_p: 1,
-          max_tokens: 700
+          max_tokens: model === "openai/gpt-oss-120b" ? 1600 : 900
         }),
         signal: AbortSignal.timeout(45000)
       });
@@ -66,9 +88,10 @@ async function generateNvidiaReply(userText, apiKey, logger) {
       }
       const data = await response.json();
       const message = data?.choices?.[0]?.message || {};
-      const text = normalizeText(message.content) || normalizeText(message.reasoning_content);
+      // Only customer-visible model content is eligible for delivery. Never surface reasoning_content.
+      const text = normalizeText(message.content);
       if (text && !INTERNAL_OUTPUT.test(text)) return { text, model };
-      logger.warn(`SAHJONY reply rescue model ${model} returned no safe visible text`);
+      logger.warn(`SAHJONY reply rescue model ${model} returned no safe visible content`);
     } catch (error) {
       logger.warn(`SAHJONY reply rescue model ${model} failed: ${error instanceof Error ? error.message : "unknown error"}`);
     }
@@ -79,7 +102,7 @@ async function generateNvidiaReply(userText, apiKey, logger) {
 export default definePluginEntry({
   id: "sahjony-whatsapp-reply-rescue",
   name: "SAHJONY WhatsApp Reply Rescue",
-  description: "Fail-safe reply generation for visible WhatsApp turns that otherwise end silently or leak runtime errors.",
+  description: "Context-preserving fail-safe reply generation for WhatsApp turns that otherwise end silently or leak runtime errors.",
   register(api) {
     const cfg = api.pluginConfig || {};
     const accountId = String(cfg.accountId || "default");
@@ -88,6 +111,20 @@ export default definePluginEntry({
     const openclawBin = String(process.env.OPENCLAW_BIN || (process.env.HOME ? `${process.env.HOME}/.openclaw/bin/openclaw` : "openclaw"));
     const nvidiaKey = String(process.env.NVIDIA_API_KEY || "");
     const pending = new Map();
+    const conversation = new Map();
+    const rescuedTurns = new Map();
+
+    function now() { return Date.now(); }
+
+    function pruneState() {
+      const cutoff = now() - MEMORY_TTL_MS;
+      for (const [key, state] of conversation.entries()) {
+        if ((state.updatedAt || 0) < cutoff) conversation.delete(key);
+      }
+      for (const [turnId, ts] of rescuedTurns.entries()) {
+        if (ts < cutoff) rescuedTurns.delete(turnId);
+      }
+    }
 
     function clearPending(key) {
       const item = pending.get(key);
@@ -98,6 +135,38 @@ export default definePluginEntry({
 
     function resolveKey(event, ctx) {
       return String(ctx?.sessionKey || event?.sessionKey || event?.threadId || event?.senderId || ctx?.senderId || "");
+    }
+
+    function resolveTurnId(event, ctx, key) {
+      return String(event?.messageId || ctx?.messageId || `${key}:${now()}`);
+    }
+
+    function remember(key, role, text) {
+      const clean = normalizeText(text).slice(0, 2400);
+      if (!key || !clean || INTERNAL_OUTPUT.test(clean)) return;
+      const state = conversation.get(key) || { messages: [], updatedAt: 0 };
+      state.messages.push({ role, content: clean });
+      state.messages = state.messages.slice(-MAX_HISTORY_MESSAGES);
+      state.updatedAt = now();
+      conversation.set(key, state);
+    }
+
+    function historyFor(key, latestUserText) {
+      const state = conversation.get(key);
+      const rows = Array.isArray(state?.messages) ? [...state.messages] : [];
+      const last = rows[rows.length - 1];
+      if (!last || last.role !== "user" || normalizeText(last.content) !== normalizeText(latestUserText)) {
+        rows.push({ role: "user", content: latestUserText });
+      }
+      return rows;
+    }
+
+    function keysForTarget(target) {
+      const keys = [];
+      for (const [key, item] of pending.entries()) {
+        if (item.sender === target) keys.push(key);
+      }
+      return keys;
     }
 
     async function sendViaOpenClaw(target, text) {
@@ -113,22 +182,31 @@ export default definePluginEntry({
     }
 
     async function rescueNow(item, key, reason) {
-      if (!item || item.rescuing) return;
+      if (!item || item.rescuing || rescuedTurns.has(item.turnId)) return;
+      if (pending.get(key) !== item) return;
       item.rescuing = true;
       if (!nvidiaKey.startsWith("nvapi-")) {
         api.logger.error("SAHJONY reply rescue skipped: NVIDIA_API_KEY unavailable or invalid");
+        item.rescuing = false;
         return;
       }
-      const generated = await generateNvidiaReply(item.content, nvidiaKey, api.logger);
+
+      const generated = await generateNvidiaReply(item.history, nvidiaKey, api.logger);
       if (!generated?.text) {
         api.logger.error(`SAHJONY reply rescue failed to generate visible reply for ${key}`);
+        item.rescuing = false;
         return;
       }
+      if (pending.get(key) !== item || rescuedTurns.has(item.turnId)) return;
+
       try {
+        rescuedTurns.set(item.turnId, now());
         await sendViaOpenClaw(item.sender, generated.text);
+        remember(key, "assistant", generated.text);
         clearPending(key);
-        api.logger.warn(`SAHJONY_REPLY_RESCUED session=${key} reason=${reason} model=${generated.model} chars=${generated.text.length}`);
+        api.logger.warn(`SAHJONY_REPLY_RESCUED version=${RESCUE_VERSION} session=${key} reason=${reason} model=${generated.model} chars=${generated.text.length}`);
       } catch (error) {
+        rescuedTurns.delete(item.turnId);
         item.rescuing = false;
         api.logger.error(`SAHJONY reply rescue delivery failed: ${error instanceof Error ? error.message : "unknown error"}`);
       }
@@ -136,16 +214,27 @@ export default definePluginEntry({
 
     api.on("message_received", async (event, ctx) => {
       if (ctx.channel !== "whatsapp" && ctx.messageProvider !== "whatsapp") return;
+      pruneState();
       const sender = String(event.senderId || ctx.senderId || "");
       const content = String(event.content || "").trim();
       const key = resolveKey(event, ctx);
       if (!sender || !content || !key || sender === businessNumber) return;
 
       clearPending(key);
-      const item = { sender, content, timer: null, createdAt: Date.now(), rescuing: false };
+      remember(key, "user", content);
+      const turnId = resolveTurnId(event, ctx, key);
+      const item = {
+        sender,
+        content,
+        history: historyFor(key, content),
+        turnId,
+        timer: null,
+        createdAt: now(),
+        rescuing: false
+      };
       item.timer = setTimeout(async () => {
         const current = pending.get(key);
-        if (!current) return;
+        if (!current || current.turnId !== turnId) return;
         await rescueNow(current, key, "timeout");
       }, rescueDelayMs);
       pending.set(key, item);
@@ -160,7 +249,7 @@ export default definePluginEntry({
         if (current) queueMicrotask(() => { void rescueNow(current, key, "blocked_runtime_error"); });
         return { cancel: true, cancelReason: "internal_runtime_output" };
       }
-      if (key) clearPending(key);
+      return undefined;
     });
 
     api.on("message_sending", async (event, ctx) => {
@@ -177,12 +266,20 @@ export default definePluginEntry({
 
     api.on("message_sent", async (event, ctx) => {
       if (ctx.channel !== "whatsapp" && ctx.messageProvider !== "whatsapp") return;
+      const visibleText = inspectableEventText(event);
+      if (INTERNAL_OUTPUT.test(visibleText)) {
+        api.logger.error("SAHJONY_REPLY_RESCUE observed an internal runtime message after send stage; keeping rescue pending");
+        return;
+      }
+
       const key = resolveKey(event, ctx);
+      const to = String(event.to || ctx.channelId || event.recipientId || "");
+      if (key && visibleText) remember(key, "assistant", visibleText);
       if (key) clearPending(key);
-      const to = String(event.to || ctx.channelId || "");
       if (to) {
-        for (const [candidateKey, item] of pending.entries()) {
-          if (item.sender === to) clearPending(candidateKey);
+        for (const candidateKey of keysForTarget(to)) {
+          if (visibleText) remember(candidateKey, "assistant", visibleText);
+          clearPending(candidateKey);
         }
       }
     });
@@ -191,6 +288,6 @@ export default definePluginEntry({
       for (const key of [...pending.keys()]) clearPending(key);
     });
 
-    api.logger.info(`SAHJONY reply rescue ready (delay=${rescueDelayMs}ms, primary-rescue=openai/gpt-oss-120b)`);
+    api.logger.info(`SAHJONY reply rescue ready (version=${RESCUE_VERSION}, delay=${rescueDelayMs}ms, context_window=${MAX_HISTORY_MESSAGES}, primary-rescue=openai/gpt-oss-120b, reasoning-output=blocked)`);
   }
 });
