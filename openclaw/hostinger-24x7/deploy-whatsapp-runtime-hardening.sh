@@ -88,6 +88,7 @@ allow=plugins.setdefault('allow', [])
 for name in ['sahjony-whatsapp-output-guard','sahjony-whatsapp-reply-rescue','sahjony-app-bridge']:
     if name not in allow:
         allow.append(name)
+plugins['allow']=allow
 entries=plugins.setdefault('entries', {})
 entries.setdefault('sahjony-whatsapp-output-guard', {})['enabled']=True
 rescue=entries.setdefault('sahjony-whatsapp-reply-rescue', {})
@@ -95,7 +96,9 @@ rescue['enabled']=True
 cfg=rescue.setdefault('config', {})
 cfg.setdefault('accountId','default')
 cfg.setdefault('businessNumber','+12816628581')
-cfg['rescueDelayMs']=12000
+# GPT-OSS 120B can legitimately take longer than 12 seconds. Runtime-error hooks
+# rescue immediately; the silence fallback waits long enough to avoid duplicates.
+cfg['rescueDelayMs']=40000
 bridge=entries.setdefault('sahjony-app-bridge', {})
 bridge['enabled']=True
 bcfg=bridge.setdefault('config', {})
@@ -117,12 +120,17 @@ current="$(oc config get agents.defaults.model.primary 2>/dev/null || true)"
 [[ "$current" == "$TARGET_MODEL" ]] || { echo "SOFIA_PRIMARY_MODEL_UNEXPECTED=$current" >&2; exit 28; }
 scope="$(oc config get session.dmScope 2>/dev/null || true)"
 [[ "$scope" == "$TARGET_DM_SCOPE" ]] || { echo "WHATSAPP_DM_SCOPE_MISMATCH=$scope" >&2; exit 29; }
+rescue_delay="$(oc config get plugins.entries.sahjony-whatsapp-reply-rescue.config.rescueDelayMs 2>/dev/null || true)"
+[[ "$rescue_delay" == "40000" ]] || { echo "WHATSAPP_RESCUE_DELAY_MISMATCH=$rescue_delay" >&2; exit 30; }
 
 grep -Fq 'Something went wrong while processing your request' "$STATE/extensions/sahjony-whatsapp-output-guard/index.js"
+grep -Fq 'RESCUE_VERSION = "2.0.0"' "$STATE/extensions/sahjony-whatsapp-reply-rescue/index.js"
+grep -Fq 'reasoning_content' "$STATE/extensions/sahjony-whatsapp-reply-rescue/index.js"
+grep -Fq 'Never surface reasoning_content' "$STATE/extensions/sahjony-whatsapp-reply-rescue/index.js"
 grep -Fq 'openai/gpt-oss-120b' "$STATE/extensions/sahjony-whatsapp-reply-rescue/index.js"
 grep -Fq 'canonicalConfigPath' "$STATE/extensions/sahjony-app-bridge/index.js"
 grep -Fq 'canonical_openclaw_config' /usr/local/sbin/sahjony-openclaw-health-sidecar
-grep -Fq 'moonshotai/kimi-k2.6' /usr/local/sbin/sahjony-nvidia-nim-rotation && { echo INVALID_KIMI_FALLBACK_STILL_IN_ROTATION=1 >&2; exit 30; } || true
+grep -Fq 'moonshotai/kimi-k2.6' /usr/local/sbin/sahjony-nvidia-nim-rotation && { echo INVALID_KIMI_FALLBACK_STILL_IN_ROTATION=1 >&2; exit 31; } || true
 
 /usr/local/sbin/sahjony-nvidia-nim-rotation >/tmp/sahjony-nvidia-rotation-hardening.log 2>&1
 fallback_json="$(oc config get agents.defaults.model.fallbacks --json 2>/dev/null || echo '[]')"
@@ -144,16 +152,18 @@ PY
 systemctl daemon-reload
 systemctl restart openclaw-gateway.service
 sleep 12
-systemctl is-active --quiet openclaw-gateway.service || { echo OPENCLAW_GATEWAY_RESTART_FAILED=1 >&2; exit 31; }
+systemctl is-active --quiet openclaw-gateway.service || { echo OPENCLAW_GATEWAY_RESTART_FAILED=1 >&2; exit 32; }
 
 pid="$(systemctl show openclaw-gateway.service -p MainPID --value)"
-[[ "$pid" =~ ^[1-9][0-9]*$ ]] || { echo OPENCLAW_MAINPID_INVALID=1 >&2; exit 32; }
-tr '\0' '\n' < "/proc/$pid/environ" | grep -q '^NVIDIA_API_KEY=' || { echo NVIDIA_KEY_NOT_BOUND_TO_GATEWAY=1 >&2; exit 33; }
+[[ "$pid" =~ ^[1-9][0-9]*$ ]] || { echo OPENCLAW_MAINPID_INVALID=1 >&2; exit 33; }
+tr '\0' '\n' < "/proc/$pid/environ" | grep -q '^NVIDIA_API_KEY=' || { echo NVIDIA_KEY_NOT_BOUND_TO_GATEWAY=1 >&2; exit 34; }
 
 after="$(oc config get agents.defaults.model.primary 2>/dev/null || true)"
-[[ "$after" == "$TARGET_MODEL" ]] || { echo "SOFIA_PRIMARY_MODEL_POST_RESTART=$after" >&2; exit 34; }
+[[ "$after" == "$TARGET_MODEL" ]] || { echo "SOFIA_PRIMARY_MODEL_POST_RESTART=$after" >&2; exit 35; }
 scope_after="$(oc config get session.dmScope 2>/dev/null || true)"
-[[ "$scope_after" == "$TARGET_DM_SCOPE" ]] || { echo "WHATSAPP_DM_SCOPE_POST_RESTART=$scope_after" >&2; exit 35; }
+[[ "$scope_after" == "$TARGET_DM_SCOPE" ]] || { echo "WHATSAPP_DM_SCOPE_POST_RESTART=$scope_after" >&2; exit 36; }
+rescue_delay_after="$(oc config get plugins.entries.sahjony-whatsapp-reply-rescue.config.rescueDelayMs 2>/dev/null || true)"
+[[ "$rescue_delay_after" == "40000" ]] || { echo "WHATSAPP_RESCUE_DELAY_POST_RESTART=$rescue_delay_after" >&2; exit 37; }
 
 systemctl start sahjony-openclaw-health-sidecar.service
 for attempt in 1 2 3 4 5 6 7 8; do
@@ -162,7 +172,7 @@ for attempt in 1 2 3 4 5 6 7 8; do
 done
 
 probe="$(oc channels status --channel whatsapp --probe 2>&1 || oc channels status --probe 2>&1 || true)"
-printf '%s' "$probe" | grep -Eiq 'whatsapp.*(connected|linked.*running)' || { echo WHATSAPP_CHANNEL_PROBE_NOT_CONNECTED=1 >&2; printf '%s\n' "$probe" | tail -n 30 >&2; exit 36; }
+printf '%s' "$probe" | grep -Eiq 'whatsapp.*(connected|linked.*running)' || { echo WHATSAPP_CHANNEL_PROBE_NOT_CONNECTED=1 >&2; printf '%s\n' "$probe" | tail -n 30 >&2; exit 38; }
 
 health=''
 for attempt in 1 2 3 4 5 6; do
@@ -201,10 +211,12 @@ rm -f "$SIDECAR_BACKUP" "$ROTATION_BACKUP"
 echo SOFIA_PRIMARY_PROVIDER=NVIDIA
 echo "SOFIA_PRIMARY_MODEL=$after"
 echo "WHATSAPP_DM_SCOPE=$scope_after"
+echo "WHATSAPP_RESCUE_DELAY_MS=$rescue_delay_after"
 echo WHATSAPP_SESSION_COLLISION_GUARD=ACTIVE
 echo NVIDIA_INVALID_FALLBACKS_REMOVED=1
 echo WHATSAPP_OUTPUT_GUARD_RUNTIME_ERROR_SUPPRESSION=ACTIVE
-echo WHATSAPP_REPLY_RESCUE_GPT_OSS_120B=ACTIVE
+echo WHATSAPP_REPLY_RESCUE_CONTEXTUAL_V2=ACTIVE
+echo WHATSAPP_REPLY_RESCUE_REASONING_OUTPUT_BLOCKED=1
 echo WHATSAPP_HEALTH_SIDECAR_CANONICAL_MODEL=ACTIVE
 echo OPENCLAW_GATEWAY_ACTIVE=1
 echo WHATSAPP_CONNECTED=1
