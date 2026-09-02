@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
-      HOST: 72.61.129.109
+      HOST: 69.62.68.67
       SSH_USER: root
       PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
       OWNER_WHATSAPP_E164: ${{ secrets.OWNER_WHATSAPP_E164 }}
