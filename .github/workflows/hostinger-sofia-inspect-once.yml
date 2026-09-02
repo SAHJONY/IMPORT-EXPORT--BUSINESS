@@ -1,4 +1,4 @@
-name: Hostinger Runtime Guardian Script Inspect Once
+name: Hostinger Runtime Guardian Auth Repair Once
 
 on:
   push:
@@ -11,7 +11,7 @@ permissions:
   contents: read
 
 jobs:
-  inspect:
+  repair:
     runs-on: ubuntu-24.04
     timeout-minutes: 8
     env:
@@ -24,28 +24,107 @@ jobs:
         run: |
           set -euo pipefail
           install -d -m 700 ~/.ssh
-          printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/hostinger-runtime-script
-          chmod 600 ~/.ssh/hostinger-runtime-script
-          ssh-keygen -y -f ~/.ssh/hostinger-runtime-script >/dev/null
-      - name: Read runtime guardian script
+          printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/hostinger-runtime-repair
+          chmod 600 ~/.ssh/hostinger-runtime-repair
+          ssh-keygen -y -f ~/.ssh/hostinger-runtime-repair >/dev/null
+
+      - name: Authenticate native runtime guardian and verify
         shell: bash
         run: |
           set -euo pipefail
-          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=15 -i ~/.ssh/hostinger-runtime-script "$USER@$HOST" 'bash -s' <<'REMOTE'
-          set -u
-          redact(){ sed -E -e 's/(Bearer[[:space:]]+)[A-Za-z0-9._~+\/-]+/\1[REDACTED]/Ig' -e 's/(OPENCLAW_GATEWAY_TOKEN=)[^[:space:]]+/\1[REDACTED]/g'; }
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=15 -i ~/.ssh/hostinger-runtime-repair "$USER@$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          SERVICE=sahjony-openclaw-runtime-guardian.service
+          DROPIN_DIR=/etc/systemd/system/${SERVICE}.d
+          DROPIN=${DROPIN_DIR}/20-native-gateway-auth.conf
+          STATE=/var/lib/sahjony-openclaw-state
+          CONFIG="$STATE/openclaw.json"
+          ts="$(date -u +%Y%m%dT%H%M%SZ)"
+          backup=/var/backups/openclaw-runtime-guardian-auth/$ts
+
           echo HOSTINGER_VPS_SCOPE_ONLY=1
-          echo RUNTIME_GUARDIAN_SCRIPT_BEGIN
-          nl -ba /usr/local/sbin/sahjony-openclaw-runtime-guardian | sed -n '1,260p' | redact
-          echo RUNTIME_GUARDIAN_SCRIPT_END
-          echo RUNTIME_GUARDIAN_UNIT_BEGIN
-          cat /etc/systemd/system/sahjony-openclaw-runtime-guardian.service | redact
-          echo RUNTIME_GUARDIAN_UNIT_END
-          echo RUNTIME_GUARDIAN_LOG_BEGIN
-          journalctl -u sahjony-openclaw-runtime-guardian.service -n 80 --no-pager 2>/dev/null | redact || true
-          echo RUNTIME_GUARDIAN_LOG_END
-          echo INSPECTION_COMPLETE=1
+          systemctl is-active --quiet openclaw-gateway.service
+          systemctl is-enabled --quiet openclaw-gateway.service
+          echo NATIVE_GATEWAY_ACTIVE_24X7=1
+          [[ -s /etc/openclaw-gateway.env ]] && grep -q '^OPENCLAW_GATEWAY_TOKEN=' /etc/openclaw-gateway.env
+          echo GATEWAY_TOKEN_FILE_PRESENT=1
+
+          install -d -m 700 "$backup"
+          systemctl cat "$SERVICE" > "$backup/runtime-guardian.service.before.txt"
+          [[ -f "$DROPIN" ]] && cp -a "$DROPIN" "$backup/20-native-gateway-auth.conf.before"
+          echo RUNTIME_GUARDIAN_BACKUP_CREATED=1
+
+          install -d -m 755 "$DROPIN_DIR"
+          cat > "$DROPIN" <<'EOF'
+          [Service]
+          EnvironmentFile=-/etc/openclaw-gateway.env
+          Environment=HOME=/home/node
+          Environment=OPENCLAW_HOME=/home/node
+          Environment=OPENCLAW_STATE_DIR=/var/lib/sahjony-openclaw-state
+          Environment=OPENCLAW_CONFIG_PATH=/var/lib/sahjony-openclaw-state/openclaw.json
+          EOF
+          chmod 644 "$DROPIN"
+          systemctl daemon-reload
+
+          envfiles="$(systemctl show "$SERVICE" -p EnvironmentFiles --value)"
+          [[ "$envfiles" == *'/etc/openclaw-gateway.env'* ]]
+          echo RUNTIME_GUARDIAN_GATEWAY_AUTH_BOUND=1
+
+          # Verify the exact command the guardian uses succeeds under its intended context.
+          token="$(sed -n 's/^OPENCLAW_GATEWAY_TOKEN=//p' /etc/openclaw-gateway.env | head -n1)"
+          env OPENCLAW_GATEWAY_TOKEN="$token" HOME=/home/node OPENCLAW_HOME=/home/node OPENCLAW_STATE_DIR="$STATE" OPENCLAW_CONFIG_PATH="$CONFIG" \
+            openclaw gateway status --deep >/tmp/runtime-guardian-probe.txt 2>&1
+          echo AUTHENTICATED_DEEP_STATUS=PASS
+          rm -f /tmp/runtime-guardian-probe.txt
+
+          verify_start="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          systemctl restart "$SERVICE"
+          systemctl is-active --quiet "$SERVICE"
+          systemctl is-enabled --quiet "$SERVICE"
+          echo RUNTIME_GUARDIAN_ACTIVE_24X7=1
+
+          # Observe more than two 30-second guardian loops.
+          sleep 75
+
+          systemctl is-active --quiet "$SERVICE"
+          echo RUNTIME_GUARDIAN_STILL_ACTIVE=1
+          if [[ -f /var/lib/sahjony-openclaw-guardian/status.json ]]; then
+            python3 - <<'PY'
+          import json
+          p='/var/lib/sahjony-openclaw-guardian/status.json'
+          d=json.load(open(p))
+          assert d.get('runtime') == 'native', d
+          assert d.get('healthy') is True, d
+          print('RUNTIME_GUARDIAN_NATIVE_HEALTHY=1')
+          PY
+          fi
+
+          ws_errors="$(journalctl -u openclaw-gateway.service --since "$verify_start" --no-pager 2>/dev/null | grep -Ec '\[ws\].*(device identity required|missing scope: operator\.read|reason=connect failed|FORBIDDEN)' || true)"
+          echo POST_FIX_WS_AUTH_ERROR_COUNT="$ws_errors"
+          [[ "$ws_errors" -eq 0 ]]
+
+          primary="$(env HOME=/home/node OPENCLAW_HOME=/home/node OPENCLAW_STATE_DIR="$STATE" OPENCLAW_CONFIG_PATH="$CONFIG" openclaw config get agents.defaults.model.primary --json 2>/dev/null)"
+          fallbacks="$(env HOME=/home/node OPENCLAW_HOME=/home/node OPENCLAW_STATE_DIR="$STATE" OPENCLAW_CONFIG_PATH="$CONFIG" openclaw config get agents.defaults.model.fallbacks --json 2>/dev/null)"
+          PRIMARY="$primary" FALLBACKS="$fallbacks" python3 - <<'PY'
+          import json,os
+          p=json.loads(os.environ['PRIMARY']); f=json.loads(os.environ['FALLBACKS'])
+          assert p == 'nvidia/nemotron-3-ultra-550b-a55b', p
+          assert isinstance(f,list) and 'openai/gpt-5.6-sol' in f, f
+          print('NVIDIA_NIM_PRIMARY_PRESERVED=1')
+          print('OPENAI_GPT56_FALLBACK_PRESERVED=1')
+          PY
+
+          wa="$(env OPENCLAW_GATEWAY_TOKEN="$token" HOME=/home/node OPENCLAW_HOME=/home/node OPENCLAW_STATE_DIR="$STATE" OPENCLAW_CONFIG_PATH="$CONFIG" openclaw channels status --channel whatsapp --probe 2>&1 || true)"
+          if grep -Eiq 'whatsapp.*(connected|healthy)|linked.*running.*connected' <<<"$wa"; then
+            echo WHATSAPP_CONNECTED_HEALTHY=1
+          else
+            echo WHATSAPP_CONNECTED_HEALTHY=0
+            exit 41
+          fi
+
+          echo RUNTIME_GUARDIAN_AUTH_REPAIR_COMPLETE=1
           REMOTE
+
       - name: Cleanup SSH
         if: always()
-        run: rm -f ~/.ssh/hostinger-runtime-script
+        run: rm -f ~/.ssh/hostinger-runtime-repair
