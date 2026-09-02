@@ -2,7 +2,6 @@ import crypto from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 
-// agents.defaults.model.primary is sourced from the canonical Hostinger OpenClaw config.
 function compactMedia(media) {
   if (!Array.isArray(media)) return [];
   return media.slice(0, 20).map((item) => {
@@ -25,12 +24,21 @@ var index_default = definePluginEntry({
     const appUrl = String(config.appUrl || process.env.SAHJONY_APP_URL || "https://www.sahjony.com").replace(/\/$/, "");
     const secret = String(process.env.SAHJONY_APP_BRIDGE_SECRET || "");
     const accountId = String(config.accountId || process.env.SAHJONY_WHATSAPP_ACCOUNT_ID || "default");
-    const gatewayId = String(config.gatewayId || process.env.SAHJONY_GATEWAY_ID || "hostinger-vps");
+    const isMacDesktop = process.platform === "darwin";
+    const openclawStateDir = String(
+      process.env.OPENCLAW_STATE_DIR ||
+      (isMacDesktop && process.env.HOME ? `${process.env.HOME}/.openclaw` : "/var/lib/sahjony-openclaw-state")
+    );
+    const gatewayId = String(
+      config.gatewayId ||
+      process.env.SAHJONY_GATEWAY_ID ||
+      (isMacDesktop ? "default" : "hostinger-vps")
+    );
     const businessNumber = String(config.businessNumber || process.env.SAHJONY_WHATSAPP_BUSINESS_NUMBER || "+12816628581");
     const businessName = String(config.businessName || process.env.SAHJONY_WHATSAPP_BUSINESS_NAME || "SAHJONY LLC");
     const pollIntervalMs = Math.max(5e3, Math.min(3e5, Number(config.pollIntervalMs || 3e4)));
-    const openclawBin = String(process.env.OPENCLAW_BIN || (process.env.HOME ? `${process.env.HOME}/.openclaw/bin/openclaw` : "openclaw"));
-    const canonicalConfigPath = String(process.env.OPENCLAW_CONFIG_PATH || "/var/lib/sahjony-openclaw-state/openclaw.json");
+    const openclawBin = String(process.env.OPENCLAW_BIN || `${openclawStateDir}/bin/openclaw`);
+    const canonicalConfigPath = String(process.env.OPENCLAW_CONFIG_PATH || `${openclawStateDir}/openclaw.json`);
     let stopped = false;
     let polling = false;
     let pollTimer;
@@ -135,7 +143,9 @@ var index_default = definePluginEntry({
             try {
               const parsed = JSON.parse(String(sent.stdout || "{}"));
               messageId = String(parsed.messageId || parsed.message_id || "") || void 0;
-            } catch { messageId = void 0; }
+            } catch {
+              messageId = void 0;
+            }
             await acknowledge(command, "sent", messageId);
           } catch (error) {
             await acknowledge(command, "failed", void 0, error instanceof Error ? error.message : "OpenClaw send failed");
@@ -143,7 +153,9 @@ var index_default = definePluginEntry({
         }
       } catch (error) {
         api.logger.warn(`SAHJONY outbox poll failed: ${error instanceof Error ? error.message : "unknown error"}`);
-      } finally { polling = false; }
+      } finally {
+        polling = false;
+      }
     }
 
     api.on("message_received", async (event, ctx) => {
@@ -183,9 +195,13 @@ var index_default = definePluginEntry({
       stopped = false;
       await heartbeat();
       await pollOutbox();
-      heartbeatTimer = setInterval(() => { void heartbeat(); }, 12e4);
-      pollTimer = setInterval(() => { void pollOutbox(); }, pollIntervalMs);
-      api.logger.info(`SAHJONY application bridge started (gatewayId=${gatewayId}, openclawBin=${openclawBin}, canonicalConfig=${canonicalConfigPath})`);
+      heartbeatTimer = setInterval(() => {
+        void heartbeat();
+      }, 12e4);
+      pollTimer = setInterval(() => {
+        void pollOutbox();
+      }, pollIntervalMs);
+      api.logger.info(`SAHJONY application bridge started (gatewayId=${gatewayId}, stateDir=${openclawStateDir}, openclawBin=${openclawBin}, canonicalConfig=${canonicalConfigPath})`);
     });
 
     api.on("gateway_stop", async () => {
