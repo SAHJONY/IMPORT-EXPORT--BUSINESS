@@ -1,4 +1,4 @@
-name: Hostinger WhatsApp Guardian Failure Inspect Once
+name: Hostinger Stale Docker OpenClaw Inspect Once
 
 on:
   push:
@@ -24,38 +24,45 @@ jobs:
         run: |
           set -euo pipefail
           install -d -m 700 ~/.ssh
-          printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/hostinger-guardian-inspect
-          chmod 600 ~/.ssh/hostinger-guardian-inspect
-          ssh-keygen -y -f ~/.ssh/hostinger-guardian-inspect >/dev/null
+          printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/hostinger-docker-inspect
+          chmod 600 ~/.ssh/hostinger-docker-inspect
+          ssh-keygen -y -f ~/.ssh/hostinger-docker-inspect >/dev/null
 
-      - name: Inspect guardian error only
+      - name: Inspect stale Docker OpenClaw only
         shell: bash
         run: |
           set -euo pipefail
-          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=15 -i ~/.ssh/hostinger-guardian-inspect "$USER@$HOST" 'bash -s' <<'REMOTE'
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=15 -i ~/.ssh/hostinger-docker-inspect "$USER@$HOST" 'bash -s' <<'REMOTE'
           set -euo pipefail
-          redact(){ sed -E \
-            -e 's/(Bearer[[:space:]]+)[A-Za-z0-9._~+\/-]+/\1[REDACTED]/Ig' \
-            -e 's/((api[_-]?key|token|secret|password|authorization)["[:space:]]*[:=]["[:space:]]*)[^,"[:space:]]+/\1[REDACTED]/Ig' \
-            -e 's/(OPENCLAW_GATEWAY_TOKEN=)[^[:space:]]+/\1[REDACTED]/g'; }
           echo HOSTINGER_VPS_SCOPE_ONLY=1
-          systemctl is-active --quiet openclaw-gateway.service && echo OPENCLAW_GATEWAY_ACTIVE=1
-          systemctl show sahjony-whatsapp-guardian.service -p EnvironmentFiles --value | grep -q '/etc/openclaw-gateway.env' && echo GUARDIAN_GATEWAY_ENV_BOUND=1 || echo GUARDIAN_GATEWAY_ENV_BOUND=0
+          systemctl is-active --quiet openclaw-gateway.service && echo NATIVE_GATEWAY_ACTIVE=1
+          echo DOCKER_OPENCLAW_CONTAINERS_BEGIN
+          if command -v docker >/dev/null 2>&1 && systemctl is-active --quiet docker; then
+            docker ps -a --format '{{.ID}}|{{.Names}}|{{.Image}}|{{.Status}}' \
+              | grep -Ei 'openclaw|claw' || true
+          else
+            echo DOCKER_UNAVAILABLE_OR_INACTIVE=1
+          fi
+          echo DOCKER_OPENCLAW_CONTAINERS_END
 
-          echo GUARDIAN_SCRIPT_RELEVANT_BEGIN
-          nl -ba /usr/local/sbin/sahjony-whatsapp-guardian | sed -n '1,110p' | redact
-          echo GUARDIAN_SCRIPT_RELEVANT_END
+          count="$(docker ps -a --format '{{.Names}}|{{.Image}}' 2>/dev/null | grep -Eic 'openclaw|claw' || true)"
+          running="$(docker ps --format '{{.Names}}|{{.Image}}' 2>/dev/null | grep -Eic 'openclaw|claw' || true)"
+          echo STALE_OPENCLAW_CONTAINER_COUNT="$count"
+          echo STALE_OPENCLAW_RUNNING_COUNT="$running"
 
-          echo GUARDIAN_LAST_FAILURE_BEGIN
-          journalctl -u sahjony-whatsapp-guardian.service -n 80 --no-pager 2>/dev/null | redact
-          echo GUARDIAN_LAST_FAILURE_END
+          echo PORT_18789_LISTENERS_BEGIN
+          ss -ltnp 2>/dev/null | grep ':18789' || true
+          echo PORT_18789_LISTENERS_END
 
-          echo GUARDIAN_STATUS_BEGIN
-          systemctl status sahjony-whatsapp-guardian.service --no-pager -l 2>&1 | redact || true
-          echo GUARDIAN_STATUS_END
+          echo LOCAL_18789_CONNECTIONS_BEGIN
+          ss -tnp 2>/dev/null | grep '127.0.0.1:18789' | head -n 30 || true
+          echo LOCAL_18789_CONNECTIONS_END
+
+          systemctl is-enabled sahjony-whatsapp-guardian.timer 2>/dev/null || true
+          systemctl is-active sahjony-whatsapp-guardian.timer 2>/dev/null || true
           echo INSPECTION_COMPLETE=1
           REMOTE
 
       - name: Cleanup SSH
         if: always()
-        run: rm -f ~/.ssh/hostinger-guardian-inspect
+        run: rm -f ~/.ssh/hostinger-docker-inspect
