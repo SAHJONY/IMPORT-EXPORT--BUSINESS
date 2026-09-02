@@ -3,9 +3,10 @@ import { promisify } from "node:util";
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 
 const execFile = promisify(execFileCb);
-const RESCUE_VERSION = "2.0.0";
-const RESCUE_BUILD = "metadata-less-terminal-recovery";
+const RESCUE_VERSION = "2.1.0";
+const RESCUE_BUILD = "exactly-once-reply-guard";
 const MEMORY_TTL_MS = 30 * 60 * 1000;
+const PRIMARY_SEND_GRACE_MS = 20000;
 const MAX_HISTORY_MESSAGES = 12;
 const MAX_HISTORY_CHARS = 9000;
 
@@ -121,7 +122,6 @@ async function generateNvidiaReply(history, apiKey, logger) {
       }
       const data = await response.json();
       const message = data?.choices?.[0]?.message || {};
-      // Only customer-visible model content is eligible for delivery. Never surface reasoning_content.
       const text = normalizeText(message.content);
       if (text && !INTERNAL_OUTPUT.test(text)) return { text, model };
       logger.warn(`SAHJONY reply rescue model ${model} returned no safe visible content`);
@@ -135,7 +135,7 @@ async function generateNvidiaReply(history, apiKey, logger) {
 export default definePluginEntry({
   id: "sahjony-whatsapp-reply-rescue",
   name: "SAHJONY WhatsApp Reply Rescue",
-  description: "Context-preserving fail-safe reply generation for WhatsApp turns that otherwise end silently or leak runtime errors.",
+  description: "Context-preserving fail-safe reply generation with inbound idempotency and exactly-once visible reply protection.",
   register(api) {
     const cfg = api.pluginConfig || {};
     const accountId = String(cfg.accountId || "default");
@@ -146,6 +146,8 @@ export default definePluginEntry({
     const pending = new Map();
     const conversation = new Map();
     const rescuedTurns = new Map();
+    const seenInboundTurns = new Map();
+    const deliveredTurns = new Map();
 
     function now() { return Date.now(); }
 
@@ -154,8 +156,10 @@ export default definePluginEntry({
       for (const [key, state] of conversation.entries()) {
         if ((state.updatedAt || 0) < cutoff) conversation.delete(key);
       }
-      for (const [turnId, ts] of rescuedTurns.entries()) {
-        if (ts < cutoff) rescuedTurns.delete(turnId);
+      for (const store of [rescuedTurns, seenInboundTurns, deliveredTurns]) {
+        for (const [turnId, ts] of store.entries()) {
+          if (ts < cutoff) store.delete(turnId);
+        }
       }
     }
 
@@ -171,7 +175,7 @@ export default definePluginEntry({
     }
 
     function resolveTurnId(event, ctx, key) {
-      return String(event?.messageId || ctx?.messageId || `${key}:${now()}`);
+      return String(event?.messageId || ctx?.messageId || event?.payload?.messageId || event?.payload?.id || `${key}:${now()}`);
     }
 
     function resolveTarget(event, ctx) {
@@ -219,9 +223,6 @@ export default definePluginEntry({
         if (matches.length === 1) return { key: matches[0], item: pending.get(matches[0]) };
       }
 
-      // Some terminal OpenClaw runtime failures arrive without channel/session
-      // metadata. If exactly one WhatsApp turn is pending, it is safe to bind the
-      // terminal failure to that turn instead of leaking the generic /new notice.
       if (pending.size === 1 && !hasExplicitNonWhatsAppContext(event, ctx)) {
         const [onlyKey, onlyItem] = pending.entries().next().value;
         return { key: onlyKey, item: onlyItem };
@@ -233,6 +234,15 @@ export default definePluginEntry({
       if (isWhatsAppContext(event, ctx)) return true;
       if (hasExplicitNonWhatsAppContext(event, ctx)) return false;
       return pending.size > 0;
+    }
+
+    function scheduleRescue(item, key, delayMs, reason) {
+      clearTimeout(item.timer);
+      item.timer = setTimeout(async () => {
+        const current = pending.get(key);
+        if (!current || current.turnId !== item.turnId) return;
+        await rescueNow(current, key, reason);
+      }, delayMs);
     }
 
     async function sendViaOpenClaw(target, text) {
@@ -248,8 +258,16 @@ export default definePluginEntry({
     }
 
     async function rescueNow(item, key, reason) {
-      if (!item || item.rescuing || rescuedTurns.has(item.turnId)) return;
+      if (!item || item.rescuing || rescuedTurns.has(item.turnId) || deliveredTurns.has(item.turnId)) return;
       if (pending.get(key) !== item) return;
+
+      const primaryAge = item.primarySendingAt ? now() - item.primarySendingAt : Number.POSITIVE_INFINITY;
+      if (primaryAge < PRIMARY_SEND_GRACE_MS) {
+        scheduleRescue(item, key, PRIMARY_SEND_GRACE_MS - primaryAge + 250, "primary_send_grace_expired");
+        api.logger.info(`SAHJONY_REPLY_GUARD deferred rescue while primary send is in flight turn=${item.turnId}`);
+        return;
+      }
+
       item.rescuing = true;
       if (!nvidiaKey.startsWith("nvapi-")) {
         api.logger.error("SAHJONY reply rescue skipped: NVIDIA_API_KEY unavailable or invalid");
@@ -263,17 +281,20 @@ export default definePluginEntry({
         item.rescuing = false;
         return;
       }
-      if (pending.get(key) !== item || rescuedTurns.has(item.turnId)) return;
+      if (pending.get(key) !== item || rescuedTurns.has(item.turnId) || deliveredTurns.has(item.turnId)) return;
 
       try {
         rescuedTurns.set(item.turnId, now());
+        item.outboundOwner = "rescue";
         await sendViaOpenClaw(item.sender, generated.text);
+        deliveredTurns.set(item.turnId, now());
         remember(key, "assistant", generated.text);
         clearPending(key);
-        api.logger.warn(`SAHJONY_REPLY_RESCUED version=${RESCUE_VERSION} build=${RESCUE_BUILD} session=${key} reason=${reason} model=${generated.model} chars=${generated.text.length}`);
+        api.logger.warn(`SAHJONY_REPLY_RESCUED version=${RESCUE_VERSION} build=${RESCUE_BUILD} session=${key} turn=${item.turnId} reason=${reason} model=${generated.model} chars=${generated.text.length}`);
       } catch (error) {
         rescuedTurns.delete(item.turnId);
         item.rescuing = false;
+        item.outboundOwner = "";
         api.logger.error(`SAHJONY reply rescue delivery failed: ${error instanceof Error ? error.message : "unknown error"}`);
       }
     }
@@ -286,9 +307,15 @@ export default definePluginEntry({
       const key = resolveKey(event, ctx);
       if (!sender || !content || !key || sender === businessNumber) return;
 
+      const turnId = resolveTurnId(event, ctx, key);
+      if (seenInboundTurns.has(turnId)) {
+        api.logger.warn(`SAHJONY_REPLY_GUARD duplicate inbound suppressed turn=${turnId} session=${key}`);
+        return { cancel: true, cancelReason: "duplicate_inbound_message" };
+      }
+      seenInboundTurns.set(turnId, now());
+
       clearPending(key);
       remember(key, "user", content);
-      const turnId = resolveTurnId(event, ctx, key);
       const item = {
         sender,
         content,
@@ -296,14 +323,12 @@ export default definePluginEntry({
         turnId,
         timer: null,
         createdAt: now(),
-        rescuing: false
+        rescuing: false,
+        primarySendingAt: 0,
+        outboundOwner: ""
       };
-      item.timer = setTimeout(async () => {
-        const current = pending.get(key);
-        if (!current || current.turnId !== turnId) return;
-        await rescueNow(current, key, "timeout");
-      }, rescueDelayMs);
       pending.set(key, item);
+      scheduleRescue(item, key, rescueDelayMs, "timeout");
     });
 
     api.on("reply_payload_sending", async (event, ctx) => {
@@ -316,12 +341,36 @@ export default definePluginEntry({
     });
 
     api.on("message_sending", async (event, ctx) => {
-      if (!INTERNAL_OUTPUT.test(inspectableEventText(event))) return undefined;
-      if (!shouldHandleWhatsAppRuntimeOutput(event, ctx)) return undefined;
-      api.logger.warn("SAHJONY_REPLY_RESCUE blocked internal WhatsApp message");
+      const visibleText = inspectableEventText(event);
+      if (INTERNAL_OUTPUT.test(visibleText)) {
+        if (!shouldHandleWhatsAppRuntimeOutput(event, ctx)) return undefined;
+        api.logger.warn("SAHJONY_REPLY_RESCUE blocked internal WhatsApp message");
+        const found = findPending(event, ctx);
+        if (found.item) queueMicrotask(() => { void rescueNow(found.item, found.key, "blocked_runtime_error"); });
+        return { cancel: true, cancelReason: "internal_runtime_output" };
+      }
+
       const found = findPending(event, ctx);
-      if (found.item) queueMicrotask(() => { void rescueNow(found.item, found.key, "blocked_runtime_error"); });
-      return { cancel: true, cancelReason: "internal_runtime_output" };
+      if (!found.item || !visibleText) return undefined;
+      const item = found.item;
+
+      if (deliveredTurns.has(item.turnId)) {
+        api.logger.warn(`SAHJONY_REPLY_GUARD duplicate outbound suppressed after delivery turn=${item.turnId}`);
+        return { cancel: true, cancelReason: "duplicate_outbound_after_delivery" };
+      }
+
+      if (item.outboundOwner === "rescue") return undefined;
+
+      if (item.primarySendingAt && now() - item.primarySendingAt < PRIMARY_SEND_GRACE_MS) {
+        api.logger.warn(`SAHJONY_REPLY_GUARD concurrent primary duplicate suppressed turn=${item.turnId}`);
+        return { cancel: true, cancelReason: "duplicate_primary_outbound" };
+      }
+
+      item.primarySendingAt = now();
+      item.outboundOwner = "primary";
+      clearTimeout(item.timer);
+      api.logger.info(`SAHJONY_REPLY_GUARD primary outbound claimed turn=${item.turnId}`);
+      return undefined;
     });
 
     api.on("message_sent", async (event, ctx) => {
@@ -330,16 +379,23 @@ export default definePluginEntry({
       const visibleText = inspectableEventText(event);
       if (INTERNAL_OUTPUT.test(visibleText)) {
         api.logger.error("SAHJONY_REPLY_RESCUE observed an internal runtime message after send stage; keeping rescue pending");
-        if (found.item) queueMicrotask(() => { void rescueNow(found.item, found.key, "post_send_runtime_error"); });
+        if (found.item) {
+          found.item.primarySendingAt = 0;
+          found.item.outboundOwner = "";
+          queueMicrotask(() => { void rescueNow(found.item, found.key, "post_send_runtime_error"); });
+        }
         return;
       }
 
       const key = found.key || resolveKey(event, ctx);
       const to = String(event?.to || ctx?.channelId || event?.recipientId || "");
+      if (found.item) deliveredTurns.set(found.item.turnId, now());
       if (key && visibleText) remember(key, "assistant", visibleText);
       if (key) clearPending(key);
       if (to) {
         for (const candidateKey of keysForTarget(to)) {
+          const candidate = pending.get(candidateKey);
+          if (candidate) deliveredTurns.set(candidate.turnId, now());
           if (visibleText) remember(candidateKey, "assistant", visibleText);
           clearPending(candidateKey);
         }
@@ -350,6 +406,6 @@ export default definePluginEntry({
       for (const key of [...pending.keys()]) clearPending(key);
     });
 
-    api.logger.info(`SAHJONY reply rescue ready (version=${RESCUE_VERSION}, build=${RESCUE_BUILD}, delay=${rescueDelayMs}ms, context_window=${MAX_HISTORY_MESSAGES}, primary-rescue=openai/gpt-oss-120b, reasoning-output=blocked, metadata-less-terminal-recovery=active)`);
+    api.logger.info(`SAHJONY reply rescue ready (version=${RESCUE_VERSION}, build=${RESCUE_BUILD}, delay=${rescueDelayMs}ms, context_window=${MAX_HISTORY_MESSAGES}, inbound-idempotency=active, exactly-once-visible-reply=active, runtime-errors=blocked)`);
   }
 });
