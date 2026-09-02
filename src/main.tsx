@@ -45,7 +45,7 @@ async function boot(){
    const {default:NeonAuthPage}=await import('./NeonAuthPage');
    createRoot(rootElement).render(withI18n(<StrictMode><AppBoundary><NeonAuthPage/></AppBoundary></StrictMode>));return
  }
- if(path==='/owner'){location.replace('/owner/deals');return}
+ if(path==='/owner'){location.replace('/owner/dashboard');return}
  if(path==='/owner/deals'||path.startsWith('/owner/deals/')){
    const {default:DealCommandCenter}=await import('./DealCommandCenter');
    createRoot(rootElement).render(withI18n(<StrictMode><AppBoundary><DealCommandCenter/></AppBoundary></StrictMode>));return

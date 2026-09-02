@@ -7,8 +7,8 @@ const errors=[]; const passes=[];
 const fail=(m)=>errors.push(m); const pass=(m)=>passes.push(m);
 
 const publicPages={
-  '/':'/landing.html',
-  '/business':'/landing.html',
+  '/':'/index.html',
+  '/business':'/index.html',
   '/cuba-private-sector':'/cuba-es.html',
   '/cuba-consumers':'/cuba-individual-consumers.html',
   '/individual-consumers':'/cuba-individual-consumers.html',
@@ -22,7 +22,7 @@ const ownerPages={
   '/owner/energy':'/owner-energy-hub.html'
 };
 
-function diskPath(dest){return dest.startsWith('/') ? `public${dest}` : dest}
+function diskPath(dest){return dest==='/index.html' ? 'index.html' : (dest.startsWith('/') ? `public${dest}` : dest)}
 function routeIndex(src,dest){return routes.findIndex(r=>r.src===src && (!dest || r.dest===dest))}
 
 for(const [src,dest] of Object.entries({...publicPages,...ownerPages})){

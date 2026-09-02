@@ -4,7 +4,8 @@ import process from 'node:process';
 const failures=[];
 const read=p=>fs.readFileSync(p,'utf8');
 const consumer=read('public/cuba-individual-consumers.html');
-const business=read('public/landing.html');
+const appSource=read('src/App.tsx');
+const business=appSource.slice(appSource.indexOf('function PublicSite'),appSource.indexOf('function StatePage'));
 const cfg=JSON.parse(read('vercel.json'));
 
 const forbiddenInConsumer=[
@@ -24,7 +25,7 @@ for(const r of consumerRoutes){
   if(!hit||hit.dest!=='/cuba-individual-consumers.html') failures.push(`Consumer route ${r} must resolve only to consumer HTML`);
 }
 const businessRoute=routes.find(x=>x.src==='/business');
-if(!businessRoute||businessRoute.dest!=='/landing.html') failures.push('/business must resolve only to business landing HTML');
+if(!businessRoute||businessRoute.dest!=='/index.html') failures.push('/business must resolve only to the cinematic business application');
 
 const consumerApi=routes.find(x=>x.src==='/consumer-marketplace(.*)');
 if(!consumerApi||consumerApi.dest!=='cuba_consumer_marketplace_api.py') failures.push('Consumer API must remain on its dedicated backend');

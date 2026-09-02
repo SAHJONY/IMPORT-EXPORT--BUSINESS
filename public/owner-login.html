@@ -1,1 +1,817 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#050b13"><title>Owner Sign In · SAHJONY Global Trade</title><style>:root{--bg:#050b13;--panel:#0c1a29;--line:rgba(255,255,255,.12);--text:#f5f9ff;--muted:#92a8bb;--cyan:#5ad8ff;--green:#78efb8;--red:#ff8991}*{box-sizing:border-box}html{-webkit-text-size-adjust:100%;background:var(--bg)}body{margin:0;min-height:100vh;min-height:100dvh;background:radial-gradient(circle at 15% 0,rgba(90,216,255,.16),transparent 34%),radial-gradient(circle at 85% 0,rgba(120,239,184,.10),transparent 30%),var(--bg);color:var(--text);font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;display:grid;place-items:center;padding:max(24px,env(safe-area-inset-top)) max(24px,env(safe-area-inset-right)) max(120px,calc(env(safe-area-inset-bottom) + 96px)) max(24px,env(safe-area-inset-left));overflow-x:hidden}.shell{width:min(1080px,100%);display:grid;grid-template-columns:1.05fr .95fr;border:1px solid var(--line);border-radius:26px;overflow:hidden;background:rgba(5,13,22,.9);box-shadow:0 40px 120px rgba(0,0,0,.42)}.intro{padding:46px;background:linear-gradient(145deg,#0b2136,#07131f)}.eyebrow{color:var(--cyan);font-size:11px;font-weight:900;letter-spacing:.18em}.intro h1{font-size:clamp(44px,6vw,76px);line-height:.92;letter-spacing:-.055em;margin:24px 0 18px}.intro p{color:var(--muted);line-height:1.65;font-size:17px}.points{display:grid;gap:10px;margin-top:28px}.point{padding:13px 0;border-top:1px solid var(--line)}.point strong{display:block;font-size:13px}.point span{display:block;color:var(--muted);font-size:11px;margin-top:5px}.login{padding:46px;background:var(--panel)}.login h2{font-size:28px;margin:0 0 8px}.login>p{color:var(--muted);line-height:1.5;margin:0 0 28px}.field{margin-bottom:14px}.field label{display:block;font-size:11px;font-weight:800;color:#b8c7d4;margin:0 0 7px}.field input{width:100%;border:1px solid var(--line);border-radius:11px;background:#06131f;color:var(--text);padding:14px;font:inherit;min-height:48px}.field input[readonly]{color:#b9cad8;background:#081827}.submit,.secondary{width:100%;border:0;border-radius:11px;padding:14px 16px;min-height:48px;font-weight:900;font-size:15px;cursor:pointer}.submit{background:linear-gradient(135deg,var(--cyan),var(--green));color:#021018}.secondary{margin-top:10px;background:#102537;color:#cfe7f7;border:1px solid var(--line)}.status{min-height:44px;margin-top:14px;padding:12px;border:1px solid var(--line);border-radius:11px;color:var(--muted);font-size:12px;line-height:1.5}.status.ok{color:var(--green);border-color:rgba(120,239,184,.3)}.status.bad{color:#ffc0c4;border-color:rgba(255,137,145,.3)}.links{display:flex;justify-content:space-between;gap:10px;margin-top:20px;flex-wrap:wrap}.links a{color:#b9cddd;font-size:12px;text-decoration:none}.security{margin-top:22px;color:#758da2;font-size:10px;line-height:1.55}.hidden{display:none!important}.mfa-panel{margin-top:18px;padding:16px;border:1px solid rgba(90,216,255,.24);border-radius:14px;background:#071827}.mfa-panel h3{margin:0 0 8px;font-size:18px}.mfa-panel p{color:#9fb5c7;font-size:12px;line-height:1.55}.qr{display:block;width:min(250px,100%);margin:14px auto;background:#fff;border-radius:12px;padding:8px}.secret{word-break:break-all;color:#d8ecf7;background:#04101a;border:1px solid var(--line);padding:10px;border-radius:9px;font-size:12px;margin:10px 0}.hint{font-size:11px;color:#8ea6ba;line-height:1.5;margin-top:10px}@media(max-width:820px){body{display:block;padding:max(18px,env(safe-area-inset-top)) max(14px,env(safe-area-inset-right)) max(150px,calc(env(safe-area-inset-bottom) + 120px)) max(14px,env(safe-area-inset-left))}.shell{grid-template-columns:1fr;border-radius:22px;margin:0 auto}.intro,.login{padding:28px}.intro h1{font-size:48px}.intro p{font-size:16px}.points{margin-top:20px}}@media(max-width:560px){.shell{border-radius:18px}.intro,.login{padding:24px 20px}.eyebrow{font-size:10px;line-height:1.5}.intro h1{font-size:42px;margin:18px 0 14px}.intro p{font-size:15px;line-height:1.55}.points{gap:4px;margin-top:16px}.point{padding:10px 0}.point strong{font-size:12px}.point span{font-size:10px}.login h2{font-size:25px}.login>p{font-size:14px;margin-bottom:20px}.links{padding-bottom:8px}}</style></head><body><main class="shell"><section class="intro"><div class="eyebrow">SAHJONY GLOBAL TRADE · SUPABASE OWNER ACCESS</div><h1>Full control. One owner.</h1><p>Supabase Auth verifies the owner identity. SAHJONY then applies owner membership, native MFA/AAL2, and fail-closed authorization across CRM, sourcing, managed trade, compliance, documents, shipping, finance and AI operations.</p><div class="points"><div class="point"><strong>IDENTITY · SUPABASE AUTH</strong><span>One canonical identity system for the entire application.</span></div><div class="point"><strong>AUTHORIZATION · OWNER MEMBERSHIP</strong><span>Privileged access is granted only by an active owner membership.</span></div><div class="point"><strong>SECURITY · NATIVE MFA + AAL2</strong><span>First sign-in enrolls an Authenticator factor. Every privileged owner session must reach Supabase AAL2.</span></div></div></section><section class="login"><h2>Owner sign in</h2><p>Sign in with your Supabase-backed SAHJONY owner account. If this is your first secure login, the system will guide you through Authenticator enrollment.</p><form id="login"><div class="field"><label>OWNER EMAIL</label><input id="email" type="email" value="sahjonycapitalllc@outlook.com" autocomplete="username" readonly></div><div class="field"><label>PASSWORD</label><input id="password" type="password" required minlength="8" maxlength="256" autocomplete="current-password" placeholder="Enter your password"></div><button id="passwordSubmit" class="submit" type="submit">Continue securely</button></form><button id="resetPassword" class="secondary" type="button">Send password setup / reset email</button><div id="mfaPanel" class="mfa-panel hidden"><h3 id="mfaTitle">Secure your Owner account</h3><p id="mfaInstructions"></p><img id="qr" class="qr hidden" alt="Authenticator QR code"><div id="secretWrap" class="hidden"><div class="hint">If you cannot scan the QR code, enter this secret manually in your Authenticator app:</div><div id="secret" class="secret"></div></div><div class="field"><label>AUTHENTICATOR CODE</label><input id="mfa" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" minlength="6" maxlength="6" placeholder="6-digit code"></div><button id="verifyMfa" class="submit" type="button">Verify MFA and enter Owner OS</button></div><div id="recoveryPanel" class="mfa-panel hidden"><h3>Create a new password</h3><p>This recovery session is verified by Supabase. Choose a strong password, then return to Owner Sign In.</p><div class="field"><label>NEW PASSWORD</label><input id="newPassword" type="password" minlength="12" maxlength="256" autocomplete="new-password" placeholder="New password"></div><button id="savePassword" class="submit" type="button">Save new password</button></div><div id="status" class="status">Owner access is fail-closed. Password authentication comes first; Supabase Authenticator MFA/AAL2 is required before Owner OS access.</div><div class="links"><a href="/">← Business site</a><a href="/owner">Owner OS</a></div><div class="security">Passwords and Authenticator codes are handled by Supabase Auth and are never stored in SAHJONY browser session storage. Only the resulting short-lived authenticated session token is retained for Owner OS access.</div></section></main><script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script><script>const SUPABASE_URL='https://qprlbmcoksrpuvodxjtt.supabase.co';const SUPABASE_KEY='sb_publishable_-I-dlfNYk4byxK5WQKuqlQ_WIAGkuA-';const OWNER_EMAIL='sahjonycapitalllc@outlook.com';const initialAuthFragment=location.hash;const sb=window.supabase.createClient(SUPABASE_URL,SUPABASE_KEY,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}});const form=document.getElementById('login'),status=document.getElementById('status'),password=document.getElementById('password'),email=document.getElementById('email'),mfa=document.getElementById('mfa'),mfaPanel=document.getElementById('mfaPanel'),mfaTitle=document.getElementById('mfaTitle'),mfaInstructions=document.getElementById('mfaInstructions'),qr=document.getElementById('qr'),secret=document.getElementById('secret'),secretWrap=document.getElementById('secretWrap'),verifyMfa=document.getElementById('verifyMfa'),resetPassword=document.getElementById('resetPassword'),recoveryPanel=document.getElementById('recoveryPanel'),newPassword=document.getElementById('newPassword'),savePassword=document.getElementById('savePassword');let factorId='';function setStatus(text,type=''){status.className='status'+(type?' '+type:'');status.textContent=text}async function finishOwner(){const {data,error}=await sb.auth.getSession();if(error)throw error;const token=data.session?.access_token;if(!token)throw new Error('Supabase did not return an authenticated session.');const check=await fetch('/owner-auth/session',{headers:{Authorization:'Bearer '+token},cache:'no-store'});const body=await check.json().catch(()=>({detail:'Owner authorization failed'}));if(!check.ok)throw new Error(body.detail||'Owner authorization failed.');if(body.mfa_verified!==true)throw new Error('Owner MFA is not yet verified at AAL2.');sessionStorage.setItem('sahjony.owner.token',token);password.value='';mfa.value='';setStatus('Owner identity and MFA verified. Opening Owner OS…','ok');location.assign('/owner')}async function prepareMfa(){const aal=await sb.auth.mfa.getAuthenticatorAssuranceLevel();if(aal.error)throw aal.error;if(aal.data.currentLevel==='aal2'){await finishOwner();return}const factors=await sb.auth.mfa.listFactors();if(factors.error)throw factors.error;const totp=factors.data?.totp||[];const verified=totp.find(f=>f.status==='verified');if(verified){factorId=verified.id;mfaTitle.textContent='Verify your Authenticator';mfaInstructions.textContent='Open the Authenticator app already linked to this Owner account and enter its current 6-digit code.';qr.classList.add('hidden');secretWrap.classList.add('hidden');mfaPanel.classList.remove('hidden');mfa.focus();return}for(const f of totp.filter(f=>f.status!=='verified')){try{await sb.auth.mfa.unenroll({factorId:f.id})}catch{}}const enrolled=await sb.auth.mfa.enroll({factorType:'totp',friendlyName:'SAHJONY Owner'});if(enrolled.error)throw enrolled.error;factorId=enrolled.data.id;mfaTitle.textContent='Set up Owner Authenticator';mfaInstructions.textContent='Scan this QR code with Microsoft Authenticator, Google Authenticator, 1Password, Authy, or another TOTP app. Then enter the 6-digit code below.';qr.src=enrolled.data.totp.qr_code;qr.classList.remove('hidden');secret.textContent=enrolled.data.totp.secret||'';secretWrap.classList.remove('hidden');mfaPanel.classList.remove('hidden');mfa.focus()}async function signInPassword(){const result=await sb.auth.signInWithPassword({email:OWNER_EMAIL,password:password.value});if(result.error)throw result.error;if((result.data.user?.email||'').toLowerCase()!==OWNER_EMAIL)throw new Error('This Supabase identity is not the SAHJONY Owner account.');setStatus('Password verified. Checking Owner MFA…','ok');await prepareMfa()}async function validateExisting(){const token=sessionStorage.getItem('sahjony.owner.token');if(token){try{const r=await fetch('/owner-auth/session',{headers:{Authorization:'Bearer '+token},cache:'no-store'});if(r.ok){setStatus('Owner session active. Opening Owner OS…','ok');location.replace('/owner');return}sessionStorage.removeItem('sahjony.owner.token')}catch{}}if(initialAuthFragment.includes('type=recovery')){recoveryPanel.classList.remove('hidden');form.classList.add('hidden');resetPassword.classList.add('hidden');setStatus('Recovery link verified by Supabase. Create your new Owner password.','ok')}}form.addEventListener('submit',async e=>{e.preventDefault();mfaPanel.classList.add('hidden');setStatus('Authenticating password with Supabase…');try{await signInPassword()}catch(err){setStatus(err?.message||'Unable to authenticate.','bad')}});verifyMfa.addEventListener('click',async()=>{const code=mfa.value.trim();if(!/^\d{6}$/.test(code)){setStatus('Enter the current 6-digit code from your Authenticator app.','bad');return}verifyMfa.disabled=true;setStatus('Verifying Supabase MFA challenge…');try{const verified=await sb.auth.mfa.challengeAndVerify({factorId,code});if(verified.error)throw verified.error;await sb.auth.refreshSession();await finishOwner()}catch(err){setStatus(err?.message||'MFA verification failed.','bad');mfa.value='';mfa.focus()}finally{verifyMfa.disabled=false}});resetPassword.addEventListener('click',async()=>{resetPassword.disabled=true;setStatus('Requesting a secure password email from Supabase…');try{const r=await sb.auth.resetPasswordForEmail(OWNER_EMAIL,{redirectTo:'https://www.sahjony.com/owner-login'});if(r.error)throw r.error;setStatus('Password setup/reset email sent. Open the newest Supabase email, then return here to set your password.','ok')}catch(err){setStatus(err?.message||'Unable to send password email.','bad')}finally{resetPassword.disabled=false}});savePassword.addEventListener('click',async()=>{const next=newPassword.value;if(next.length<12){setStatus('Use a password with at least 12 characters.','bad');return}savePassword.disabled=true;setStatus('Saving your new password securely in Supabase…');try{const r=await sb.auth.updateUser({password:next});if(r.error)throw r.error;newPassword.value='';recoveryPanel.classList.add('hidden');form.classList.remove('hidden');resetPassword.classList.remove('hidden');setStatus('Password saved. Sign in now to enroll or verify Owner MFA.','ok')}catch(err){setStatus(err?.message||'Unable to update password.','bad')}finally{savePassword.disabled=false}});validateExisting();</script><script src="/global-language.js" defer></script></body></html>
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width,initial-scale=1,viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#050b13" />
+    <meta name="robots" content="noindex,nofollow,noarchive" />
+    <title>Owner Sign In · SAHJONY Global Trade</title>
+    <style>
+      :root {
+        --bg: #050b13;
+        --panel: #0c1a29;
+        --line: rgba(255, 255, 255, 0.12);
+        --text: #f5f9ff;
+        --muted: #92a8bb;
+        --cyan: #5ad8ff;
+        --green: #78efb8;
+        --red: #ff8991;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html {
+        -webkit-text-size-adjust: 100%;
+        background: var(--bg);
+      }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        min-height: 100dvh;
+        background:
+          radial-gradient(
+            circle at 15% 0,
+            rgba(90, 216, 255, 0.16),
+            transparent 34%
+          ),
+          radial-gradient(
+            circle at 85% 0,
+            rgba(120, 239, 184, 0.1),
+            transparent 30%
+          ),
+          var(--bg);
+        color: var(--text);
+        font-family:
+          Inter,
+          -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          sans-serif;
+        display: grid;
+        place-items: center;
+        padding: max(24px, env(safe-area-inset-top))
+          max(24px, env(safe-area-inset-right))
+          max(120px, calc(env(safe-area-inset-bottom) + 96px))
+          max(24px, env(safe-area-inset-left));
+        overflow-x: hidden;
+      }
+      .shell {
+        width: min(1080px, 100%);
+        display: grid;
+        grid-template-columns: 1.05fr 0.95fr;
+        border: 1px solid var(--line);
+        border-radius: 26px;
+        overflow: hidden;
+        background: rgba(5, 13, 22, 0.9);
+        box-shadow: 0 40px 120px rgba(0, 0, 0, 0.42);
+      }
+      .intro {
+        padding: 46px;
+        background: linear-gradient(145deg, #0b2136, #07131f);
+      }
+      .eyebrow {
+        color: var(--cyan);
+        font-size: 11px;
+        font-weight: 900;
+        letter-spacing: 0.18em;
+      }
+      .intro h1 {
+        font-size: clamp(44px, 6vw, 76px);
+        line-height: 0.92;
+        letter-spacing: -0.055em;
+        margin: 24px 0 18px;
+      }
+      .intro p {
+        color: var(--muted);
+        line-height: 1.65;
+        font-size: 17px;
+      }
+      .points {
+        display: grid;
+        gap: 10px;
+        margin-top: 28px;
+      }
+      .point {
+        padding: 13px 0;
+        border-top: 1px solid var(--line);
+      }
+      .point strong {
+        display: block;
+        font-size: 13px;
+      }
+      .point span {
+        display: block;
+        color: var(--muted);
+        font-size: 11px;
+        margin-top: 5px;
+      }
+      .login {
+        padding: 46px;
+        background: var(--panel);
+      }
+      .login h2 {
+        font-size: 28px;
+        margin: 0 0 8px;
+      }
+      .login > p {
+        color: var(--muted);
+        line-height: 1.5;
+        margin: 0 0 28px;
+      }
+      .field {
+        margin-bottom: 14px;
+      }
+      .field label {
+        display: block;
+        font-size: 11px;
+        font-weight: 800;
+        color: #b8c7d4;
+        margin: 0 0 7px;
+      }
+      .field input {
+        width: 100%;
+        border: 1px solid var(--line);
+        border-radius: 11px;
+        background: #06131f;
+        color: var(--text);
+        padding: 14px;
+        font: inherit;
+        min-height: 48px;
+      }
+      .field input[readonly] {
+        color: #b9cad8;
+        background: #081827;
+      }
+      .submit,
+      .secondary {
+        width: 100%;
+        border: 0;
+        border-radius: 11px;
+        padding: 14px 16px;
+        min-height: 48px;
+        font-weight: 900;
+        font-size: 15px;
+        cursor: pointer;
+      }
+      .submit {
+        background: linear-gradient(135deg, var(--cyan), var(--green));
+        color: #021018;
+      }
+      .secondary {
+        margin-top: 10px;
+        background: #102537;
+        color: #cfe7f7;
+        border: 1px solid var(--line);
+      }
+      .status {
+        min-height: 44px;
+        margin-top: 14px;
+        padding: 12px;
+        border: 1px solid var(--line);
+        border-radius: 11px;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.5;
+      }
+      .status.ok {
+        color: var(--green);
+        border-color: rgba(120, 239, 184, 0.3);
+      }
+      .status.bad {
+        color: #ffc0c4;
+        border-color: rgba(255, 137, 145, 0.3);
+      }
+      .links {
+        display: flex;
+        justify-content: space-between;
+        gap: 10px;
+        margin-top: 20px;
+        flex-wrap: wrap;
+      }
+      .links a {
+        color: #b9cddd;
+        font-size: 12px;
+        text-decoration: none;
+      }
+      .security {
+        margin-top: 22px;
+        color: #758da2;
+        font-size: 10px;
+        line-height: 1.55;
+      }
+      .hidden {
+        display: none !important;
+      }
+      .mfa-panel {
+        margin-top: 18px;
+        padding: 16px;
+        border: 1px solid rgba(90, 216, 255, 0.24);
+        border-radius: 14px;
+        background: #071827;
+      }
+      .mfa-panel h3 {
+        margin: 0 0 8px;
+        font-size: 18px;
+      }
+      .mfa-panel p {
+        color: #9fb5c7;
+        font-size: 12px;
+        line-height: 1.55;
+      }
+      .qr {
+        display: block;
+        width: min(250px, 100%);
+        margin: 14px auto;
+        background: #fff;
+        border-radius: 12px;
+        padding: 8px;
+      }
+      .secret {
+        word-break: break-all;
+        color: #d8ecf7;
+        background: #04101a;
+        border: 1px solid var(--line);
+        padding: 10px;
+        border-radius: 9px;
+        font-size: 12px;
+        margin: 10px 0;
+      }
+      .hint {
+        font-size: 11px;
+        color: #8ea6ba;
+        line-height: 1.5;
+        margin-top: 10px;
+      }
+      @media (max-width: 820px) {
+        body {
+          display: block;
+          padding: max(18px, env(safe-area-inset-top))
+            max(14px, env(safe-area-inset-right))
+            max(150px, calc(env(safe-area-inset-bottom) + 120px))
+            max(14px, env(safe-area-inset-left));
+        }
+        .shell {
+          grid-template-columns: 1fr;
+          border-radius: 22px;
+          margin: 0 auto;
+        }
+        .intro,
+        .login {
+          padding: 28px;
+        }
+        .intro h1 {
+          font-size: 48px;
+        }
+        .intro p {
+          font-size: 16px;
+        }
+        .points {
+          margin-top: 20px;
+        }
+      }
+      @media (max-width: 560px) {
+        .shell {
+          border-radius: 18px;
+        }
+        .intro,
+        .login {
+          padding: 24px 20px;
+        }
+        .eyebrow {
+          font-size: 10px;
+          line-height: 1.5;
+        }
+        .intro h1 {
+          font-size: 42px;
+          margin: 18px 0 14px;
+        }
+        .intro p {
+          font-size: 15px;
+          line-height: 1.55;
+        }
+        .points {
+          gap: 4px;
+          margin-top: 16px;
+        }
+        .point {
+          padding: 10px 0;
+        }
+        .point strong {
+          font-size: 12px;
+        }
+        .point span {
+          font-size: 10px;
+        }
+        .login h2 {
+          font-size: 25px;
+        }
+        .login > p {
+          font-size: 14px;
+          margin-bottom: 20px;
+        }
+        .links {
+          padding-bottom: 8px;
+        }
+      }
+
+      /* Cinematic secure command entrance */
+      :root {
+        --bg: #020304;
+        --panel: rgba(7, 10, 13, 0.84);
+        --line: rgba(255, 255, 255, 0.13);
+        --text: #f7f7f4;
+        --muted: #8d969e;
+        --cyan: #9aeaff;
+        --green: #9ce8bb;
+      }
+      body {
+        position: relative;
+        background: #020304;
+        overflow: hidden auto;
+      }
+      body::before {
+        content: "";
+        position: fixed;
+        inset: -5%;
+        z-index: -3;
+        background:
+          linear-gradient(90deg, rgba(1, 2, 3, 0.96), rgba(1, 2, 3, 0.62)),
+          url("/media/native/global-logistics.webp") center/cover no-repeat;
+        animation: securePush 18s ease-in-out infinite alternate;
+      }
+      body::after {
+        content: "";
+        position: fixed;
+        inset: 0;
+        z-index: -2;
+        pointer-events: none;
+        background:
+          linear-gradient(rgba(255, 255, 255, 0.018) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(255, 255, 255, 0.018) 1px, transparent 1px),
+          radial-gradient(circle at 75% 25%, rgba(86, 191, 222, 0.14), transparent 25%);
+        background-size: 58px 58px, 58px 58px, auto;
+        mask-image: linear-gradient(#000, transparent 88%);
+      }
+      .access-signal {
+        position: fixed;
+        top: 24px;
+        left: 28px;
+        right: 28px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        color: #7a838b;
+        font-size: 8px;
+        font-weight: 800;
+        letter-spacing: 0.17em;
+        z-index: 3;
+      }
+      .access-signal span {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+      }
+      .access-signal i {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--green);
+        box-shadow: 0 0 14px rgba(156, 232, 187, 0.6);
+      }
+      .shell {
+        width: min(1180px, 100%);
+        grid-template-columns: 1.12fr 0.88fr;
+        border-radius: 30px;
+        background: rgba(3, 5, 7, 0.72);
+        backdrop-filter: blur(28px) saturate(125%);
+        box-shadow: 0 46px 150px rgba(0, 0, 0, 0.55), 0 0 80px rgba(90, 198, 230, 0.07);
+        animation: secureReveal 1s cubic-bezier(0.2, 0.75, 0.2, 1) both;
+      }
+      .intro {
+        position: relative;
+        padding: 58px;
+        background: linear-gradient(145deg, rgba(14, 19, 24, 0.76), rgba(4, 7, 10, 0.72));
+      }
+      .intro::after {
+        content: "OWNER / 01";
+        position: absolute;
+        left: 58px;
+        bottom: 34px;
+        color: #5f6871;
+        font-size: 8px;
+        letter-spacing: 0.18em;
+      }
+      .eyebrow { color: #9aa4ac; font-size: 9px; }
+      .intro h1 {
+        max-width: 540px;
+        font-size: clamp(54px, 6.5vw, 92px);
+        font-weight: 620;
+        line-height: 0.88;
+        letter-spacing: -0.068em;
+        margin-top: 34px;
+      }
+      .intro h1::after {
+        content: " Securely.";
+        color: var(--cyan);
+        font-family: Georgia, "Times New Roman", serif;
+        font-weight: 400;
+      }
+      .intro p { max-width: 520px; color: #a3abb2; font-size: 15px; }
+      .point { border-color: rgba(255, 255, 255, 0.1); }
+      .point strong { font-size: 10px; letter-spacing: 0.09em; }
+      .point span { color: #727c85; font-size: 9px; }
+      .login {
+        padding: 54px 46px;
+        background: rgba(6, 9, 12, 0.88);
+      }
+      .login h2 { font-size: 34px; letter-spacing: -0.04em; }
+      .login > p { color: #848e97; font-size: 13px; }
+      .field label { color: #707a83; font-size: 8px; letter-spacing: 0.14em; }
+      .field input {
+        min-height: 54px;
+        border-radius: 13px;
+        background: rgba(255, 255, 255, 0.035);
+        border-color: rgba(255, 255, 255, 0.11);
+        outline: none;
+      }
+      .field input:focus { border-color: rgba(154, 234, 255, 0.45); box-shadow: 0 0 0 3px rgba(154, 234, 255, 0.07); }
+      .submit, .secondary { min-height: 52px; border-radius: 999px; font-size: 12px; }
+      .submit { background: #f6f7f4; color: #050607; }
+      .secondary { background: rgba(255, 255, 255, 0.035); color: #c8ced3; }
+      .status { border-radius: 14px; background: rgba(255, 255, 255, 0.025); font-size: 10px; }
+      @keyframes secureReveal { from { opacity: 0; transform: translateY(32px) scale(0.985); } to { opacity: 1; transform: none; } }
+      @keyframes securePush { from { transform: scale(1.03) translate3d(-0.5%, 0, 0); } to { transform: scale(1.1) translate3d(0.5%, -1%, 0); } }
+      @media (max-width: 820px) {
+        body { padding-top: 74px; }
+        .shell { grid-template-columns: 1fr; }
+        .intro, .login { padding: 34px 27px; }
+        .intro::after { display: none; }
+        .access-signal { top: 18px; left: 18px; right: 18px; }
+      }
+      @media (prefers-reduced-motion: reduce) { body::before, .shell { animation: none; } }
+    </style>
+  </head>
+  <body>
+    <div class="access-signal" aria-hidden="true"><span><i></i> SECURE COMMAND ENTRANCE</span><span>SAHJONY LLC · OWNER ACCESS</span></div>
+    <main class="shell">
+      <section class="intro">
+        <div class="eyebrow">SAHJONY GLOBAL TRADE · SUPABASE OWNER ACCESS</div>
+        <h1>Full control. One owner.</h1>
+        <p>
+          Supabase Auth verifies the owner identity. SAHJONY then applies owner
+          membership, native MFA/AAL2, and fail-closed authorization across CRM,
+          sourcing, managed trade, compliance, documents, shipping, finance and
+          AI operations.
+        </p>
+        <div class="points">
+          <div class="point">
+            <strong>IDENTITY · SUPABASE AUTH</strong
+            ><span
+              >One canonical identity system for the entire application.</span
+            >
+          </div>
+          <div class="point">
+            <strong>AUTHORIZATION · OWNER MEMBERSHIP</strong
+            ><span
+              >Privileged access is granted only by an active owner
+              membership.</span
+            >
+          </div>
+          <div class="point">
+            <strong>SECURITY · NATIVE MFA + AAL2</strong
+            ><span
+              >First sign-in enrolls an Authenticator factor. Every privileged
+              owner session must reach Supabase AAL2.</span
+            >
+          </div>
+        </div>
+      </section>
+      <section class="login">
+        <h2>Owner sign in</h2>
+        <p>
+          Sign in with your Supabase-backed SAHJONY owner account. If this is
+          your first secure login, the system will guide you through
+          Authenticator enrollment.
+        </p>
+        <form id="login">
+          <div class="field">
+            <label>OWNER EMAIL</label
+            ><input
+              id="email"
+              type="email"
+              autocomplete="username"
+              placeholder="Enter the authorized owner email"
+              required
+            />
+          </div>
+          <div class="field">
+            <label>PASSWORD</label
+            ><input
+              id="password"
+              type="password"
+              required
+              minlength="8"
+              maxlength="256"
+              autocomplete="current-password"
+              placeholder="Enter your password"
+            />
+          </div>
+          <button id="passwordSubmit" class="submit" type="submit">
+            Continue securely
+          </button>
+        </form>
+        <button id="resetPassword" class="secondary" type="button">
+          Send password setup / reset email
+        </button>
+        <div id="mfaPanel" class="mfa-panel hidden">
+          <h3 id="mfaTitle">Secure your Owner account</h3>
+          <p id="mfaInstructions"></p>
+          <img id="qr" class="qr hidden" alt="Authenticator QR code" />
+          <div id="secretWrap" class="hidden">
+            <div class="hint">
+              If you cannot scan the QR code, enter this secret manually in your
+              Authenticator app:
+            </div>
+            <div id="secret" class="secret"></div>
+          </div>
+          <div class="field">
+            <label>AUTHENTICATOR CODE</label
+            ><input
+              id="mfa"
+              type="text"
+              inputmode="numeric"
+              autocomplete="one-time-code"
+              pattern="[0-9]{6}"
+              minlength="6"
+              maxlength="6"
+              placeholder="6-digit code"
+            />
+          </div>
+          <button id="verifyMfa" class="submit" type="button">
+            Verify MFA and enter Owner OS
+          </button>
+        </div>
+        <div id="recoveryPanel" class="mfa-panel hidden">
+          <h3>Create a new password</h3>
+          <p>
+            This recovery session is verified by Supabase. Choose a strong
+            password, then return to Owner Sign In.
+          </p>
+          <div class="field">
+            <label>NEW PASSWORD</label
+            ><input
+              id="newPassword"
+              type="password"
+              minlength="12"
+              maxlength="256"
+              autocomplete="new-password"
+              placeholder="New password"
+            />
+          </div>
+          <button id="savePassword" class="submit" type="button">
+            Save new password
+          </button>
+        </div>
+        <div id="status" class="status">
+          Owner access is fail-closed. Password authentication comes first;
+          Supabase Authenticator MFA/AAL2 is required before Owner OS access.
+        </div>
+        <div class="links">
+          <a href="/">← Business site</a><a href="/owner">Owner OS</a>
+        </div>
+        <div class="security">
+          Passwords and Authenticator codes are handled by Supabase Auth and are
+          never stored in SAHJONY browser session storage. Only the resulting
+          short-lived authenticated session token is retained for Owner OS
+          access.
+        </div>
+      </section>
+    </main>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script>
+      const SUPABASE_URL = "https://qprlbmcoksrpuvodxjtt.supabase.co";
+      const SUPABASE_KEY = "sb_publishable_-I-dlfNYk4byxK5WQKuqlQ_WIAGkuA-";
+      const initialAuthFragment = location.hash;
+      const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
+        auth: {
+          persistSession: true,
+          autoRefreshToken: true,
+          detectSessionInUrl: true,
+        },
+      });
+      const form = document.getElementById("login"),
+        status = document.getElementById("status"),
+        password = document.getElementById("password"),
+        email = document.getElementById("email"),
+        mfa = document.getElementById("mfa"),
+        mfaPanel = document.getElementById("mfaPanel"),
+        mfaTitle = document.getElementById("mfaTitle"),
+        mfaInstructions = document.getElementById("mfaInstructions"),
+        qr = document.getElementById("qr"),
+        secret = document.getElementById("secret"),
+        secretWrap = document.getElementById("secretWrap"),
+        verifyMfa = document.getElementById("verifyMfa"),
+        resetPassword = document.getElementById("resetPassword"),
+        recoveryPanel = document.getElementById("recoveryPanel"),
+        newPassword = document.getElementById("newPassword"),
+        savePassword = document.getElementById("savePassword");
+      let factorId = "";
+      function setStatus(text, type = "") {
+        status.className = "status" + (type ? " " + type : "");
+        status.textContent = text;
+      }
+      async function finishOwner() {
+        const { data, error } = await sb.auth.getSession();
+        if (error) throw error;
+        const token = data.session?.access_token;
+        if (!token)
+          throw new Error("Supabase did not return an authenticated session.");
+        const check = await fetch("/owner-auth/session", {
+          headers: { Authorization: "Bearer " + token },
+          cache: "no-store",
+        });
+        const body = await check
+          .json()
+          .catch(() => ({ detail: "Owner authorization failed" }));
+        if (!check.ok)
+          throw new Error(body.detail || "Owner authorization failed.");
+        if (body.mfa_verified !== true)
+          throw new Error("Owner MFA is not yet verified at AAL2.");
+        sessionStorage.setItem("sahjony.owner.token", token);
+        password.value = "";
+        mfa.value = "";
+        setStatus("Owner identity and MFA verified. Opening Owner OS…", "ok");
+        location.assign("/owner/dashboard");
+      }
+      async function prepareMfa() {
+        const aal = await sb.auth.mfa.getAuthenticatorAssuranceLevel();
+        if (aal.error) throw aal.error;
+        if (aal.data.currentLevel === "aal2") {
+          await finishOwner();
+          return;
+        }
+        const factors = await sb.auth.mfa.listFactors();
+        if (factors.error) throw factors.error;
+        const totp = factors.data?.totp || [];
+        const verified = totp.find((f) => f.status === "verified");
+        if (verified) {
+          factorId = verified.id;
+          mfaTitle.textContent = "Verify your Authenticator";
+          mfaInstructions.textContent =
+            "Open the Authenticator app already linked to this Owner account and enter its current 6-digit code.";
+          qr.classList.add("hidden");
+          secretWrap.classList.add("hidden");
+          mfaPanel.classList.remove("hidden");
+          mfa.focus();
+          return;
+        }
+        for (const f of totp.filter((f) => f.status !== "verified")) {
+          try {
+            await sb.auth.mfa.unenroll({ factorId: f.id });
+          } catch {}
+        }
+        const enrolled = await sb.auth.mfa.enroll({
+          factorType: "totp",
+          friendlyName: "SAHJONY Owner",
+        });
+        if (enrolled.error) throw enrolled.error;
+        factorId = enrolled.data.id;
+        mfaTitle.textContent = "Set up Owner Authenticator";
+        mfaInstructions.textContent =
+          "Scan this QR code with Microsoft Authenticator, Google Authenticator, 1Password, Authy, or another TOTP app. Then enter the 6-digit code below.";
+        qr.src = enrolled.data.totp.qr_code;
+        qr.classList.remove("hidden");
+        secret.textContent = enrolled.data.totp.secret || "";
+        secretWrap.classList.remove("hidden");
+        mfaPanel.classList.remove("hidden");
+        mfa.focus();
+      }
+      async function signInPassword() {
+        const result = await sb.auth.signInWithPassword({
+          email: email.value.trim().toLowerCase(),
+          password: password.value,
+        });
+        if (result.error) throw result.error;
+        setStatus("Password verified. Checking Owner MFA…", "ok");
+        await prepareMfa();
+      }
+      async function validateExisting() {
+        const token = sessionStorage.getItem("sahjony.owner.token");
+        if (token) {
+          try {
+            const r = await fetch("/owner-auth/session", {
+              headers: { Authorization: "Bearer " + token },
+              cache: "no-store",
+            });
+            if (r.ok) {
+              setStatus("Owner session active. Opening Owner OS…", "ok");
+              location.replace("/owner/dashboard");
+              return;
+            }
+            sessionStorage.removeItem("sahjony.owner.token");
+          } catch {}
+        }
+        if (initialAuthFragment.includes("type=recovery")) {
+          recoveryPanel.classList.remove("hidden");
+          form.classList.add("hidden");
+          resetPassword.classList.add("hidden");
+          setStatus(
+            "Recovery link verified by Supabase. Create your new Owner password.",
+            "ok",
+          );
+        }
+      }
+      form.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        mfaPanel.classList.add("hidden");
+        setStatus("Authenticating password with Supabase…");
+        try {
+          await signInPassword();
+        } catch (err) {
+          setStatus(err?.message || "Unable to authenticate.", "bad");
+        }
+      });
+      verifyMfa.addEventListener("click", async () => {
+        const code = mfa.value.trim();
+        if (!/^\d{6}$/.test(code)) {
+          setStatus(
+            "Enter the current 6-digit code from your Authenticator app.",
+            "bad",
+          );
+          return;
+        }
+        verifyMfa.disabled = true;
+        setStatus("Verifying Supabase MFA challenge…");
+        try {
+          const verified = await sb.auth.mfa.challengeAndVerify({
+            factorId,
+            code,
+          });
+          if (verified.error) throw verified.error;
+          await sb.auth.refreshSession();
+          await finishOwner();
+        } catch (err) {
+          setStatus(err?.message || "MFA verification failed.", "bad");
+          mfa.value = "";
+          mfa.focus();
+        } finally {
+          verifyMfa.disabled = false;
+        }
+      });
+      resetPassword.addEventListener("click", async () => {
+        const recoveryEmail = email.value.trim().toLowerCase();
+        if (!recoveryEmail || !email.validity.valid) {
+          setStatus("Enter the authorized owner email first.", "bad");
+          email.focus();
+          return;
+        }
+        resetPassword.disabled = true;
+        setStatus("Requesting a secure password email from Supabase…");
+        try {
+          const r = await sb.auth.resetPasswordForEmail(recoveryEmail, {
+            redirectTo: "https://www.sahjony.com/owner-login",
+          });
+          if (r.error) throw r.error;
+          setStatus(
+            "Password setup/reset email sent. Open the newest Supabase email, then return here to set your password.",
+            "ok",
+          );
+        } catch (err) {
+          setStatus(err?.message || "Unable to send password email.", "bad");
+        } finally {
+          resetPassword.disabled = false;
+        }
+      });
+      savePassword.addEventListener("click", async () => {
+        const next = newPassword.value;
+        if (next.length < 12) {
+          setStatus("Use a password with at least 12 characters.", "bad");
+          return;
+        }
+        savePassword.disabled = true;
+        setStatus("Saving your new password securely in Supabase…");
+        try {
+          const r = await sb.auth.updateUser({ password: next });
+          if (r.error) throw r.error;
+          newPassword.value = "";
+          recoveryPanel.classList.add("hidden");
+          form.classList.remove("hidden");
+          resetPassword.classList.remove("hidden");
+          setStatus(
+            "Password saved. Sign in now to enroll or verify Owner MFA.",
+            "ok",
+          );
+        } catch (err) {
+          setStatus(err?.message || "Unable to update password.", "bad");
+        } finally {
+          savePassword.disabled = false;
+        }
+      });
+      validateExisting();
+    </script>
+    <script src="/global-language.js" defer></script>
+  </body>
+</html>

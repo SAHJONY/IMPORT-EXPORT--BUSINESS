@@ -1,4 +1,5 @@
 import {useEffect,useMemo,useRef,useState} from 'react';
+import {useCinematicMotion} from './useCinematicMotion';
 
 type Role='owner'|'employee'|'customer';
 type ModuleKey='dashboard'|'crm'|'global-sourcing'|'managed-trade'|'us-import'|'intermediary'|'documents'|'shipping'|'messages'|'compliance'|'countries'|'finance'|'ai-brain'|'readiness'|'business-email';
@@ -55,6 +56,7 @@ function route():RouteState{
 
 export default function App(){
  const [r,setR]=useState(route());
+ useCinematicMotion(`${r.public?'public':r.role}:${r.section}`);
  useEffect(()=>{const fn=()=>setR(route());addEventListener('popstate',fn);return()=>removeEventListener('popstate',fn)},[]);
  if(r.public)return <PublicSite/>;
  if(r.notFound)return <StatePage title="Workspace not found" text="The requested SAHJONY workspace does not exist or the link has changed." path="/"/>;
@@ -75,7 +77,7 @@ function Brand({ownerShortcut=false}:{ownerShortcut?:boolean}){
  return <button className="brand-button" onClick={activate} aria-label="SAHJONY LLC home"><span className="brand-symbol" aria-hidden="true"><i/></span><span className="brand-copy"><strong>SAHJONY LLC</strong><small>GLOBAL TRADE OS</small></span></button>
 }
 
-function PublicSite(){
+function LegacyPublicSite(){
  return <div className="public-site institutional-public">
   <div className="signal-strip"><span><i/>GLOBAL TRADE NETWORK</span><strong>Human-led. AI-powered. Evidence-controlled.</strong><span>SAHJONY LLC · UNITED STATES</span></div>
   <header className="public-nav"><Brand ownerShortcut/><nav className="public-links" aria-label="Primary navigation"><a href="#solutions">Capabilities</a><a href="/industrial-marketplace">Marketplace</a><a href="#process">Process</a><a href="/cuba-private-sector">Cuba Desk</a><a className="primary-link" href="/start">Start a request <span aria-hidden="true">↗</span></a></nav></header>
@@ -103,6 +105,80 @@ function PublicSite(){
    <section className="final-cta"><div><small>YOUR NEXT GLOBAL OPPORTUNITY STARTS HERE</small><h2>Tell us what the business needs. We coordinate the world around it.</h2></div><a className="primary-link large" href="/start">Start now <span aria-hidden="true">↗</span></a></section>
   </main>
   <footer><span>© SAHJONY LLC · Global Trade Operating System</span><nav aria-label="Footer navigation"><a href="/trust-center">Trust center</a><a href="/partners">Partners</a><a href="/government-contracting">Government contracting</a></nav><span>www.sahjony.com</span></footer>
+ </div>
+}
+
+function PublicSite(){
+ const facts=[['PRODUCT','Defined need'],['QUANTITY','Commercial volume'],['DESTINATION','Named corridor'],['TIMING','Required window']];
+ return <div className="public-site institutional-public cinematic-trade-os">
+  <div className="signal-strip"><span><i/>GLOBAL TRADE NETWORK</span><strong>Human-led · AI-powered · Evidence-controlled</strong><span>SAHJONY LLC · UNITED STATES</span></div>
+  <header className="public-nav cinematic-nav"><Brand ownerShortcut/><nav className="public-links" aria-label="Primary navigation"><a className="text-link" href="#demand">Demand</a><a className="text-link" href="#sourcing">Sourcing</a><a className="text-link" href="#control">Control</a><a className="text-link" href="/cuba-private-sector">Cuba Desk</a><a className="owner-entry" href="/owner-login">Private owner</a><a className="primary-link" href="#inquiry">Submit RFQ <span aria-hidden="true">↗</span></a></nav></header>
+  <main>
+   <section className="cinematic-chapter chapter-hero" data-cinematic>
+    <div className="chapter-media hero-media" data-cinematic-media/>
+    <div className="chapter-shade"/>
+    <div className="chapter-content hero-chapter-copy">
+     <div className="chapter-index" data-cinematic-reveal><span>01 / 06</span><i/> ENTRANCE</div>
+     <h1 data-cinematic-reveal>Global trade.<br/><em>Under control.</em></h1>
+     <p data-cinematic-reveal>SAHJONY TRADING OS coordinates sourcing, economics, compliance, documents, logistics and delivery across borders.</p>
+     <div className="chapter-actions" data-cinematic-reveal><a className="primary-link large" href="#inquiry">Start a trade request ↗</a><a className="quiet-link" href="#demand">Enter the system ↓</a></div>
+    </div>
+    <div className="scroll-cue" data-float><span>SCROLL TO MOVE FORWARD</span><i/></div>
+   </section>
+
+   <section id="demand" className="cinematic-chapter split-chapter demand-chapter" data-cinematic>
+    <div className="chapter-media manufacturing-media" data-cinematic-media/>
+    <div className="chapter-shade"/>
+    <div className="chapter-content split-copy">
+     <div className="chapter-index" data-cinematic-reveal><span>02 / 06</span><i/> APPROACH</div>
+     <h2 data-cinematic-reveal>Every movement starts with precise demand.</h2>
+     <p data-cinematic-reveal>Product, volume, destination and timing become one qualified operating record before sourcing begins.</p>
+     <div className="demand-facts" data-cinematic-reveal>{facts.map(([a,b],i)=><article key={a}><small>{String(i+1).padStart(2,'0')} · {a}</small><strong>{b}</strong></article>)}</div>
+    </div>
+   </section>
+
+   <section id="sourcing" className="cinematic-chapter core-chapter" data-cinematic>
+    <div className="chapter-media logistics-media" data-cinematic-media/>
+    <div className="chapter-shade"/>
+    <div className="chapter-content core-copy">
+     <div className="chapter-index" data-cinematic-reveal><span>03 / 06</span><i/> CORE EXPERIENCE</div>
+     <h2 data-cinematic-reveal>Source the world.<br/>Compare what matters.</h2>
+     <div className="floating-callouts" data-cinematic-reveal><article data-float><small>SUPPLIER</small><strong>Identity verified</strong><span>KYB · capacity · origin</span></article><article data-float><small>COMMERCIAL</small><strong>Terms compared</strong><span>MOQ · Incoterms · lead time</span></article><article data-float><small>ECONOMICS</small><strong>Landed path</strong><span>Cost · freight · protected margin</span></article></div>
+    </div>
+   </section>
+
+   <section id="control" className="cinematic-chapter control-chapter" data-cinematic>
+    <div className="control-grid" data-cinematic-media/>
+    <div className="chapter-content control-copy">
+     <div className="chapter-index" data-cinematic-reveal><span>04 / 06</span><i/> SIGNATURE DETAIL</div>
+     <h2 data-cinematic-reveal>The release is earned by evidence.</h2>
+     <p data-cinematic-reveal>SAHJONY holds each transaction at the right gate until counterparty, product, corridor, payment and documents are ready.</p>
+     <div className="control-rail" data-cinematic-reveal>{['KYB','HTS / ECCN','SANCTIONS','TERMS','DOCUMENTS','PAYMENT'].map((x,i)=><span key={x}><i className={i<4?'ready':''}/>{x}</span>)}</div>
+     <div className="control-console" data-cinematic-reveal><small>RELEASE POSTURE</small><strong>FAIL-CLOSED</strong><span>AI recommends · Owner governs · Evidence releases</span></div>
+    </div>
+   </section>
+
+   <section id="execution" className="cinematic-chapter execution-chapter" data-cinematic>
+    <div className="chapter-media energy-media" data-cinematic-media/>
+    <div className="chapter-shade"/>
+    <div className="chapter-content execution-copy">
+     <div className="chapter-index" data-cinematic-reveal><span>05 / 06</span><i/> EXECUTION</div>
+     <h2 data-cinematic-reveal>Origin to destination.<br/>One visible path.</h2>
+     <p data-cinematic-reveal>Factory, freight, port, vessel, customs and delivery remain linked to the same commercial truth.</p>
+     <div className="execution-route" data-cinematic-reveal><span>ORIGIN</span><i/><span>SAHJONY CONTROL</span><i/><span>DESTINATION</span></div>
+    </div>
+   </section>
+
+   <section id="inquiry" className="cinematic-chapter finale-chapter" data-cinematic>
+    <div className="chapter-media finale-media" data-cinematic-media/>
+    <div className="chapter-shade"/>
+    <div className="chapter-content finale-grid">
+     <div><div className="chapter-index" data-cinematic-reveal><span>06 / 06</span><i/> GRAND FINALE</div><h2 data-cinematic-reveal>Tell SAHJONY what needs to move across borders.</h2><p data-cinematic-reveal>Submit the commercial need. The system creates the controlled path.</p></div>
+     <form className="finale-form" action="/start" method="get" data-cinematic-reveal><label>PRODUCT OR NEED<input name="product" required placeholder="What do you need sourced?"/></label><div><label>QUANTITY<input name="quantity" placeholder="Volume or target quantity"/></label><label>DESTINATION<input name="destination" placeholder="Country / port / city"/></label></div><label>CONTACT EMAIL<input type="email" name="email" required placeholder="name@company.com"/></label><button type="submit">Create trade request <span>↗</span></button><small>No commitment is created until commercial and compliance review is complete.</small></form>
+    </div>
+   </section>
+  </main>
+  <footer><span>© SAHJONY LLC · Global Trade Operating System</span><nav aria-label="Footer navigation"><a href="/global-sourcing">Global sourcing</a><a href="/partners">Partners</a><a href="/cuba-private-sector">Cuba Desk</a><a href="/owner-login">Private owner</a></nav><span>www.sahjony.com</span></footer>
  </div>
 }
 
@@ -146,7 +222,7 @@ function Dashboard({role,health,token,api}:any){
  if(role==='customer')return <CustomerDashboard health={health}/>;
  const owner=role==='owner';
  const stats=owner?[['CRM PIPELINE',counts.crm,'Visible intake records'],['TRADE CASES',counts.trade,'Managed-trade records'],['SOURCING',counts.sourcing,'Global sourcing requests'],['CONTROL POSTURE',health?.production_ready?'READY':'GOVERNED',health?.production_ready?'Production gates satisfied':'Fail-closed controls active']]:[['QUALIFICATION',counts.crm,'Visible intake records'],['TRADE CASES',counts.trade,'Execution records'],['SOURCING',counts.sourcing,'Research requests'],['RELEASE','OWNER','Escalate controlled releases']];
- return <><section className="command-hero executive-hero"><div><div className="eyebrow gold">{owner?'GLOBAL TRADE COMMAND CENTER':'DAILY OPERATIONS'}</div><h1>{owner?'Control the pipeline. See the risk. Move with evidence.':'Work the queue. Resolve blockers. Escalate exceptions.'}</h1><p>{owner?'One operating layer across demand, suppliers, commercial terms, compliance, documents, payments, logistics and reconciliation.':'Your workspace is organized around the next operational action.'}</p><div className="hero-chip-row"><span>Worldwide sourcing</span><span>Case-based execution</span><span>Owner-governed release</span></div></div><div className="control-posture"><small>PLATFORM STATUS</small><strong>{health?.status==='ok'?'ONLINE':'CHECKING'}</strong><div><span>Release policy</span><b>FAIL-CLOSED</b></div><div><span>AI authority</span><b>ADVISORY</b></div><div><span>Access</span><b>{owner?'FULL OWNER':'OPERATIONS'}</b></div></div></section><section className="stat-grid institutional-stats">{stats.map(([a,b,c]:any)=><article key={a}><small>{a}</small><strong>{b}</strong><span>{c}</span></article>)}</section>{owner&&<section className="executive-grid"><article className="panel trade-network"><div className="panel-head"><div><small>GLOBAL CONTROL PLANE</small><h2>Trade corridor posture</h2></div><span className="live-pill">LIVE MODEL</span></div><div className="network-canvas"><div className="world-line l1"/><div className="world-line l2"/><div className="world-line l3"/><div className="world-hub origin">ORIGIN<br/><b>SUPPLIERS</b></div><div className="world-hub center">SAHJONY<br/><b>CONTROL</b></div><div className="world-hub destination">DESTINATION<br/><b>CUSTOMERS</b></div></div><div className="network-legend"><span><i className="ok-dot"/>Qualified path</span><span><i className="hold-dot"/>Evidence gates</span><span><i className="ai-dot"/>AI advisory</span></div></article><article className="panel ai-brief"><div className="panel-head"><div><small>EXECUTIVE BRIEF</small><h2>What needs attention</h2></div></div><Brief n="01" title={`${counts.crm} intake records visible`} text="Review qualification and promote viable demand."/><Brief n="02" title={`${counts.sourcing} sourcing requests visible`} text="Compare candidates and corridor readiness."/><Brief n="03" title={`${counts.trade} trade cases visible`} text="Focus on holds, documents, logistics and reconciliation."/><button className="secondary-button" onClick={()=>nav('/owner/ai-brain')}>Open AI Intelligence</button></article></section>}<QuickActions role={role}/><Pipeline/></>
+ return <><section className="command-hero executive-hero" data-cinematic><div data-cinematic-reveal><div className="eyebrow gold">{owner?'GLOBAL TRADE COMMAND CENTER':'DAILY OPERATIONS'}</div><h1>{owner?'Control the pipeline. See the risk. Move with evidence.':'Work the queue. Resolve blockers. Escalate exceptions.'}</h1><p>{owner?'One operating layer across demand, suppliers, commercial terms, compliance, documents, payments, logistics and reconciliation.':'Your workspace is organized around the next operational action.'}</p><div className="hero-chip-row"><span>Worldwide sourcing</span><span>Case-based execution</span><span>Owner-governed release</span></div></div><div className="control-posture" data-cinematic-reveal><small>PLATFORM STATUS</small><strong>{health?.status==='ok'?'ONLINE':'CHECKING'}</strong><div><span>Release policy</span><b>FAIL-CLOSED</b></div><div><span>AI authority</span><b>ADVISORY</b></div><div><span>Access</span><b>{owner?'FULL OWNER':'OPERATIONS'}</b></div></div></section><section className="stat-grid institutional-stats" data-cinematic data-cinematic-reveal>{stats.map(([a,b,c]:any)=><article key={a}><small>{a}</small><strong>{b}</strong><span>{c}</span></article>)}</section>{owner&&<section className="executive-grid" data-cinematic data-cinematic-reveal><article className="panel trade-network"><div className="panel-head"><div><small>GLOBAL CONTROL PLANE</small><h2>Trade corridor posture</h2></div><span className="live-pill">LIVE MODEL</span></div><div className="network-canvas"><div className="world-line l1"/><div className="world-line l2"/><div className="world-line l3"/><div className="world-hub origin">ORIGIN<br/><b>SUPPLIERS</b></div><div className="world-hub center">SAHJONY<br/><b>CONTROL</b></div><div className="world-hub destination">DESTINATION<br/><b>CUSTOMERS</b></div></div><div className="network-legend"><span><i className="ok-dot"/>Qualified path</span><span><i className="hold-dot"/>Evidence gates</span><span><i className="ai-dot"/>AI advisory</span></div></article><article className="panel ai-brief"><div className="panel-head"><div><small>EXECUTIVE BRIEF</small><h2>What needs attention</h2></div></div><Brief n="01" title={`${counts.crm} intake records visible`} text="Review qualification and promote viable demand."/><Brief n="02" title={`${counts.sourcing} sourcing requests visible`} text="Compare candidates and corridor readiness."/><Brief n="03" title={`${counts.trade} trade cases visible`} text="Focus on holds, documents, logistics and reconciliation."/><button className="secondary-button" onClick={()=>nav('/owner/ai-brain')}>Open AI Intelligence</button></article></section>}<QuickActions role={role}/><Pipeline/></>
 }
 
 function Brief({n,title,text}:{n:string;title:string;text:string}){return <div className="brief-item"><span>{n}</span><div><strong>{title}</strong><small>{text}</small></div></div>}
