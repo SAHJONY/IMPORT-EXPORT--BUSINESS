@@ -1,4 +1,4 @@
-name: Hostinger SOFIA Auth Warning Diagnose Once
+name: Hostinger SOFIA Stale Auth Source Classifier
 
 on:
   push:
@@ -11,7 +11,7 @@ permissions:
   contents: read
 
 jobs:
-  verify:
+  classify:
     runs-on: ubuntu-24.04
     timeout-minutes: 8
     env:
@@ -25,29 +25,29 @@ jobs:
           set -euo pipefail
           [[ -n "${PRIVATE_KEY:-}" ]] || { echo HOSTINGER_SSH_PRIVATE_KEY_MISSING=1 >&2; exit 2; }
           install -d -m 700 ~/.ssh
-          printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/hostinger-sofia-verify
-          chmod 600 ~/.ssh/hostinger-sofia-verify
-          ssh-keygen -y -f ~/.ssh/hostinger-sofia-verify >/dev/null
+          printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/hostinger-sofia-classify
+          chmod 600 ~/.ssh/hostinger-sofia-classify
+          ssh-keygen -y -f ~/.ssh/hostinger-sofia-classify >/dev/null
 
-      - name: Diagnose stale auth warning on Hostinger
+      - name: Classify stale Codex auth source on Hostinger
         shell: bash
         run: |
           set -euo pipefail
           ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=15 \
-            -i ~/.ssh/hostinger-sofia-verify "$USER@$HOST" 'bash -s' <<'REMOTE'
+            -i ~/.ssh/hostinger-sofia-classify "$USER@$HOST" 'bash -s' <<'REMOTE'
           set -euo pipefail
           STATE=/var/lib/sahjony-openclaw-state
           CONFIG="$STATE/openclaw.json"
-          WORKSPACE=/home/node/.openclaw/workspace
-          EXT=/home/node/.openclaw/extensions
+          HOME_OC=/home/node/.openclaw
+          AUTH=/var/lib/sahjony-openclaw-auth
           oc(){ env HOME=/home/node OPENCLAW_HOME=/home/node OPENCLAW_STATE_DIR="$STATE" OPENCLAW_CONFIG_PATH="$CONFIG" "$@"; }
-          count_files(){ local pat="$1"; shift; local out; out="$(grep -RIlEi --exclude='*.log' --exclude='*.jsonl' --exclude-dir=node_modules "$pat" "$@" 2>/dev/null || true)"; if [[ -z "$out" ]]; then printf '0'; else printf '%s\n' "$out" | wc -l | tr -d ' '; fi; }
+          redact(){ sed -E \
+            -e 's/(Bearer[[:space:]]+)[A-Za-z0-9._~+\/-]+/\1[REDACTED]/Ig' \
+            -e 's/((api[_-]?key|token|secret|password|authorization)["[:space:]]*[:=]["[:space:]]*)[^,"[:space:]]+/\1[REDACTED]/Ig' \
+            -e 's/(sk-[A-Za-z0-9_-]{8})[A-Za-z0-9_-]+/\1[REDACTED]/g'; }
 
           echo HOSTINGER_VPS_SCOPE_ONLY=1
-          systemctl is-active --quiet openclaw-gateway.service
-          systemctl is-enabled --quiet openclaw-gateway.service
-          echo OPENCLAW_GATEWAY_ACTIVE=1
-          echo OPENCLAW_GATEWAY_24X7=1
+          systemctl is-active --quiet openclaw-gateway.service && echo OPENCLAW_GATEWAY_ACTIVE=1
 
           primary="$(oc openclaw config get agents.defaults.model.primary --json 2>/dev/null || printf 'null')"
           fallbacks="$(oc openclaw config get agents.defaults.model.fallbacks --json 2>/dev/null || printf '[]')"
@@ -55,58 +55,113 @@ jobs:
           import json, os
           p=json.loads(os.environ['PRIMARY']); f=json.loads(os.environ['FALLBACKS'])
           print('PRIMARY_MODEL='+str(p))
-          print('FALLBACK_MODELS='+(','.join(f) if isinstance(f,list) else str(f)))
           print('NVIDIA_PRIMARY='+('PASS' if isinstance(p,str) and p.startswith('nvidia/') else 'FAIL'))
-          print('OPENAI_56_CONFIGURED='+('PASS' if ((p=='openai/gpt-5.6-sol') or (isinstance(f,list) and 'openai/gpt-5.6-sol' in f)) else 'NOT_IN_ROUTE'))
+          print('OPENAI_56_FALLBACK='+('PASS' if isinstance(f,list) and 'openai/gpt-5.6-sol' in f else 'FAIL'))
           PY
 
-          envfiles="$(systemctl show openclaw-gateway.service -p EnvironmentFiles --value 2>/dev/null || true)"
-          [[ "$envfiles" == *'/etc/openclaw-openai.env'* ]] && echo OPENAI_ENV_FILE_BOUND=1 || echo OPENAI_ENV_FILE_BOUND=0
-          [[ -s /etc/openclaw-openai.env ]] && grep -q '^OPENAI_API_KEY=' /etc/openclaw-openai.env && echo OPENAI_ENV_FILE_HAS_KEY=1 || echo OPENAI_ENV_FILE_HAS_KEY=0
-          pid="$(systemctl show -p MainPID --value openclaw-gateway.service)"
-          if [[ "$pid" =~ ^[0-9]+$ ]] && [[ "$pid" -gt 1 ]]; then
-            if tr '\0' '\n' < "/proc/$pid/environ" | grep -q '^OPENAI_API_KEY='; then echo OPENAI_KEY_IN_GATEWAY_PROCESS=1; else echo OPENAI_KEY_IN_GATEWAY_PROCESS=0; fi
-          else
-            echo OPENAI_KEY_IN_GATEWAY_PROCESS=0
-          fi
+          # 1) Exact recent journal signatures. Print only matching lines, redacted.
+          echo JOURNAL_SIGNATURES_BEGIN
+          journalctl -u openclaw-gateway.service -n 2500 --no-pager 2>/dev/null \
+            | grep -Ei '(openai-codex|/login[[:space:]]+codex|gpt-5\.4|oauth|no auth|auth[^[:alnum:]]*(missing|not configured|failed)|credential[^[:alnum:]]*(missing|not configured|failed))' \
+            | tail -n 40 | redact || true
+          echo JOURNAL_SIGNATURES_END
 
-          code=NO_KEY
-          if [[ -s /etc/openclaw-openai.env ]]; then
-            set +u; . /etc/openclaw-openai.env; set -u
-            if [[ -n "${OPENAI_API_KEY:-}" ]]; then
-              code="$(curl -sS --connect-timeout 10 --max-time 60 -o /tmp/openai-auth-probe.json -w '%{http_code}' \
-                https://api.openai.com/v1/responses \
-                -H "Authorization: Bearer $OPENAI_API_KEY" \
-                -H 'Content-Type: application/json' \
-                -d '{"model":"gpt-5.6-sol","input":"Reply exactly SAHJONY_OPENAI_OK","max_output_tokens":24}' || true)"
-              rm -f /tmp/openai-auth-probe.json
-            fi
-          fi
-          echo OPENAI_GPT56_HTTP="$code"
-
-          roots=(); [[ -d "$WORKSPACE" ]] && roots+=("$WORKSPACE"); [[ -d "$EXT" ]] && roots+=("$EXT")
+          # 2) Search all persisted OpenClaw state, including session JSONL, but print paths only.
+          echo STALE_FILE_PATHS_BEGIN
+          roots=()
+          [[ -d "$HOME_OC" ]] && roots+=("$HOME_OC")
+          [[ -d "$STATE" ]] && roots+=("$STATE")
+          [[ -d "$AUTH" ]] && roots+=("$AUTH")
           if ((${#roots[@]})); then
-            echo STALE_LOGIN_CODEX_ACTIVE_FILE_COUNT="$(count_files '/login[[:space:]]+codex' "${roots[@]}")"
-            echo STALE_GPT54_ACTIVE_FILE_COUNT="$(count_files 'gpt-5\.4' "${roots[@]}")"
-            echo STALE_OAUTH_ACTIVE_FILE_COUNT="$(count_files '(oauth.*openai|openai.*oauth|auth.*not configured)' "${roots[@]}")"
-            matches="$(grep -RIlEi --exclude='*.log' --exclude='*.jsonl' --exclude-dir=node_modules '(/login[[:space:]]+codex|gpt-5\.4|oauth.*openai|openai.*oauth|auth.*not configured)' "${roots[@]}" 2>/dev/null || true)"
-            if [[ -n "$matches" ]]; then
-              echo STALE_ACTIVE_PATHS_BEGIN
-              printf '%s\n' "$matches" | head -n 20
-              echo STALE_ACTIVE_PATHS_END
-            fi
-          else
-            echo STALE_LOGIN_CODEX_ACTIVE_FILE_COUNT=0
-            echo STALE_GPT54_ACTIVE_FILE_COUNT=0
-            echo STALE_OAUTH_ACTIVE_FILE_COUNT=0
+            grep -RIlEi --exclude-dir=node_modules --exclude='*.log' \
+              '(openai-codex|/login[[:space:]]+codex|gpt-5\.4|oauth.*openai|openai.*oauth|auth.*not configured)' \
+              "${roots[@]}" 2>/dev/null | sort -u | head -n 80 || true
           fi
+          echo STALE_FILE_PATHS_END
 
-          warnings="$(journalctl -u openclaw-gateway.service -n 1000 --no-pager 2>/dev/null | grep -Eic '(openai|codex|oauth|credential|auth.*(missing|fail|not configured)|gpt-5\.4)' || true)"
-          echo RECENT_AUTH_WARNING_COUNT="$warnings"
-          echo DIAGNOSIS_COMPLETE=1
+          # Separate active-config vs session-history counts.
+          cfg_count=0
+          if [[ -f "$CONFIG" ]] && grep -Eqi '(openai-codex|/login[[:space:]]+codex|gpt-5\.4|oauth.*openai|openai.*oauth|auth.*not configured)' "$CONFIG"; then cfg_count=1; fi
+          echo STALE_ACTIVE_CONFIG_MATCH="$cfg_count"
+          session_files="$(find "$HOME_OC" "$STATE" -type f \( -name '*.jsonl' -o -path '*/sessions/*' \) -print 2>/dev/null | sort -u || true)"
+          session_match_count=0
+          if [[ -n "$session_files" ]]; then
+            while IFS= read -r f; do
+              [[ -f "$f" ]] || continue
+              if grep -Eqi '(openai-codex|/login[[:space:]]+codex|gpt-5\.4|oauth.*openai|openai.*oauth|auth.*not configured)' "$f" 2>/dev/null; then
+                session_match_count=$((session_match_count+1))
+              fi
+            done <<< "$session_files"
+          fi
+          echo STALE_SESSION_FILE_COUNT="$session_match_count"
+
+          # 3) Inspect OpenClaw cron/scheduler metadata without printing prompts or secrets.
+          echo OPENCLAW_CRON_SCAN_BEGIN
+          if oc openclaw cron list --json >/tmp/openclaw-cron.json 2>/tmp/openclaw-cron.err; then
+            python3 - <<'PY'
+          import json,re
+          from pathlib import Path
+          p=Path('/tmp/openclaw-cron.json')
+          try: data=json.loads(p.read_text())
+          except Exception as e:
+              print('CRON_JSON_PARSE=FAIL:'+type(e).__name__); raise SystemExit
+          pat=re.compile(r'openai-codex|/login\s+codex|gpt-5\.4|oauth|auth.*not configured',re.I)
+          matches=[]
+          def walk(x,path='$'):
+              if isinstance(x,dict):
+                  for k,v in x.items(): walk(v,f'{path}.{k}')
+              elif isinstance(x,list):
+                  for i,v in enumerate(x): walk(v,f'{path}[{i}]')
+              elif isinstance(x,str) and pat.search(x):
+                  matches.append(path)
+          walk(data)
+          print('OPENCLAW_CRON_LIST=PASS')
+          print('STALE_CRON_FIELD_COUNT='+str(len(matches)))
+          for m in matches[:30]: print('STALE_CRON_FIELD_PATH='+m)
+          PY
+          else
+            echo OPENCLAW_CRON_LIST=UNAVAILABLE
+            head -n 5 /tmp/openclaw-cron.err | redact || true
+          fi
+          rm -f /tmp/openclaw-cron.json /tmp/openclaw-cron.err
+          echo OPENCLAW_CRON_SCAN_END
+
+          # 4) OS background schedulers, names/timing only.
+          echo SYSTEM_TIMER_MATCHES_BEGIN
+          systemctl list-timers --all --no-pager 2>/dev/null | grep -Ei '(openclaw|sahjony|codex|openai)' | redact || true
+          echo SYSTEM_TIMER_MATCHES_END
+          echo SYSTEM_CRON_PATH_MATCHES_BEGIN
+          grep -RIlEi '(openclaw|sahjony|codex|openai)' /etc/cron.d /etc/cron.daily /etc/cron.hourly /etc/cron.weekly /etc/crontab 2>/dev/null | sort -u | head -n 30 || true
+          echo SYSTEM_CRON_PATH_MATCHES_END
+
+          # 5) Plugin inventory names only, useful if a background hook owns the warning.
+          echo PLUGIN_INVENTORY_BEGIN
+          if oc openclaw plugins list --json >/tmp/plugins.json 2>/dev/null; then
+            python3 - <<'PY'
+          import json
+          from pathlib import Path
+          try: d=json.loads(Path('/tmp/plugins.json').read_text())
+          except Exception: print('PLUGIN_LIST_PARSE=FAIL'); raise SystemExit
+          def visit(x):
+              if isinstance(x,dict):
+                  ident=x.get('id') or x.get('name') or x.get('key')
+                  enabled=x.get('enabled')
+                  if ident: print(f'PLUGIN={ident}|enabled={enabled}')
+                  for v in x.values(): visit(v)
+              elif isinstance(x,list):
+                  for v in x: visit(v)
+          visit(d)
+          PY
+          else
+            echo PLUGIN_LIST=UNAVAILABLE
+          fi
+          rm -f /tmp/plugins.json
+          echo PLUGIN_INVENTORY_END
+
+          echo SOURCE_CLASSIFICATION_COMPLETE=1
           REMOTE
 
       - name: Cleanup SSH
         if: always()
         shell: bash
-        run: rm -f ~/.ssh/hostinger-sofia-verify
+        run: rm -f ~/.ssh/hostinger-sofia-classify
