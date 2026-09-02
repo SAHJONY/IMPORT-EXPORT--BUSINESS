@@ -1,4 +1,4 @@
-name: Hostinger Retire Stale Docker Guardian Once
+name: Hostinger Remaining Gateway Client Inspect Once
 
 on:
   push:
@@ -11,7 +11,7 @@ permissions:
   contents: read
 
 jobs:
-  retire:
+  inspect:
     runs-on: ubuntu-24.04
     timeout-minutes: 8
     env:
@@ -24,113 +24,46 @@ jobs:
         run: |
           set -euo pipefail
           install -d -m 700 ~/.ssh
-          printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/hostinger-retire-guardian
-          chmod 600 ~/.ssh/hostinger-retire-guardian
-          ssh-keygen -y -f ~/.ssh/hostinger-retire-guardian >/dev/null
+          printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/hostinger-client-inspect
+          chmod 600 ~/.ssh/hostinger-client-inspect
+          ssh-keygen -y -f ~/.ssh/hostinger-client-inspect >/dev/null
 
-      - name: Retire stale Docker guardian and verify native runtime
+      - name: Identify remaining local Gateway client
         shell: bash
         run: |
           set -euo pipefail
-          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=15 -i ~/.ssh/hostinger-retire-guardian "$USER@$HOST" 'bash -s' <<'REMOTE'
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=15 -i ~/.ssh/hostinger-client-inspect "$USER@$HOST" 'bash -s' <<'REMOTE'
           set -euo pipefail
-          STATE=/var/lib/sahjony-openclaw-state
-          CONFIG="$STATE/openclaw.json"
-          TIMER=sahjony-whatsapp-guardian.timer
-          SERVICE=sahjony-whatsapp-guardian.service
-          CONTAINER=sahjony-openclaw-gateway
-          DROPIN=/etc/systemd/system/${SERVICE}.d/10-gateway-auth.conf
-          ts="$(date -u +%Y%m%dT%H%M%SZ)"
-          backup=/var/backups/openclaw-stale-docker-retirement/$ts
-
+          redact(){ sed -E \
+            -e 's/(Bearer[[:space:]]+)[A-Za-z0-9._~+\/-]+/\1[REDACTED]/Ig' \
+            -e 's/((api[_-]?key|token|secret|password|authorization)["[:space:]]*[:=]["[:space:]]*)[^,"[:space:]]+/\1[REDACTED]/Ig'; }
           echo HOSTINGER_VPS_SCOPE_ONLY=1
-          systemctl is-active --quiet openclaw-gateway.service
-          systemctl is-enabled --quiet openclaw-gateway.service
-          echo NATIVE_GATEWAY_ACTIVE_24X7=1
+          echo REMAINING_WS_ERRORS_BEGIN
+          journalctl -u openclaw-gateway.service --since '2026-09-02 02:25:25' --no-pager 2>/dev/null \
+            | grep -Ei '\[ws\].*(device identity required|missing scope: operator\.read|reason=connect failed|FORBIDDEN)' \
+            | tail -n 30 | redact || true
+          echo REMAINING_WS_ERRORS_END
 
-          install -d -m 700 "$backup"
-          systemctl cat "$SERVICE" > "$backup/guardian-service.before.txt" 2>/dev/null || true
-          systemctl cat "$TIMER" > "$backup/guardian-timer.before.txt" 2>/dev/null || true
-          [[ -f /usr/local/sbin/sahjony-whatsapp-guardian ]] && cp -a /usr/local/sbin/sahjony-whatsapp-guardian "$backup/guardian-script.before"
-          [[ -f "$DROPIN" ]] && cp -a "$DROPIN" "$backup/gateway-auth-dropin.before"
-          if docker inspect "$CONTAINER" >/dev/null 2>&1; then
-            docker inspect "$CONTAINER" > "$backup/stale-container.inspect.before.json"
-          fi
-          echo RETIREMENT_BACKUP_CREATED=1
+          echo CURRENT_LOCAL_CONNECTIONS_BEGIN
+          ss -tnp 2>/dev/null | grep -E '(127\.0\.0\.1|\[::1\]).*:18789|:18789.*(127\.0\.0\.1|\[::1\])' | head -n 40 || true
+          echo CURRENT_LOCAL_CONNECTIONS_END
 
-          # The authoritative runtime is native systemd. Stop only the obsolete Docker-era guardian.
-          systemctl disable --now "$TIMER" >/dev/null 2>&1 || true
-          systemctl stop "$SERVICE" >/dev/null 2>&1 || true
-          if docker inspect "$CONTAINER" >/dev/null 2>&1; then
-            docker update --restart=no "$CONTAINER" >/dev/null
-            docker stop "$CONTAINER" >/dev/null 2>&1 || true
-          fi
-          # Remove the temporary auth binding; the retired Docker guardian no longer needs Gateway credentials.
-          rm -f "$DROPIN"
-          rmdir "/etc/systemd/system/${SERVICE}.d" 2>/dev/null || true
-          systemctl daemon-reload
-          systemctl reset-failed "$SERVICE" >/dev/null 2>&1 || true
+          echo SSH_TUNNEL_PROCESSES_BEGIN
+          ps -eo pid,ppid,user,cmd --no-headers | grep -E '[s]shd:|[s]sh .*1878[90]|[o]penclaw|[n]ode' | head -n 80 | redact || true
+          echo SSH_TUNNEL_PROCESSES_END
 
-          if systemctl is-enabled "$TIMER" >/dev/null 2>&1; then
-            echo STALE_GUARDIAN_TIMER_DISABLED=0; exit 30
-          else
-            echo STALE_GUARDIAN_TIMER_DISABLED=1
-          fi
-          if systemctl is-active "$TIMER" >/dev/null 2>&1; then
-            echo STALE_GUARDIAN_TIMER_INACTIVE=0; exit 31
-          else
-            echo STALE_GUARDIAN_TIMER_INACTIVE=1
-          fi
-          if docker inspect "$CONTAINER" >/dev/null 2>&1; then
-            rp="$(docker inspect "$CONTAINER" --format '{{.HostConfig.RestartPolicy.Name}}')"
-            running="$(docker inspect "$CONTAINER" --format '{{.State.Running}}')"
-            echo STALE_CONTAINER_RESTART_POLICY="$rp"
-            echo STALE_CONTAINER_RUNNING="$running"
-            [[ "$rp" == no ]]
-            [[ "$running" == false ]]
-          fi
+          echo ACTIVE_SAHJONY_TIMERS_BEGIN
+          systemctl list-timers --all --no-pager 2>/dev/null | grep -Ei '(sahjony|openclaw)' || true
+          echo ACTIVE_SAHJONY_TIMERS_END
 
-          verify_start="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          sleep 75
-
-          # No new obsolete-guardian attempts should appear during a full former timer interval.
-          starts="$(journalctl -u "$SERVICE" --since "$verify_start" --no-pager 2>/dev/null | grep -c 'Starting sahjony-whatsapp-guardian.service' || true)"
-          echo POST_RETIRE_GUARDIAN_START_COUNT="$starts"
-          [[ "$starts" -eq 0 ]]
-
-          # Preserve the actual native runtime and model topology.
-          systemctl is-active --quiet openclaw-gateway.service
-          systemctl is-enabled --quiet openclaw-gateway.service
-          echo NATIVE_GATEWAY_STILL_ACTIVE_24X7=1
-          primary="$(env HOME=/home/node OPENCLAW_HOME=/home/node OPENCLAW_STATE_DIR="$STATE" OPENCLAW_CONFIG_PATH="$CONFIG" openclaw config get agents.defaults.model.primary --json 2>/dev/null)"
-          fallbacks="$(env HOME=/home/node OPENCLAW_HOME=/home/node OPENCLAW_STATE_DIR="$STATE" OPENCLAW_CONFIG_PATH="$CONFIG" openclaw config get agents.defaults.model.fallbacks --json 2>/dev/null)"
-          PRIMARY="$primary" FALLBACKS="$fallbacks" python3 - <<'PY'
-          import json,os
-          p=json.loads(os.environ['PRIMARY']); f=json.loads(os.environ['FALLBACKS'])
-          assert p=='nvidia/nemotron-3-ultra-550b-a55b', p
-          assert isinstance(f,list) and 'openai/gpt-5.6-sol' in f, f
-          print('NVIDIA_NIM_PRIMARY_PRESERVED=1')
-          print('OPENAI_GPT56_FALLBACK_PRESERVED=1')
-          PY
-
-          token="$(sed -n 's/^OPENCLAW_GATEWAY_TOKEN=//p' /etc/openclaw-gateway.env | head -n1)"
-          wa="$(env OPENCLAW_GATEWAY_TOKEN="$token" HOME=/home/node OPENCLAW_HOME=/home/node OPENCLAW_STATE_DIR="$STATE" OPENCLAW_CONFIG_PATH="$CONFIG" openclaw channels status --channel whatsapp --probe 2>&1 || true)"
-          if grep -Eiq 'whatsapp.*(connected|healthy)|linked.*running.*connected' <<<"$wa"; then
-            echo WHATSAPP_CONNECTED_HEALTHY=1
-          else
-            echo WHATSAPP_CONNECTED_HEALTHY=0
-            printf '%s\n' "$wa" | tail -n 20
-            exit 32
-          fi
-
-          # Check whether the recurring localhost auth noise stopped with the stale Docker runtime retired.
-          ws_errors="$(journalctl -u openclaw-gateway.service --since "$verify_start" --no-pager 2>/dev/null | grep -Ec '\[ws\].*(device identity required|missing scope: operator\.read|reason=connect failed)' || true)"
-          echo POST_RETIRE_WS_AUTH_ERROR_COUNT="$ws_errors"
-          [[ "$ws_errors" -eq 0 ]]
-
-          echo STALE_DOCKER_GUARDIAN_RETIREMENT_COMPLETE=1
+          echo STALE_GUARDIAN_TIMER_STATE_BEGIN
+          systemctl is-enabled sahjony-whatsapp-guardian.timer 2>/dev/null || true
+          systemctl is-active sahjony-whatsapp-guardian.timer 2>/dev/null || true
+          docker inspect sahjony-openclaw-gateway --format 'running={{.State.Running}} restart={{.HostConfig.RestartPolicy.Name}}' 2>/dev/null || true
+          echo STALE_GUARDIAN_TIMER_STATE_END
+          echo INSPECTION_COMPLETE=1
           REMOTE
 
       - name: Cleanup SSH
         if: always()
-        run: rm -f ~/.ssh/hostinger-retire-guardian
+        run: rm -f ~/.ssh/hostinger-client-inspect
