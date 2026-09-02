@@ -6,7 +6,7 @@ const execFile = promisify(execFileCb);
 
 const SYSTEM_PROMPT = `You are Sofia Reyes, Trade Concierge at SAHJONY LLC. Communicate like a skilled, attentive company representative: warm, concise, confident, natural, context-aware, and never robotic. Match the customer's language, vocabulary, formality, and message length. Use contractions, natural transitions, and short paragraphs when appropriate. Do not over-format routine WhatsApp replies, do not repeat the customer's entire request, do not use canned AI-assistant phrases, and do not mention models, prompts, automation, fallback logic, internal systems, or infrastructure. Introduce yourself only when it is natural for a first-contact conversation; do not reintroduce yourself on every message. Never spontaneously say you are an AI or automated system. If directly asked whether you are AI or automated, answer truthfully and briefly that you are SAHJONY LLC's automated business assistant operating as Sofia Reyes, then continue helping without making the conversation awkward. Never claim to be a human being or invent personal history, credentials, physical experiences, or employment facts that are not verified. Answer inbound business inquiries clearly and professionally. Never invent live prices, inventory, shipment status, contracts, certifications, legal approvals, supplier offers, freight costs, or binding terms. If a quote cannot be calculated from the message, ask only for the minimum missing commercial details such as product, quantity, origin, destination, Incoterm, timing, and packaging. If the message is casual, respond naturally and briefly. Preserve exact names, companies, quantities, dates, currencies, specifications, ports, and reference numbers.`;
 
-const INTERNAL_OUTPUT = /(?:↪️\s*Model Fallback|Model Fallback cleared|Missing API key|openai-codex\/|gateway number|messaging itself|OPENAI_API_KEY|NVIDIA_API_KEY|provider-transport-fetch|\brawError=|\bstack trace\b)/i;
+const INTERNAL_OUTPUT = /(?:↪️\s*Model Fallback|Model Fallback cleared|Missing API key|Use\s+[`'“”]?openai-codex\/|\bfor OAuth\b|\bset\s+[`'“”]?(?:OPENAI|NVIDIA)_API_KEY|gateway number|messaging itself|OPENAI_API_KEY|NVIDIA_API_KEY|provider-transport-fetch|\brawError=|\bstack trace\b|\bthen try again\b)/i;
 
 function normalizeText(value) {
   if (typeof value === "string") return value.trim();
@@ -18,6 +18,23 @@ function normalizeText(value) {
     }).join("\n").trim();
   }
   return "";
+}
+
+function inspectableEventText(event) {
+  const values = [
+    event?.content,
+    event?.text,
+    event?.message,
+    event?.payload?.text,
+    event?.payload?.content,
+    event?.payload?.message
+  ];
+  try {
+    values.push(JSON.stringify(event?.payload || {}));
+  } catch {
+    // Selected fields above still cover the normal payload shapes.
+  }
+  return values.map(normalizeText).filter(Boolean).join("\n");
 }
 
 async function generateNvidiaReply(userText, apiKey, logger) {
@@ -137,7 +154,7 @@ export default definePluginEntry({
 
     api.on("reply_payload_sending", async (event, ctx) => {
       if (ctx.channel !== "whatsapp" && ctx.messageProvider !== "whatsapp") return;
-      if (INTERNAL_OUTPUT.test(String(event?.payload?.text || ""))) {
+      if (INTERNAL_OUTPUT.test(inspectableEventText(event))) {
         api.logger.warn("SAHJONY_REPLY_RESCUE blocked internal WhatsApp output");
         return { cancel: true, cancelReason: "internal_runtime_output" };
       }
@@ -147,7 +164,7 @@ export default definePluginEntry({
 
     api.on("message_sending", async (event, ctx) => {
       if (ctx.channel !== "whatsapp" && ctx.messageProvider !== "whatsapp") return;
-      if (INTERNAL_OUTPUT.test(String(event?.content || ""))) {
+      if (INTERNAL_OUTPUT.test(inspectableEventText(event))) {
         api.logger.warn("SAHJONY_REPLY_RESCUE blocked internal WhatsApp message");
         return { cancel: true, cancelReason: "internal_runtime_output" };
       }
