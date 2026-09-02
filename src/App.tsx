@@ -1,4 +1,4 @@
-import {useEffect,useMemo,useState} from 'react';
+import {useEffect,useMemo,useRef,useState} from 'react';
 
 type Role='owner'|'employee'|'customer';
 type ModuleKey='dashboard'|'crm'|'global-sourcing'|'managed-trade'|'us-import'|'intermediary'|'documents'|'shipping'|'messages'|'compliance'|'countries'|'finance'|'ai-brain'|'readiness'|'business-email';
@@ -62,12 +62,23 @@ export default function App(){
  return <Portal key={r.role} role={r.role} section={r.section}/>;
 }
 
-function Brand(){return <button className="brand-button" onClick={()=>nav('/')} aria-label="SAHJONY LLC home"><span className="brand-symbol" aria-hidden="true"><i/></span><span className="brand-copy"><strong>SAHJONY LLC</strong><small>GLOBAL TRADE OS</small></span></button>}
+function Brand({ownerShortcut=false}:{ownerShortcut?:boolean}){
+ const clicks=useRef(0);
+ const reset=useRef<number|undefined>(undefined);
+ function activate(){
+  if(!ownerShortcut){nav('/');return}
+  clicks.current+=1;
+  if(reset.current)window.clearTimeout(reset.current);
+  if(clicks.current>=3){clicks.current=0;location.assign('/owner-login');return}
+  reset.current=window.setTimeout(()=>{clicks.current=0},800);
+ }
+ return <button className="brand-button" onClick={activate} aria-label="SAHJONY LLC home"><span className="brand-symbol" aria-hidden="true"><i/></span><span className="brand-copy"><strong>SAHJONY LLC</strong><small>GLOBAL TRADE OS</small></span></button>
+}
 
 function PublicSite(){
  return <div className="public-site institutional-public">
   <div className="signal-strip"><span><i/>GLOBAL TRADE NETWORK</span><strong>Human-led. AI-powered. Evidence-controlled.</strong><span>SAHJONY LLC · UNITED STATES</span></div>
-  <header className="public-nav"><Brand/><nav className="public-links" aria-label="Primary navigation"><a href="#solutions">Capabilities</a><a href="/industrial-marketplace">Marketplace</a><a href="#process">Process</a><a href="/cuba-private-sector">Cuba Desk</a><a className="text-link" href="/owner-login">Sign in</a><a className="primary-link" href="/start">Start a request <span aria-hidden="true">↗</span></a></nav></header>
+  <header className="public-nav"><Brand ownerShortcut/><nav className="public-links" aria-label="Primary navigation"><a href="#solutions">Capabilities</a><a href="/industrial-marketplace">Marketplace</a><a href="#process">Process</a><a href="/cuba-private-sector">Cuba Desk</a><a className="primary-link" href="/start">Start a request <span aria-hidden="true">↗</span></a></nav></header>
   <main>
    <section className="public-hero ultra-hero">
     <div className="hero-copy">
