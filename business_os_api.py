@@ -30,6 +30,10 @@ OWNER_CONTROL_PROFILE = {
         "time": "06:00",
         "timezone": "America/Chicago",
         "channel": "whatsapp",
+        "all_nonbinding_outputs_to_owner": True,
+        "urgent_nonbinding_delivery": "immediate",
+        "routine_nonbinding_delivery": "owner_feed_plus_daily_digest",
+        "binding_actions_delivery": "separate_approval_queue",
     },
 }
 
