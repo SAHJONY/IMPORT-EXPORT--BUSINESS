@@ -12,6 +12,7 @@ from business_email_registry import DEPARTMENTS
 from business_communications_director_api import _route_department
 from business_os_executor_api import execute_mission_internal
 from insforge_backend import get_backend, persistent_backend_status
+from sofia_owner_assistant import OWNER_ASSISTANT_CONTRACT, OwnerMode, build_owner_mission
 
 app = FastAPI(title="SAHJONY AI-Operated Business OS", version="1.1.0", docs_url=None, redoc_url=None)
 
@@ -112,6 +113,12 @@ class MissionCreate(BaseModel):
     context: dict[str, Any] = Field(default_factory=dict)
 
 
+class OwnerAssistantRequest(BaseModel):
+    request: str = Field(min_length=2, max_length=10000)
+    mode: OwnerMode | None = None
+    execute_reversible_steps: bool = True
+
+
 @app.get("/business-os/health")
 async def business_os_health() -> dict[str, Any]:
     persistence = persistent_backend_status()
@@ -176,6 +183,45 @@ def owner_control_profile(authorization: str | None = Header(None, alias="Author
         },
         "secrets_exposed": False,
     }
+
+
+@app.get("/business-os/owner/assistant")
+def owner_assistant_profile(authorization: str | None = Header(None, alias="Authorization")) -> dict[str, Any]:
+    _owner(authorization)
+    return {"status": "active", **OWNER_ASSISTANT_CONTRACT, "secrets_exposed": False}
+
+
+@app.post("/business-os/owner/assistant/requests")
+async def create_owner_assistant_request(
+    payload: OwnerAssistantRequest,
+    authorization: str | None = Header(None, alias="Authorization"),
+) -> dict[str, Any]:
+    _owner(authorization)
+    mission = build_owner_mission(payload.request, payload.mode)
+    event_id = f"evt_{secrets.token_urlsafe(16)}"
+    ts = _now()
+    await get_backend().insert("business_events", {
+        "event_id": event_id,
+        "event_type": "owner_assistant_request",
+        "source_type": "sofia_owner_assistant",
+        "source_id": "juan-gonzalez",
+        "trade_case_id": None,
+        "customer_id": None,
+        "lead_id": None,
+        "actor_role": "owner",
+        "actor_id": "juan-gonzalez",
+        "visibility": mission["visibility"],
+        "title": payload.request[:240],
+        "summary": payload.request[:4000],
+        "action_required": False,
+        "action_label": "Sofia owner assistant",
+        "priority": "normal",
+        "event_status": "open",
+        "payload": {**mission, "execute_reversible_steps": payload.execute_reversible_steps},
+        "created_at": ts,
+        "updated_at": ts,
+    })
+    return {"status": "accepted", "event_id": event_id, "mission": mission}
 
 
 @app.post("/business-os/missions")
