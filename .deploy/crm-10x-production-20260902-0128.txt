@@ -1,0 +1,1 @@
+Trigger production deployment for CRM 10X Quality OS and Unified Trade API v7.4.0 after deployment/build fixes. Verify production READY, then validate /crm/quality-10x/health, /crm/quality-10x/scorecard, /crm/quality-10x/activation-queue, /crm/health, and /backend/health. Do not mark commercial stages beyond evidence.
