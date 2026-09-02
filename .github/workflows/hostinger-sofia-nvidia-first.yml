@@ -92,15 +92,13 @@ jobs:
           openai_code="$(curl -sS -o /tmp/openai-smoke.json -w '%{http_code}' --connect-timeout 10 --max-time 45 -H "Authorization: Bearer $okey" https://api.openai.com/v1/models || true)"
           [[ "$openai_code" == 200 ]] || { echo OPENAI_AUTH_SMOKE_HTTP="$openai_code" >&2; exit 21; }
 
-          if [[ -n "$primary" ]]; then
-            fallbacks='["openai/gpt-5.6-sol"]'
-            provider=NVIDIA
-          else
-            # Keep Sofia operational when NVIDIA NIM is temporarily saturated.
-            primary='openai/gpt-5.6-sol'
-            fallbacks='[]'
-            provider=OPENAI_TEMPORARY
-          fi
+          [[ -n "$primary" ]] || { echo NVIDIA_HEALTHY_PRIMARY_UNAVAILABLE=1 >&2; exit 22; }
+          # OpenAI remains authenticated for later controlled validation, but is
+          # intentionally excluded from live WhatsApp failover until OpenClaw's
+          # agent-level credential path passes an end-to-end test. This prevents
+          # provider diagnostics from leaking into owner/customer conversations.
+          fallbacks='[]'
+          provider=NVIDIA
           oc config set agents.defaults.model.primary "$primary" >/dev/null
           oc config set agents.defaults.model.fallbacks "$fallbacks" --strict-json >/dev/null
           oc config validate >/dev/null
@@ -119,8 +117,6 @@ jobs:
           )"
           if [[ "$provider" == NVIDIA ]]; then
             [[ "$configured" == nvidia/* ]] || { echo SOFIA_PRIMARY_PROVIDER_MISMATCH=1 >&2; exit 23; }
-          else
-            [[ "$configured" == openai/* ]] || { echo SOFIA_PRIMARY_PROVIDER_MISMATCH=1 >&2; exit 23; }
           fi
           pid="$(systemctl show openclaw-gateway.service -p MainPID --value)"
           tr '\0' '\n' <"/proc/$pid/environ" | grep -q '^OPENAI_API_KEY='
@@ -139,8 +135,8 @@ jobs:
           fi
           echo "SOFIA_PRIMARY_PROVIDER=$provider"
           echo "SOFIA_PRIMARY_MODEL=$configured"
-          echo SOFIA_FALLBACK_MODEL=openai/gpt-5.6-sol
-          echo OPENAI_FALLBACK_KEY_BOUND=1
+          echo SOFIA_FALLBACK_MODEL=NONE_PENDING_AGENT_LEVEL_VALIDATION
+          echo OPENAI_KEY_BOUND_BUT_LIVE_FAILOVER_DISABLED=1
           echo WHATSAPP_CONNECTED=1
           REMOTE
       - name: Cleanup
