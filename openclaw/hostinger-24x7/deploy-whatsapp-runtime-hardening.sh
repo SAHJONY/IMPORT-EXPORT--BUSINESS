@@ -9,13 +9,18 @@ NVIDIA_KEY=/root/nvidia-key
 TMP=/tmp/sahjony-whatsapp-hardening
 TARGET_MODEL=nvidia/openai/gpt-oss-120b
 TARGET_DM_SCOPE=per-account-channel-peer
-BACKUP="$STATE/openclaw.json.pre-whatsapp-hardening.$(date -u +%Y%m%dT%H%M%SZ)"
+START_EPOCH="$(date -u +%s)"
+STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
+BACKUP="$STATE/openclaw.json.pre-whatsapp-hardening.$STAMP"
 SIDECAR_BACKUP=/usr/local/sbin/sahjony-openclaw-health-sidecar.pre-hardening
 ROTATION_BACKUP=/usr/local/sbin/sahjony-nvidia-nim-rotation.pre-hardening
+PLUGIN_BACKUP="$STATE/.whatsapp-hardening-plugin-backup.$STAMP"
 
-cleanup(){ rm -rf "$TMP" "$ARCHIVE" "$ROTATION" "$NVIDIA_KEY" /root/deploy-whatsapp-runtime-hardening.sh; }
-rollback(){
-  rc=$?
+cleanup(){
+  rm -rf "$TMP" "$ARCHIVE" "$ROTATION" "$NVIDIA_KEY" /root/deploy-whatsapp-runtime-hardening.sh "$PLUGIN_BACKUP"
+}
+
+restore_runtime(){
   set +e
   if [[ -s "$BACKUP" ]]; then
     cp -f "$BACKUP" "$CONFIG"
@@ -28,15 +33,30 @@ rollback(){
     cp -f "$ROTATION_BACKUP" /usr/local/sbin/sahjony-nvidia-nim-rotation
     chmod 700 /usr/local/sbin/sahjony-nvidia-nim-rotation
   fi
+  for plugin in sahjony-whatsapp-output-guard sahjony-whatsapp-reply-rescue sahjony-app-bridge; do
+    dst="$STATE/extensions/$plugin"
+    rm -rf "$dst"
+    if [[ -d "$PLUGIN_BACKUP/$plugin" ]]; then
+      cp -a "$PLUGIN_BACKUP/$plugin" "$dst"
+    fi
+  done
   systemctl daemon-reload || true
   systemctl restart openclaw-gateway.service >/dev/null 2>&1 || true
   systemctl start sahjony-openclaw-health-sidecar.service >/dev/null 2>&1 || true
   echo WHATSAPP_HARDENING_ROLLBACK=1 >&2
+}
+
+on_exit(){
+  rc=$?
+  trap - EXIT
+  if [[ "$rc" -ne 0 ]]; then
+    restore_runtime
+  fi
   cleanup
   exit "$rc"
 }
-trap rollback ERR INT TERM
-trap cleanup EXIT
+trap on_exit EXIT
+trap 'exit 130' INT TERM
 
 [[ -s "$CONFIG" ]] || { echo OPENCLAW_CONFIG_MISSING=1 >&2; exit 20; }
 [[ -s "$ARCHIVE" ]] || { echo HARDENING_ARCHIVE_MISSING=1 >&2; exit 21; }
@@ -51,6 +71,13 @@ cp -a "$CONFIG" "$BACKUP"
 chmod 600 "$BACKUP"
 [[ ! -e /usr/local/sbin/sahjony-openclaw-health-sidecar ]] || cp -a /usr/local/sbin/sahjony-openclaw-health-sidecar "$SIDECAR_BACKUP"
 [[ ! -e /usr/local/sbin/sahjony-nvidia-nim-rotation ]] || cp -a /usr/local/sbin/sahjony-nvidia-nim-rotation "$ROTATION_BACKUP"
+install -d -m 700 "$PLUGIN_BACKUP"
+for plugin in sahjony-whatsapp-output-guard sahjony-whatsapp-reply-rescue sahjony-app-bridge; do
+  dst="$STATE/extensions/$plugin"
+  if [[ -d "$dst" ]]; then
+    cp -a "$dst" "$PLUGIN_BACKUP/$plugin"
+  fi
+done
 
 rm -rf "$TMP"
 mkdir -p "$TMP"
@@ -96,8 +123,8 @@ rescue['enabled']=True
 cfg=rescue.setdefault('config', {})
 cfg.setdefault('accountId','default')
 cfg.setdefault('businessNumber','+12816628581')
-# GPT-OSS 120B can legitimately take longer than 12 seconds. Runtime-error hooks
-# rescue immediately; the silence fallback waits long enough to avoid duplicates.
+# Runtime-error hooks rescue immediately. Silence fallback waits long enough for
+# GPT-OSS 120B to finish a legitimate turn and therefore avoids duplicate replies.
 cfg['rescueDelayMs']=40000
 bridge=entries.setdefault('sahjony-app-bridge', {})
 bridge['enabled']=True
@@ -125,7 +152,6 @@ rescue_delay="$(oc config get plugins.entries.sahjony-whatsapp-reply-rescue.conf
 
 grep -Fq 'Something went wrong while processing your request' "$STATE/extensions/sahjony-whatsapp-output-guard/index.js"
 grep -Fq 'RESCUE_VERSION = "2.0.0"' "$STATE/extensions/sahjony-whatsapp-reply-rescue/index.js"
-grep -Fq 'reasoning_content' "$STATE/extensions/sahjony-whatsapp-reply-rescue/index.js"
 grep -Fq 'Never surface reasoning_content' "$STATE/extensions/sahjony-whatsapp-reply-rescue/index.js"
 grep -Fq 'openai/gpt-oss-120b' "$STATE/extensions/sahjony-whatsapp-reply-rescue/index.js"
 grep -Fq 'canonicalConfigPath' "$STATE/extensions/sahjony-app-bridge/index.js"
@@ -165,24 +191,35 @@ scope_after="$(oc config get session.dmScope 2>/dev/null || true)"
 rescue_delay_after="$(oc config get plugins.entries.sahjony-whatsapp-reply-rescue.config.rescueDelayMs 2>/dev/null || true)"
 [[ "$rescue_delay_after" == "40000" ]] || { echo "WHATSAPP_RESCUE_DELAY_POST_RESTART=$rescue_delay_after" >&2; exit 37; }
 
-systemctl start sahjony-openclaw-health-sidecar.service
-for attempt in 1 2 3 4 5 6 7 8; do
-  if ! systemctl is-active --quiet sahjony-openclaw-health-sidecar.service; then break; fi
-  sleep 2
-done
-
-probe="$(oc channels status --channel whatsapp --probe 2>&1 || oc channels status --probe 2>&1 || true)"
-printf '%s' "$probe" | grep -Eiq 'whatsapp.*(connected|linked.*running)' || { echo WHATSAPP_CHANNEL_PROBE_NOT_CONNECTED=1 >&2; printf '%s\n' "$probe" | tail -n 30 >&2; exit 38; }
+# Do not use an external `openclaw channels status --probe` here: this runtime
+# protects gateway RPC with credentials held by the systemd process. The public
+# signed heartbeat is the authority-neutral verification surface and must be
+# newer than this deployment before we accept success.
+systemctl start sahjony-openclaw-health-sidecar.service >/dev/null 2>&1 || true
 
 health=''
-for attempt in 1 2 3 4 5 6; do
+for attempt in 1 2 3 4 5 6 7 8 9 10 11 12; do
   health="$(curl -fsS --connect-timeout 10 --max-time 30 https://www.sahjony.com/whatsapp/health 2>/dev/null || true)"
-  if HEALTH="$health" TARGET="$TARGET_MODEL" python3 - <<'PY'
-import json, os, sys
-try: h=json.loads(os.environ.get('HEALTH') or '{}')
-except Exception: raise SystemExit(1)
-n=h.get('hostinger_openclaw') or {}
-ok=(h.get('status')=='ok' and h.get('send_ready') is True and h.get('webhook_ready') is True and n.get('connected') is True and n.get('heartbeat_fresh') is True and n.get('gateway_id')=='hostinger-vps' and n.get('model')==os.environ['TARGET'])
+  if HEALTH="$health" TARGET="$TARGET_MODEL" START_EPOCH="$START_EPOCH" python3 - <<'PY'
+import datetime, json, os
+try:
+    h=json.loads(os.environ.get('HEALTH') or '{}')
+    n=h.get('hostinger_openclaw') or {}
+    raw=n.get('last_seen_at') or ''
+    seen=datetime.datetime.fromisoformat(raw.replace('Z','+00:00')).timestamp()
+    start=float(os.environ['START_EPOCH'])
+except Exception:
+    raise SystemExit(1)
+ok=(
+    h.get('status')=='ok' and
+    h.get('send_ready') is True and
+    h.get('webhook_ready') is True and
+    n.get('connected') is True and
+    n.get('heartbeat_fresh') is True and
+    n.get('gateway_id')=='hostinger-vps' and
+    n.get('model')==os.environ['TARGET'] and
+    seen >= start - 5
+)
 raise SystemExit(0 if ok else 1)
 PY
   then
@@ -192,10 +229,13 @@ PY
   sleep 8
 done
 
-HEALTH="$health" TARGET="$TARGET_MODEL" python3 - <<'PY'
-import json, os
+HEALTH="$health" TARGET="$TARGET_MODEL" START_EPOCH="$START_EPOCH" python3 - <<'PY'
+import datetime, json, os
 h=json.loads(os.environ.get('HEALTH') or '{}')
 n=h.get('hostinger_openclaw') or {}
+raw=n.get('last_seen_at') or ''
+seen=datetime.datetime.fromisoformat(raw.replace('Z','+00:00')).timestamp()
+start=float(os.environ['START_EPOCH'])
 assert h.get('status')=='ok', 'WHATSAPP_HEALTH_NOT_OK'
 assert h.get('send_ready') is True, 'WHATSAPP_SEND_NOT_READY'
 assert h.get('webhook_ready') is True, 'WHATSAPP_WEBHOOK_NOT_READY'
@@ -203,9 +243,9 @@ assert n.get('connected') is True, 'HOSTINGER_OPENCLAW_NOT_CONNECTED'
 assert n.get('heartbeat_fresh') is True, 'HOSTINGER_HEARTBEAT_STALE'
 assert n.get('gateway_id')=='hostinger-vps', 'WRONG_WHATSAPP_AUTHORITY'
 assert n.get('model')==os.environ['TARGET'], f"HEARTBEAT_MODEL_MISMATCH={n.get('model')}"
+assert seen >= start - 5, f"POST_RESTART_HEARTBEAT_NOT_OBSERVED={raw}"
 PY
 
-trap - ERR INT TERM
 rm -f "$SIDECAR_BACKUP" "$ROTATION_BACKUP"
 
 echo SOFIA_PRIMARY_PROVIDER=NVIDIA
@@ -217,6 +257,7 @@ echo NVIDIA_INVALID_FALLBACKS_REMOVED=1
 echo WHATSAPP_OUTPUT_GUARD_RUNTIME_ERROR_SUPPRESSION=ACTIVE
 echo WHATSAPP_REPLY_RESCUE_CONTEXTUAL_V2=ACTIVE
 echo WHATSAPP_REPLY_RESCUE_REASONING_OUTPUT_BLOCKED=1
+echo WHATSAPP_POST_RESTART_HEARTBEAT=VERIFIED
 echo WHATSAPP_HEALTH_SIDECAR_CANONICAL_MODEL=ACTIVE
 echo OPENCLAW_GATEWAY_ACTIVE=1
 echo WHATSAPP_CONNECTED=1
