@@ -1,9 +1,11 @@
 {
-  "name": "sahjony-whatsapp-output-guard",
+  "name": "@sahjony/openclaw-whatsapp-output-guard",
   "version": "1.0.0",
   "type": "module",
   "main": "index.js",
   "openclaw": {
     "extensions": ["./index.js"]
-  }
+  },
+  "engines": { "node": ">=22" },
+  "peerDependencies": { "openclaw": ">=2026.8.1" }
 }
