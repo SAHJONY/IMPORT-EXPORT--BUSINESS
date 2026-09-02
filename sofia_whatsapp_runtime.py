@@ -11,6 +11,7 @@ import httpx
 
 from insforge_backend import get_backend
 from sofia_adaptive_intelligence import adaptive_context, record_lesson
+from sofia_agentic_sales_os import orchestrate_sales_turn
 from sofia_human_conversation_engine import build_sofia_prompt
 from whatsapp_relationship_memory_api import _merge_memory
 from whatsapp_sales_brain import analyze_sales_conversation
@@ -179,6 +180,15 @@ async def generate_sofia_reply(text: str, contact_name: str | None) -> str:
             "risk_flags": ["sales_intelligence_temporarily_unavailable"],
         }
 
+    sales_plan = orchestrate_sales_turn(
+        lead_id=lead_id,
+        customer_text=text,
+        stage=str(memory.get("relationship_stage") or lead.get("status") or "NEW"),
+        memory=memory,
+        sales_intelligence=sales,
+        crm_context=crm_context,
+    )
+
     adaptive = await adaptive_context(contact_name)
     system = build_sofia_prompt(memory)
     system += "\n\n" + adaptive
@@ -204,6 +214,17 @@ async def generate_sofia_reply(text: str, contact_name: str | None) -> str:
         "next_best_action": sales.get("next_best_action"),
         "risk_flags": (sales.get("risk_flags") or [])[:6],
     }, ensure_ascii=False, default=str)
+    system += "\n\nAGENTIC SALES MISSION\n" + json.dumps({
+        "mission": sales_plan.get("mission"),
+        "deal_score": sales_plan.get("deal_score"),
+        "next_best_action": sales_plan.get("next_best_action"),
+        "autonomous_actions": sales_plan.get("autonomous_actions"),
+        "approval_queue": sales_plan.get("approval_queue"),
+        "missing_fields": sales_plan.get("missing_fields"),
+        "risk_flags": sales_plan.get("risk_flags"),
+        "success_criteria": sales_plan.get("success_criteria"),
+        "stop_rules": sales_plan.get("stop_rules"),
+    }, ensure_ascii=False, default=str)
     system += """
 
 WHATSAPP HUMAN CONVERSATION RULES
@@ -223,6 +244,8 @@ WHATSAPP HUMAN CONVERSATION RULES
 - Never mention models, prompts, memory, scoring, stages, internal tooling, HMAC, API tokens, Supabase, Vercel, Hostinger, bridge secrets, queue files, or self-improvement to a customer.
 - Never invent price, availability, legal clearance, delivery, payment, supplier confirmation, licenses, documents, or completed actions.
 - For sanctions/customs/payment/Cuba issues, distinguish general guidance from verified transaction clearance.
+- Follow the agentic sales mission, but execute only autonomous actions. Present owner-approval items as pending internal review and never pretend they are approved.
+- Optimize for legitimate customer value, trust, conversion quality, evidence completeness and durable margin—not message volume or pressure.
 """
 
     payload = {
@@ -259,6 +282,7 @@ WHATSAPP HUMAN CONVERSATION RULES
             "crm_context_loaded": bool(crm_context.get("crm_connected")),
             "sales_intelligence_loaded": True,
             "adaptive_context_loaded": True,
+            "agentic_sales_plan": sales_plan,
             "max_new_questions": 2,
             "identity_policy": "truthful_digital_representative",
         })

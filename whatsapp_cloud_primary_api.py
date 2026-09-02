@@ -37,6 +37,7 @@ from sofia_whatsapp_runtime import generate_sofia_reply
 from whatsapp_backlog_recovery import drain_backlog, find_unanswered
 from sofia_self_marketing import growth_health
 from sofia_self_selling import self_selling_health
+from sofia_agentic_sales_os import sales_os_health
 from whatsapp_crm_bridge import crm_bridge_status, router as crm_bridge_router
 
 app = FastAPI(title="SAHJONY WhatsApp Hostinger OpenClaw Authority", version="5.5.0", docs_url=None, redoc_url=None)
@@ -243,6 +244,11 @@ async def sofia_marketing_health() -> dict[str, Any]:
 @app.get("/whatsapp/sofia/self-selling/health")
 async def sofia_self_selling_health() -> dict[str, Any]:
     return await self_selling_health()
+
+
+@app.get("/whatsapp/sofia/sales-os/health")
+async def sofia_sales_os_health() -> dict[str, Any]:
+    return sales_os_health()
 
 
 @app.post("/whatsapp/send")
