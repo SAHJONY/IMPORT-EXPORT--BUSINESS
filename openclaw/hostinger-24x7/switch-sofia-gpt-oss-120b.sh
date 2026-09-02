@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# Exact-model cutover trigger: 2026-09-02
 
 STATE="${OPENCLAW_STATE_DIR:-/var/lib/sahjony-openclaw-state}"
 CONFIG="${OPENCLAW_CONFIG_PATH:-$STATE/openclaw.json}"
