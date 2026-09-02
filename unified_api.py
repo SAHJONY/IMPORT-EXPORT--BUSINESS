@@ -98,7 +98,12 @@ async def supabase_identity_bridge(request: Request, call_next):
             employee_id = str(claims.get("sub") or claims.get("email") or "staff")[:160]
             headers.append((b"x-employee-id", employee_id.encode()))
             request.scope["headers"] = headers
-    return await call_next(request)
+    response = await call_next(request)
+    if request.url.path.startswith("/higgsfield-cloud"):
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["X-Robots-Tag"] = "noindex, nofollow"
+    return response
 
 @app.exception_handler(PersistentBackendConfigurationError)
 async def persistent_backend_configuration_error(_request: Request, exc: PersistentBackendConfigurationError):
