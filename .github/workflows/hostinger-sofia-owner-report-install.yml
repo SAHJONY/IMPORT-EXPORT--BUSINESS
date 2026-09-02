@@ -1,0 +1,47 @@
+name: Hostinger Sofia Owner Daily Report Install
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  install:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      HOST: 72.61.129.109
+      SSH_USER: root
+      PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+      OWNER_WHATSAPP_E164: ${{ secrets.OWNER_WHATSAPP_E164 }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate private configuration
+        run: |
+          [[ -n "$PRIVATE_KEY" ]] || { echo '::error::Missing HOSTINGER_SSH_PRIVATE_KEY'; exit 2; }
+          [[ "$OWNER_WHATSAPP_E164" =~ ^\+[1-9][0-9]{7,14}$ ]] || { echo '::error::Missing or invalid OWNER_WHATSAPP_E164'; exit 3; }
+      - name: Install SSH identity
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/hostinger-owner-report
+          chmod 600 ~/.ssh/hostinger-owner-report
+          ssh-keygen -y -f ~/.ssh/hostinger-owner-report >/dev/null
+      - name: Copy and install timer
+        run: |
+          scp -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/hostinger-owner-report \
+            openclaw/hostinger-24x7/sofia-owner-daily-report.sh \
+            openclaw/hostinger-24x7/install-sofia-owner-daily-report.sh \
+            "$SSH_USER@$HOST:/root/"
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/hostinger-owner-report \
+            "$SSH_USER@$HOST" "OWNER_WHATSAPP_E164='$OWNER_WHATSAPP_E164' bash -s" <<'REMOTE'
+          set -euo pipefail
+          install -d /opt/sahjony/openclaw/hostinger-24x7
+          mv /root/sofia-owner-daily-report.sh /root/install-sofia-owner-daily-report.sh /opt/sahjony/openclaw/hostinger-24x7/
+          chmod 755 /opt/sahjony/openclaw/hostinger-24x7/*.sh
+          cd /opt/sahjony/openclaw/hostinger-24x7
+          ./install-sofia-owner-daily-report.sh
+          REMOTE
+      - name: Cleanup
+        if: always()
+        run: rm -f ~/.ssh/hostinger-owner-report

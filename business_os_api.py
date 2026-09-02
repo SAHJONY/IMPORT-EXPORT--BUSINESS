@@ -15,6 +15,23 @@ from insforge_backend import get_backend, persistent_backend_status
 
 app = FastAPI(title="SAHJONY AI-Operated Business OS", version="1.1.0", docs_url=None, redoc_url=None)
 
+OWNER_CONTROL_PROFILE = {
+    "owner_id": "juan-gonzalez",
+    "owner_name": "Juan Gonzalez",
+    "business_role": "business_and_application_owner",
+    "access_tier": "superadmin",
+    "scope": "owner:full",
+    "commercial_access_fee": 0,
+    "data_access": "all_business_and_application_data",
+    "sofia_access": "unlimited_owner_requests",
+    "reporting": {
+        "daily": True,
+        "time": "06:00",
+        "timezone": "America/Chicago",
+        "channel": "whatsapp",
+    },
+}
+
 Priority = Literal["urgent", "high", "normal", "low"]
 
 AUTONOMOUS_DOMAINS = {
@@ -132,6 +149,32 @@ def business_os_policy() -> dict[str, Any]:
         "autonomous_domains": AUTONOMOUS_DOMAINS,
         "fail_closed_actions": FAIL_CLOSED,
         "rule": "Autonomously execute routine reversible work through durable queues and verify evidence; stop before binding, financial, legal, compliance-release, destructive or irreversible actions unless governed authority exists.",
+    }
+
+
+@app.get("/business-os/owner/control")
+def owner_control_profile(authorization: str | None = Header(None, alias="Authorization")) -> dict[str, Any]:
+    """Return the authenticated owner's control contract without exposing secrets."""
+    _owner(authorization)
+    return {
+        "status": "active",
+        **OWNER_CONTROL_PROFILE,
+        "restrictions": [
+            "applicable_law_and_regulation",
+            "security_and_credential_protection",
+            "third_party_privacy_and_consent",
+            "truthfulness_and_evidence_integrity",
+        ],
+        "owner_authority": {
+            "read": "all_authorized_business_data",
+            "export": "all_authorized_business_data",
+            "configure_sofia": True,
+            "create_missions": True,
+            "approve_governed_actions": True,
+            "receive_on_demand_reports": True,
+            "receive_daily_report": True,
+        },
+        "secrets_exposed": False,
     }
 
 
