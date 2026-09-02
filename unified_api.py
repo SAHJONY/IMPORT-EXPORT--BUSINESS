@@ -83,7 +83,7 @@ from fastapi_server import app as core_app
 _RUNTIME_EMPLOYEE_BRIDGE_TOKEN = os.getenv("EMPLOYEE_TOKEN", "").strip() or secrets.token_urlsafe(48)
 os.environ.setdefault("EMPLOYEE_TOKEN", _RUNTIME_EMPLOYEE_BRIDGE_TOKEN)
 
-app = FastAPI(title="SAHJONY LLC Unified Trade API", version="7.4.0", docs_url=None, redoc_url=None)
+app = FastAPI(title="SAHJONY LLC Unified Trade API", version="7.4.1", docs_url=None, redoc_url=None)
 
 @app.middleware("http")
 async def supabase_identity_bridge(request: Request, call_next):
