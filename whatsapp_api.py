@@ -382,6 +382,56 @@ async def _send_text(
 async def _message_seen(message_id: str | None) -> bool:
     if not message_id:
         return False
+
+
+def _same_phone(left: str | None, right: str | None) -> bool:
+    try:
+        return bool(left and right and _normalize_phone(left) == _normalize_phone(right))
+    except HTTPException:
+        return False
+
+
+async def _is_owner_whatsapp(phone: str | None) -> bool:
+    if not phone:
+        return False
+    candidates = [os.getenv("OWNER_WHATSAPP_E164", "").strip()]
+    try:
+        gateways = await get_backend().select(
+            "whatsapp_openclaw_gateways",
+            params={"gateway_id": "eq.hostinger-vps", "limit": "1"},
+        ) or []
+        if gateways:
+            candidates.append(str(gateways[0].get("business_number") or ""))
+    except Exception:
+        pass
+    return any(_same_phone(phone, candidate) for candidate in candidates if candidate)
+
+
+async def _record_owner_private_whatsapp_event(*, phone: str | None, message_id: str | None, text: str, message_type: str, direction: str) -> None:
+    try:
+        await get_backend().insert("business_events", {
+            "event_id": f"evt_{secrets.token_urlsafe(16)}",
+            "event_type": "owner_private_message",
+            "source_type": "whatsapp_owner_private",
+            "source_id": message_id,
+            "trade_case_id": None,
+            "customer_id": None,
+            "lead_id": None,
+            "actor_role": "owner",
+            "actor_id": "juan-gonzalez",
+            "visibility": "owner",
+            "title": "Private owner WhatsApp message",
+            "summary": text[:4000],
+            "action_required": False,
+            "action_label": None,
+            "priority": "normal",
+            "event_status": "closed",
+            "payload": {"phone": phone, "raw_type": message_type, "direction": direction, "public_visibility": False},
+            "created_at": _now(),
+            "updated_at": _now(),
+        })
+    except Exception:
+        pass
     try:
         rows = await get_backend().select("whatsapp_messages", params={"message_id": f"eq.{message_id}", "limit": "1"})
         return bool(rows)
@@ -617,6 +667,9 @@ async def _process_inbound(
         clean_phone = _normalize_phone(phone or "") if phone else ""
     except HTTPException:
         clean_phone = ""
+    if await _is_owner_whatsapp(clean_phone or phone):
+        await _record_owner_private_whatsapp_event(phone=clean_phone or phone, message_id=message_id, text=text, message_type=message_type, direction="inbound")
+        return
     opted_out = bool(text and _opt_out(text))
     lead_id = await _upsert_whatsapp_lead(clean_phone, text, contact_name, opted_out=opted_out) if clean_phone else None
     await _record_inbound_event(clean_phone or phone, message_id, text, message_type, lead_id)
@@ -890,6 +943,16 @@ async def openclaw_event(
             normalized_phone = _normalize_phone(phone)
         except HTTPException:
             normalized_phone = ""
+    owner_private = await _is_owner_whatsapp(normalized_phone or phone)
+    if owner_private:
+        await _record_owner_private_whatsapp_event(
+            phone=normalized_phone or phone,
+            message_id=message_id,
+            text=event.content,
+            message_type=event.message_type,
+            direction=event.direction,
+        )
+        return {"status": "accepted_owner_private", "event_id": event.event_id, "message_id": message_id, "public_visibility": False}
     await _register_inbound_message(
         phone=normalized_phone or phone,
         message_id=message_id,

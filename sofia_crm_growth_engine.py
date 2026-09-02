@@ -60,6 +60,8 @@ def build_growth_queue(accounts: list[dict[str, Any]], intakes: list[dict[str, A
     seen: set[str] = set()
     for source, rows in (("customer_crm", accounts), ("external_research", external), ("whatsapp_crm", whatsapp or [])):
         for lead in rows:
+            if lead.get("owner_private") is True or _text(lead.get("actor_role")).lower() == "owner":
+                continue
             identity = _text(lead.get("customer_id") or lead.get("id") or lead.get("lead_id") or lead.get("email") or lead.get("phone"))
             if not identity or identity in seen:
                 continue
