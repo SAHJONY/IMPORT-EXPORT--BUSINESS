@@ -10,9 +10,8 @@ NATIVE_STATE_DIR="${OPENCLAW_NATIVE_STATE_DIR:-/var/lib/sahjony-openclaw-state}"
 NATIVE_CONFIG_PATH="${OPENCLAW_NATIVE_CONFIG_PATH:-${NATIVE_STATE_DIR}/openclaw.json}"
 
 # Keep the rotation pool deliberately small. These NVIDIA NIMs have produced
-# successful inference on this account/runtime. Do not re-add inventory-only
-# models: an inventory listing does not guarantee account-level serving access.
-# In particular, moonshotai/kimi-k2.6 produced provider 404s in production.
+# successful inference on this account/runtime. Inventory-only candidates are
+# intentionally excluded because listing does not guarantee serving access.
 CANDIDATES=(
   'nvidia/nemotron-3.5-lightning-30b-a3b'
   'nvidia/nemotron-3-super-120b-a12b'
@@ -109,8 +108,6 @@ else
 fi
 ((${#selected[@]} > 0)) || fail no_curated_models_available
 
-# Replace the NVIDIA fallback pool instead of merging old candidates. This
-# prevents removed/invalid inventory-only models from surviving indefinitely.
 NVIDIA_LIST="$(printf '%s\n' "${selected[@]}")" python3 - <<'PY' > "$STATE_DIR/target.json"
 import json, os
 nv=[x for x in os.environ.get('NVIDIA_LIST','').splitlines() if x]
