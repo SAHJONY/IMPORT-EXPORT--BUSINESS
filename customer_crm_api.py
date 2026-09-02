@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field, field_validator
 from auth import verify_owner_token
 from insforge_backend import get_backend
 from crm_campaign_bootstrap import CAMPAIGN, bootstrap_cuba_mipyme_outreach, load_seed
+from sofia_crm_growth_engine import build_growth_queue, growth_health
 
 app=FastAPI(title='SAHJONY Customer CRM',version='1.5.0',docs_url=None,redoc_url=None)
 Role=Literal['owner','employee']
@@ -86,6 +87,10 @@ class ProspectStatusIn(BaseModel):
     next_follow_up_at:str|None=None
     notes:str|None=None
 
+class SofiaPursuitIn(BaseModel):
+    limit:int=Field(default=50,ge=1,le=250)
+    execute_reversible_steps:bool=False
+
 class QualifyIn(BaseModel):
     status:Literal['QUALIFIED','NEEDS_INFO','DISQUALIFIED']
     assigned_employee_id:str|None=None
@@ -101,7 +106,47 @@ async def audit(actor,event,summary,customer_id=None,intake_id=None,payload=None
 @app.get('/crm/health')
 async def health():
     bootstrap=await ensure_campaign_bootstrap()
-    return {'status':'ok','service':'customer-crm','public_intake':True,'fail_closed_promotion':True,'campaign_bootstrap':bootstrap,'external_trade_research_visible':True,'full_record_detail':True}
+    return {'status':'ok','service':'customer-crm','public_intake':True,'fail_closed_promotion':True,'campaign_bootstrap':bootstrap,'external_trade_research_visible':True,'full_record_detail':True,'sofia_growth_engine':growth_health()}
+
+@app.get('/crm/sofia/health')
+async def sofia_crm_health():
+    return growth_health()
+
+async def _sofia_growth_queue():
+    backend=get_backend()
+    accounts=await backend.select('customer_accounts',params={'limit':'5000'}) or []
+    intakes=await backend.select('customer_trade_intakes',params={'limit':'5000'}) or []
+    try: external=await backend.select('external_trade_prospects',params={'organization_id':'eq.org_sahjony_global_trade','limit':'5000'}) or []
+    except Exception: external=[]
+    try: whatsapp=await backend.select('whatsapp_leads',params={'limit':'5000'}) or []
+    except Exception: whatsapp=[]
+    return build_growth_queue(accounts,intakes,external,whatsapp)
+
+@app.get('/crm/sofia/growth-queue')
+async def sofia_growth_queue(x_role:str|None=Header(None,alias='X-Role'),authorization:str|None=Header(None,alias='Authorization'),x_employee_id:str|None=Header(None,alias='X-Employee-Id')):
+    identity(x_role,authorization,x_employee_id)
+    queue=await _sofia_growth_queue()
+    return {'status':'ok','count':len(queue),'queue':queue,'autonomous_messages_sent':0}
+
+@app.post('/crm/sofia/pursue')
+async def sofia_pursue(p:SofiaPursuitIn,x_role:str|None=Header(None,alias='X-Role'),authorization:str|None=Header(None,alias='Authorization'),x_employee_id:str|None=Header(None,alias='X-Employee-Id')):
+    actor=identity(x_role,authorization,x_employee_id)
+    queue=(await _sofia_growth_queue())[:p.limit]
+    selected=[row for row in queue if not row['assessment']['blocked']]
+    if p.execute_reversible_steps:
+        for row in selected:
+            customer_id=row['lead_ref'] if row['source']=='customer_crm' else None
+            await audit(actor,'sofia_lead_pursuit_queued',row['assessment']['next_best_action'],customer_id,payload={
+                'lead_ref':row['lead_ref'],'source':row['source'],'score':row['assessment']['score'],'company':row['company'],
+                'autonomous_outreach_allowed':row['assessment']['autonomous_outreach_allowed'],
+                'message_sent':False,'owner_review_required':not row['assessment']['autonomous_outreach_allowed'],
+            })
+    return {
+        'status':'queued' if p.execute_reversible_steps else 'planned',
+        'evaluated':len(queue),'selected':len(selected),'blocked':len(queue)-len(selected),
+        'actions':selected,'messages_sent':0,
+        'rule':'Sofia may research, score and queue pursuit autonomously; actual outreach requires a consent-compatible route and channel execution evidence.',
+    }
 
 @app.get('/crm/data-health')
 async def data_health():
