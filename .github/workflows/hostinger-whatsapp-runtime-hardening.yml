@@ -5,6 +5,9 @@ on:
     branches: [main]
     paths:
       - 'openclaw/hostinger-24x7/deploy-whatsapp-runtime-hardening.sh'
+      - 'openclaw/sahjony-app-bridge/index.js'
+      - 'openclaw/sahjony-whatsapp-output-guard/index.js'
+      - 'openclaw/sahjony-whatsapp-reply-rescue/index.js'
   workflow_dispatch:
 
 permissions:
