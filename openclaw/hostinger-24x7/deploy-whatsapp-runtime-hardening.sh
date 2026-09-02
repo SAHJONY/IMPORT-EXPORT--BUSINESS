@@ -68,12 +68,10 @@ for plugin in sahjony-whatsapp-output-guard sahjony-whatsapp-reply-rescue sahjon
   find "$dst" -type f -exec chmod 644 {} +
 done
 
-# Install the authoritative health reporter and validated NVIDIA fallback manager.
 [[ -s "$TMP/openclaw/sahjony-app-bridge/health-sidecar.py" ]] || { echo HEALTH_SIDECAR_ASSET_MISSING=1 >&2; exit 27; }
 install -m 755 "$TMP/openclaw/sahjony-app-bridge/health-sidecar.py" /usr/local/sbin/sahjony-openclaw-health-sidecar
 install -m 700 "$ROTATION" /usr/local/sbin/sahjony-nvidia-nim-rotation
 
-# Persist NVIDIA only for the gateway process. Never print the key.
 umask 077
 { printf 'NVIDIA_API_KEY='; tr -d '\r\n' < "$NVIDIA_KEY"; printf '\n'; } > /etc/openclaw-nvidia.env
 chmod 600 /etc/openclaw-nvidia.env
@@ -107,9 +105,6 @@ bcfg.setdefault('gatewayId','hostinger-vps')
 bcfg.setdefault('businessNumber','+12816628581')
 bcfg.setdefault('businessName','SAHJONY LLC')
 bcfg.setdefault('pollIntervalMs',30000)
-# A business WhatsApp inbox must never collapse all people into agent:main:main.
-# Isolate by account + channel + peer so simultaneous customers cannot supersede
-# each other's session writer or share private conversational state.
 session=data.setdefault('session', {})
 session['dmScope']=os.environ['TARGET_DM_SCOPE']
 with open(path,'w',encoding='utf-8') as f:
@@ -129,7 +124,6 @@ grep -Fq 'canonicalConfigPath' "$STATE/extensions/sahjony-app-bridge/index.js"
 grep -Fq 'canonical_openclaw_config' /usr/local/sbin/sahjony-openclaw-health-sidecar
 grep -Fq 'moonshotai/kimi-k2.6' /usr/local/sbin/sahjony-nvidia-nim-rotation && { echo INVALID_KIMI_FALLBACK_STILL_IN_ROTATION=1 >&2; exit 30; } || true
 
-# Replace old inventory-derived fallbacks with the known-good pool.
 /usr/local/sbin/sahjony-nvidia-nim-rotation >/tmp/sahjony-nvidia-rotation-hardening.log 2>&1
 fallback_json="$(oc config get agents.defaults.model.fallbacks --json 2>/dev/null || echo '[]')"
 FALLBACK_JSON="$fallback_json" python3 - <<'PY'
@@ -140,9 +134,9 @@ text='\n'.join(map(str,v))
 assert 'moonshotai/kimi-k2.6' not in text, 'INVALID_KIMI_FALLBACK_PRESENT'
 assert len(v) >= 1, 'NO_NVIDIA_FALLBACKS'
 allowed=(
- 'nvidia/nvidia/nemotron-3.5-lightning-30b-a3b',
- 'nvidia/nvidia/nemotron-3-super-120b-a12b',
- 'nvidia/nvidia/nemotron-3-ultra-550b-a55b',
+ 'nvidia/nemotron-3.5-lightning-30b-a3b',
+ 'nvidia/nemotron-3-super-120b-a12b',
+ 'nvidia/nemotron-3-ultra-550b-a55b',
 )
 assert all(x in allowed for x in v), f'UNVALIDATED_FALLBACK_PRESENT={v}'
 PY
@@ -161,7 +155,6 @@ after="$(oc config get agents.defaults.model.primary 2>/dev/null || true)"
 scope_after="$(oc config get session.dmScope 2>/dev/null || true)"
 [[ "$scope_after" == "$TARGET_DM_SCOPE" ]] || { echo "WHATSAPP_DM_SCOPE_POST_RESTART=$scope_after" >&2; exit 35; }
 
-# Force one authoritative sidecar heartbeat now instead of waiting for its timer.
 systemctl start sahjony-openclaw-health-sidecar.service
 for attempt in 1 2 3 4 5 6 7 8; do
   if ! systemctl is-active --quiet sahjony-openclaw-health-sidecar.service; then break; fi
