@@ -32,6 +32,7 @@ jobs:
           [[ "$OWNER_WHATSAPP_E164" =~ ^\+[1-9][0-9]{7,14}$ ]] || { echo OWNER_WHATSAPP_E164_MISSING_OR_INVALID=1 >&2; exit 5; }
           [[ -s openclaw/hostinger-24x7/SOFIA_SOUL.md ]] || { echo SOFIA_SOUL_MISSING=1 >&2; exit 6; }
           bash -n openclaw/hostinger-24x7/nvidia-nim-rotation.sh
+          [[ -s openclaw/sahjony-whatsapp-output-guard/index.js ]] || { echo OUTPUT_GUARD_MISSING=1 >&2; exit 7; }
       - name: Prepare secure SSH and credentials
         run: |
           set -euo pipefail
@@ -43,17 +44,18 @@ jobs:
           printf '%s' "$OWNER_WHATSAPP_E164" > "$RUNNER_TEMP/owner-number"
           chmod 600 ~/.ssh/hostinger-nvidia-first "$RUNNER_TEMP/nvidia-key" "$RUNNER_TEMP/openai-key" "$RUNNER_TEMP/owner-number"
           ssh-keygen -y -f ~/.ssh/hostinger-nvidia-first >/dev/null
+          tar -czf "$RUNNER_TEMP/sahjony-whatsapp-output-guard.tgz" -C openclaw sahjony-whatsapp-output-guard
       - name: Transfer configuration securely
         run: |
           set -euo pipefail
           opts=(-o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=12 -i ~/.ssh/hostinger-nvidia-first)
-          scp "${opts[@]}" openclaw/hostinger-24x7/nvidia-nim-rotation.sh openclaw/hostinger-24x7/SOFIA_SOUL.md "$RUNNER_TEMP/nvidia-key" "$RUNNER_TEMP/openai-key" "$RUNNER_TEMP/owner-number" "$SSH_USER@$HOST:/root/"
+          scp "${opts[@]}" openclaw/hostinger-24x7/nvidia-nim-rotation.sh openclaw/hostinger-24x7/SOFIA_SOUL.md "$RUNNER_TEMP/sahjony-whatsapp-output-guard.tgz" "$RUNNER_TEMP/nvidia-key" "$RUNNER_TEMP/openai-key" "$RUNNER_TEMP/owner-number" "$SSH_USER@$HOST:/root/"
       - name: Configure and verify NVIDIA-first Sofia
         run: |
           set -euo pipefail
           ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=12 -i ~/.ssh/hostinger-nvidia-first "$SSH_USER@$HOST" 'bash -s' <<'REMOTE'
           set -euo pipefail
-          trap 'rm -f /root/nvidia-key /root/openai-key /root/owner-number /root/SOFIA_SOUL.md /tmp/nvidia-smoke.json /tmp/openai-smoke.json' EXIT
+          trap 'rm -rf /root/nvidia-key /root/openai-key /root/owner-number /root/SOFIA_SOUL.md /root/sahjony-whatsapp-output-guard.tgz /tmp/sahjony-whatsapp-output-guard /tmp/nvidia-smoke.json /tmp/openai-smoke.json' EXIT
           STATE=/var/lib/sahjony-openclaw-state
           CONFIG="$STATE/openclaw.json"
           oc(){ env HOME=/home/node OPENCLAW_HOME=/home/node OPENCLAW_STATE_DIR="$STATE" OPENCLAW_CONFIG_PATH="$CONFIG" openclaw "$@"; }
@@ -83,6 +85,15 @@ jobs:
           The configured private owner WhatsApp number is $owner. Messages from this sender and WhatsApp self-chat are owner-private conversations. Never route their content to public lead/customer views. Juan receives all requests for binding approval.
           EOF
           chmod 600 "$workspace/USER.md"
+
+          # Self-chat normally adds the agent name automatically. An explicit
+          # empty prefix keeps replies human and clean. The output guard blocks
+          # OpenClaw operational notices before they reach WhatsApp.
+          oc config set channels.whatsapp.responsePrefix '' >/dev/null
+          rm -rf /tmp/sahjony-whatsapp-output-guard
+          tar -xzf /root/sahjony-whatsapp-output-guard.tgz -C /tmp
+          oc plugins install /tmp/sahjony-whatsapp-output-guard --force --acknowledge-install-policy-warning >/dev/null
+          oc plugins enable sahjony-whatsapp-output-guard >/dev/null
 
           install -m 700 /root/nvidia-nim-rotation.sh /usr/local/sbin/sahjony-nvidia-nim-rotation
           rm -f /root/nvidia-nim-rotation.sh
@@ -170,7 +181,9 @@ jobs:
           echo SOFIA_NATURAL_CONVERSATION_POLICY=ACTIVE
           echo SOFIA_TECHNICAL_OUTPUT_BOUNDARY=ACTIVE
           echo SOFIA_OWNER_PRIVATE_MODE=ACTIVE
+          echo SOFIA_WHATSAPP_OUTPUT_GUARD=ACTIVE
+          echo SOFIA_WHATSAPP_RESPONSE_PREFIX=EMPTY
           REMOTE
       - name: Cleanup
         if: always()
-        run: rm -f ~/.ssh/hostinger-nvidia-first "$RUNNER_TEMP/nvidia-key" "$RUNNER_TEMP/openai-key" "$RUNNER_TEMP/owner-number"
+        run: rm -f ~/.ssh/hostinger-nvidia-first "$RUNNER_TEMP/nvidia-key" "$RUNNER_TEMP/openai-key" "$RUNNER_TEMP/owner-number" "$RUNNER_TEMP/sahjony-whatsapp-output-guard.tgz"
