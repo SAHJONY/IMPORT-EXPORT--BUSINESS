@@ -3,7 +3,8 @@ import { promisify } from "node:util";
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 
 const execFile = promisify(execFileCb);
-const RESCUE_VERSION = "2.1.0";
+const RESCUE_VERSION = "2.0.0";
+const RESCUE_BUILD = "metadata-less-terminal-recovery";
 const MEMORY_TTL_MS = 30 * 60 * 1000;
 const MAX_HISTORY_MESSAGES = 12;
 const MAX_HISTORY_CHARS = 9000;
@@ -269,7 +270,7 @@ export default definePluginEntry({
         await sendViaOpenClaw(item.sender, generated.text);
         remember(key, "assistant", generated.text);
         clearPending(key);
-        api.logger.warn(`SAHJONY_REPLY_RESCUED version=${RESCUE_VERSION} session=${key} reason=${reason} model=${generated.model} chars=${generated.text.length}`);
+        api.logger.warn(`SAHJONY_REPLY_RESCUED version=${RESCUE_VERSION} build=${RESCUE_BUILD} session=${key} reason=${reason} model=${generated.model} chars=${generated.text.length}`);
       } catch (error) {
         rescuedTurns.delete(item.turnId);
         item.rescuing = false;
@@ -280,8 +281,8 @@ export default definePluginEntry({
     api.on("message_received", async (event, ctx) => {
       if (!isWhatsAppContext(event, ctx)) return;
       pruneState();
-      const sender = String(event.senderId || ctx.senderId || "");
-      const content = String(event.content || "").trim();
+      const sender = String(event?.senderId || ctx?.senderId || "");
+      const content = String(event?.content || "").trim();
       const key = resolveKey(event, ctx);
       if (!sender || !content || !key || sender === businessNumber) return;
 
@@ -334,7 +335,7 @@ export default definePluginEntry({
       }
 
       const key = found.key || resolveKey(event, ctx);
-      const to = String(event.to || ctx.channelId || event.recipientId || "");
+      const to = String(event?.to || ctx?.channelId || event?.recipientId || "");
       if (key && visibleText) remember(key, "assistant", visibleText);
       if (key) clearPending(key);
       if (to) {
@@ -349,6 +350,6 @@ export default definePluginEntry({
       for (const key of [...pending.keys()]) clearPending(key);
     });
 
-    api.logger.info(`SAHJONY reply rescue ready (version=${RESCUE_VERSION}, delay=${rescueDelayMs}ms, context_window=${MAX_HISTORY_MESSAGES}, primary-rescue=openai/gpt-oss-120b, reasoning-output=blocked, metadata-less-terminal-recovery=active)`);
+    api.logger.info(`SAHJONY reply rescue ready (version=${RESCUE_VERSION}, build=${RESCUE_BUILD}, delay=${rescueDelayMs}ms, context_window=${MAX_HISTORY_MESSAGES}, primary-rescue=openai/gpt-oss-120b, reasoning-output=blocked, metadata-less-terminal-recovery=active)`);
   }
 });
