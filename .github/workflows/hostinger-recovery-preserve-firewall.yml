@@ -18,6 +18,7 @@ env:
   VM_ID: '767852'
   HOST: '69.62.68.67'
   USER: root
+  MAINT_USER: sahjony-recovery
 
 jobs:
   recover:
@@ -122,7 +123,7 @@ jobs:
           echo "root_mount=$root_mount" >> "$GITHUB_OUTPUT"
           echo "HOSTINGER_RECOVERY_AUTH_READY=1 root_mount=$root_mount"
 
-      - name: Repair original OS SSH with ephemeral key
+      - name: Diagnose SSH and create ephemeral maintenance user
         id: repair
         shell: bash
         env:
@@ -134,21 +135,89 @@ jobs:
           export SSHPASS="$RECOVERY_PASSWORD"
           PUB_B64="$(base64 -w0 ~/.ssh/hostinger-recovery.pub)"
           sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 \
-            "$USER@$RECOVERY_HOST" "ROOT_MOUNT='$ROOT_MOUNT' PUB_B64='$PUB_B64' bash -s" <<'REMOTE'
+            "$USER@$RECOVERY_HOST" "ROOT_MOUNT='$ROOT_MOUNT' PUB_B64='$PUB_B64' MAINT_USER='$MAINT_USER' bash -s" <<'REMOTE'
           set -euo pipefail
           root="$ROOT_MOUNT"
+          maint="$MAINT_USER"
           pub="$(printf '%s' "$PUB_B64" | base64 -d)"
           test -f "$root/etc/os-release"
-          install -d -m 700 "$root/root/.ssh"
-          touch "$root/root/.ssh/authorized_keys"
-          chmod 600 "$root/root/.ssh/authorized_keys"
-          grep -qxF "$pub" "$root/root/.ssh/authorized_keys" || printf '%s\n' "$pub" >> "$root/root/.ssh/authorized_keys"
-          install -d "$root/etc/ssh/sshd_config.d"
-          cat > "$root/etc/ssh/sshd_config.d/99-sahjony-ephemeral-recovery.conf" <<'EOF'
+
+          echo '--- SSH policy diagnostics before repair ---'
+          grep -RniE '^[[:space:]]*(Include|PermitRootLogin|PubkeyAuthentication|AuthorizedKeysFile|AllowUsers|DenyUsers|AllowGroups|DenyGroups|AuthenticationMethods|Match)[[:space:]]' \
+            "$root/etc/ssh/sshd_config" "$root/etc/ssh/sshd_config.d" 2>/dev/null || true
+
+          if ! chroot "$root" /usr/bin/id "$maint" >/dev/null 2>&1; then
+            chroot "$root" /usr/sbin/useradd -m -s /bin/bash "$maint"
+          fi
+          uid="$(chroot "$root" /usr/bin/id -u "$maint")"
+          gid="$(chroot "$root" /usr/bin/id -g "$maint")"
+          home="$root/home/$maint"
+          install -d -m 700 -o "$uid" -g "$gid" "$home/.ssh"
+          printf '%s\n' "$pub" > "$home/.ssh/authorized_keys"
+          chown "$uid:$gid" "$home/.ssh/authorized_keys"
+          chmod 600 "$home/.ssh/authorized_keys"
+
+          install -d -m 755 "$root/etc/sudoers.d"
+          printf '%s ALL=(ALL) NOPASSWD:ALL\n' "$maint" > "$root/etc/sudoers.d/99-sahjony-recovery"
+          chmod 440 "$root/etc/sudoers.d/99-sahjony-recovery"
+
+          install -d -m 755 "$root/etc/ssh/sshd_config.d"
+          cat > "$root/etc/ssh/sshd_config.d/00-sahjony-ephemeral-maintenance.conf" <<EOF
           PubkeyAuthentication yes
-          PermitRootLogin prohibit-password
+          Match User $maint
+              PubkeyAuthentication yes
+              PasswordAuthentication no
+              AuthorizedKeysFile .ssh/authorized_keys
           EOF
-          chmod 600 "$root/etc/ssh/sshd_config.d/99-sahjony-ephemeral-recovery.conf"
+          chmod 600 "$root/etc/ssh/sshd_config.d/00-sahjony-ephemeral-maintenance.conf"
+
+          # Preserve restrictive AllowUsers policies while explicitly adding only the temporary maintenance user.
+          python3 - "$root" "$maint" <<'PY'
+          import pathlib, re, shutil, sys
+          root=pathlib.Path(sys.argv[1]); user=sys.argv[2]
+          files=[root/'etc/ssh/sshd_config'] + sorted((root/'etc/ssh/sshd_config.d').glob('*.conf'))
+          backup=root/'var/lib/sahjony-recovery/ssh-backup'
+          for p in files:
+              if not p.exists() or p.name == '00-sahjony-ephemeral-maintenance.conf':
+                  continue
+              lines=p.read_text(errors='replace').splitlines()
+              changed=False; in_match=False; out=[]
+              for line in lines:
+                  s=line.strip()
+                  if re.match(r'(?i)^Match\s+', s):
+                      in_match=True
+                  if not in_match and re.match(r'(?i)^AllowUsers\s+', s):
+                      parts=s.split()
+                      if user not in parts[1:]:
+                          indent=line[:len(line)-len(line.lstrip())]
+                          line=indent+'AllowUsers '+' '.join(parts[1:]+[user])
+                          changed=True
+                  if not in_match and re.match(r'(?i)^DenyUsers\s+', s):
+                      parts=s.split()[1:]
+                      if '*' in parts or user in parts:
+                          raise SystemExit(f'UNSAFE_DENYUSERS_POLICY={p}:{s}')
+                  out.append(line)
+              if changed:
+                  rel=p.relative_to(root)
+                  dest=backup/rel
+                  dest.parent.mkdir(parents=True, exist_ok=True)
+                  shutil.copy2(p,dest)
+                  p.write_text('\n'.join(out)+'\n')
+                  print(f'SSH_ALLOWUSERS_EXTENDED={rel}')
+          PY
+
+          sshd="$(find "$root/usr/sbin" "$root/usr/bin" -maxdepth 1 -name sshd -type f -print -quit 2>/dev/null || true)"
+          if [ -n "$sshd" ]; then
+            for d in dev proc sys run; do
+              if [ -d "/$d" ] && [ -d "$root/$d" ] && ! mountpoint -q "$root/$d"; then
+                mount --bind "/$d" "$root/$d" 2>/dev/null || true
+              fi
+            done
+            chroot "$root" /usr/sbin/sshd -t
+            chroot "$root" /usr/sbin/sshd -T -C "user=$maint,host=localhost,addr=127.0.0.1" 2>/dev/null \
+              | grep -E '^(pubkeyauthentication|authorizedkeysfile|allowusers|denyusers|allowgroups|denygroups|authenticationmethods) ' || true
+          fi
+
           if [ -d "$root/etc/systemd/system/multi-user.target.wants" ]; then
             for unit in ssh.service sshd.service; do
               target="$(find "$root/lib/systemd/system" "$root/usr/lib/systemd/system" -maxdepth 1 -name "$unit" -print -quit 2>/dev/null || true)"
@@ -159,7 +228,7 @@ jobs:
               fi
             done
           fi
-          echo 'ORIGINAL_OS_SSH_REPAIRED=1'
+          echo 'ORIGINAL_OS_MAINTENANCE_SSH_REPAIRED=1'
           REMOTE
 
       - name: Exit recovery mode
@@ -172,16 +241,16 @@ jobs:
             "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/recovery" >/tmp/recovery-stop.json
           echo 'HOSTINGER_RECOVERY_MODE_STOP_REQUESTED=1'
 
-      - name: Wait for normal SSH
+      - name: Wait for normal maintenance SSH
         id: normal_ssh
         shell: bash
         run: |
           set -euo pipefail
           connected=false
           for attempt in $(seq 1 60); do
-            echo "NORMAL_SSH_GATE=$attempt"
+            echo "NORMAL_SSH_GATE=$attempt user=$MAINT_USER"
             if out="$(ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=6 \
-              -i ~/.ssh/hostinger-recovery "$USER@$HOST" 'printf SAHJONY_NORMAL_SSH_OK' 2>&1)" \
+              -i ~/.ssh/hostinger-recovery "$MAINT_USER@$HOST" 'sudo -n true && printf SAHJONY_NORMAL_SSH_OK' 2>&1)" \
               && grep -q SAHJONY_NORMAL_SSH_OK <<<"$out"; then
               connected=true
               break
@@ -189,8 +258,8 @@ jobs:
             printf '%s\n' "$out" | tail -n1 || true
             sleep 10
           done
-          [[ "$connected" == true ]] || { echo 'NORMAL_KALI_SSH_UNREACHABLE=1' >&2; exit 11; }
-          echo 'NORMAL_KALI_SSH_AUTHORIZED=1'
+          [[ "$connected" == true ]] || { echo 'NORMAL_MAINTENANCE_SSH_UNREACHABLE=1' >&2; exit 11; }
+          echo 'NORMAL_MAINTENANCE_SSH_AUTHORIZED=1'
 
       - name: Stabilize Docker and OpenClaw
         id: docker
@@ -198,7 +267,7 @@ jobs:
         run: |
           set -euo pipefail
           ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-            -i ~/.ssh/hostinger-recovery "$USER@$HOST" 'bash -s' <<'REMOTE'
+            -i ~/.ssh/hostinger-recovery "$MAINT_USER@$HOST" 'sudo -n bash -s' <<'REMOTE'
           set -euo pipefail
           command -v docker >/dev/null 2>&1 || { echo 'DOCKER_NOT_FOUND=1' >&2; exit 20; }
           systemctl enable docker >/dev/null 2>&1 || true
@@ -235,25 +304,27 @@ jobs:
           [[ "$ready" == true ]] || { echo 'SAHJONY_PUBLIC_WHATSAPP_HEALTH_NOT_READY=1' >&2; exit 40; }
           echo 'SAHJONY_HOSTINGER_OPENCLAW_24X7=READY'
 
-      - name: Remove ephemeral access
+      - name: Remove ephemeral maintenance access
         if: always() && steps.normal_ssh.outcome == 'success'
         shell: bash
         run: |
           set +e
-          PUB_B64="$(base64 -w0 ~/.ssh/hostinger-recovery.pub 2>/dev/null)"
           ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=6 \
-            -i ~/.ssh/hostinger-recovery "$USER@$HOST" "PUB_B64='$PUB_B64' python3 - <<'PY'
-          import base64, os, pathlib
-          p=pathlib.Path('/root/.ssh/authorized_keys')
-          target=base64.b64decode(os.environ['PUB_B64']).decode().strip()
-          if p.exists():
-              lines=[x for x in p.read_text().splitlines() if x.strip()!=target]
-              p.write_text(('\n'.join(lines)+'\n') if lines else '')
-              p.chmod(0o600)
-          cfg=pathlib.Path('/etc/ssh/sshd_config.d/99-sahjony-ephemeral-recovery.conf')
-          if cfg.exists(): cfg.unlink()
-          PY"
+            -i ~/.ssh/hostinger-recovery "$MAINT_USER@$HOST" "sudo -n MAINT_USER='$MAINT_USER' bash -s" <<'REMOTE'
+          set +e
+          maint="$MAINT_USER"
+          rm -f "/home/$maint/.ssh/authorized_keys"
+          rm -f /etc/sudoers.d/99-sahjony-recovery
+          rm -f /etc/ssh/sshd_config.d/00-sahjony-ephemeral-maintenance.conf
+          if [ -d /var/lib/sahjony-recovery/ssh-backup ]; then
+            (cd /var/lib/sahjony-recovery/ssh-backup && find etc/ssh -type f -print0 2>/dev/null | while IFS= read -r -d '' p; do cp -a "$p" "/$p"; done)
+            rm -rf /var/lib/sahjony-recovery/ssh-backup
+          fi
+          passwd -l "$maint" >/dev/null 2>&1 || true
+          systemctl reload ssh 2>/dev/null || systemctl reload sshd 2>/dev/null || true
+          nohup sh -c "sleep 3; userdel -r '$maint' >/dev/null 2>&1 || true" >/dev/null 2>&1 &
           echo 'SAHJONY_EPHEMERAL_ACCESS_REMOVED=1'
+          REMOTE
 
       - name: Ensure recovery mode is off
         if: always()
