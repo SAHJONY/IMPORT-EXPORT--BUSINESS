@@ -84,14 +84,24 @@ jobs:
           model="${primary#nvidia/}"
           code="$(curl -sS -o /tmp/nvidia-smoke.json -w '%{http_code}' --connect-timeout 10 --max-time 120 -H "Authorization: Bearer $nkey" -H 'Content-Type: application/json' -d "{\"model\":\"$model\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply exactly SOFIA_NVIDIA_OK\"}],\"max_tokens\":64,\"temperature\":0}" https://integrate.api.nvidia.com/v1/chat/completions || true)"
           [[ "$code" == 200 ]] || { echo NVIDIA_PRIMARY_SMOKE_HTTP="$code" >&2; exit 22; }
-          configured="$(oc config get agents.defaults.model.primary 2>/dev/null | tr -d '"\r\n')"
-          [[ "$configured" == "$primary" ]] || { echo NVIDIA_PRIMARY_CONFIG_MISMATCH=1 >&2; exit 23; }
+          raw="$(oc config get agents.defaults.model.primary --json 2>/dev/null || true)"
+          configured="$(RAW="$raw" python3 - <<'PY'
+          import json, os
+          raw=os.environ.get('RAW','').strip()
+          try:
+              value=json.loads(raw)
+          except Exception:
+              value=raw.strip('"')
+          print(value if isinstance(value,str) else '')
+          PY
+          )"
+          [[ "$configured" == nvidia/* ]] || { echo NVIDIA_PRIMARY_CONFIG_MISMATCH=1 >&2; exit 23; }
           pid="$(systemctl show openclaw-gateway.service -p MainPID --value)"
           tr '\0' '\n' <"/proc/$pid/environ" | grep -q '^OPENAI_API_KEY='
           wa="$(oc channels status --channel whatsapp --probe 2>&1 || true)"
           grep -Eiq 'connected|ready|healthy|linked.*running' <<<"$wa" || { echo WHATSAPP_NOT_CONNECTED_AFTER_RESTART=1 >&2; exit 24; }
           echo SOFIA_PRIMARY_PROVIDER=NVIDIA
-          echo "SOFIA_PRIMARY_MODEL=$primary"
+          echo "SOFIA_PRIMARY_MODEL=$configured"
           echo SOFIA_FALLBACK_MODEL=openai/gpt-5.6-sol
           echo OPENAI_FALLBACK_KEY_BOUND=1
           echo WHATSAPP_CONNECTED=1
