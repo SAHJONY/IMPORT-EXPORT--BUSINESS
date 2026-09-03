@@ -1,0 +1,4 @@
+Hostinger SOFIA WhatsApp guard-only deployment trigger
+2026-09-03
+Version: 3.0.1
+Scope: owner-vs-customer context classification, source ownership, external commercial leakage fail-closed guard. No model mutation.
