@@ -1,0 +1,50 @@
+name: Hostinger WhatsApp Inbound Reply Probe
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/hostinger-whatsapp-inbound-reply-probe.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  HOST: '69.62.68.67'
+  USER: root
+
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    env:
+      PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Inspect inbound and reply pipeline safely
+        shell: bash
+        run: |
+          set -euo pipefail
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/hostinger-key
+          chmod 600 ~/.ssh/hostinger-key
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=12 -i ~/.ssh/hostinger-key "$USER@$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          echo '=== PUBLIC_HEALTH ==='
+          curl -fsS --max-time 20 https://www.sahjony.com/whatsapp/health || true
+          echo
+          echo '=== RECENT_GATEWAY_EVENTS ==='
+          journalctl -u openclaw-gateway.service --since '-10 minutes' --no-pager -n 500 \
+            | sed -E 's/(sk-[A-Za-z0-9_-]{8})[A-Za-z0-9_-]+/\1<redacted>/g' \
+            | grep -Ei 'whatsapp|inbound|message|reply|send|outbound|error|fail|openai|nvidia|gpt-oss|sofia|duplicate|dedup|guard|allowlist|self|fromme|from_me|jid|chat' || true
+          echo '=== CHANNEL_STATUS ==='
+          export HOME=/home/node
+          export OPENCLAW_STATE_DIR=/var/lib/sahjony-openclaw-state
+          export OPENCLAW_CONFIG_PATH=/var/lib/sahjony-openclaw-state/openclaw.json
+          PATH=/usr/bin:/bin:/usr/sbin:/sbin /usr/bin/openclaw channels status --probe || true
+          echo '=== DEAD_LETTERS ==='
+          PATH=/usr/bin:/bin:/usr/sbin:/sbin /usr/bin/openclaw channels dead-letters 2>&1 | head -n 120 || true
+          echo '=== RECENT_SESSION_FILES ==='
+          find /var/lib/sahjony-openclaw-state/agents/main/sessions -type f -mmin -15 -printf '%TY-%Tm-%Td %TH:%TM:%TS %p\n' 2>/dev/null | sort | tail -n 50 || true
+          REMOTE
+          rm -f ~/.ssh/hostinger-key
