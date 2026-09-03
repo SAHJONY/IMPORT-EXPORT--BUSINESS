@@ -1,0 +1,43 @@
+name: Hostinger WhatsApp Timelock Probe
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  probe:
+    if: contains(github.event.head_commit.message, 'inspect WhatsApp reachout timelock') || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      HOST: 69.62.68.67
+      USER: root
+      PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Inspect timelock source safely
+        shell: bash
+        run: |
+          set -euo pipefail
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/hostinger-key
+          chmod 600 ~/.ssh/hostinger-key
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=12 -i ~/.ssh/hostinger-key "$USER@$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          echo '=== NOW ==='
+          date -u --iso-8601=seconds
+          echo '=== GATEWAY UNIT ==='
+          systemctl cat openclaw-gateway.service || true
+          echo '=== CONFIG MATCHES ==='
+          grep -RniE 'RESTRICT_ALL_COMPANIONS|reachout|timelock|companion|restrict' \
+            /var/lib/sahjony-openclaw-state /etc/openclaw* /usr/local/sbin 2>/dev/null | head -n 300 || true
+          echo '=== PACKAGE MATCHES ==='
+          for d in /usr/lib/node_modules /usr/local/lib/node_modules /root/.local /home/node/.local; do
+            [[ -d "$d" ]] || continue
+            grep -RniE 'RESTRICT_ALL_COMPANIONS|reachout timelock|timelock is active|direct messages are temporarily blocked' "$d" 2>/dev/null | head -n 200 || true
+          done
+          echo '=== RECENT REACHOUT EVENTS ==='
+          journalctl -u openclaw-gateway.service --since '-30 minutes' --no-pager -n 800 \
+            | grep -Ei 'timelock|RESTRICT_ALL_COMPANIONS|delivery-recovery|Sending message|Inbound message|platform_message_not_dispatched' || true
+          REMOTE
+          rm -f ~/.ssh/hostinger-key
