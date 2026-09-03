@@ -15,6 +15,7 @@ SSH_READY=false
 
 log(){ printf '[provider-repair] %s\n' "$*"; }
 fail(){ log "FAIL: $*" >&2; exit 1; }
+need(){ command -v "$1" >/dev/null 2>&1 || fail "missing command: $1"; }
 api(){
   local method="$1" path="$2" data="${3:-}"
   local args=(-fsS -X "$method" -H "Authorization: Bearer $TOKEN" -H 'Accept: application/json')
@@ -62,7 +63,7 @@ echo EPHEMERAL_KEY_REMOVED_FROM_VPS=1
 REMOTE
       [[ $? -eq 0 ]] || cleanup_failed=true
     else
-      log 'SECURITY_CLEANUP_UNVERIFIED: key was attached but normal SSH was never established'
+      log 'SECURITY_CLEANUP_UNVERIFIED: attach action succeeded but normal SSH was never established'
       cleanup_failed=true
     fi
   fi
@@ -85,7 +86,7 @@ trap cleanup EXIT
 [[ -n "$HOST" ]] || fail 'HOSTINGER_HOST is required'
 [[ -n "$TOKEN" ]] || fail 'HOSTINGER_API_TOKEN is required'
 [[ -n "$OPENAI_KEY" ]] || fail 'OPENAI_API_KEY is required'
-for c in curl jq ssh ssh-keygen awk base64 sed grep docker; do command -v "$c" >/dev/null 2>&1 || true; done
+for c in curl jq ssh ssh-keygen awk base64 sed grep; do need "$c"; done
 
 code="$(curl -sS -o /tmp/openai-preflight.json -w '%{http_code}' -H "Authorization: Bearer $OPENAI_KEY" https://api.openai.com/v1/models || true)"
 log "OPENAI_PREFLIGHT_HTTP=$code"
@@ -94,12 +95,15 @@ rm -f /tmp/openai-preflight.json
 
 mkdir -p "$KEY_DIR"
 chmod 700 "$KEY_DIR"
-ssh-keygen -q -t ed25519 -N '' -f "$KEY_PATH" -C "provider-repair-${GITHUB_RUN_ID:-manual}"
+# RSA 3072 is intentional: account-level Hostinger key create/delete was proven
+# against this API/account with this key type, while the previous ED25519 path failed.
+ssh-keygen -q -t rsa -b 3072 -N '' -f "$KEY_PATH" -C "provider-repair-${GITHUB_RUN_ID:-manual}"
 pub="$(cat "$KEY_PATH.pub")"
 name="sahjony-provider-repair-${GITHUB_RUN_ID:-manual}-$(date +%s)"
 create="$(api POST /api/vps/v1/public-keys "$(jq -n --arg name "$name" --arg key "$pub" '{name:$name,key:$key}')")"
 EPHEMERAL_KEY_ID="$(jq -r '.id // empty' <<<"$create")"
 [[ "$EPHEMERAL_KEY_ID" =~ ^[0-9]+$ ]] || fail 'Hostinger public key id missing'
+log 'HOSTINGER_ACCOUNT_PUBLIC_KEY_CREATE=READY'
 
 attach="$(api POST "/api/vps/v1/public-keys/attach/$VM_ID" "$(jq -n --argjson id "$EPHEMERAL_KEY_ID" '{ids:[$id]}')")"
 action_id="$(jq -r '.id // empty' <<<"$attach")"
@@ -107,8 +111,8 @@ action_id="$(jq -r '.id // empty' <<<"$attach")"
 
 attach_ok=false
 for i in $(seq 1 60); do
-  body="$(api GET "/api/vps/v1/virtual-machines/$VM_ID/actions/$action_id")"
-  state="$(jq -r '.state // empty' <<<"$body")"
+  action_body="$(api GET "/api/vps/v1/virtual-machines/$VM_ID/actions/$action_id")"
+  state="$(jq -r '.state // empty' <<<"$action_body")"
   log "SSH_KEY_ATTACH probe=$i state=${state:-unknown}"
   case "$state" in
     success) attach_ok=true; break ;;
@@ -118,10 +122,11 @@ for i in $(seq 1 60); do
 done
 [[ "$attach_ok" == true ]] || fail 'Hostinger SSH-key attach timed out'
 
-attached="$(api GET "/api/vps/v1/virtual-machines/$VM_ID/public-keys")"
-jq -e --argjson id "$EPHEMERAL_KEY_ID" '.data[]? | select(.id == $id)' >/dev/null <<<"$attached" || fail 'Hostinger did not report the key attached to the VM'
+# This Hostinger account returns VPS:2002 Route is not found for the documented
+# VM-attached-public-keys GET route. Treat the successful attach action plus real
+# SSH authentication as the authoritative materialization proof instead.
 KEY_ATTACHED=true
-log 'HOSTINGER_KEY_ATTACH=READY'
+log 'HOSTINGER_KEY_ATTACH_ACTION=SUCCESS'
 
 for i in $(seq 1 36); do
   if ssh_base 'printf SAHJONY_NORMAL_SSH_OK' 2>/dev/null | grep -q SAHJONY_NORMAL_SSH_OK; then
@@ -179,9 +184,9 @@ REMOTE
 
 ready=false
 for i in $(seq 1 24); do
-  body="$(curl -fsS --max-time 20 https://www.sahjony.com/whatsapp/health || true)"
-  printf '%s\n' "$body" | jq '{status,provider,send_ready,gateway_connected,heartbeat_fresh,recovery_issues,backlog_recovery}' 2>/dev/null || true
-  if jq -e '(.provider == "hostinger_openclaw") and ((.gateway_connected // false) == true) and ((.heartbeat_fresh // false) == true) and ((.send_ready // false) == true)' >/dev/null 2>&1 <<<"$body"; then
+  health_body="$(curl -fsS --max-time 20 https://www.sahjony.com/whatsapp/health || true)"
+  printf '%s\n' "$health_body" | jq '{status,provider,send_ready,gateway_connected,heartbeat_fresh,recovery_issues,backlog_recovery}' 2>/dev/null || true
+  if jq -e '(.provider == "hostinger_openclaw") and ((.gateway_connected // false) == true) and ((.heartbeat_fresh // false) == true) and ((.send_ready // false) == true)' >/dev/null 2>&1 <<<"$health_body"; then
     ready=true
     break
   fi
