@@ -4,6 +4,13 @@ on:
   workflow_dispatch:
   schedule:
     - cron: '17 * * * *'
+  push:
+    branches: [main]
+    paths:
+      - 'openclaw/skills/whatsapp-crm-bridge/SKILL.md'
+      - '.github/workflows/hostinger-sofia-self-heal.yml'
+      - 'openclaw/hostinger-24x7/sahjony-crm-bridge.py'
+      - 'openclaw/hostinger-24x7/install-crm-bridge.sh'
 
 permissions:
   contents: read
