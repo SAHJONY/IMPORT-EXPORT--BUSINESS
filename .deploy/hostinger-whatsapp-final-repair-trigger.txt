@@ -1,5 +1,5 @@
 Hostinger WhatsApp final repair trigger
 2026-09-03
-Attempt: sofia-recipient-context-v3.0.1-guard-only
-Targets: SOFIA owner-vs-customer prompt routing, source ownership, fail-closed external commercial leakage guard.
+Attempt: sofia-recipient-context-v3.0.1-resilient-access
+Targets: restore authenticated management access if needed, then deploy SOFIA owner-vs-customer prompt routing, source ownership, and fail-closed external commercial leakage guard.
 Constraint: preserve current OpenClaw model and working transport; no model mutation.
