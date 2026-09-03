@@ -1,0 +1,135 @@
+name: Hostinger Sofia Intelligence Sync
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'openclaw/hostinger-24x7/SOFIA_SOUL.md'
+      - '.github/workflows/hostinger-sofia-intelligence-sync.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hostinger-vm-767852-mutation
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      HOST: '69.62.68.67'
+      SSH_USER: root
+      PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate reviewed Sofia policy
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "${PRIVATE_KEY:-}" ]] || { echo HOSTINGER_SSH_PRIVATE_KEY_MISSING=1 >&2; exit 2; }
+          [[ -s openclaw/hostinger-24x7/SOFIA_SOUL.md ]] || { echo SOFIA_SOUL_MISSING=1 >&2; exit 3; }
+          grep -q '^## 10X commercial intelligence$' openclaw/hostinger-24x7/SOFIA_SOUL.md
+          grep -q 'Collected revenue' openclaw/hostinger-24x7/SOFIA_SOUL.md
+          grep -q 'Research Intelligence Center' openclaw/hostinger-24x7/SOFIA_SOUL.md
+
+      - name: Prepare SSH
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/hostinger-sofia-intelligence
+          chmod 600 ~/.ssh/hostinger-sofia-intelligence
+          ssh-keygen -y -f ~/.ssh/hostinger-sofia-intelligence >/dev/null
+
+      - name: Transfer Sofia policy
+        shell: bash
+        run: |
+          set -euo pipefail
+          scp -q -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=12 \
+            -i ~/.ssh/hostinger-sofia-intelligence \
+            openclaw/hostinger-24x7/SOFIA_SOUL.md \
+            "$SSH_USER@$HOST:/root/SOFIA_SOUL.10x.md"
+
+      - name: Activate policy in canonical OpenClaw workspace
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=12 \
+            -i ~/.ssh/hostinger-sofia-intelligence "$SSH_USER@$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          STATE=/var/lib/sahjony-openclaw-state
+          CONFIG="$STATE/openclaw.json"
+          SOURCE=/root/SOFIA_SOUL.10x.md
+          TS="$(date -u +%Y%m%dT%H%M%SZ)"
+          trap 'rm -f "$SOURCE"' EXIT
+
+          [[ -f "$CONFIG" ]] || { echo OPENCLAW_CONFIG_MISSING=1 >&2; exit 20; }
+          [[ -s "$SOURCE" ]] || { echo SOFIA_POLICY_TRANSFER_MISSING=1 >&2; exit 21; }
+          grep -q '^## 10X commercial intelligence$' "$SOURCE"
+          grep -q 'Collected revenue' "$SOURCE"
+
+          workspace="$(CONFIG="$CONFIG" python3 - <<'PY'
+          import json, os
+          with open(os.environ['CONFIG'], encoding='utf-8') as handle:
+              data=json.load(handle)
+          print(data.get('agents',{}).get('defaults',{}).get('workspace') or '/var/lib/sahjony-openclaw-state/workspace')
+          PY
+          )"
+          install -d -m 700 "$workspace"
+          install -d -m 700 /var/backups/openclaw-sofia-policy
+          if [[ -f "$workspace/SOUL.md" ]]; then
+            cp -a "$workspace/SOUL.md" "/var/backups/openclaw-sofia-policy/SOUL.md.$TS"
+          fi
+          install -m 600 "$SOURCE" "$workspace/SOUL.md"
+
+          if [[ "$workspace" != /home/node/.openclaw/workspace ]]; then
+            install -d -m 700 /home/node/.openclaw/workspace
+            install -m 600 "$SOURCE" /home/node/.openclaw/workspace/SOUL.md
+          fi
+
+          grep -q '^## 10X commercial intelligence$' "$workspace/SOUL.md"
+          grep -q 'Research Intelligence Center is the prioritization layer' "$workspace/SOUL.md"
+          grep -q 'Collected revenue' "$workspace/SOUL.md"
+
+          systemctl restart openclaw-gateway.service
+          sleep 12
+          systemctl is-active --quiet openclaw-gateway.service
+          echo SOFIA_10X_POLICY_INSTALLED=1
+          echo SOFIA_CANONICAL_WORKSPACE="$workspace"
+          REMOTE
+
+      - name: Verify production WhatsApp heartbeat
+        shell: bash
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 9); do
+            health="$(curl -fsS --max-time 20 https://www.sahjony.com/whatsapp/health || true)"
+            if HEALTH="$health" python3 - <<'PY'
+          import json, os, sys
+          try:
+              data=json.loads(os.environ.get('HEALTH') or '{}')
+          except Exception:
+              sys.exit(1)
+          host=data.get('hostinger_openclaw') or {}
+          ok=(data.get('send_ready') is True and host.get('gateway_id')=='hostinger-vps' and host.get('connected') is True and host.get('heartbeat_fresh') is True)
+          print(json.dumps({'ready':ok,'status':data.get('status'),'gateway_id':host.get('gateway_id'),'connected':host.get('connected'),'heartbeat_fresh':host.get('heartbeat_fresh')}))
+          sys.exit(0 if ok else 1)
+          PY
+            then
+              echo SOFIA_WHATSAPP_AFTER_POLICY_SYNC=READY
+              exit 0
+            fi
+            sleep 10
+          done
+          echo SOFIA_WHATSAPP_HEARTBEAT_NOT_READY=1 >&2
+          exit 30
+
+      - name: Cleanup
+        if: always()
+        shell: bash
+        run: rm -f ~/.ssh/hostinger-sofia-intelligence
