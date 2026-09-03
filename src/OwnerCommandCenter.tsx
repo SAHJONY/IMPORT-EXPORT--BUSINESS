@@ -59,6 +59,7 @@ export default function OwnerCommandCenter(){
 
   useEffect(()=>{void refresh();const id=window.setInterval(()=>void refresh(),60000);return()=>window.clearInterval(id)},[]);
   const healthy=useMemo(()=>Object.values(health).filter(item=>item.ok).length,[health]);
+  const readiness=probes.length?Math.round((healthy/probes.length)*100):0;
 
   return <main style={s.page}>
     <header style={s.header}>
@@ -78,8 +79,8 @@ export default function OwnerCommandCenter(){
       </div>
       <div style={s.scoreCard}>
         <div style={s.scoreLabel}>LIVE SYSTEM READINESS</div>
-        <div style={s.score}>{health?healthy:0}<span style={s.scoreSmall}> / {probes.length}</span></div>
-        <div style={s.muted}>{checkedAt?`Last checked ${checkedAt}`:'Checking production services…'}</div>
+        <div style={s.score}>{readiness}<span style={s.scoreSmall}>%</span></div>
+        <div style={s.muted}>{healthy} of {probes.length} critical services ready{checkedAt?` · checked ${checkedAt}`:''}</div>
       </div>
     </section>
 
