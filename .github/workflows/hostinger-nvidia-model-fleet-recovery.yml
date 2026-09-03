@@ -29,7 +29,7 @@ jobs:
           chmod 600 ~/.ssh/nvidia-recovery
           ssh-keygen -y -f ~/.ssh/nvidia-recovery >/dev/null
 
-      - name: Probe current NVIDIA fleet and promote first healthy model
+      - name: Probe NVIDIA API directly and promote healthy fleet
         shell: bash
         run: |
           set -euo pipefail
@@ -39,87 +39,158 @@ jobs:
           ROOTCFG=/root/.openclaw/openclaw.json
           test -f "$CANON"
 
-          CANDIDATES=(
-            'nvidia/nemotron-3-super-120b-a12b'
-            'nvidia/nemotron-3.5-lightning-30b-a3b'
-            'nvidia/moonshotai/kimi-k2.6'
-            'nvidia/minimaxai/minimax-m3'
-            'nvidia/nemotron-3-ultra-550b-a55b'
-          )
+          # Read the already-provisioned NVIDIA credential locally on the VPS. Never print it.
+          NVIDIA_KEY="$(python3 - <<'PY'
+          import pathlib,re,subprocess
+          candidates=[
+            pathlib.Path('/etc/systemd/system/openclaw-gateway.service.d/30-nvidia-auth.conf'),
+            pathlib.Path('/etc/systemd/system/openclaw-gateway.service.d/30-nvidia.conf'),
+          ]
+          value=''
+          for p in candidates:
+              if not p.exists(): continue
+              text=p.read_text(errors='ignore')
+              m=re.search(r'NVIDIA_API_KEY=([^"\n]+)',text)
+              if m:
+                  value=m.group(1).strip(); break
+          if not value:
+              try:
+                  text=subprocess.check_output(['systemctl','show','openclaw-gateway.service','-p','Environment','--value'],text=True)
+                  m=re.search(r'(?:^|\s)NVIDIA_API_KEY=([^\s]+)',text)
+                  if m: value=m.group(1).strip('"')
+              except Exception:
+                  pass
+          print(value,end='')
+          PY
+          )"
+          [[ -n "$NVIDIA_KEY" ]] || { echo NVIDIA_RUNTIME_KEY_MISSING=1 >&2; exit 10; }
+          export NVIDIA_KEY
+
+          # Discover currently offered models and test preferred candidates against NVIDIA's API itself.
+          python3 - <<'PY' >/tmp/nvidia-fleet-selection.json
+          import json,os,re,urllib.request,urllib.error,time
+          key=os.environ['NVIDIA_KEY']
+          base='https://integrate.api.nvidia.com/v1'
+          headers={'Authorization':f'Bearer {key}','Content-Type':'application/json','Accept':'application/json'}
+
+          req=urllib.request.Request(base+'/models',headers=headers,method='GET')
+          try:
+              with urllib.request.urlopen(req,timeout=20) as r:
+                  raw=json.load(r)
+          except Exception as e:
+              raise SystemExit('NVIDIA_MODELS_DISCOVERY_FAILED:'+type(e).__name__)
+
+          ids=[]
+          for row in raw.get('data',[]) if isinstance(raw,dict) else []:
+              if isinstance(row,dict) and isinstance(row.get('id'),str): ids.append(row['id'])
+
+          prefs=[
+            'nemotron-3-super-120b-a12b',
+            'nemotron-3.5-lightning-30b-a3b',
+            'kimi-k2.6',
+            'minimax-m3',
+            'nemotron-3-ultra-550b-a55b',
+          ]
+          ordered=[]
+          for needle in prefs:
+              for mid in ids:
+                  if needle.lower() in mid.lower() and mid not in ordered:
+                      ordered.append(mid)
+
+          # Include a few current chat/instruct NVIDIA models as resilience candidates if preferred names changed.
+          if len(ordered)<3:
+              for mid in ids:
+                  low=mid.lower()
+                  if any(x in low for x in ('nemotron','kimi','minimax')) and mid not in ordered:
+                      ordered.append(mid)
+                  if len(ordered)>=8: break
+
+          results=[]
+          healthy=[]
+          for mid in ordered[:8]:
+              payload=json.dumps({
+                  'model':mid,
+                  'messages':[{'role':'user','content':'Reply with exactly: OK'}],
+                  'max_tokens':12,
+                  'temperature':0
+              }).encode()
+              req=urllib.request.Request(base+'/chat/completions',data=payload,headers=headers,method='POST')
+              started=time.time(); status=None; ok=False; err=''
+              try:
+                  with urllib.request.urlopen(req,timeout=25) as r:
+                      status=r.status
+                      body=json.load(r)
+                      text=''
+                      try: text=body['choices'][0]['message']['content'] or ''
+                      except Exception: pass
+                      ok=(status==200 and bool(text.strip()))
+              except urllib.error.HTTPError as e:
+                  status=e.code; err='HTTP_'+str(e.code)
+              except Exception as e:
+                  err=type(e).__name__
+              ms=round((time.time()-started)*1000)
+              results.append({'id':mid,'status':status,'ok':ok,'latency_ms':ms,'error':err})
+              if ok: healthy.append(mid)
+              if len(healthy)>=3: break
+
+          out={'discovered_count':len(ids),'tested':results,'healthy':healthy}
+          print(json.dumps(out,separators=(',',':')))
+          if not healthy:
+              raise SystemExit(21)
+          PY
+
+          python3 - <<'PY'
+          import json
+          d=json.load(open('/tmp/nvidia-fleet-selection.json'))
+          print('NVIDIA_DISCOVERED_MODELS='+str(d.get('discovered_count',0)))
+          for r in d.get('tested',[]):
+              print('NVIDIA_DIRECT_PROBE id=%s status=%s ok=%s latency_ms=%s error=%s' % (r.get('id'),r.get('status'),str(r.get('ok')).lower(),r.get('latency_ms'),r.get('error') or '-'))
+          for x in d.get('healthy',[]): print('NVIDIA_MODEL_HEALTHY='+x)
+          PY
 
           cp -a "$CANON" "$CANON.before-nvidia-fleet-recovery"
-          selected=''
-          healthy=()
 
-          for model in "${CANDIDATES[@]}"; do
-            tmp="/tmp/openclaw-model-probe-${RANDOM}.json"
-            python3 - "$CANON" "$tmp" "$model" <<'PY'
+          python3 - "$CANON" /tmp/nvidia-fleet-selection.json <<'PY'
           import json,sys
-          src,tmp,model=sys.argv[1:]
-          d=json.load(open(src))
-          d.setdefault('agents',{}).setdefault('defaults',{})['model']={'primary':model,'fallbacks':[]}
-          with open(tmp,'w') as f:
-              json.dump(d,f)
-          PY
-            set +e
-            out="$(OPENCLAW_CONFIG="$tmp" timeout 35 openclaw models status --probe 2>&1)"
-            rc=$?
-            set -e
-            rm -f "$tmp"
-            safe="$(printf '%s\n' "$out" | sed -E 's/(nvapi-[A-Za-z0-9_-]{6})[A-Za-z0-9_-]+/\1***/g; s/(sk-[A-Za-z0-9_-]{8})[A-Za-z0-9_-]+/\1***/g')"
-            echo "=== PROBE $model rc=$rc ==="
-            printf '%s\n' "$safe" | tail -n 60
-
-            if MODEL="$model" PROBE="$out" python3 - <<'PY'
-          import os,re,sys
-          model=os.environ['MODEL']
-          text=os.environ['PROBE']
-          bad=re.compile(r'\b(401|403|404|410|429|timeout|timed out|auth\b|unavailable|error\b|failed\b|gone\b)\b',re.I)
-          lines=[ln for ln in text.splitlines() if model in ln]
-          # A healthy probe line normally contains the candidate plus an affirmative latency/status,
-          # while failures surface one of the hard-failure markers above.
-          ok=bool(lines) and not bad.search('\n'.join(lines[-6:])) and not bad.search(text[-2500:])
-          sys.exit(0 if ok else 1)
-          PY
-            then
-              healthy+=("$model")
-              [[ -n "$selected" ]] || selected="$model"
-              echo "NVIDIA_MODEL_HEALTHY=$model"
-            else
-              echo "NVIDIA_MODEL_REJECTED=$model"
-            fi
-          done
-
-          [[ -n "$selected" ]] || { echo NVIDIA_NO_HEALTHY_MODEL_FOUND=1 >&2; exit 20; }
-
-          fallbacks=()
-          for model in "${healthy[@]}"; do
-            [[ "$model" == "$selected" ]] || fallbacks+=("$model")
-          done
-
-          SELECTED="$selected" FALLBACKS="$(IFS=,; echo "${fallbacks[*]}")" python3 - "$CANON" <<'PY'
-          import json,os,sys
-          p=sys.argv[1]
-          selected=os.environ['SELECTED']
-          fallbacks=[x for x in os.environ.get('FALLBACKS','').split(',') if x]
-          d=json.load(open(p))
-          old={'nvidia/openai/gpt-oss-120b','openai/gpt-oss-120b'}
-          def replace(v):
-              if isinstance(v,dict): return {k:replace(x) for k,x in v.items()}
-              if isinstance(v,list): return [replace(x) for x in v]
-              if isinstance(v,str) and v in old: return selected
+          cfg,sel=sys.argv[1:]
+          d=json.load(open(cfg)); s=json.load(open(sel))
+          healthy=s['healthy']
+          def ref(api_id):
+              # OpenClaw provider reference = nvidia/<catalog id>, except NVIDIA-owned
+              # IDs that are already represented by the provider-qualified reference.
+              if api_id.startswith('nvidia/'):
+                  return api_id
+              return 'nvidia/'+api_id
+          refs=[ref(x) for x in healthy]
+          primary=refs[0]; fallbacks=refs[1:]
+          old={'nvidia/openai/gpt-oss-120b','openai/gpt-oss-120b','openai/gpt-5.5'}
+          def scrub(v):
+              if isinstance(v,dict): return {k:scrub(x) for k,x in v.items()}
+              if isinstance(v,list): return [scrub(x) for x in v if not (isinstance(x,str) and x in old)]
+              if isinstance(v,str) and v in old: return primary
               return v
-          d=replace(d)
-          d.setdefault('agents',{}).setdefault('defaults',{})['model']={'primary':selected,'fallbacks':fallbacks}
-          with open(p,'w') as f:
+          d=scrub(d)
+          agents=d.setdefault('agents',{})
+          agents.setdefault('defaults',{})['model']={'primary':primary,'fallbacks':fallbacks}
+          entries=agents.get('entries')
+          if isinstance(entries,dict) and isinstance(entries.get('main'),dict):
+              entries['main']['model']={'primary':primary,'fallbacks':fallbacks}
+          elif isinstance(entries,list):
+              for row in entries:
+                  if isinstance(row,dict) and row.get('id')=='main':
+                      row['model']={'primary':primary,'fallbacks':fallbacks}
+          with open(cfg,'w') as f:
               json.dump(d,f,indent=2); f.write('\n')
+          print('NVIDIA_OPENCLAW_PRIMARY='+primary)
+          print('NVIDIA_OPENCLAW_FALLBACKS='+','.join(fallbacks))
           PY
+
           chmod 600 "$CANON"
           install -d -m 700 /root/.openclaw
           cp "$CANON" "$ROOTCFG"
           chmod 600 "$ROOTCFG"
 
-          # Invalid OpenAI credential is deliberately removed from the live gateway until revalidated.
+          # The existing OpenAI key produced HTTP 401. Keep OpenAI out of the live path until revalidated.
           rm -f /etc/systemd/system/openclaw-gateway.service.d/20-openai-auth.conf
           install -d -m 755 /etc/systemd/system/openclaw-gateway.service.d
           cat >/etc/systemd/system/openclaw-gateway.service.d/21-canonical-state.conf <<EOF
@@ -134,26 +205,33 @@ jobs:
           python3 - <<'PY'
           import json
           d=json.load(open('/tmp/nvidia-recovery-validate.json'))
-          if d.get('valid') is False or d.get('ok') is False:
-              raise SystemExit('OPENCLAW_CONFIG_INVALID')
+          if d.get('valid') is False or d.get('ok') is False: raise SystemExit('OPENCLAW_CONFIG_INVALID')
           print('OPENCLAW_CONFIG_VALID=1')
           PY
 
           systemctl daemon-reload
           systemctl restart openclaw-gateway.service
-          sleep 12
+          sleep 14
           systemctl is-active --quiet openclaw-gateway.service
-
-          echo "NVIDIA_PRIMARY_SELECTED=$selected"
-          printf 'NVIDIA_FALLBACKS_SELECTED=%s\n' "$(IFS=,; echo "${fallbacks[*]}")"
-          echo OPENAI_BAD_CREDENTIAL_REMOVED_FROM_GATEWAY=1
+          echo OPENCLAW_GATEWAY_ACTIVE=1
+          echo OPENAI_INVALID_CREDENTIAL_REMOVED_FROM_LIVE_PATH=1
           echo ANTHROPIC_DISABLED=1
 
-          journalctl -u openclaw-gateway.service --since '-2 minutes' --no-pager -n 240 \
-            | grep -Ei 'agent model|whatsapp|listening|connected|error|invalid|plugin' \
-            | tail -n 120 || true
+          # Verify runtime uses a non-EOL model and WhatsApp is listening after restart.
+          python3 - "$CANON" <<'PY'
+          import json,sys
+          d=json.load(open(sys.argv[1]))
+          m=((d.get('agents') or {}).get('defaults') or {}).get('model') or {}
+          p=m.get('primary','')
+          assert p and 'gpt-oss-120b' not in p and 'openai/gpt-5.5' not in p, m
+          print('RUNTIME_PRIMARY='+p)
+          print('RUNTIME_FALLBACK_COUNT='+str(len(m.get('fallbacks') or [])))
+          PY
 
-          journalctl -u openclaw-gateway.service --since '-2 minutes' --no-pager \
+          journalctl -u openclaw-gateway.service --since '-3 minutes' --no-pager -n 350 \
+            | grep -Ei 'agent model|whatsapp|listening|connected|410|401|error|invalid' \
+            | tail -n 160 || true
+          journalctl -u openclaw-gateway.service --since '-3 minutes' --no-pager \
             | grep -q 'Listening for WhatsApp inbound messages'
           echo WHATSAPP_LISTENING=1
           echo SAHJONY_NVIDIA_MODEL_FLEET_RECOVERED=1
