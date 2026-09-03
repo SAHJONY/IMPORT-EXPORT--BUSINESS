@@ -32,6 +32,7 @@ jobs:
       HOST: '69.62.68.67'
       USER: root
       PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+      CRM_BRIDGE_SECRET: ${{ secrets.OPENCLAW_APP_BRIDGE_SECRET || secrets.SAHJONY_APP_BRIDGE_SECRET }}
     steps:
       - uses: actions/checkout@v4
 
@@ -55,6 +56,36 @@ jobs:
             sleep 10
           done
           [[ "$ready" == true ]] || { echo HOSTINGER_CRM_BRIDGE_SSH_UNAVAILABLE=1 >&2; exit 3; }
+
+      - name: Provision CRM bridge authorization secret
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ ${#CRM_BRIDGE_SECRET} -ge 24 ]] || { echo CRM_BRIDGE_AUTHORIZATION_SECRET_MISSING=1 >&2; exit 4; }
+          umask 077
+          secret_file="$(mktemp)"
+          printf '%s' "$CRM_BRIDGE_SECRET" > "$secret_file"
+          scp -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 -i ~/.ssh/hostinger-crm-bridge "$secret_file" "$USER@$HOST:/tmp/sahjony-crm-bridge-secret"
+          rm -f "$secret_file"
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 -i ~/.ssh/hostinger-crm-bridge "$USER@$HOST" 'python3 - <<'"'"'PY'"'"'
+          from pathlib import Path
+
+          incoming = Path("/tmp/sahjony-crm-bridge-secret")
+          target = Path("/opt/sahjony/openclaw/.env")
+          secret = incoming.read_text()
+          if len(secret.strip()) < 24:
+              raise SystemExit("invalid CRM bridge secret")
+          target.parent.mkdir(parents=True, exist_ok=True)
+          rows = []
+          if target.exists():
+              rows = target.read_text(errors="ignore").splitlines()
+          kept = [row for row in rows if not row.startswith("OPENCLAW_APP_BRIDGE_SECRET=") and not row.startswith("SAHJONY_APP_BRIDGE_SECRET=")]
+          kept.append("OPENCLAW_APP_BRIDGE_SECRET=" + secret.strip())
+          target.write_text("\n".join(kept) + "\n")
+          target.chmod(0o600)
+          incoming.unlink(missing_ok=True)
+          PY'
+          echo CRM_BRIDGE_AUTHORIZATION_SECRET_PROVISIONED=1
 
       - name: Install tool and native OpenClaw RFQ skill
         shell: bash
@@ -81,12 +112,22 @@ jobs:
           python3 -m py_compile /usr/local/sbin/sahjony-crm-bridge
           test -s /home/node/.openclaw/skills/whatsapp-crm-bridge/SKILL.md
           grep -q 'Machine-readable RFQ metadata' /home/node/.openclaw/skills/whatsapp-crm-bridge/SKILL.md
-          /usr/local/sbin/sahjony-crm-bridge doctor
+          doctor_json="$(/usr/local/sbin/sahjony-crm-bridge doctor)"
+          python3 - "$doctor_json" <<'PY'
+          import json, sys
+          data = json.loads(sys.argv[1])
+          if data.get("status") != "ok" or (data.get("health") or {}).get("status") != "ok":
+              raise SystemExit("CRM bridge doctor is not healthy")
+          if data.get("pending_count") != 0:
+              raise SystemExit("CRM bridge queue is not empty")
+          PY
           test -s /var/lib/sahjony-crm-bridge/status.json
-          echo SAHJONY_HOSTINGER_CRM_RFQ_BRIDGE_INSTALLED=1
+          echo SAHJONY_HOSTINGER_CRM_RFQ_BRIDGE_HEALTHY=1
           REMOTE
 
       - name: Cleanup local key
         if: always()
         shell: bash
-        run: rm -f ~/.ssh/hostinger-crm-bridge
+        run: |
+          rm -f ~/.ssh/hostinger-crm-bridge
+          find /tmp -maxdepth 1 -name 'tmp.*' -user "$(id -u)" -delete 2>/dev/null || true
