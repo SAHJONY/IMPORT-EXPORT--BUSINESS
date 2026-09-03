@@ -23,8 +23,18 @@ jobs:
         run: |
           set -euo pipefail
           BODY="$(curl -fsS --retry 3 --retry-delay 5 --max-time 30 https://www.sahjony.com/whatsapp/health || true)"
-          printf '%s\n' "$BODY" | jq '{status,provider,hostinger_independent_runtime,hostinger_openclaw}' 2>/dev/null || true
-          if jq -e '(.hostinger_independent_runtime // false) == true or ((.hostinger_openclaw.connected // false) == true)' >/dev/null 2>&1 <<<"$BODY"; then
+          printf '%s\n' "$BODY" | jq '{status,provider,send_ready,gateway_connected,heartbeat_fresh,hostinger_independent_runtime,hostinger_openclaw,recovery_issues,backlog_recovery}' 2>/dev/null || true
+
+          # Fortune-500 readiness gate: transport presence alone is NOT healthy.
+          # Require the authoritative Hostinger/OpenClaw provider, a live gateway,
+          # fresh heartbeat, and actual outbound send readiness.
+          if jq -e '
+            (.status == "ok") and
+            (.provider == "hostinger_openclaw") and
+            ((.gateway_connected // .hostinger_openclaw.connected // false) == true) and
+            ((.heartbeat_fresh // .hostinger_openclaw.heartbeat_fresh // false) == true) and
+            ((.send_ready // false) == true)
+          ' >/dev/null 2>&1 <<<"$BODY"; then
             echo 'healthy=true' >> "$GITHUB_OUTPUT"
           else
             echo 'healthy=false' >> "$GITHUB_OUTPUT"
@@ -43,6 +53,6 @@ jobs:
                 repo: context.repo.repo,
                 title,
                 labels: ['whatsapp-recovery'],
-                body: 'Automated watchdog detected that Hostinger-specific WhatsApp readiness is false. Authoritative transport is Hostinger + Docker + OpenClaw. Use Hostinger WhatsApp Direct Rescue first, then Recovery V7 if non-destructive recovery is exhausted. Meta Cloud is not part of the readiness gate. No secrets were exposed.'
+                body: 'Automated watchdog detected that Hostinger WhatsApp is not transaction-ready. Health now requires provider=hostinger_openclaw, gateway connected, fresh heartbeat, and send_ready=true. Transport connectivity alone is not considered healthy. Check OpenClaw model authentication (OpenAI), outbound send path, and runtime state. Anthropic remains disabled. No secrets were exposed.'
               });
             }
