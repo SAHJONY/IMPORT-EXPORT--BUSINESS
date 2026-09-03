@@ -7,6 +7,7 @@ on:
       - '.github/workflows/hostinger-public-key-api-probe.yml'
   workflow_dispatch:
 
+# Non-destructive API capability probe. No VPS mutation.
 permissions:
   contents: read
 
