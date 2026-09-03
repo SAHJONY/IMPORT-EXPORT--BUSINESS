@@ -1,0 +1,158 @@
+name: Hostinger OpenClaw Native Provider Cutover
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/hostinger-openclaw-native-provider-cutover.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hostinger-vm-767852-mutation
+  cancel-in-progress: false
+
+env:
+  HOST: '69.62.68.67'
+  USER: root
+
+jobs:
+  cutover:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+    steps:
+      - name: Validate management path and OpenAI
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "${PRIVATE_KEY:-}" ]]
+          [[ -n "${OPENAI_API_KEY:-}" ]]
+          code="$(curl -sS -o /tmp/openai.json -w '%{http_code}' -H "Authorization: Bearer $OPENAI_API_KEY" https://api.openai.com/v1/models || true)"
+          rm -f /tmp/openai.json
+          echo "OPENAI_PREFLIGHT_HTTP=$code"
+          [[ "$code" == 200 ]]
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/hostinger-key
+          chmod 600 ~/.ssh/hostinger-key
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=12 -i ~/.ssh/hostinger-key "$USER@$HOST" 'printf HOSTINGER_DIRECT_SSH_READY'
+
+      - name: Make native OpenClaw the sole gateway owner
+        shell: bash
+        run: |
+          set -euo pipefail
+          OPENAI_B64="$(printf '%s' "$OPENAI_API_KEY" | base64 -w0)"
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=12 -i ~/.ssh/hostinger-key "$USER@$HOST" "OPENAI_B64='$OPENAI_B64' bash -s" <<'REMOTE'
+          set -euo pipefail
+          stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+          key="$(printf '%s' "$OPENAI_B64" | base64 -d)"
+          [[ -n "$key" ]]
+
+          # Native systemd runtime is authoritative. Preserve rollback copies.
+          install -d -m 700 /var/backups/sahjony-openclaw
+          for f in /etc/openclaw-openai.env /etc/openclaw-gateway.env; do
+            [[ -f "$f" ]] && cp -a "$f" "/var/backups/sahjony-openclaw/$(basename "$f").$stamp" || true
+          done
+
+          # Dedicated OpenAI auth file: one key, no Anthropic.
+          tmp="$(mktemp)"
+          printf 'OPENAI_API_KEY=%s\n' "$key" > "$tmp"
+          install -m 600 "$tmp" /etc/openclaw-openai.env
+          rm -f "$tmp"
+
+          # Remove Anthropic from the general gateway environment if present.
+          if [[ -f /etc/openclaw-gateway.env ]]; then
+            tmp="$(mktemp)"
+            grep -vE '^ANTHROPIC_API_KEY=' /etc/openclaw-gateway.env > "$tmp" || true
+            install -m 600 "$tmp" /etc/openclaw-gateway.env
+            rm -f "$tmp"
+          fi
+          ! grep -q '^ANTHROPIC_API_KEY=' /etc/openclaw-openai.env
+          if [[ -f /etc/openclaw-gateway.env ]]; then ! grep -q '^ANTHROPIC_API_KEY=' /etc/openclaw-gateway.env; fi
+
+          # Docker OpenClaw is standby only and must never contend for 18789.
+          if command -v docker >/dev/null 2>&1; then
+            ids="$(docker ps -aq --filter name=openclaw 2>/dev/null || true)"
+            if [[ -n "$ids" ]]; then
+              while read -r cid; do
+                [[ -n "$cid" ]] || continue
+                docker update --restart=no "$cid" >/dev/null 2>&1 || true
+                docker stop -t 10 "$cid" >/dev/null 2>&1 || true
+              done <<<"$ids"
+            fi
+          fi
+
+          systemctl daemon-reload
+          systemctl enable openclaw-gateway.service sahjony-openclaw-runtime-guardian.service >/dev/null
+          systemctl restart openclaw-gateway.service
+          systemctl restart sahjony-openclaw-runtime-guardian.service
+
+          for i in $(seq 1 30); do
+            systemctl is-active --quiet openclaw-gateway.service && ss -ltnp 2>/dev/null | grep -q ':18789' && break
+            sleep 2
+          done
+          systemctl is-active --quiet openclaw-gateway.service
+          systemctl is-active --quiet sahjony-openclaw-runtime-guardian.service
+
+          # Exactly one listener owns 18789 and it is the native OpenClaw process tree.
+          listener_count="$(ss -ltnp 2>/dev/null | grep -c ':18789' || true)"
+          echo "PORT_18789_LISTENER_COUNT=$listener_count"
+          [[ "$listener_count" == 1 ]]
+          ss -ltnp 2>/dev/null | grep ':18789' | grep -q 'openclaw-gatewa'
+          if command -v docker >/dev/null 2>&1; then
+            ! docker ps --format '{{.Names}} {{.Ports}}' | grep -Ei 'openclaw.*18789|18789.*openclaw'
+          fi
+
+          # Verify native OpenAI credential with a real inference, without exposing it.
+          runtime_key="$(sed -n 's/^OPENAI_API_KEY=//p' /etc/openclaw-openai.env | head -n1)"
+          [[ -n "$runtime_key" ]]
+          code="$(curl -sS -o /tmp/openai-runtime.json -w '%{http_code}' \
+            -H "Authorization: Bearer $runtime_key" \
+            -H 'Content-Type: application/json' \
+            --data '{"model":"gpt-4.1-mini","input":"Reply with exactly SAHJONY_RUNTIME_OK","max_output_tokens":16}' \
+            https://api.openai.com/v1/responses || true)"
+          unset runtime_key key OPENAI_B64
+          echo "OPENAI_NATIVE_RUNTIME_HTTP=$code"
+          [[ "$code" == 200 ]]
+          grep -q 'SAHJONY_RUNTIME_OK' /tmp/openai-runtime.json
+          rm -f /tmp/openai-runtime.json
+
+          env HOME=/home/node OPENCLAW_HOME=/home/node OPENCLAW_STATE_DIR=/var/lib/sahjony-openclaw-state OPENCLAW_CONFIG_PATH=/var/lib/sahjony-openclaw-state/openclaw.json openclaw gateway status --deep >/tmp/openclaw-status.txt 2>&1 || true
+          sed -n '1,120p' /tmp/openclaw-status.txt
+          rm -f /tmp/openclaw-status.txt
+
+          recent="$(journalctl -u openclaw-gateway.service --since '-2 minutes' --no-pager 2>/dev/null || true)"
+          if grep -Eqi 'Incorrect API key|invalid_api_key|HTTP 401|ANTHROPIC_API_KEY is not configured' <<<"$recent"; then
+            echo PROVIDER_AUTH_ERROR_DETECTED=1 >&2
+            exit 51
+          fi
+          echo NATIVE_OPENCLAW_SOLE_OWNER=READY
+          echo ANTHROPIC_PROVIDER=OFF
+          echo OPENAI_NATIVE_RUNTIME=READY
+          REMOTE
+
+      - name: Verify WhatsApp transaction readiness
+        shell: bash
+        run: |
+          set -euo pipefail
+          ready=false
+          for i in $(seq 1 36); do
+            body="$(curl -fsS --max-time 20 https://www.sahjony.com/whatsapp/health || true)"
+            printf '%s\n' "$body" | jq '{status,provider,send_ready,gateway_connected,heartbeat_fresh,cloud_independent_of_local_mac,recovery_issues,backlog_recovery}' 2>/dev/null || true
+            if jq -e '(.provider == "hostinger_openclaw") and ((.gateway_connected // false) == true) and ((.heartbeat_fresh // false) == true) and ((.send_ready // false) == true)' >/dev/null 2>&1 <<<"$body"; then
+              ready=true
+              break
+            fi
+            sleep 5
+          done
+          [[ "$ready" == true ]]
+          echo WHATSAPP_TRANSACTION_READY=1
+
+      - name: Cleanup runner SSH material
+        if: always()
+        shell: bash
+        run: rm -f ~/.ssh/hostinger-key
