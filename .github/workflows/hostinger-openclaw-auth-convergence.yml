@@ -1,0 +1,149 @@
+name: Hostinger OpenClaw Auth Convergence
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'openclaw/sahjony-app-bridge/index.js'
+      - 'openclaw/sahjony-app-bridge/health-sidecar.py'
+      - '.github/workflows/hostinger-openclaw-auth-convergence.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hostinger-openclaw-auth-convergence
+  cancel-in-progress: false
+
+jobs:
+  converge:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    env:
+      HOST: '69.62.68.67'
+      USER: root
+      PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare SSH
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "$PRIVATE_KEY" ]] || { echo HOSTINGER_SSH_PRIVATE_KEY_MISSING=1 >&2; exit 2; }
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/auth-convergence
+          chmod 600 ~/.ssh/auth-convergence
+          ssh-keygen -y -f ~/.ssh/auth-convergence >/dev/null
+
+      - name: Stage bridge runtime assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          scp -q -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/auth-convergence \
+            openclaw/sahjony-app-bridge/index.js \
+            openclaw/sahjony-app-bridge/health-sidecar.py \
+            "$USER@$HOST:/tmp/"
+
+      - name: Converge authorized bridge credential and runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -i ~/.ssh/auth-convergence "$USER@$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          STATE=/var/lib/sahjony-openclaw-state
+          ENV_FILE="$STATE/.env"
+          PLUGIN="$STATE/extensions/sahjony-app-bridge/index.js"
+          SIDECAR=/usr/local/sbin/sahjony-openclaw-health-sidecar
+          APP_URL=https://www.sahjony.com
+
+          [[ -d "$STATE" ]] || { echo STATE_DIR_MISSING=1 >&2; exit 20; }
+          touch "$ENV_FILE"
+          chmod 600 "$ENV_FILE"
+
+          # Gather candidate secrets without printing any secret value. A candidate is
+          # accepted only if it can authenticate a real signed production request.
+          python3 - "$ENV_FILE" "$APP_URL" <<'PY'
+          import hashlib, hmac, os, pathlib, subprocess, sys, time, urllib.error, urllib.request
+          env_path=pathlib.Path(sys.argv[1]); base=sys.argv[2].rstrip('/')
+          vals={}
+          for line in env_path.read_text(errors='replace').splitlines():
+              if '=' in line and not line.lstrip().startswith('#'):
+                  k,v=line.split('=',1); vals[k.strip()]=v.strip().strip('"').strip("'")
+          candidates=[]
+          for key in ('OPENCLAW_APP_BRIDGE_SECRET','SAHJONY_APP_BRIDGE_SECRET'):
+              v=(vals.get(key) or '').strip()
+              if len(v)>=24 and v not in candidates: candidates.append(v)
+          try:
+              pid=subprocess.check_output(['systemctl','show','openclaw-gateway.service','-p','MainPID','--value'],text=True).strip()
+              if pid.isdigit() and int(pid)>0:
+                  raw=pathlib.Path(f'/proc/{pid}/environ').read_bytes().split(b'\0')
+                  for item in raw:
+                      for key in (b'OPENCLAW_APP_BRIDGE_SECRET=',b'SAHJONY_APP_BRIDGE_SECRET='):
+                          if item.startswith(key):
+                              v=item[len(key):].decode(errors='ignore').strip()
+                              if len(v)>=24 and v not in candidates: candidates.append(v)
+          except Exception:
+              pass
+          def valid(secret):
+              ts=str(int(time.time())); body=b''
+              sig='sha256='+hmac.new(secret.encode(),ts.encode()+b'.'+body,hashlib.sha256).hexdigest()
+              req=urllib.request.Request(base+'/whatsapp/openclaw/outbox?limit=1',method='GET',headers={
+                  'Accept':'application/json','X-SAHJONY-Timestamp':ts,'X-SAHJONY-Signature':sig,
+                  'User-Agent':'SAHJONY-Auth-Convergence/1.0'})
+              try:
+                  with urllib.request.urlopen(req,timeout=15) as r: return r.status==200
+              except Exception: return False
+          chosen=next((c for c in candidates if valid(c)),None)
+          if not chosen:
+              print('AUTHORIZED_BRIDGE_SECRET_NOT_DISCOVERABLE=1',file=sys.stderr); raise SystemExit(31)
+          preserved=[]
+          for line in env_path.read_text(errors='replace').splitlines():
+              if not line.startswith('OPENCLAW_APP_BRIDGE_SECRET=') and not line.startswith('SAHJONY_APP_BRIDGE_SECRET='):
+                  preserved.append(line)
+          preserved += ['OPENCLAW_APP_BRIDGE_SECRET='+chosen,'SAHJONY_APP_BRIDGE_SECRET='+chosen]
+          tmp=env_path.with_suffix('.env.tmp')
+          tmp.write_text('\n'.join(preserved).rstrip()+'\n')
+          os.chmod(tmp,0o600); os.replace(tmp,env_path)
+          print('AUTHORIZED_BRIDGE_SECRET_VERIFIED=1')
+          print('BRIDGE_SECRET_ALIASES_CONVERGED=1')
+          PY
+
+          install -d -m 755 "$(dirname "$PLUGIN")"
+          install -m 644 /tmp/index.js "$PLUGIN"
+          install -m 755 /tmp/health-sidecar.py "$SIDECAR"
+          rm -f /tmp/index.js /tmp/health-sidecar.py
+
+          install -d -m 755 /etc/systemd/system/openclaw-gateway.service.d
+          cat >/etc/systemd/system/openclaw-gateway.service.d/40-app-bridge-auth.conf <<EOF
+          [Service]
+          EnvironmentFile=$ENV_FILE
+          EOF
+          systemctl daemon-reload
+          systemctl restart openclaw-gateway.service
+          sleep 14
+          systemctl is-active --quiet openclaw-gateway.service
+
+          # Sidecar and plugin now consume one credential source. Prove the sidecar
+          # against the real endpoint without revealing credentials.
+          sidecar_json="$($SIDECAR || true)"
+          SIDECAR_JSON="$sidecar_json" python3 - <<'PY'
+          import json,os
+          d=json.loads(os.environ.get('SIDECAR_JSON') or '{}')
+          assert d.get('heartbeat_accepted') is True, d
+          assert d.get('http_status') == 200, d
+          print('SOFIA_HEARTBEAT_AUTHORIZED=1')
+          PY
+
+          # A single gateway process is the only allowed OpenClaw production authority.
+          main_pid="$(systemctl show openclaw-gateway.service -p MainPID --value)"
+          [[ "$main_pid" =~ ^[1-9][0-9]*$ ]] || { echo OPENCLAW_MAINPID_INVALID=1 >&2; exit 32; }
+          echo OPENCLAW_GATEWAY_SINGLE_SYSTEMD_AUTHORITY=1
+          echo SAHJONY_OPENCLAW_AUTH_CONVERGED=1
+          REMOTE
+
+      - name: Cleanup
+        if: always()
+        shell: bash
+        run: rm -f ~/.ssh/auth-convergence
