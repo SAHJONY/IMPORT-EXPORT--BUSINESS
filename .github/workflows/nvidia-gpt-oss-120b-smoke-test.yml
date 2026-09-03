@@ -36,11 +36,14 @@ jobs:
           {
             "model": "openai/gpt-oss-120b",
             "messages": [{"role": "user", "content": "Reply exactly SAHJONY_GPT_OSS_120B_OK"}],
-            "max_tokens": 32,
-            "temperature": 0
+            "reasoning_effort": "low",
+            "max_tokens": 4096,
+            "temperature": 1,
+            "top_p": 1,
+            "stream": false
           }
           JSON
-          code="$(curl -sS --connect-timeout 10 --max-time 120 -o /tmp/nim.json -w '%{http_code}' \
+          code="$(curl -sS --connect-timeout 10 --max-time 180 -o /tmp/nim.json -w '%{http_code}' \
             -H "Authorization: Bearer $NVIDIA_API_KEY" \
             -H 'Content-Type: application/json' \
             --data-binary @/tmp/payload.json \
@@ -50,9 +53,14 @@ jobs:
             jq -r '.detail?,.error?.message?,.error?.code?' /tmp/nim.json 2>/dev/null | sed '/^null$/d' >&2 || true
             exit 4
           fi
-          jq -e '.choices[0].message.content | contains("SAHJONY_GPT_OSS_120B_OK")' /tmp/nim.json >/dev/null || {
+          finish="$(jq -r '.choices[0].finish_reason // "unknown"' /tmp/nim.json)"
+          content="$(jq -r '.choices[0].message.content // ""' /tmp/nim.json)"
+          reasoning="$(jq -r '.choices[0].message.reasoning_content // ""' /tmp/nim.json)"
+          echo "NVIDIA_GPT_OSS_120B_FINISH_REASON=$finish"
+          [[ "$finish" != "length" ]] || { echo NVIDIA_GPT_OSS_120B_TRUNCATED=1 >&2; exit 5; }
+          if [[ "$content" != *"SAHJONY_GPT_OSS_120B_OK"* ]]; then
             echo NVIDIA_GPT_OSS_120B_RESPONSE_MISMATCH=1 >&2
-            jq '{model,finish_reason:.choices[0].finish_reason}' /tmp/nim.json >&2 || true
-            exit 5
-          }
+            printf 'content_length=%s reasoning_length=%s\n' "${#content}" "${#reasoning}" >&2
+            exit 6
+          fi
           echo NVIDIA_GPT_OSS_120B=READY
