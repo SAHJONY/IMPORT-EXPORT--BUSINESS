@@ -50,6 +50,10 @@ async function boot(){
    const {default:OwnerCommandCenter}=await import('./OwnerCommandCenter');
    createRoot(rootElement).render(withI18n(<StrictMode><AppBoundary><OwnerCommandCenter/></AppBoundary></StrictMode>));return
  }
+ if(path==='/owner/exceptions'||path.startsWith('/owner/exceptions/')){
+   const {default:ExecutiveExceptionEngine}=await import('./ExecutiveExceptionEngine');
+   createRoot(rootElement).render(withI18n(<StrictMode><AppBoundary><ExecutiveExceptionEngine/></AppBoundary></StrictMode>));return
+ }
  if(path==='/owner/intelligence'||path==='/owner/research-intelligence'||path.startsWith('/owner/intelligence/')||path.startsWith('/owner/research-intelligence/')){
    const {default:ResearchIntelligenceCenter}=await import('./ResearchIntelligenceCenter');
    createRoot(rootElement).render(withI18n(<StrictMode><AppBoundary><ResearchIntelligenceCenter/></AppBoundary></StrictMode>));return
