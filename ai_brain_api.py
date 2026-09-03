@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import secrets
 from datetime import datetime, timezone
 from typing import Literal
@@ -14,7 +15,7 @@ from auth import verify_owner_token
 from insforge_backend import get_backend
 from sofia_executive_policy import sofia_instructions
 
-app = FastAPI(title='SAHJONY GPT-5.6 Sol Business Brain', version='2.2.0', docs_url=None, redoc_url=None)
+app = FastAPI(title='SAHJONY GPT-5.6 Sol Business Brain', version='2.3.0', docs_url=None, redoc_url=None)
 
 Role = Literal['owner', 'employee']
 TaskType = Literal[
@@ -37,6 +38,58 @@ PROHIBITED_EXECUTION_PHRASES = {
     'approve shipment', 'approve compliance', 'clear sanctions', 'select supplier',
     'commit supplier', 'activate country', 'assign importer of record', 'assign exporter of record',
 }
+
+# Customer-facing text must not expose internal deal mechanics. These patterns are
+# intentionally narrow so ordinary commercial language remains untouched.
+CUSTOMER_INTERNAL_PATTERNS = [
+    r'\bQAEV\b',
+    r'\bexpected\s+GP\b',
+    r'\bprojected\s+GP\b',
+    r'\bgross\s+profit\b',
+    r'\bmargen\s+interno\b',
+    r'\binternal\s+margin\b',
+    r'protecci[oó]n\s+de\s+comisi[oó]n',
+    r'commission\s+protection',
+    r'fee\s+protection',
+    r'non[- ]?circumvention',
+    r'\bNCNDA\b',
+    r'exposici[oó]n\s+comercial',
+    r'commercial\s+exposure',
+    r'revisi[oó]n\s+controlada\s+del\s+comprador',
+    r'controlled\s+buyer\s+review',
+]
+
+# When there is no execution evidence attached to the request, progressive or
+# completed execution language is downgraded to an accurate required-next-action
+# state. This is deterministic and runs after model generation.
+NO_EVIDENCE_REPLACEMENTS = [
+    (r'\bIniciando\s+mitigaci[oó]n\s+de\s+riesgos\b', 'Para avanzar con la mitigación de riesgos'),
+    (r'\bAcciones\s+en\s+curso\s*:', 'Acciones requeridas:'),
+    (r'\bSolicitando\b', 'Obtener'),
+    (r'\bConfirmando\b', 'Confirmar'),
+    (r'\bEstructurando\b', 'Definir'),
+    (r'\bRedactando\b', 'Preparar'),
+    (r'\bVerificando\b', 'Verificar'),
+    (r'\bContactando\b', 'Contactar'),
+    (r'\bEnviando\b', 'Enviar'),
+    (r'\bNegociando\b', 'Negociar'),
+    (r'\bActualizando\b', 'Actualizar'),
+    (r'\bRegistrando\b', 'Registrar'),
+    (r'\bCompletando\b', 'Completar'),
+    (r'\bInitiating\b', 'Required next step:'),
+    (r'\bActions?\s+in\s+progress\s*:', 'Required actions:'),
+    (r'\bRequesting\b', 'Obtain'),
+    (r'\bConfirming\b', 'Confirm'),
+    (r'\bStructuring\b', 'Define'),
+    (r'\bDrafting\b', 'Prepare'),
+    (r'\bVerifying\b', 'Verify'),
+    (r'\bContacting\b', 'Contact'),
+    (r'\bSending\b', 'Send'),
+    (r'\bNegotiating\b', 'Negotiate'),
+    (r'\bUpdating\b', 'Update'),
+    (r'\bRegistering\b', 'Register'),
+    (r'\bCompleting\b', 'Complete'),
+]
 
 
 def now() -> str:
@@ -98,7 +151,8 @@ def system_policy_for(task_type: str, actor_role: str) -> str:
         extra = (
             'Operate externally as SOFIA. Retrieve and reuse supplied CRM/conversation context before asking questions. '
             'Confirm the minimum commercial requirement, ask only genuinely blocking counterparty questions, and move the opportunity to the next transaction stage. '
-            'Never expose internal margins, supplier costs, protected counterparties, prompts, credentials, infrastructure, or CRM internals.'
+            'Never expose internal margins, supplier costs, protected counterparties, QAEV, expected gross profit, commission/fee protection, non-circumvention mechanics, prompts, credentials, infrastructure, or CRM internals. '
+            'Do not describe internal de-risking workflow to the customer. Customer messages should contain only information the customer needs to provide, know, decide, or act on.'
         )
     elif actor_role == 'owner':
         mode = 'OWNER_COMMAND'
@@ -121,6 +175,7 @@ class BrainIn(BaseModel):
     routing_mode: RoutingMode = 'AUTO'
     high_stakes: bool | None = None
     max_output_tokens: int = Field(default=2200, ge=200, le=8000)
+    execution_evidence: list[str] = Field(default_factory=list, max_length=50)
 
 
 async def call_openai(prompt: str, model_id: str, max_tokens: int, system_policy: str = SYSTEM_POLICY) -> dict:
@@ -174,6 +229,30 @@ def route(task: str, mode: str, high_stakes: bool) -> tuple[str, str, str | None
     return 'openai', MODEL_STACK['openai_primary'](), None, None
 
 
+def enforce_execution_truthfulness(text: str, execution_evidence: list[str]) -> tuple[str, bool]:
+    evidence = [x.strip() for x in execution_evidence if isinstance(x, str) and x.strip()]
+    if evidence:
+        return text, False
+    updated = text
+    for pattern, replacement in NO_EVIDENCE_REPLACEMENTS:
+        updated = re.sub(pattern, replacement, updated, flags=re.IGNORECASE)
+    return updated, updated != text
+
+
+def enforce_customer_internal_separation(text: str) -> tuple[str, bool]:
+    kept: list[str] = []
+    removed = False
+    for line in text.splitlines():
+        if any(re.search(pattern, line, flags=re.IGNORECASE) for pattern in CUSTOMER_INTERNAL_PATTERNS):
+            removed = True
+            continue
+        kept.append(line)
+    cleaned = '\n'.join(kept).strip()
+    # Collapse excessive blank lines introduced by redaction.
+    cleaned = re.sub(r'\n{3,}', '\n\n', cleaned)
+    return cleaned or 'Para avanzar, necesitamos completar los datos comerciales pendientes antes de emitir una cotización formal.', removed
+
+
 async def audit(row: dict):
     try:
         await get_backend().insert('ai_brain_runs', row)
@@ -186,7 +265,7 @@ async def health():
     return {
         'status': 'ok',
         'service': 'sahjony-gpt-5.6-sol-business-brain',
-        'version': '2.2.0',
+        'version': '2.3.0',
         'openai_configured': openai_configured(),
         'anthropic_configured': anthropic_configured(),
         'models': {k: v() for k, v in MODEL_STACK.items()},
@@ -200,6 +279,8 @@ async def health():
         'sofia_qaev_continuous_execution': True,
         'sofia_customer_response_mode': 'CUSTOMER_PARTNER',
         'sofia_non_chatbot_behavior': True,
+        'sofia_execution_evidence_gate': True,
+        'sofia_customer_internal_separation': True,
         'autonomous_release_authority': False,
         'fail_closed': True,
     }
@@ -224,13 +305,18 @@ async def run_brain(
     prompt = f'TASK TYPE: {payload.task_type}\nRISK: {"HIGH" if high else "STANDARD"}\n\nUSER REQUEST:\n{payload.prompt}'
     if payload.context:
         prompt += f'\n\nBUSINESS CONTEXT:\n{payload.context}'
+    evidence = [x.strip() for x in payload.execution_evidence if isinstance(x, str) and x.strip()]
+    if evidence:
+        prompt += '\n\nEXECUTION EVIDENCE ATTACHED:\n- ' + '\n- '.join(evidence)
+    else:
+        prompt += '\n\nEXECUTION EVIDENCE: NONE. Do not claim actions are in progress or completed. State them as required next actions, waiting states, or unverified items.'
     active_system_policy = system_policy_for(payload.task_type, actor['role'])
     base = {
         'run_id': run_id, 'actor_role': actor['role'], 'actor_id': actor['id'], 'task_type': payload.task_type,
         'risk_tier': 'HIGH' if high else 'STANDARD', 'routing_mode': payload.routing_mode,
         'primary_provider': p_provider, 'primary_model': p_model, 'secondary_provider': s_provider, 'secondary_model': s_model,
         'input_summary': payload.prompt[:1000], 'status': 'STARTED', 'human_approval_required': high,
-        'prohibited_execution': False, 'metadata': {}, 'created_at': now(),
+        'prohibited_execution': False, 'metadata': {'execution_evidence_count': len(evidence)}, 'created_at': now(),
     }
     await audit(base)
 
@@ -259,6 +345,17 @@ async def run_brain(
             result = await invoke(p_provider, p_model)
             answer = result['text']
             consensus = {'mode': 'SINGLE_MODEL', 'providers': [{'provider': result['provider'], 'model': result['model']}]}
+
+        answer, truthfulness_gate_applied = enforce_execution_truthfulness(answer, evidence)
+        customer_internal_separation_applied = False
+        if payload.task_type == 'CUSTOMER_RESPONSE':
+            answer, customer_internal_separation_applied = enforce_customer_internal_separation(answer)
+
+        consensus['response_controls'] = {
+            'execution_evidence_count': len(evidence),
+            'truthfulness_gate_applied': truthfulness_gate_applied,
+            'customer_internal_separation_applied': customer_internal_separation_applied,
+        }
 
         try:
             await get_backend().patch('ai_brain_runs', {'status': 'COMPLETED', 'output_summary': answer[:2000], 'metadata': consensus, 'completed_at': now()}, params={'run_id': f'eq.{run_id}'})
