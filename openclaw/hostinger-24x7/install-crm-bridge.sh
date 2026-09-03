@@ -1,50 +1,67 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-# Installs the authorized SAHJONY CRM bridge client on the Hostinger VPS and,
-# when the retained OpenClaw container exists, installs the corresponding skill
-# into the persisted OpenClaw home. This script never changes WhatsApp auth,
-# linked-device state, owner credentials, or provider security controls.
+# Installs the authorized SAHJONY CRM bridge and the WhatsApp CRM/RFQ skill.
+# This script does not change WhatsApp authentication, linked-device state,
+# gateway provider, owner credentials, or model credentials.
 
 ROOT="${SAHJONY_CRM_BRIDGE_SOURCE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 TOOL_SOURCE="$ROOT/sahjony-crm-bridge.py"
 SKILL_SOURCE="${SAHJONY_CRM_BRIDGE_SKILL_SOURCE:-$ROOT/../skills/whatsapp-crm-bridge/SKILL.md}"
 TOOL_DEST="/usr/local/sbin/sahjony-crm-bridge"
 STATE_DIR="${SAHJONY_CRM_BRIDGE_STATE_DIR:-/var/lib/sahjony-crm-bridge}"
+OPENCLAW_STATE_DIR="${OPENCLAW_STATE_DIR:-/var/lib/sahjony-openclaw-state}"
+OPENCLAW_HOME="${OPENCLAW_HOME:-/home/node/.openclaw}"
 
 log(){ printf '[crm-bridge-install] %s\n' "$*"; }
 fail(){ log "FAIL: $*" >&2; exit 1; }
 
 [[ "$(id -u)" -eq 0 ]] || fail "run as root on the authorized Hostinger VPS"
 [[ -f "$TOOL_SOURCE" ]] || fail "missing $TOOL_SOURCE"
+[[ -f "$SKILL_SOURCE" ]] || fail "missing $SKILL_SOURCE"
 command -v python3 >/dev/null 2>&1 || fail "python3 is required"
 
 python3 -m py_compile "$TOOL_SOURCE"
 install -d -m 700 "$STATE_DIR"
 install -m 700 "$TOOL_SOURCE" "$TOOL_DEST"
 
+install_native_skill(){
+  local installed=0 dest
+  for dest in \
+    "$OPENCLAW_HOME/skills/whatsapp-crm-bridge" \
+    "$OPENCLAW_STATE_DIR/skills/whatsapp-crm-bridge"
+  do
+    install -d -m 700 "$dest"
+    install -m 600 "$SKILL_SOURCE" "$dest/SKILL.md"
+    installed=$((installed+1))
+  done
+  if id node >/dev/null 2>&1; then
+    chown -R node:node "$OPENCLAW_HOME/skills/whatsapp-crm-bridge" 2>/dev/null || true
+  fi
+  log "Installed WhatsApp CRM/RFQ skill into $installed native OpenClaw skill paths"
+}
+
 find_container(){
+  command -v docker >/dev/null 2>&1 || return 0
   docker ps -a --format '{{.ID}}|{{.Names}}|{{.Image}}' 2>/dev/null \
     | awk -F'|' 'tolower($0) ~ /openclaw|claw/ {print $1; exit}'
 }
 
-install_skill(){
-  command -v docker >/dev/null 2>&1 || { log 'Docker unavailable; host CRM client installed, OpenClaw skill install deferred.'; return 0; }
+install_container_skill(){
+  command -v docker >/dev/null 2>&1 || return 0
   local cid
   cid="$(find_container || true)"
-  [[ -n "$cid" ]] || { log 'Existing OpenClaw container not found; skill install deferred without creating a container.'; return 0; }
-  [[ -f "$SKILL_SOURCE" ]] || { log "Skill source not present at $SKILL_SOURCE; host client remains installed."; return 0; }
-
+  [[ -n "$cid" ]] || return 0
   docker exec "$cid" sh -lc 'mkdir -p "$HOME/.openclaw/skills/whatsapp-crm-bridge" && chmod 700 "$HOME/.openclaw/skills/whatsapp-crm-bridge"' >/dev/null
   docker cp "$SKILL_SOURCE" "$cid:/tmp/sahjony-whatsapp-crm-skill.md" >/dev/null
   docker exec "$cid" sh -lc 'mv /tmp/sahjony-whatsapp-crm-skill.md "$HOME/.openclaw/skills/whatsapp-crm-bridge/SKILL.md" && chmod 600 "$HOME/.openclaw/skills/whatsapp-crm-bridge/SKILL.md"' >/dev/null
-  log "Installed WhatsApp CRM skill into retained OpenClaw container $cid"
+  log "Installed WhatsApp CRM/RFQ skill into retained OpenClaw container $cid"
 }
 
 cat >/etc/systemd/system/sahjony-crm-bridge.service <<EOF
 [Unit]
 Description=SAHJONY authorized OpenClaw CRM bridge doctor
-After=network-online.target docker.service
+After=network-online.target
 Wants=network-online.target
 
 [Service]
@@ -74,16 +91,18 @@ Persistent=true
 WantedBy=timers.target
 EOF
 
-install_skill
+install_native_skill
+install_container_skill
 systemctl daemon-reload
 systemctl enable --now sahjony-crm-bridge.timer
 
-# One immediate diagnostic is intentionally non-fatal so installation can land
-# before the matching application deployment is live. The timer will retry.
+# Immediate diagnostics are non-fatal because the remote app deployment may be
+# updating at the same moment; the timer performs bounded recovery afterwards.
 set +e
 "$TOOL_DEST" doctor
 rc=$?
 set -e
 systemctl is-active --quiet sahjony-crm-bridge.timer || fail "CRM bridge timer is not active"
+test -s "$OPENCLAW_HOME/skills/whatsapp-crm-bridge/SKILL.md" || fail "native OpenClaw CRM/RFQ skill was not installed"
 
-log "CRM bridge installed; initial doctor exit=$rc. No authorization control was bypassed."
+log "CRM bridge + governed RFQ skill installed; initial doctor exit=$rc. No authorization control was bypassed."
