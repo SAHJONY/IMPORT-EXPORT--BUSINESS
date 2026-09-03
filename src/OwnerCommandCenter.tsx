@@ -65,6 +65,7 @@ export default function OwnerCommandCenter(){
     <header style={s.header}>
       <a href="/" style={s.brand}>SAHJONY <span style={{color:'#66dcff'}}>GLOBAL TRADE</span></a>
       <nav style={s.nav}>
+        <a href="/owner/exceptions" style={s.link}>Exceptions</a>
         <a href="/owner/deals" style={s.link}>Deals</a>
         <a href="/owner/intelligence" style={s.link}>Intelligence</a>
         <button onClick={()=>void refresh()} style={s.button}>{loading?'Checking…':'Refresh systems'}</button>
@@ -112,6 +113,7 @@ export default function OwnerCommandCenter(){
     <section style={s.panel}>
       <div style={s.panelHead}><div><div style={s.eyebrow}>EXECUTIVE ACTION QUEUE</div><h2 style={s.h2}>Move the highest-value bottleneck first</h2></div></div>
       <div style={s.grid3}>
+        <a href="/owner/exceptions" style={s.actionCard}><strong>Resolve executive exceptions</strong><span>Escalate blocked RFQs, missing economics, stale deals, PO/payment and logistics risks.</span><b>OPEN EXCEPTIONS →</b></a>
         <a href="/owner/deals" style={s.actionCard}><strong>Close active opportunities</strong><span>Advance qualified demand to firm price, quote and PO.</span><b>GO TO DEALS →</b></a>
         <a href="/owner/intelligence" style={s.actionCard}><strong>Find evidence-backed demand</strong><span>Research buyers, suppliers, pricing, logistics and counterparties.</span><b>OPEN INTELLIGENCE →</b></a>
         <a href="/start" style={s.actionCard}><strong>Capture a new RFQ</strong><span>Turn inbound demand into structured commercial requirements.</span><b>START REQUEST →</b></a>
