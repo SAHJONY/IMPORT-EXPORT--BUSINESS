@@ -1,0 +1,3 @@
+Deployment trigger for SOFIA Commodity-Specific RFQ Intelligence.
+Target commit lineage includes 9ca086172c61992dc55f09a0207792d8db466a29.
+Purpose: force Git-integrated Vercel production deployment after prior build-rate-limit failure.
