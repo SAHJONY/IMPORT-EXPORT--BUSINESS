@@ -1,0 +1,175 @@
+name: Hostinger OpenClaw OpenAI Sync One-Time
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/hostinger-openclaw-openai-sync-one-time.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hostinger-vm-767852-mutation
+  cancel-in-progress: false
+
+env:
+  HOSTINGER_VM_ID: '767852'
+  HOSTINGER_HOST: '69.62.68.67'
+  HOSTINGER_USER: root
+  HOSTINGER_API_BASE: https://developers.hostinger.com
+
+jobs:
+  sync_openai:
+    if: github.event.head_commit.message == 'ops: sync OpenAI to Hostinger OpenClaw'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      HOSTINGER_API_TOKEN: ${{ secrets.HOSTINGER_API_TOKEN }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+    steps:
+      - name: Checkout exact revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Validate required secrets without exposing them
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "$HOSTINGER_API_TOKEN" ]] || { echo HOSTINGER_API_TOKEN_MISSING=1 >&2; exit 2; }
+          [[ -n "$OPENAI_API_KEY" ]] || { echo OPENAI_API_KEY_MISSING=1 >&2; exit 3; }
+          echo '::add-mask::'"$OPENAI_API_KEY"
+          code="$(curl -sS -o /tmp/openai-models.json -w '%{http_code}' \
+            -H "Authorization: Bearer $OPENAI_API_KEY" \
+            https://api.openai.com/v1/models || true)"
+          if [[ "$code" != 200 ]]; then
+            echo "OPENAI_SECRET_VALIDATION_FAILED_HTTP=$code" >&2
+            jq -r '.error.type?,.error.code?' /tmp/openai-models.json 2>/dev/null | sed '/^null$/d' >&2 || true
+            exit 4
+          fi
+          echo OPENAI_SECRET_VALIDATED=1
+
+      - name: Prepare ephemeral Hostinger management identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq jq sshpass netcat-openbsd >/dev/null
+          install -d -m 700 ~/.ssh
+          ssh-keygen -q -t ed25519 -N '' -f ~/.ssh/openai-sync -C "sahjony-openai-sync-${GITHUB_RUN_ID}"
+          echo "SSH_KEY_PATH=$HOME/.ssh/openai-sync" >> "$GITHUB_ENV"
+          chmod +x openclaw/hostinger-24x7/hostinger-recovery-controller.sh
+          chmod +x openclaw/hostinger-24x7/ssh-self-heal.sh
+          bash -n openclaw/hostinger-24x7/hostinger-recovery-controller.sh
+
+      - name: Establish authenticated native SSH
+        shell: bash
+        run: |
+          set -euo pipefail
+          openclaw/hostinger-24x7/hostinger-recovery-controller.sh repair-ssh
+
+      - name: Install validated OpenAI key and disable Anthropic
+        shell: bash
+        run: |
+          set -euo pipefail
+          opts=(-o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -i "$SSH_KEY_PATH")
+
+          # Stream the secret over the authenticated SSH channel on stdin. It is never
+          # included in the remote command line, workflow output, repository, or logs.
+          printf '%s\n' "$OPENAI_API_KEY" | ssh "${opts[@]}" "$HOSTINGER_USER@$HOSTINGER_HOST" 'bash -c '\''
+            set -euo pipefail
+            IFS= read -r OPENAI_KEY
+            [[ -n "$OPENAI_KEY" ]]
+            cd /opt/sahjony-openclaw
+            test -f docker-compose.yml
+            touch .env
+            chmod 600 .env
+            cp -a .env ".env.backup.$(date -u +%Y%m%dT%H%M%SZ)"
+            tmp="$(mktemp)"
+            grep -vE "^(OPENAI_API_KEY|ANTHROPIC_API_KEY)=" .env > "$tmp" || true
+            printf "OPENAI_API_KEY=%s\n" "$OPENAI_KEY" >> "$tmp"
+            install -m 600 "$tmp" .env
+            rm -f "$tmp"
+            unset OPENAI_KEY
+
+            # Anthropic is intentionally disabled until owner re-enables it.
+            if grep -q "^ANTHROPIC_API_KEY=" .env; then
+              echo ANTHROPIC_DISABLE_FAILED=1 >&2
+              exit 31
+            fi
+            grep -q "^OPENAI_API_KEY=" .env
+            echo OPENAI_RUNTIME_ENV_INSTALLED=1
+
+            docker compose up -d --force-recreate openclaw-gateway
+            docker update --restart unless-stopped openclaw-openclaw-gateway-1 >/dev/null
+
+            for i in $(seq 1 36); do
+              state="$(docker inspect openclaw-openclaw-gateway-1 --format "{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}" 2>/dev/null || true)"
+              echo "OPENCLAW_POST_SYNC_HEALTH=$i/36 status=${state:-unknown}"
+              [[ "$state" == healthy ]] && break
+              [[ "$state" == exited || "$state" == dead ]] && break
+              sleep 5
+            done
+
+            test "$(docker inspect openclaw-openclaw-gateway-1 --format "{{.State.Health.Status}}" 2>/dev/null)" = healthy
+            test "$(docker inspect openclaw-openclaw-gateway-1 --format "{{.HostConfig.RestartPolicy.Name}}")" = unless-stopped
+
+            # Verify the running container received OpenAI but not Anthropic; print names only.
+            docker inspect openclaw-openclaw-gateway-1 --format "{{range .Config.Env}}{{println .}}{{end}}" \
+              | cut -d= -f1 \
+              | grep -qx OPENAI_API_KEY
+            if docker inspect openclaw-openclaw-gateway-1 --format "{{range .Config.Env}}{{println .}}{{end}}" \
+              | cut -d= -f1 | grep -qx ANTHROPIC_API_KEY; then
+              echo ANTHROPIC_PRESENT_IN_RUNNING_CONTAINER=1 >&2
+              exit 32
+            fi
+            echo OPENCLAW_OPENAI_RUNTIME_SYNC=READY
+          '\'''
+
+      - name: Verify public WhatsApp transaction readiness
+        shell: bash
+        run: |
+          set -euo pipefail
+          ready=false
+          for i in $(seq 1 24); do
+            body="$(curl -fsS --max-time 20 https://www.sahjony.com/whatsapp/health || true)"
+            printf '%s\n' "$body" | jq '{status,provider,send_ready,gateway_connected,heartbeat_fresh,hostinger_openclaw,recovery_issues,backlog_recovery}' 2>/dev/null || true
+            if jq -e '
+              (.status == "ok") and
+              (.provider == "hostinger_openclaw") and
+              ((.gateway_connected // .hostinger_openclaw.connected // false) == true) and
+              ((.heartbeat_fresh // .hostinger_openclaw.heartbeat_fresh // false) == true) and
+              ((.send_ready // false) == true)
+            ' >/dev/null 2>&1 <<<"$body"; then
+              ready=true
+              break
+            fi
+            sleep 5
+          done
+          [[ "$ready" == true ]] || { echo WHATSAPP_TRANSACTION_READINESS_NOT_RESTORED=1 >&2; exit 40; }
+          echo WHATSAPP_TRANSACTION_READINESS=READY
+
+      - name: Remove ephemeral management identity
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          if [[ -s ~/.ssh/openai-sync.pub && -s ~/.ssh/openai-sync ]]; then
+            pub_b64="$(base64 -w0 ~/.ssh/openai-sync.pub)"
+            ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 -i ~/.ssh/openai-sync "$HOSTINGER_USER@$HOSTINGER_HOST" "PUB_B64='$pub_b64' bash -s" <<'REMOTE'
+          set -euo pipefail
+          auth=/root/.ssh/authorized_keys
+          if [[ -f "$auth" ]]; then
+            pub="$(printf '%s' "$PUB_B64" | base64 -d)"
+            tmp="$(mktemp)"
+            grep -vxF "$pub" "$auth" > "$tmp" || true
+            cat "$tmp" > "$auth"
+            chmod 600 "$auth"
+            rm -f "$tmp"
+          fi
+          echo SAHJONY_OPENAI_SYNC_EPHEMERAL_KEY_REMOVED=1
+          REMOTE
+          fi
+          rm -f ~/.ssh/openai-sync ~/.ssh/openai-sync.pub
