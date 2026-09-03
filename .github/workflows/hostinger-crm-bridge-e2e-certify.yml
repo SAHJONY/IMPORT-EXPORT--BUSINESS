@@ -1,0 +1,95 @@
+name: Hostinger CRM Bridge E2E Certification
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/hostinger-crm-bridge-e2e-certify.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hostinger-vm-767852-mutation
+  cancel-in-progress: false
+
+jobs:
+  certify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      HOST: '69.62.68.67'
+      USER: root
+      PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Prepare authenticated SSH
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "$PRIVATE_KEY" ]] || { echo HOSTINGER_SSH_PRIVATE_KEY_MISSING=1 >&2; exit 2; }
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/hostinger-crm-e2e
+          chmod 600 ~/.ssh/hostinger-crm-e2e
+          ssh-keygen -y -f ~/.ssh/hostinger-crm-e2e >/dev/null
+
+      - name: Certify authenticated RFQ intake and idempotency
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 -i ~/.ssh/hostinger-crm-e2e "$USER@$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          tool=/usr/local/sbin/sahjony-crm-bridge
+          test -x "$tool"
+          operation_id='e2e_rfq_cert_20260903_v1'
+          phone='12025550147'
+          payload='{"operation_id":"e2e_rfq_cert_20260903_v1","phone":"12025550147","product_need":"SYNTHETIC E2E CERTIFICATION - soybean oil","destination_country":"US","specifications":"TEST DATA ONLY. Commercial packaging 20 L; two 40-foot container-equivalent requirement used solely to certify RFQ persistence. No supplier quote or external commitment.","quantity":2,"currency":"USD","preferred_incoterm":"CIF","notes":"SAHJONY automated CRM/RFQ certification record. TEST DATA ONLY. Do not source, quote, contact, invoice, ship, or otherwise act commercially on this record."}'
+
+          first="$(printf '%s' "$payload" | "$tool" intake --json -)"
+          second="$(printf '%s' "$payload" | "$tool" intake --json -)"
+          context="$("$tool" contact "$phone")"
+          doctor="$("$tool" doctor)"
+
+          python3 - "$first" "$second" "$context" "$doctor" "$operation_id" <<'PY'
+          import json, sys
+          first, second, context, doctor = map(json.loads, sys.argv[1:5])
+          op = sys.argv[5]
+          if first.get('status') != 'created':
+              raise SystemExit(f'first intake was not created: {first.get("status")}')
+          if first.get('operation_id') != op:
+              raise SystemExit('first intake operation id mismatch')
+          if first.get('external_commitment_created') is not False:
+              raise SystemExit('synthetic intake unexpectedly created external commitment')
+          if second.get('status') != 'duplicate':
+              raise SystemExit(f'idempotency failure: second status={second.get("status")}')
+          nested = second.get('result') or {}
+          if nested.get('intake_id') != first.get('intake_id'):
+              raise SystemExit('duplicate did not resolve to original intake')
+          matches = [row for row in (context.get('trade_intakes') or []) if row.get('intake_id') == first.get('intake_id')]
+          if len(matches) != 1:
+              raise SystemExit(f'expected exactly one persisted intake in CRM context, found {len(matches)}')
+          if context.get('source_of_truth') != 'supabase_trade_persistence':
+              raise SystemExit('CRM context source of truth mismatch')
+          if doctor.get('status') != 'ok' or (doctor.get('health') or {}).get('status') != 'ok':
+              raise SystemExit('bridge doctor unhealthy after e2e certification')
+          if doctor.get('pending_count') != 0:
+              raise SystemExit('bridge queue is not empty after e2e certification')
+          print(json.dumps({
+              'status':'certified',
+              'first_write':'created',
+              'second_write':'duplicate',
+              'persisted_matching_intakes':len(matches),
+              'source_of_truth':context.get('source_of_truth'),
+              'external_commitment_created':first.get('external_commitment_created'),
+              'bridge_health':doctor.get('status'),
+              'pending_count':doctor.get('pending_count'),
+          }, separators=(',',':')))
+          PY
+          echo SAHJONY_CRM_RFQ_E2E_CERTIFIED=1
+          REMOTE
+
+      - name: Cleanup local key
+        if: always()
+        shell: bash
+        run: rm -f ~/.ssh/hostinger-crm-e2e
