@@ -1,4 +1,4 @@
 Hostinger WhatsApp final repair trigger
-2026-09-02T19:05Z
-Attempt: indexed-workflow-trigger-2
-Targets: GPT-OSS-120B, per-account-channel-peer sessions, validated NVIDIA fallbacks, runtime error suppression, reply rescue, canonical health sidecar.
+2026-09-03
+Attempt: sofia-recipient-context-v3
+Targets: SOFIA owner-vs-customer prompt routing, source ownership, fail-closed external commercial leakage guard, GPT-OSS-120B, per-account-channel-peer sessions, validated NVIDIA fallbacks, runtime error suppression, reply rescue, canonical health sidecar.
