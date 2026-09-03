@@ -4,6 +4,9 @@ on:
   schedule:
     - cron: '*/15 * * * *'
   workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/whatsapp-self-healing-watchdog.yml'
 
 permissions:
   contents: read
