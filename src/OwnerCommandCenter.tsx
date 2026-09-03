@@ -65,6 +65,8 @@ export default function OwnerCommandCenter(){
     <header style={s.header}>
       <a href="/" style={s.brand}>SAHJONY <span style={{color:'#66dcff'}}>GLOBAL TRADE</span></a>
       <nav style={s.nav}>
+        <a href="/owner/priorities" style={s.link}>Priorities</a>
+        <a href="/owner/economics" style={s.link}>Economics</a>
         <a href="/owner/exceptions" style={s.link}>Exceptions</a>
         <a href="/owner/deals" style={s.link}>Deals</a>
         <a href="/owner/intelligence" style={s.link}>Intelligence</a>
@@ -113,6 +115,8 @@ export default function OwnerCommandCenter(){
     <section style={s.panel}>
       <div style={s.panelHead}><div><div style={s.eyebrow}>EXECUTIVE ACTION QUEUE</div><h2 style={s.h2}>Move the highest-value bottleneck first</h2></div></div>
       <div style={s.grid3}>
+        <a href="/owner/priorities" style={s.actionCard}><strong>Allocate effort by expected value</strong><span>Rank governed deals by expected gross profit, close probability, time to close and risk.</span><b>OPEN PRIORITIES →</b></a>
+        <a href="/owner/economics" style={s.actionCard}><strong>Protect deal economics</strong><span>Separate evidenced economics from targets and expose capital at risk.</span><b>OPEN ECONOMICS →</b></a>
         <a href="/owner/exceptions" style={s.actionCard}><strong>Resolve executive exceptions</strong><span>Escalate blocked RFQs, missing economics, stale deals, PO/payment and logistics risks.</span><b>OPEN EXCEPTIONS →</b></a>
         <a href="/owner/deals" style={s.actionCard}><strong>Close active opportunities</strong><span>Advance qualified demand to firm price, quote and PO.</span><b>GO TO DEALS →</b></a>
         <a href="/owner/intelligence" style={s.actionCard}><strong>Find evidence-backed demand</strong><span>Research buyers, suppliers, pricing, logistics and counterparties.</span><b>OPEN INTELLIGENCE →</b></a>
@@ -126,8 +130,8 @@ export default function OwnerCommandCenter(){
 
 const s:Record<string,any>={
   page:{minHeight:'100vh',background:'radial-gradient(circle at 20% -10%,#12334a 0,#07111d 34%,#04080e 70%)',color:'#f4f8fb',fontFamily:'Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif',padding:'0 24px 48px'},
-  header:{maxWidth:1320,margin:'0 auto',height:74,display:'flex',alignItems:'center',justifyContent:'space-between',borderBottom:'1px solid rgba(255,255,255,.08)',gap:20},
-  brand:{fontWeight:950,letterSpacing:'.08em',fontSize:14,color:'#fff',textDecoration:'none'},nav:{display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'},link:{color:'#b9c7d3',textDecoration:'none',fontSize:14,padding:'9px 10px'},
+  header:{maxWidth:1320,margin:'0 auto',minHeight:74,display:'flex',alignItems:'center',justifyContent:'space-between',borderBottom:'1px solid rgba(255,255,255,.08)',gap:20,padding:'10px 0'},
+  brand:{fontWeight:950,letterSpacing:'.08em',fontSize:14,color:'#fff',textDecoration:'none'},nav:{display:'flex',alignItems:'center',gap:7,flexWrap:'wrap',justifyContent:'flex-end'},link:{color:'#b9c7d3',textDecoration:'none',fontSize:13,padding:'9px 9px'},
   button:{background:'#66dcff',border:0,borderRadius:10,padding:'10px 13px',fontWeight:900,color:'#021018',cursor:'pointer'},
   hero:{maxWidth:1320,margin:'0 auto',padding:'70px 0 44px',display:'grid',gridTemplateColumns:'minmax(0,1.8fr) minmax(260px,.7fr)',gap:30,alignItems:'end'},
   eyebrow:{fontSize:11,fontWeight:950,letterSpacing:'.16em',color:'#66dcff',marginBottom:14},h1:{fontSize:'clamp(46px,6vw,88px)',lineHeight:.93,letterSpacing:'-.055em',maxWidth:980,margin:'0 0 22px'},lead:{maxWidth:820,fontSize:17,lineHeight:1.65,color:'#9fb2c1',margin:0},
