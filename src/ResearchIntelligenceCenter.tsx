@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 
 type RawDeal = Record<string, any>;
-
 type IntelligenceRow = {
   id: string;
   title: string;
@@ -18,6 +17,8 @@ type IntelligenceRow = {
   blocker: string;
   nextAction: string;
 };
+
+const DATA_ENDPOINTS = ["/canonical-deals.json", "/api/deals"] as const;
 
 function authHeaders(): Record<string, string> {
   const token = sessionStorage.getItem("sahjony.owner.token") || "";
@@ -118,6 +119,21 @@ function normalize(row: RawDeal, index: number): IntelligenceRow {
   };
 }
 
+async function readRows(response: Response): Promise<RawDeal[]> {
+  if (!response.ok) return [];
+  const contentType = response.headers.get("content-type") || "";
+  if (!contentType.toLowerCase().includes("application/json")) return [];
+  try {
+    const body = await response.json();
+    if (Array.isArray(body)) return body;
+    if (Array.isArray(body?.deals)) return body.deals;
+    const firstArray = Object.values(body || {}).find((value) => Array.isArray(value));
+    return Array.isArray(firstArray) ? (firstArray as RawDeal[]) : [];
+  } catch {
+    return [];
+  }
+}
+
 const usd = (n: number) => (n > 0 ? `$${n.toLocaleString(undefined, { maximumFractionDigits: 0 })}` : "Needs pricing");
 
 const css = `
@@ -133,32 +149,23 @@ export default function ResearchIntelligenceCenter() {
 
   async function refresh() {
     setLoading(true);
-    try {
-      const responses = await Promise.allSettled([
-        fetch("/canonical-deals.json", { cache: "no-store" }),
-        fetch("/api/deals", { cache: "no-store", headers: authHeaders() }),
-      ]);
-      const merged: RawDeal[] = [];
-      for (const result of responses) {
-        if (result.status !== "fulfilled" || !result.value.ok) continue;
-        const body = await result.value.json();
-        if (Array.isArray(body)) merged.push(...body);
-        else if (Array.isArray(body?.deals)) merged.push(...body.deals);
-        else {
-          const firstArray = Object.values(body || {}).find((value) => Array.isArray(value));
-          if (Array.isArray(firstArray)) merged.push(...(firstArray as RawDeal[]));
-        }
-      }
-      const unique = new Map<string, RawDeal>();
-      merged.forEach((row, index) => unique.set(text(row.id || row.deal_id || row.opportunity_id || `row-${index}`), row));
-      setRows([...unique.values()]);
-      setSyncedAt(new Date().toLocaleString());
-    } catch {
-      setRows([]);
-      setSyncedAt(new Date().toLocaleString());
-    } finally {
-      setLoading(false);
+    const requests = DATA_ENDPOINTS.map((endpoint) =>
+      fetch(endpoint, {
+        cache: "no-store",
+        ...(endpoint === "/api/deals" ? { headers: authHeaders() } : {}),
+      }),
+    );
+    const responses = await Promise.allSettled(requests);
+    const merged: RawDeal[] = [];
+    for (const result of responses) {
+      if (result.status !== "fulfilled") continue;
+      merged.push(...(await readRows(result.value)));
     }
+    const unique = new Map<string, RawDeal>();
+    merged.forEach((row, index) => unique.set(text(row.id || row.deal_id || row.opportunity_id || `row-${index}`), row));
+    setRows([...unique.values()]);
+    setSyncedAt(new Date().toLocaleString());
+    setLoading(false);
   }
 
   useEffect(() => { void refresh(); }, []);
@@ -186,9 +193,7 @@ export default function ResearchIntelligenceCenter() {
           <div>
             <div className="kicker">SAHJONY LLC · 10X COMMERCIAL INTELLIGENCE</div>
             <h1>Research Intelligence Center</h1>
-            <p>
-              Prioritize evidence-backed demand by commercial quality, profit visibility, counterparty readiness and conversion probability. Research activity is not revenue: every opportunity stays separated until it becomes qualified demand, RFQ ready, firmly quoted, contracted, invoiced and collected.
-            </p>
+            <p>Prioritize evidence-backed demand by commercial quality, profit visibility, counterparty readiness and conversion probability. Research activity is not revenue: every opportunity stays separated until it becomes qualified demand, RFQ ready, firmly quoted, contracted, invoiced and collected.</p>
           </div>
           <div className="actions">
             <a className="btn" href="/owner/dashboard">Executive dashboard</a>
@@ -210,18 +215,7 @@ export default function ResearchIntelligenceCenter() {
           <div className="card">
             <small>Evidence-gated commercial lifecycle</small>
             <div className="flow">
-              {[
-                "Research lead",
-                "Qualified demand",
-                "RFQ ready",
-                "Sourcing",
-                "Firm quotation",
-                "Margin protection",
-                "Contracted transaction",
-                "Invoiced",
-                "Fulfillment",
-                "Collected revenue",
-              ].map((item) => <span className="step" key={item}>{item}</span>)}
+              {["Research lead","Qualified demand","RFQ ready","Sourcing","Firm quotation","Margin protection","Contracted transaction","Invoiced","Fulfillment","Collected revenue"].map((item) => <span className="step" key={item}>{item}</span>)}
             </div>
           </div>
           <div className="card">
@@ -238,37 +232,27 @@ export default function ResearchIntelligenceCenter() {
         <section className="controls">
           <input className="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search opportunity, buyer, supplier, market or ID" aria-label="Search intelligence" />
           <select className="filter" value={priority} onChange={(event) => setPriority(event.target.value)} aria-label="Filter by research priority">
-            <option value="ALL">All priorities</option>
-            <option value="A">Priority A</option>
-            <option value="B">Priority B</option>
-            <option value="C">Priority C</option>
+            <option value="ALL">All priorities</option><option value="A">Priority A</option><option value="B">Priority B</option><option value="C">Priority C</option>
           </select>
         </section>
 
         <div className="table-wrap">
           <table className="table">
             <thead><tr><th>Opportunity</th><th>Intelligence stage</th><th>Priority</th><th>Research score</th><th>Buyer</th><th>Supplier</th><th>Possible profit*</th><th>Evidence</th><th>Next best action</th></tr></thead>
-            <tbody>
-              {filtered.map((row) => (
-                <tr key={row.id}>
-                  <td><span className="title">{row.title}</span><span className="sub">{row.id} · {row.market} · source: {row.sourceStage}</span></td>
-                  <td><span className="pill">{row.intelligenceStage}</span></td>
-                  <td><span className={`pill ${row.priority.toLowerCase()}`}>{row.priority}</span></td>
-                  <td><span className="score">{row.score}%</span><span className="sub">confidence {row.confidence}%</span></td>
-                  <td>{row.buyer}</td>
-                  <td>{row.supplier}</td>
-                  <td className="profit">{usd(row.possibleProfit)}</td>
-                  <td>{row.evidenceCount} artifact{row.evidenceCount === 1 ? "" : "s"}</td>
-                  <td>{row.nextAction}</td>
-                </tr>
-              ))}
-            </tbody>
+            <tbody>{filtered.map((row) => (
+              <tr key={row.id}>
+                <td><span className="title">{row.title}</span><span className="sub">{row.id} · {row.market} · source: {row.sourceStage}</span></td>
+                <td><span className="pill">{row.intelligenceStage}</span></td>
+                <td><span className={`pill ${row.priority.toLowerCase()}`}>{row.priority}</span></td>
+                <td><span className="score">{row.score}%</span><span className="sub">confidence {row.confidence}%</span></td>
+                <td>{row.buyer}</td><td>{row.supplier}</td><td className="profit">{usd(row.possibleProfit)}</td>
+                <td>{row.evidenceCount} artifact{row.evidenceCount === 1 ? "" : "s"}</td><td>{row.nextAction}</td>
+              </tr>
+            ))}</tbody>
           </table>
         </div>
 
-        <div className="foot">
-          *Possible profit and quality-adjusted opportunity are planning signals, not contracted or collected revenue. The quality-adjusted proxy multiplies quantified possible profit by recorded confidence and research score; it must not be represented to customers or management as guaranteed revenue. Last sync: {syncedAt || "waiting"}.
-        </div>
+        <div className="foot">*Possible profit and quality-adjusted opportunity are planning signals, not contracted or collected revenue. The quality-adjusted proxy multiplies quantified possible profit by recorded confidence and research score; it must not be represented to customers or management as guaranteed revenue. Last sync: {syncedAt || "waiting"}.</div>
       </div>
     </main>
   );
