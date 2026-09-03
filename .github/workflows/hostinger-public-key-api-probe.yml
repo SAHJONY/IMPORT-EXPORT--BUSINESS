@@ -1,0 +1,54 @@
+name: Hostinger Public Key API Probe
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/hostinger-public-key-api-probe.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  HOSTINGER_API_BASE: https://developers.hostinger.com
+  HOSTINGER_VM_ID: '767852'
+
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      HOSTINGER_API_TOKEN: ${{ secrets.HOSTINGER_API_TOKEN }}
+    steps:
+      - name: Probe non-destructive Hostinger endpoints
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "${HOSTINGER_API_TOKEN:-}" ]]
+          auth=(-H "Authorization: Bearer $HOSTINGER_API_TOKEN" -H 'Accept: application/json')
+          probe(){
+            local label="$1" url="$2"
+            local code
+            code="$(curl -sS -o "/tmp/$label.json" -w '%{http_code}' "${auth[@]}" "$url" || true)"
+            echo "$label=$code"
+            if [[ "$code" != 200 ]]; then
+              jq -c '{error,message}' "/tmp/$label.json" 2>/dev/null || head -c 500 "/tmp/$label.json" || true
+              echo
+            fi
+          }
+          probe VM_DETAILS "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$HOSTINGER_VM_ID"
+          probe ACCOUNT_PUBLIC_KEYS "$HOSTINGER_API_BASE/api/vps/v1/public-keys?page=1"
+          probe VM_ATTACHED_PUBLIC_KEYS "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$HOSTINGER_VM_ID/public-keys?page=1"
+
+          vm_code="$(curl -sS -o /dev/null -w '%{http_code}' "${auth[@]}" "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$HOSTINGER_VM_ID" || true)"
+          keys_code="$(curl -sS -o /dev/null -w '%{http_code}' "${auth[@]}" "$HOSTINGER_API_BASE/api/vps/v1/public-keys?page=1" || true)"
+          attached_code="$(curl -sS -o /dev/null -w '%{http_code}' "${auth[@]}" "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$HOSTINGER_VM_ID/public-keys?page=1" || true)"
+          [[ "$vm_code" == 200 ]]
+          if [[ "$keys_code" == 404 || "$attached_code" == 404 ]]; then
+            echo HOSTINGER_PUBLIC_KEY_API_UNAVAILABLE=1
+            exit 44
+          fi
+          [[ "$keys_code" == 200 ]]
+          [[ "$attached_code" == 200 ]]
+          echo HOSTINGER_PUBLIC_KEY_API=READY
