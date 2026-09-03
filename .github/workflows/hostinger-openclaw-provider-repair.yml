@@ -23,7 +23,7 @@ env:
 jobs:
   repair:
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 30
     env:
       HOSTINGER_API_TOKEN: ${{ secrets.HOSTINGER_API_TOKEN }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -41,23 +41,45 @@ jobs:
           echo "OPENAI_HTTP=$code"
           [[ "$code" == 200 ]]
 
-      - name: Prepare management key
+      - name: Prepare and attach ephemeral Hostinger management key
         shell: bash
         run: |
           set -euo pipefail
           sudo apt-get update -qq
-          sudo apt-get install -y -qq jq sshpass netcat-openbsd >/dev/null
+          sudo apt-get install -y -qq jq netcat-openbsd >/dev/null
           install -d -m 700 ~/.ssh
           ssh-keygen -q -t ed25519 -N '' -f ~/.ssh/provider-repair -C "provider-repair-${GITHUB_RUN_ID}"
           echo "SSH_KEY_PATH=$HOME/.ssh/provider-repair" >> "$GITHUB_ENV"
-          chmod +x openclaw/hostinger-24x7/*.sh
-          bash -n openclaw/hostinger-24x7/hostinger-recovery-controller.sh
+          pub="$(cat ~/.ssh/provider-repair.pub)"
+          name="sahjony-provider-repair-${GITHUB_RUN_ID}"
+          create="$(curl -fsS -X POST -H "Authorization: Bearer $HOSTINGER_API_TOKEN" -H 'Accept: application/json' -H 'Content-Type: application/json' --data "$(jq -n --arg name "$name" --arg key "$pub" '{name:$name,key:$key}')" "$HOSTINGER_API_BASE/api/vps/v1/public-keys")"
+          key_id="$(jq -r '.id // empty' <<<"$create")"
+          [[ "$key_id" =~ ^[0-9]+$ ]]
+          echo "HOSTINGER_EPHEMERAL_KEY_ID=$key_id" >> "$GITHUB_ENV"
+          attach="$(curl -fsS -X POST -H "Authorization: Bearer $HOSTINGER_API_TOKEN" -H 'Accept: application/json' -H 'Content-Type: application/json' --data "$(jq -n --argjson id "$key_id" '{ids:[$id]}')" "$HOSTINGER_API_BASE/api/vps/v1/public-keys/attach/$HOSTINGER_VM_ID")"
+          action_id="$(jq -r '.id // empty' <<<"$attach")"
+          [[ "$action_id" =~ ^[0-9]+$ ]]
+          for i in $(seq 1 60); do
+            body="$(curl -fsS -H "Authorization: Bearer $HOSTINGER_API_TOKEN" -H 'Accept: application/json' "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$HOSTINGER_VM_ID/actions/$action_id")"
+            state="$(jq -r '.state // empty' <<<"$body")"
+            echo "SSH_KEY_ATTACH probe=$i state=${state:-unknown}"
+            case "$state" in success) break ;; failed|failure|error|cancelled|canceled) exit 21 ;; esac
+            sleep 5
+          done
+          attached="$(curl -fsS -H "Authorization: Bearer $HOSTINGER_API_TOKEN" -H 'Accept: application/json' "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$HOSTINGER_VM_ID/public-keys")"
+          jq -e --argjson id "$key_id" '.data[]? | select(.id == $id)' >/dev/null <<<"$attached"
 
-      - name: Repair native SSH
+      - name: Verify normal SSH from attached key
         shell: bash
         run: |
           set -euo pipefail
-          openclaw/hostinger-24x7/hostinger-recovery-controller.sh repair-ssh
+          ok=false
+          for i in $(seq 1 36); do
+            if ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 -i "$SSH_KEY_PATH" "$HOSTINGER_USER@$HOSTINGER_HOST" 'printf SAHJONY_NORMAL_SSH_OK' 2>/dev/null | grep -q SAHJONY_NORMAL_SSH_OK; then ok=true; break; fi
+            sleep 5
+          done
+          [[ "$ok" == true ]]
+          echo HOSTINGER_NORMAL_SSH=READY
 
       - name: Install OpenAI and disable Anthropic
         shell: bash
@@ -65,8 +87,7 @@ jobs:
           set -euo pipefail
           OPENAI_B64="$(printf '%s' "$OPENAI_API_KEY" | base64 -w0)"
           echo "::add-mask::$OPENAI_B64"
-          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -i "$SSH_KEY_PATH" \
-            "$HOSTINGER_USER@$HOSTINGER_HOST" "OPENAI_B64='$OPENAI_B64' bash -s" <<'REMOTE'
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -i "$SSH_KEY_PATH" "$HOSTINGER_USER@$HOSTINGER_HOST" "OPENAI_B64='$OPENAI_B64' bash -s" <<'REMOTE'
           set -euo pipefail
           cd /opt/sahjony-openclaw
           test -f docker-compose.yml
@@ -101,18 +122,28 @@ jobs:
           for i in $(seq 1 24); do
             body="$(curl -fsS --max-time 20 https://www.sahjony.com/whatsapp/health || true)"
             printf '%s\n' "$body" | jq '{status,provider,send_ready,gateway_connected,heartbeat_fresh,recovery_issues,backlog_recovery}' 2>/dev/null || true
-            if jq -e '(.provider == "hostinger_openclaw") and ((.gateway_connected // false) == true) and ((.heartbeat_fresh // false) == true) and ((.send_ready // false) == true)' >/dev/null 2>&1 <<<"$body"; then
-              ok=true
-              break
-            fi
+            if jq -e '(.provider == "hostinger_openclaw") and ((.gateway_connected // false) == true) and ((.heartbeat_fresh // false) == true) and ((.send_ready // false) == true)' >/dev/null 2>&1 <<<"$body"; then ok=true; break; fi
             sleep 5
           done
           [[ "$ok" == true ]]
           echo WHATSAPP_TRANSACTION_READY=1
 
-      - name: Cleanup ephemeral key
+      - name: Remove ephemeral key from VPS
         if: always()
         shell: bash
         run: |
           set +e
+          if [[ -f ~/.ssh/provider-repair.pub ]]; then
+            pub="$(cat ~/.ssh/provider-repair.pub)"
+            pub_b64="$(printf '%s' "$pub" | base64 -w0)"
+            ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 -i ~/.ssh/provider-repair "$HOSTINGER_USER@$HOSTINGER_HOST" "PUB_B64='$pub_b64' bash -s" <<'REMOTE'
+          set -e
+          pub="$(printf '%s' "$PUB_B64" | base64 -d)"
+          f=/root/.ssh/authorized_keys
+          if [[ -f "$f" ]]; then grep -vxF "$pub" "$f" > "$f.tmp" || true; install -m 600 "$f.tmp" "$f"; rm -f "$f.tmp"; fi
+          REMOTE
+          fi
+          if [[ -n "${HOSTINGER_EPHEMERAL_KEY_ID:-}" ]]; then
+            curl -sS -X DELETE -H "Authorization: Bearer $HOSTINGER_API_TOKEN" -H 'Accept: application/json' "$HOSTINGER_API_BASE/api/vps/v1/public-keys/$HOSTINGER_EPHEMERAL_KEY_ID" >/dev/null || true
+          fi
           rm -f ~/.ssh/provider-repair ~/.ssh/provider-repair.pub
