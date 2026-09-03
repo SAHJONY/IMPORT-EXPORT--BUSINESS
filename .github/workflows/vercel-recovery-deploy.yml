@@ -1,15 +1,13 @@
 name: Vercel Prebuilt Production
 
 on:
-  push:
-    branches:
-      - main
   workflow_dispatch:
     inputs:
       reason:
         description: Release reason
         required: false
         default: Manual production release
+
 concurrency:
   group: vercel-production-prebuilt
   cancel-in-progress: true
@@ -37,7 +35,7 @@ jobs:
       - name: Verify Vercel deployment credential
         run: |
           if [ -z "$VERCEL_TOKEN" ]; then
-            echo '::error::Missing GitHub Actions secret VERCEL_TOKEN. Create a scoped Vercel token and save it as repository secret VERCEL_TOKEN.'
+            echo '::error::Missing GitHub Actions secret VERCEL_TOKEN. Create a scoped Vercel token and save it as repository secret VERCEL_TOKEN before using this manual recovery workflow.'
             exit 78
           fi
       - name: Install application dependencies
