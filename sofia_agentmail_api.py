@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 import httpx
-from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi import APIRouter, Header, HTTPException, Request
 from pydantic import BaseModel, EmailStr, Field
 from svix.webhooks import Webhook, WebhookVerificationError
 
@@ -17,12 +17,7 @@ SOFIA_AGENT_ID = "sofia-smith"
 SOFIA_DISPLAY_NAME = "Sofía Smith"
 SOFIA_ROLE = "Executive Manager / Executive Assistant & AI Commercial Executive"
 
-app = FastAPI(
-    title="SAHJONY Sofía AgentMail Omnichannel Bridge",
-    version="1.0.0",
-    docs_url=None,
-    redoc_url=None,
-)
+router = APIRouter(prefix="/whatsapp/sofia/agentmail", tags=["sofia-agentmail"])
 
 
 def _now() -> str:
@@ -102,18 +97,18 @@ async def _record_event(event_type: str, payload: dict[str, Any]) -> None:
             },
         )
     except Exception:
-        # Webhook delivery must not fail merely because audit persistence is temporarily unavailable.
+        # AgentMail should retry only transport failures, not temporary audit-store issues.
         pass
 
 
-@app.get("/api/sofia/agentmail/health")
+@router.get("/health")
 async def agentmail_health() -> dict[str, Any]:
     cfg = _configured()
     ready = all(cfg.values())
     return {
         "status": "ok" if ready else "configuration_required",
         "service": "sofia-agentmail-bridge",
-        "version": "1.0.0",
+        "version": "1.1.0",
         "agent_id": SOFIA_AGENT_ID,
         "identity": {
             "display_name": SOFIA_DISPLAY_NAME,
@@ -135,7 +130,7 @@ async def agentmail_health() -> dict[str, Any]:
     }
 
 
-@app.post("/api/sofia/agentmail/webhook")
+@router.post("/webhook")
 async def agentmail_webhook(request: Request) -> dict[str, Any]:
     secret = _env("AGENTMAIL_WEBHOOK_SECRET")
     if not secret:
@@ -186,7 +181,7 @@ class AgentMailSend(BaseModel):
     reply_to: EmailStr | list[EmailStr] | None = None
 
 
-@app.post("/api/sofia/agentmail/send")
+@router.post("/send")
 async def agentmail_send(
     payload: AgentMailSend,
     authorization: str | None = Header(None, alias="Authorization"),
