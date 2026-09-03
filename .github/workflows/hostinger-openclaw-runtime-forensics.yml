@@ -1,0 +1,207 @@
+name: Hostinger OpenClaw Runtime Forensics
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/hostinger-openclaw-runtime-forensics.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hostinger-openclaw-runtime-forensics
+  cancel-in-progress: false
+
+env:
+  HOSTINGER_API_BASE: https://developers.hostinger.com
+  VM_ID: '767852'
+  HOST: '69.62.68.67'
+  USER: root
+
+jobs:
+  inspect:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      API_TOKEN: ${{ secrets.HOSTINGER_API_TOKEN }}
+    steps:
+      - name: Prepare recovery credential
+        id: creds
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "$API_TOKEN" ]] || { echo 'HOSTINGER_API_TOKEN_MISSING=1' >&2; exit 2; }
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq sshpass netcat-openbsd >/dev/null
+          RECOVERY_PASSWORD="$(openssl rand -hex 16)Aa1!"
+          echo "::add-mask::$RECOVERY_PASSWORD"
+          echo "recovery_password=$RECOVERY_PASSWORD" >> "$GITHUB_OUTPUT"
+          echo 'FORENSICS_RECOVERY_CREDENTIAL_READY=1'
+
+      - name: Start Hostinger recovery mode
+        shell: bash
+        env:
+          RECOVERY_PASSWORD: ${{ steps.creds.outputs.recovery_password }}
+        run: |
+          set -euo pipefail
+          payload="$(jq -n --arg p "$RECOVERY_PASSWORD" '{root_password:$p}')"
+          curl --fail --silent --show-error -X POST \
+            -H "Authorization: Bearer $API_TOKEN" \
+            -H 'Content-Type: application/json' \
+            -H 'Accept: application/json' \
+            --data "$payload" \
+            "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/recovery" >/tmp/recovery-start.json
+          echo 'HOSTINGER_FORENSICS_RECOVERY_REQUESTED=1'
+
+      - name: Wait for recovery SSH and original OS
+        id: ready
+        shell: bash
+        env:
+          RECOVERY_PASSWORD: ${{ steps.creds.outputs.recovery_password }}
+        run: |
+          set -euo pipefail
+          export SSHPASS="$RECOVERY_PASSWORD"
+          auth=(-H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json')
+          ssh_opts=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=6)
+          recovery_host="$HOST"
+          root_mount=""
+          for attempt in $(seq 1 60); do
+            curl --silent --show-error "${auth[@]}" \
+              "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID" > /tmp/vm-recovery.json || true
+            api_ip="$(jq -r '[.. | objects | .ipv4? // .ip? // .address? // empty | select(type=="string") | select(test("^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+$"))] | first // empty' /tmp/vm-recovery.json 2>/dev/null || true)"
+            [[ -n "$api_ip" ]] && recovery_host="$api_ip"
+            echo "FORENSICS_RECOVERY_GATE=$attempt host=$recovery_host"
+            if nc -z -w 4 "$recovery_host" 22 >/dev/null 2>&1; then
+              if sshpass -e ssh "${ssh_opts[@]}" "$USER@$recovery_host" 'printf SAHJONY_FORENSICS_AUTH_OK' 2>/dev/null | grep -q SAHJONY_FORENSICS_AUTH_OK; then
+                root_mount="$(sshpass -e ssh "${ssh_opts[@]}" "$USER@$recovery_host" 'bash -s' 2>/dev/null <<'REMOTE' || true
+          set -e
+          for d in /mnt /mnt/sda /mnt/sda1 /mnt/vda /mnt/vda1 /mnt/nvme0n1 /mnt/nvme0n1p1 /mnt/* /mnt/*/*; do
+            [ -d "$d" ] || continue
+            if [ -f "$d/etc/os-release" ] && [ -d "$d/var" ] && [ -d "$d/root" ]; then
+              printf '%s\n' "$d"
+              exit 0
+            fi
+          done
+          exit 1
+          REMOTE
+          )"
+                root_mount="$(printf '%s\n' "$root_mount" | head -n1 | tr -d '\r')"
+                [[ -n "$root_mount" ]] && break
+              fi
+            fi
+            sleep 10
+          done
+          [[ -n "$root_mount" ]] || { echo 'FORENSICS_RECOVERY_AUTH_OR_OS_MOUNT_NOT_READY=1' >&2; exit 34; }
+          echo "recovery_host=$recovery_host" >> "$GITHUB_OUTPUT"
+          echo "root_mount=$root_mount" >> "$GITHUB_OUTPUT"
+          echo "FORENSICS_OS_READY=1 root_mount=$root_mount"
+
+      - name: Collect sanitized OpenClaw runtime evidence
+        shell: bash
+        env:
+          RECOVERY_PASSWORD: ${{ steps.creds.outputs.recovery_password }}
+          RECOVERY_HOST: ${{ steps.ready.outputs.recovery_host }}
+          ROOT_MOUNT: ${{ steps.ready.outputs.root_mount }}
+        run: |
+          set -euo pipefail
+          export SSHPASS="$RECOVERY_PASSWORD"
+          sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 \
+            "$USER@$RECOVERY_HOST" "ROOT_MOUNT='$ROOT_MOUNT' bash -s" <<'REMOTE'
+          set -euo pipefail
+          root="$ROOT_MOUNT"
+          test -f "$root/etc/os-release"
+          echo '=== SAHJONY HOSTINGER OPENCLAW SANITIZED FORENSICS ==='
+          echo '[os]'
+          sed -n -E 's/^(ID|VERSION_ID|PRETTY_NAME)=/\1=/p' "$root/etc/os-release" | head -n 10 || true
+
+          echo '[systemd-unit-files]'
+          find "$root/etc/systemd/system" "$root/lib/systemd/system" "$root/usr/lib/systemd/system" \
+            -maxdepth 3 -type f \( -iname '*openclaw*' -o -iname '*whatsapp*' -o -iname '*gateway*' -o -iname '*docker*' \) \
+            -print 2>/dev/null | sed "s#^$root##" | sort -u | head -n 200
+
+          echo '[systemd-unit-references]'
+          grep -RIlE 'openclaw|whatsapp|18789|gateway' \
+            "$root/etc/systemd/system" "$root/lib/systemd/system" "$root/usr/lib/systemd/system" 2>/dev/null \
+            | sed "s#^$root##" | sort -u | head -n 200 || true
+
+          echo '[enabled-unit-links]'
+          find "$root/etc/systemd/system" -type l 2>/dev/null \
+            | grep -Ei 'openclaw|whatsapp|gateway|docker' \
+            | sed "s#^$root##" | sort -u | head -n 200 || true
+
+          echo '[compose-and-container-config-files]'
+          find "$root/opt" "$root/srv" "$root/root" "$root/home" "$root/etc" -xdev -type f \
+            \( -iname 'docker-compose.yml' -o -iname 'docker-compose.yaml' -o -iname 'compose.yml' -o -iname 'compose.yaml' -o -iname 'Dockerfile' \) \
+            -print 2>/dev/null | sed "s#^$root##" | sort -u | head -n 300 || true
+
+          echo '[candidate-env-files-and-safe-key-names]'
+          find "$root/opt" "$root/srv" "$root/root" "$root/home" "$root/etc" -xdev -type f \
+            \( -name '.env' -o -name '*.env' -o -name 'environment' \) -print0 2>/dev/null \
+            | while IFS= read -r -d '' f; do
+                keys="$(grep -E '^[A-Za-z_][A-Za-z0-9_]*=' "$f" 2>/dev/null \
+                  | cut -d= -f1 \
+                  | grep -E '^(OPENAI_API_KEY|ANTHROPIC_API_KEY|OPENAI_|ANTHROPIC_|OPENCLAW_|WHATSAPP_|GATEWAY_|MODEL_|PROVIDER_)' \
+                  | sort -u | tr '\n' ',' | sed 's/,$//' || true)"
+                if [ -n "$keys" ]; then
+                  printf '%s keys=%s\n' "${f#$root}" "$keys"
+                fi
+              done | head -n 300
+
+          echo '[runtime-reference-files]'
+          grep -RIlE 'openclaw|whatsapp|18789|OPENAI_API_KEY|ANTHROPIC_API_KEY' \
+            "$root/opt" "$root/srv" "$root/etc" "$root/root" "$root/home" 2>/dev/null \
+            | sed "s#^$root##" | sort -u | head -n 400 || true
+
+          echo '[docker-persistent-state]'
+          for p in "$root/var/lib/docker/containers"/*/config.v2.json; do
+            [ -f "$p" ] || continue
+            if grep -Eqi 'openclaw|claw|whatsapp|18789' "$p"; then
+              cid="$(basename "$(dirname "$p")")"
+              name="$(python3 - "$p" <<'PY'
+          import json,sys
+          try:
+              d=json.load(open(sys.argv[1])); print((d.get('Name') or '').lstrip('/'))
+          except Exception: print('unknown')
+          PY
+          )"
+              image="$(python3 - "$p" <<'PY'
+          import json,sys
+          try:
+              d=json.load(open(sys.argv[1])); print(d.get('Config',{}).get('Image','unknown'))
+          except Exception: print('unknown')
+          PY
+          )"
+              keys="$(python3 - "$p" <<'PY'
+          import json,sys,re
+          try:
+              d=json.load(open(sys.argv[1])); env=d.get('Config',{}).get('Env') or []
+              allow=re.compile(r'^(OPENAI_API_KEY|ANTHROPIC_API_KEY|OPENAI_|ANTHROPIC_|OPENCLAW_|WHATSAPP_|GATEWAY_|MODEL_|PROVIDER_)')
+              print(','.join(sorted({x.split('=',1)[0] for x in env if '=' in x and allow.match(x.split('=',1)[0])})))
+          except Exception: print('')
+          PY
+          )"
+              printf 'container=%s name=%s image=%s safe_env_keys=%s\n' "${cid:0:12}" "$name" "$image" "$keys"
+            fi
+          done
+
+          echo '[candidate-git-roots]'
+          find "$root/opt" "$root/srv" "$root/root" "$root/home" -xdev -type d -name .git -print 2>/dev/null \
+            | sed 's#/.git$##' | sed "s#^$root##" | head -n 100 || true
+
+          echo '[important-file-metadata]'
+          find "$root/etc/systemd/system" "$root/opt" "$root/srv" "$root/root" "$root/home" -xdev -type f \
+            \( -iname '*openclaw*' -o -iname '*whatsapp*' -o -iname '*gateway*' -o -name '.env' -o -name 'docker-compose.yml' -o -name 'compose.yml' \) \
+            -printf '%m %u:%g %s %p\n' 2>/dev/null | sed "s# $root/# /#" | head -n 300 || true
+          echo 'FORENSICS_COLLECTION_COMPLETE=1'
+          REMOTE
+
+      - name: Ensure recovery mode is off
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          curl --silent --show-error -X DELETE \
+            -H "Authorization: Bearer $API_TOKEN" -H 'Accept: application/json' \
+            "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$VM_ID/recovery" >/dev/null 2>&1
+          echo 'HOSTINGER_FORENSICS_RECOVERY_CLEANUP_COMPLETE=1'
