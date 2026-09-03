@@ -7,7 +7,7 @@ on:
 
 jobs:
   reconcile:
-    if: contains(github.event.head_commit.message, 'recover valid OpenAI key from Vercel production') || github.event_name == 'workflow_dispatch'
+    if: contains(github.event.head_commit.message, 'transmit selected OpenAI credential safely') || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 12
     env:
@@ -36,42 +36,25 @@ jobs:
           set -euo pipefail
           key=''
           source_name=''
-
           if [[ -n "$GITHUB_OPENAI_API_KEY" ]]; then
             status="$(curl -sS -o /tmp/openai-gh.json -w '%{http_code}' -H "Authorization: Bearer $GITHUB_OPENAI_API_KEY" https://api.openai.com/v1/models || true)"
-            if [[ "$status" == 200 ]]; then
-              key="$GITHUB_OPENAI_API_KEY"
-              source_name='github'
-            else
-              echo "GITHUB_OPENAI_KEY_VALID=false status=$status"
-            fi
+            if [[ "$status" == 200 ]]; then key="$GITHUB_OPENAI_API_KEY"; source_name='github'; else echo "GITHUB_OPENAI_KEY_VALID=false status=$status"; fi
           fi
-
           if [[ -z "$key" ]]; then
             [[ -n "$VERCEL_TOKEN" ]] || { echo VERCEL_TOKEN_MISSING_AND_GITHUB_OPENAI_INVALID=1 >&2; exit 4; }
             work=/tmp/vercel-openai-sync
-            rm -rf "$work"
-            mkdir -p "$work/.vercel"
+            rm -rf "$work"; mkdir -p "$work/.vercel"
             printf '{"orgId":"%s","projectId":"%s"}\n' "$VERCEL_ORG_ID" "$VERCEL_PROJECT_ID" > "$work/.vercel/project.json"
-            (
-              cd "$work"
-              npx --yes vercel@latest env pull .env.production.local --environment=production --yes --token "$VERCEL_TOKEN" >/tmp/vercel-env-pull.log 2>&1
-            )
+            (cd "$work" && npx --yes vercel@latest env pull .env.production.local --environment=production --yes --token "$VERCEL_TOKEN" >/tmp/vercel-env-pull.log 2>&1)
             vkey="$(python3 - "$work/.env.production.local" <<'PY'
           import pathlib,sys
-          p=pathlib.Path(sys.argv[1])
           val=''
-          for raw in p.read_text().splitlines():
+          for raw in pathlib.Path(sys.argv[1]).read_text().splitlines():
               line=raw.strip()
-              if not line or line.startswith('#') or '=' not in line:
-                  continue
-              k,v=line.split('=',1)
-              if k.strip()=='OPENAI_API_KEY':
-                  v=v.strip()
-                  if len(v)>=2 and v[0]==v[-1] and v[0] in "\"'":
-                      v=v[1:-1]
-                  val=v
-                  break
+              if line and not line.startswith('#') and '=' in line:
+                  k,v=line.split('=',1)
+                  if k.strip()=='OPENAI_API_KEY':
+                      v=v.strip(); val=v[1:-1] if len(v)>=2 and v[0]==v[-1] and v[0] in "\"'" else v; break
           print(val,end='')
           PY
             )"
@@ -79,64 +62,58 @@ jobs:
             echo "::add-mask::$vkey"
             status="$(curl -sS -o /tmp/openai-vercel.json -w '%{http_code}' -H "Authorization: Bearer $vkey" https://api.openai.com/v1/models || true)"
             [[ "$status" == 200 ]] || { echo "VERCEL_PRODUCTION_OPENAI_KEY_VALID=false status=$status" >&2; exit 6; }
-            key="$vkey"
-            source_name='vercel-production'
+            key="$vkey"; source_name='vercel-production'
           fi
-
           echo "::add-mask::$key"
           printf '%s' "$key" > /tmp/selected-openai-key
           chmod 600 /tmp/selected-openai-key
           echo "OPENAI_SELECTED_SOURCE=$source_name"
           echo "source=$source_name" >> "$GITHUB_OUTPUT"
 
+      - name: Transfer selected credential to Hostinger securely
+        shell: bash
+        run: |
+          set -euo pipefail
+          scp -q -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=12 -i ~/.ssh/openclaw-runtime-reconcile /tmp/selected-openai-key "$USER@$HOST:/root/.openclaw-selected-openai-key"
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=12 -i ~/.ssh/openclaw-runtime-reconcile "$USER@$HOST" 'chmod 600 /root/.openclaw-selected-openai-key'
+
       - name: Reconcile canonical runtime paths and fallback auth
         shell: bash
         run: |
           set -euo pipefail
-          cat /tmp/selected-openai-key | ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=12 -i ~/.ssh/openclaw-runtime-reconcile "$USER@$HOST" 'bash -s' <<'REMOTE'
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=12 -i ~/.ssh/openclaw-runtime-reconcile "$USER@$HOST" 'bash -s' <<'REMOTE'
           set -euo pipefail
-          read -r OPENAI_KEY
+          OPENAI_KEY="$(cat /root/.openclaw-selected-openai-key)"
+          rm -f /root/.openclaw-selected-openai-key
           [[ -n "$OPENAI_KEY" ]] || { echo OPENAI_KEY_EMPTY_ON_HOST=1 >&2; exit 5; }
           STATE=/var/lib/sahjony-openclaw-state
           CONFIG=$STATE/openclaw.json
           test -f "$CONFIG"
           install -d -m 755 /etc/systemd/system/openclaw-gateway.service.d
-
           cat >/etc/systemd/system/openclaw-gateway.service.d/05-canonical-paths.conf <<EOF
           [Service]
           Environment="OPENCLAW_STATE_DIR=$STATE"
           Environment="OPENCLAW_CONFIG_PATH=$CONFIG"
           EOF
           chmod 644 /etc/systemd/system/openclaw-gateway.service.d/05-canonical-paths.conf
-
           umask 077
           cat >/etc/systemd/system/openclaw-gateway.service.d/20-openai-auth.conf <<EOF
           [Service]
           Environment="OPENAI_API_KEY=$OPENAI_KEY"
           EOF
           chmod 600 /etc/systemd/system/openclaw-gateway.service.d/20-openai-auth.conf
-
           python3 - "$STATE/.env" "$OPENAI_KEY" <<'PY'
           import pathlib,sys
-          p=pathlib.Path(sys.argv[1]); key=sys.argv[2]
-          rows=p.read_text().splitlines() if p.exists() else []
-          out=[]; seen=False
+          p=pathlib.Path(sys.argv[1]); key=sys.argv[2]; rows=p.read_text().splitlines() if p.exists() else []; out=[]; seen=False
           for row in rows:
-              if row.startswith('OPENAI_API_KEY='):
-                  out.append('OPENAI_API_KEY='+key); seen=True
-              elif not row.startswith('ANTHROPIC_API_KEY='):
-                  out.append(row)
+              if row.startswith('OPENAI_API_KEY='): out.append('OPENAI_API_KEY='+key); seen=True
+              elif not row.startswith('ANTHROPIC_API_KEY='): out.append(row)
           if not seen: out.append('OPENAI_API_KEY='+key)
           p.write_text('\n'.join(out).rstrip()+'\n'); p.chmod(0o600)
           PY
-
           python3 - "$CONFIG" <<'PY'
           import json,sys
-          p=sys.argv[1]; d=json.load(open(p))
-          agents=d.setdefault('agents',{}); defaults=agents.setdefault('defaults',{})
-          desired={'primary':'nvidia/openai/gpt-oss-120b','fallbacks':['openai/gpt-5.5']}
-          defaults['model']=desired.copy()
-          entries=agents.get('entries')
+          p=sys.argv[1]; d=json.load(open(p)); agents=d.setdefault('agents',{}); defaults=agents.setdefault('defaults',{}); desired={'primary':'nvidia/openai/gpt-oss-120b','fallbacks':['openai/gpt-5.5']}; defaults['model']=desired.copy(); entries=agents.get('entries')
           if isinstance(entries,dict) and isinstance(entries.get('main'),dict): entries['main']['model']=desired.copy()
           elif isinstance(entries,list):
               for row in entries:
@@ -144,11 +121,8 @@ jobs:
           with open(p,'w') as f: json.dump(d,f,indent=2); f.write('\n')
           PY
           chmod 600 "$CONFIG"
-
           export OPENCLAW_STATE_DIR="$STATE" OPENCLAW_CONFIG_PATH="$CONFIG" OPENAI_API_KEY="$OPENAI_KEY"
-          active_file="$(openclaw config file)"
-          echo "OPENCLAW_ACTIVE_CONFIG=$active_file"
-          [[ "$active_file" == "$CONFIG" ]]
+          active_file="$(openclaw config file)"; echo "OPENCLAW_ACTIVE_CONFIG=$active_file"; [[ "$active_file" == "$CONFIG" ]]
           openclaw config validate --json >/tmp/openclaw-runtime-config.json
           python3 - <<'PY'
           import json
@@ -156,24 +130,18 @@ jobs:
           if d.get('valid') is False or d.get('ok') is False: raise SystemExit('OPENCLAW_CONFIG_INVALID')
           print('OPENCLAW_CANONICAL_CONFIG_VALID=1')
           PY
-
           systemctl daemon-reload
           systemctl restart openclaw-gateway.service
           sleep 12
           systemctl is-active --quiet openclaw-gateway.service
           echo OPENCLAW_GATEWAY_ACTIVE=1
-
           pid="$(systemctl show openclaw-gateway.service -p MainPID --value)"
           python3 - "$pid" <<'PY'
           import pathlib,sys
           vals={x.split('=',1)[0]:x.split('=',1)[1] for x in (pathlib.Path('/proc')/sys.argv[1]/'environ').read_bytes().decode(errors='ignore').split('\0') if '=' in x}
-          assert vals.get('OPENCLAW_STATE_DIR')=='/var/lib/sahjony-openclaw-state'
-          assert vals.get('OPENCLAW_CONFIG_PATH')=='/var/lib/sahjony-openclaw-state/openclaw.json'
-          assert bool(vals.get('OPENAI_API_KEY'))
-          assert not bool(vals.get('ANTHROPIC_API_KEY'))
+          assert vals.get('OPENCLAW_STATE_DIR')=='/var/lib/sahjony-openclaw-state'; assert vals.get('OPENCLAW_CONFIG_PATH')=='/var/lib/sahjony-openclaw-state/openclaw.json'; assert bool(vals.get('OPENAI_API_KEY')); assert not bool(vals.get('ANTHROPIC_API_KEY'))
           print('GATEWAY_CANONICAL_STATE_DIR=1'); print('GATEWAY_CANONICAL_CONFIG_PATH=1'); print('GATEWAY_OPENAI_AUTH_PRESENT=1'); print('GATEWAY_ANTHROPIC_DISABLED=1')
           PY
-
           timeout 75 openclaw infer model run --local --model openai/gpt-5.5 --prompt 'Reply with exactly: SOFIA_FALLBACK_OK' --json >/tmp/openai-smoke.json
           python3 - <<'PY'
           import json
@@ -181,13 +149,9 @@ jobs:
           if 'SOFIA_FALLBACK_OK' not in json.dumps(d): raise SystemExit('OPENAI_FALLBACK_SMOKE_FAILED')
           print('OPENAI_FALLBACK_SMOKE_OK=1')
           PY
-
           python3 - "$CONFIG" <<'PY'
           import json,sys
-          d=json.load(open(sys.argv[1])); m=((d.get('agents') or {}).get('defaults') or {}).get('model') or {}
-          assert m.get('primary')=='nvidia/openai/gpt-oss-120b',m
-          assert m.get('fallbacks')==['openai/gpt-5.5'],m
-          print('MODEL_CHAIN_CANONICAL=1')
+          d=json.load(open(sys.argv[1])); m=((d.get('agents') or {}).get('defaults') or {}).get('model') or {}; assert m.get('primary')=='nvidia/openai/gpt-oss-120b',m; assert m.get('fallbacks')==['openai/gpt-5.5'],m; print('MODEL_CHAIN_CANONICAL=1')
           PY
           echo SAHJONY_OPENCLAW_MODEL_RUNTIME_RECONCILED=1
           REMOTE
@@ -198,3 +162,4 @@ jobs:
         run: |
           rm -f ~/.ssh/openclaw-runtime-reconcile /tmp/selected-openai-key /tmp/openai-gh.json /tmp/openai-vercel.json
           rm -rf /tmp/vercel-openai-sync
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 -i ~/.ssh/openclaw-runtime-reconcile "$USER@$HOST" 'rm -f /root/.openclaw-selected-openai-key' 2>/dev/null || true
