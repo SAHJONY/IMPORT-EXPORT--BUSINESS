@@ -17,11 +17,11 @@ env:
 jobs:
   probe:
     runs-on: ubuntu-24.04
-    timeout-minutes: 8
+    timeout-minutes: 5
     env:
       PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
     steps:
-      - name: Inspect native gateway and health reporter
+      - name: Inspect WhatsApp relink interface safely
         shell: bash
         run: |
           set -euo pipefail
@@ -30,36 +30,19 @@ jobs:
           chmod 600 ~/.ssh/hostinger-key
           ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=12 -i ~/.ssh/hostinger-key "$USER@$HOST" 'bash -s' <<'REMOTE'
           set -euo pipefail
-          echo '=== PORT_OWNER ==='
-          ss -ltnp 2>/dev/null | grep ':18789' || true
-          echo '=== SYSTEMD ==='
-          systemctl status openclaw-gateway.service sahjony-openclaw-runtime-guardian.service sahjony-openclaw-health-sidecar.service --no-pager -l || true
-          echo '=== SIDECAR_UNIT ==='
-          systemctl cat sahjony-openclaw-health-sidecar.service || true
-          echo '=== SIDECAR_SCRIPT ==='
-          sed -n '1,320p' /usr/local/sbin/sahjony-openclaw-health-sidecar 2>/dev/null || true
-          echo '=== STATE_FILES ==='
-          find /var/lib/sahjony-openclaw-state /var/lib/sahjony-openclaw-guardian -maxdepth 2 -type f -printf '%p %s bytes\n' 2>/dev/null | sort || true
-          echo '=== HEALTH_STATE_RAW ==='
-          for f in /var/lib/sahjony-openclaw-state/*health*.json /var/lib/sahjony-openclaw-state/*status*.json /var/lib/sahjony-openclaw-guardian/status.json; do
-            [[ -f "$f" ]] || continue
-            echo "FILE=$f"
-            sed -E 's/("?(key|token|secret|password|credential|auth|cookie)"?[[:space:]]*:[[:space:]]*)"[^"]*"/\1"<redacted>"/Ig' "$f" | head -c 12000
-            echo
-          done
-          echo '=== ENV_KEYS ==='
-          for f in /etc/openclaw-sahjony-bridge.env /etc/openclaw-gateway.env /etc/openclaw-openai.env; do
-            if [[ -f "$f" ]]; then
-              echo "FILE_PRESENT=$f"
-              sed -n 's/^\([A-Za-z_][A-Za-z0-9_]*\)=.*/ENV_KEY=\1/p' "$f" | sort -u
-            else
-              echo "FILE_MISSING=$f"
-            fi
-          done
-          echo '=== SIDECAR_LOGS ==='
-          journalctl -u sahjony-openclaw-health-sidecar.service --since '-30 minutes' --no-pager -n 300 || true
-          echo '=== PUBLIC_HEALTH ==='
-          curl -fsS --max-time 20 https://www.sahjony.com/whatsapp/health || true
-          echo
+          export HOME=/home/node
+          export OPENCLAW_STATE_DIR=/var/lib/sahjony-openclaw-state
+          export OPENCLAW_CONFIG_PATH=/var/lib/sahjony-openclaw-state/openclaw.json
+          export OPENCLAW_BIN=/usr/bin/openclaw
+          echo '=== CHANNEL_STATUS ==='
+          /usr/bin/openclaw channels status --probe || true
+          echo '=== CHANNELS_HELP ==='
+          /usr/bin/openclaw channels --help || true
+          echo '=== LOGIN_HELP ==='
+          /usr/bin/openclaw channels login --help || true
+          echo '=== WHATSAPP_HELP ==='
+          /usr/bin/openclaw channels login --channel whatsapp --help || true
+          echo '=== CREDENTIAL_PATHS ==='
+          find /var/lib/sahjony-openclaw-state /home/node/.openclaw -maxdepth 4 -type d -o -type f 2>/dev/null | grep -Ei 'whatsapp|credential|auth|session' | head -n 120 || true
           REMOTE
           rm -f ~/.ssh/hostinger-key
