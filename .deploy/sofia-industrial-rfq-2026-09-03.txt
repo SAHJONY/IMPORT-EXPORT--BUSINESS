@@ -1,0 +1,1 @@
+Deploy trigger for SOFIA policy 2026.09.03.6. Canonical policy commit: e80148b24b011c6e2f1665b00257deea2ee87ff8.
