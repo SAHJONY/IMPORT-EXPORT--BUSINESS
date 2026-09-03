@@ -1,0 +1,43 @@
+name: Hostinger Existing SSH Probe
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/hostinger-existing-ssh-probe.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  HOST: '69.62.68.67'
+  USER: root
+
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Probe existing Hostinger SSH secret
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${PRIVATE_KEY:-}" ]]; then
+            echo HOSTINGER_SSH_PRIVATE_KEY_PRESENT=0
+            exit 41
+          fi
+          echo HOSTINGER_SSH_PRIVATE_KEY_PRESENT=1
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/hostinger-existing-key
+          chmod 600 ~/.ssh/hostinger-existing-key
+          out="$(ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=12 -i ~/.ssh/hostinger-existing-key "$USER@$HOST" 'printf SAHJONY_EXISTING_SSH_OK' 2>/dev/null || true)"
+          rm -f ~/.ssh/hostinger-existing-key
+          if [[ "$out" == 'SAHJONY_EXISTING_SSH_OK' ]]; then
+            echo HOSTINGER_EXISTING_SSH=READY
+          else
+            echo HOSTINGER_EXISTING_SSH=UNAVAILABLE
+            exit 42
+          fi
