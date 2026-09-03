@@ -1,11 +1,21 @@
 {
   "id": "sahjony-whatsapp-output-guard",
   "name": "SAHJONY WhatsApp Output Guard",
-  "description": "Blocks internal runtime diagnostics from customer and owner WhatsApp messages.",
+  "description": "Classifies owner versus external WhatsApp context and blocks internal runtime or commercial leakage.",
   "activation": { "onStartup": true },
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
-    "properties": {}
+    "properties": {
+      "ownerNumber": {
+        "type": "string",
+        "description": "Owner WhatsApp peer in E.164 or provider-qualified form. Used only for runtime context classification."
+      },
+      "failClosedExternal": {
+        "type": "boolean",
+        "default": true,
+        "description": "Block outbound external WhatsApp messages that expose internal commercial mechanics."
+      }
+    }
   }
 }
