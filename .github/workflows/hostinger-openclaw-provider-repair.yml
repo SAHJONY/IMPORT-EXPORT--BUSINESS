@@ -1,0 +1,118 @@
+name: Hostinger OpenClaw Provider Repair
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/hostinger-openclaw-provider-repair.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hostinger-vm-767852-mutation
+  cancel-in-progress: false
+
+env:
+  HOSTINGER_VM_ID: '767852'
+  HOSTINGER_HOST: '69.62.68.67'
+  HOSTINGER_USER: root
+  HOSTINGER_API_BASE: https://developers.hostinger.com
+
+jobs:
+  repair:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      HOSTINGER_API_TOKEN: ${{ secrets.HOSTINGER_API_TOKEN }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate secrets and OpenAI
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "${HOSTINGER_API_TOKEN:-}" ]]
+          [[ -n "${OPENAI_API_KEY:-}" ]]
+          echo "::add-mask::$OPENAI_API_KEY"
+          code="$(curl -sS -o /tmp/openai.json -w '%{http_code}' -H "Authorization: Bearer $OPENAI_API_KEY" https://api.openai.com/v1/models || true)"
+          echo "OPENAI_HTTP=$code"
+          [[ "$code" == 200 ]]
+
+      - name: Prepare management key
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq jq sshpass netcat-openbsd >/dev/null
+          install -d -m 700 ~/.ssh
+          ssh-keygen -q -t ed25519 -N '' -f ~/.ssh/provider-repair -C "provider-repair-${GITHUB_RUN_ID}"
+          echo "SSH_KEY_PATH=$HOME/.ssh/provider-repair" >> "$GITHUB_ENV"
+          chmod +x openclaw/hostinger-24x7/*.sh
+          bash -n openclaw/hostinger-24x7/hostinger-recovery-controller.sh
+
+      - name: Repair native SSH
+        shell: bash
+        run: |
+          set -euo pipefail
+          openclaw/hostinger-24x7/hostinger-recovery-controller.sh repair-ssh
+
+      - name: Install OpenAI and disable Anthropic
+        shell: bash
+        run: |
+          set -euo pipefail
+          OPENAI_B64="$(printf '%s' "$OPENAI_API_KEY" | base64 -w0)"
+          echo "::add-mask::$OPENAI_B64"
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -i "$SSH_KEY_PATH" \
+            "$HOSTINGER_USER@$HOSTINGER_HOST" "OPENAI_B64='$OPENAI_B64' bash -s" <<'REMOTE'
+          set -euo pipefail
+          cd /opt/sahjony-openclaw
+          test -f docker-compose.yml
+          key="$(printf '%s' "$OPENAI_B64" | base64 -d)"
+          [[ -n "$key" ]]
+          touch .env
+          chmod 600 .env
+          cp -a .env ".env.backup.$(date -u +%Y%m%dT%H%M%SZ)"
+          tmp="$(mktemp)"
+          grep -vE '^(OPENAI_API_KEY|ANTHROPIC_API_KEY)=' .env > "$tmp" || true
+          printf 'OPENAI_API_KEY=%s\n' "$key" >> "$tmp"
+          install -m 600 "$tmp" .env
+          rm -f "$tmp"
+          unset key OPENAI_B64
+          ! grep -q '^ANTHROPIC_API_KEY=' .env
+          docker compose up -d --force-recreate openclaw-gateway
+          cid="$(docker compose ps -q openclaw-gateway)"
+          [[ -n "$cid" ]]
+          docker update --restart unless-stopped "$cid" >/dev/null
+          test "$(docker inspect "$cid" --format '{{.State.Running}}')" = true
+          env_names="$(docker inspect "$cid" --format '{{range .Config.Env}}{{println .}}{{end}}' | cut -d= -f1)"
+          grep -qx OPENAI_API_KEY <<<"$env_names"
+          ! grep -qx ANTHROPIC_API_KEY <<<"$env_names"
+          echo OPENCLAW_PROVIDER_RUNTIME=READY
+          REMOTE
+
+      - name: Verify WhatsApp readiness
+        shell: bash
+        run: |
+          set -euo pipefail
+          ok=false
+          for i in $(seq 1 24); do
+            body="$(curl -fsS --max-time 20 https://www.sahjony.com/whatsapp/health || true)"
+            printf '%s\n' "$body" | jq '{status,provider,send_ready,gateway_connected,heartbeat_fresh,recovery_issues,backlog_recovery}' 2>/dev/null || true
+            if jq -e '(.provider == "hostinger_openclaw") and ((.gateway_connected // false) == true) and ((.heartbeat_fresh // false) == true) and ((.send_ready // false) == true)' >/dev/null 2>&1 <<<"$body"; then
+              ok=true
+              break
+            fi
+            sleep 5
+          done
+          [[ "$ok" == true ]]
+          echo WHATSAPP_TRANSACTION_READY=1
+
+      - name: Cleanup ephemeral key
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          rm -f ~/.ssh/provider-repair ~/.ssh/provider-repair.pub
