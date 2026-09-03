@@ -1,0 +1,57 @@
+name: Hostinger OpenClaw Native Config Probe
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/hostinger-openclaw-native-config-probe.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  HOST: '69.62.68.67'
+  USER: root
+
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Inspect native provider configuration without secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/hostinger-key
+          chmod 600 ~/.ssh/hostinger-key
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=12 -i ~/.ssh/hostinger-key "$USER@$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          echo '=== SERVICE_ENV_FILES ==='
+          for f in /etc/openclaw-gateway.env /etc/openclaw-openai.env /etc/openclaw-nvidia.env /etc/openclaw-sahjony-bridge.env; do
+            if [[ -f "$f" ]]; then
+              echo "FILE=$f mode=$(stat -c '%a' "$f")"
+              sed -E 's/=.*$/=<redacted>/' "$f" | sed -n '1,120p'
+            else
+              echo "MISSING=$f"
+            fi
+          done
+          echo '=== SYSTEMD_EFFECTIVE_ENV_NAMES ==='
+          systemctl show openclaw-gateway.service -p Environment --value | tr ' ' '\n' | cut -d= -f1 | grep -E '^[A-Za-z_][A-Za-z0-9_]*$' | sort -u || true
+          echo '=== CONFIG_NONSECRET_SUMMARY ==='
+          cfg=/var/lib/sahjony-openclaw-state/openclaw.json
+          if [[ -f "$cfg" ]]; then
+            jq 'walk(if type=="object" then with_entries(if (.key|test("key|token|secret|password|credential";"i")) then .value="<redacted>" else . end) else . end) | {models,providers,channels,gateway,agents}' "$cfg" 2>/dev/null || echo CONFIG_PARSE_FAILED
+          else
+            echo CONFIG_MISSING
+          fi
+          echo '=== RUNTIME_STATUS ==='
+          env HOME=/home/node OPENCLAW_HOME=/home/node OPENCLAW_STATE_DIR=/var/lib/sahjony-openclaw-state OPENCLAW_CONFIG_PATH=/var/lib/sahjony-openclaw-state/openclaw.json openclaw gateway status --deep 2>&1 | sed -n '1,200p' || true
+          echo '=== DOCKER_STANDBY ==='
+          cd /opt/sahjony-openclaw 2>/dev/null && docker compose ps -a || true
+          docker ps -a --format '{{.ID}} {{.Names}} {{.Status}} {{.Ports}}' | grep -Ei 'openclaw|18789' || true
+          REMOTE
+          rm -f ~/.ssh/hostinger-key
