@@ -1,4 +1,5 @@
 name: NVIDIA GPT-OSS 120B Smoke Test
+# production validation gate: openai/gpt-oss-120b
 
 on:
   push:
