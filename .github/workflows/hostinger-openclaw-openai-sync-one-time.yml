@@ -1,4 +1,5 @@
 name: Hostinger OpenClaw OpenAI Sync One-Time
+# trigger revision: 2026-09-03 exact OpenAI runtime sync
 
 on:
   push:
@@ -76,8 +77,6 @@ jobs:
           set -euo pipefail
           opts=(-o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -i "$SSH_KEY_PATH")
 
-          # Stream the secret over the authenticated SSH channel on stdin. It is never
-          # included in the remote command line, workflow output, repository, or logs.
           printf '%s\n' "$OPENAI_API_KEY" | ssh "${opts[@]}" "$HOSTINGER_USER@$HOSTINGER_HOST" 'bash -c '\''
             set -euo pipefail
             IFS= read -r OPENAI_KEY
@@ -94,7 +93,6 @@ jobs:
             rm -f "$tmp"
             unset OPENAI_KEY
 
-            # Anthropic is intentionally disabled until owner re-enables it.
             if grep -q "^ANTHROPIC_API_KEY=" .env; then
               echo ANTHROPIC_DISABLE_FAILED=1 >&2
               exit 31
@@ -116,7 +114,6 @@ jobs:
             test "$(docker inspect openclaw-openclaw-gateway-1 --format "{{.State.Health.Status}}" 2>/dev/null)" = healthy
             test "$(docker inspect openclaw-openclaw-gateway-1 --format "{{.HostConfig.RestartPolicy.Name}}")" = unless-stopped
 
-            # Verify the running container received OpenAI but not Anthropic; print names only.
             docker inspect openclaw-openclaw-gateway-1 --format "{{range .Config.Env}}{{println .}}{{end}}" \
               | cut -d= -f1 \
               | grep -qx OPENAI_API_KEY
