@@ -18,13 +18,13 @@ concurrency:
 jobs:
   certify:
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 12
     env:
       HOST: '69.62.68.67'
       USER: root
       PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
     steps:
-      - name: Prepare authenticated SSH
+      - name: Prepare authenticated SSH and wait for VPS
         shell: bash
         run: |
           set -euo pipefail
@@ -33,12 +33,22 @@ jobs:
           printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/hostinger-crm-e2e
           chmod 600 ~/.ssh/hostinger-crm-e2e
           ssh-keygen -y -f ~/.ssh/hostinger-crm-e2e >/dev/null
+          ready=false
+          for i in $(seq 1 36); do
+            if ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=6 -i ~/.ssh/hostinger-crm-e2e "$USER@$HOST" 'printf CRM_E2E_SSH_READY' 2>/dev/null | grep -q CRM_E2E_SSH_READY; then
+              ready=true
+              break
+            fi
+            echo "crm_e2e_ssh_probe=$i/36"
+            sleep 10
+          done
+          [[ "$ready" == true ]] || { echo HOSTINGER_CRM_E2E_SSH_UNAVAILABLE=1 >&2; exit 3; }
 
       - name: Certify authenticated RFQ intake and idempotency
         shell: bash
         run: |
           set -euo pipefail
-          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 -i ~/.ssh/hostinger-crm-e2e "$USER@$HOST" 'bash -s' <<'REMOTE'
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=12 -o ServerAliveInterval=5 -o ServerAliveCountMax=3 -i ~/.ssh/hostinger-crm-e2e "$USER@$HOST" 'bash -s' <<'REMOTE'
           set -euo pipefail
           tool=/usr/local/sbin/sahjony-crm-bridge
           test -x "$tool"
