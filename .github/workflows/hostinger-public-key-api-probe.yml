@@ -23,7 +23,7 @@ jobs:
     env:
       HOSTINGER_API_TOKEN: ${{ secrets.HOSTINGER_API_TOKEN }}
     steps:
-      - name: Probe Hostinger public-key capabilities
+      - name: Probe Hostinger public-key and Docker Manager capabilities
         shell: bash
         run: |
           set -euo pipefail
@@ -34,10 +34,13 @@ jobs:
           vm_code="$(get_code "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$HOSTINGER_VM_ID" /tmp/vm.json)"
           keys_code="$(get_code "$HOSTINGER_API_BASE/api/vps/v1/public-keys?page=1" /tmp/keys.json)"
           attached_code="$(get_code "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$HOSTINGER_VM_ID/public-keys?page=1" /tmp/attached.json)"
+          docker_code="$(get_code "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$HOSTINGER_VM_ID/docker" /tmp/docker.json)"
           echo "VM_DETAILS=$vm_code"
           echo "ACCOUNT_PUBLIC_KEYS=$keys_code"
           echo "VM_ATTACHED_PUBLIC_KEYS=$attached_code"
+          echo "DOCKER_MANAGER_LIST=$docker_code"
           if [[ "$attached_code" != 200 ]]; then jq -c '{error,message}' /tmp/attached.json 2>/dev/null || true; fi
+          if [[ "$docker_code" != 200 ]]; then jq -c '{error,message}' /tmp/docker.json 2>/dev/null || head -c 500 /tmp/docker.json || true; echo; fi
           [[ "$vm_code" == 200 && "$keys_code" == 200 ]]
 
           install -d -m 700 /tmp/hostinger-key-probe
@@ -61,3 +64,4 @@ jobs:
           rm -rf /tmp/hostinger-key-probe
           [[ "$delete_code" == 200 ]]
           echo HOSTINGER_ACCOUNT_PUBLIC_KEY_CRUD=READY
+          if [[ "$docker_code" == 200 ]]; then echo HOSTINGER_DOCKER_MANAGER=READY; else echo HOSTINGER_DOCKER_MANAGER=UNAVAILABLE; fi
