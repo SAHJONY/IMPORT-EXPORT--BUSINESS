@@ -17,54 +17,81 @@ concurrency:
 jobs:
   final-repair:
     runs-on: ubuntu-24.04
-    timeout-minutes: 12
+    timeout-minutes: 35
     env:
-      HOST: '69.62.68.67'
-      SSH_USER: root
-      PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+      HOSTINGER_API_BASE: https://developers.hostinger.com
+      HOSTINGER_VM_ID: '767852'
+      HOSTINGER_HOST: '69.62.68.67'
+      HOSTINGER_USER: root
+      HOSTINGER_API_TOKEN: ${{ secrets.HOSTINGER_API_TOKEN }}
+      DURABLE_PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: false
 
-      - name: Validate SOFIA guard assets
+      - name: Validate SOFIA guard and recovery assets
         run: |
           set -euo pipefail
-          [[ -n "$PRIVATE_KEY" ]] || { echo HOSTINGER_SSH_PRIVATE_KEY_MISSING=1 >&2; exit 2; }
+          [[ -n "$HOSTINGER_API_TOKEN" ]] || { echo HOSTINGER_API_TOKEN_MISSING=1 >&2; exit 2; }
           [[ -s openclaw/sahjony-whatsapp-output-guard/index.js ]]
           [[ -s openclaw/sahjony-whatsapp-output-guard/openclaw.plugin.json ]]
+          [[ -s openclaw/hostinger-24x7/hostinger-resilient-access-broker.sh ]]
+          [[ -s openclaw/hostinger-24x7/hostinger-recovery-controller.sh ]]
           grep -Fq 'GUARD_VERSION = "3.0.1"' openclaw/sahjony-whatsapp-output-guard/index.js
           grep -Fq 'OWNER_COMMAND' openclaw/sahjony-whatsapp-output-guard/index.js
           grep -Fq 'CUSTOMER_PARTNER' openclaw/sahjony-whatsapp-output-guard/index.js
           grep -Fq 'internal_commercial_output_external' openclaw/sahjony-whatsapp-output-guard/index.js
           node --check openclaw/sahjony-whatsapp-output-guard/index.js
+          bash -n openclaw/hostinger-24x7/hostinger-resilient-access-broker.sh
+          bash -n openclaw/hostinger-24x7/hostinger-recovery-controller.sh
 
-      - name: Prepare secure SOFIA guard bundle
+      - name: Prepare management identity and guard bundle
         run: |
           set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq jq netcat-openbsd sshpass >/dev/null
           umask 077
-          install -d -m 700 ~/.ssh
-          printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/hostinger-final-repair
-          chmod 600 ~/.ssh/hostinger-final-repair
-          ssh-keygen -y -f ~/.ssh/hostinger-final-repair >/dev/null
+          install -d -m 700 ~/.ssh "$RUNNER_TEMP/sofia-guard"
+          key="$HOME/.ssh/hostinger-sofia-guard"
+          if [[ -n "$DURABLE_PRIVATE_KEY" ]]; then
+            if [[ "$DURABLE_PRIVATE_KEY" == *'\n'* ]]; then
+              printf '%b' "$DURABLE_PRIVATE_KEY" | sed 's/\r$//' > "$key"
+            else
+              printf '%s\n' "$DURABLE_PRIVATE_KEY" | sed 's/\r$//' > "$key"
+            fi
+            chmod 600 "$key"
+            if ssh-keygen -y -f "$key" > "$key.pub" 2>/dev/null; then
+              echo HOSTINGER_GUARD_IDENTITY=DURABLE_VALIDATED
+            else
+              rm -f "$key" "$key.pub"
+            fi
+          fi
+          if [[ ! -s "$key" ]]; then
+            ssh-keygen -q -t ed25519 -N '' -f "$key" -C "sahjony-sofia-guard-${GITHUB_RUN_ID}"
+            echo HOSTINGER_GUARD_IDENTITY=EPHEMERAL_RECOVERY
+            echo EPHEMERAL_MANAGEMENT_KEY=true >> "$GITHUB_ENV"
+          else
+            echo EPHEMERAL_MANAGEMENT_KEY=false >> "$GITHUB_ENV"
+          fi
+          echo "SSH_KEY_PATH=$key" >> "$GITHUB_ENV"
           tar -czf "$RUNNER_TEMP/sofia-whatsapp-guard.tgz" openclaw/sahjony-whatsapp-output-guard
+
+      - name: Restore authenticated management access if needed
+        run: |
+          set -euo pipefail
+          chmod +x openclaw/hostinger-24x7/hostinger-resilient-access-broker.sh openclaw/hostinger-24x7/hostinger-recovery-controller.sh
+          openclaw/hostinger-24x7/hostinger-resilient-access-broker.sh solve | tee "$RUNNER_TEMP/sofia-guard/access-broker.log"
+          grep -q 'SAHJONY_HOSTINGER_ACCESS_BROKER=READY' "$RUNNER_TEMP/sofia-guard/access-broker.log"
+          echo HOSTINGER_MANAGEMENT_ACCESS=READY
 
       - name: Deploy SOFIA guard without model mutation
         run: |
           set -euo pipefail
-          opts=(-o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=12 -o ConnectionAttempts=1 -i ~/.ssh/hostinger-final-repair)
-          connected=0
-          for attempt in 1 2 3 4 5 6; do
-            echo "SSH_GUARD_ATTEMPT=$attempt"
-            if ssh "${opts[@]}" "$SSH_USER@$HOST" 'printf HOSTINGER_SSH_OK' 2>/dev/null | grep -q HOSTINGER_SSH_OK; then
-              connected=1
-              break
-            fi
-            sleep 10
-          done
-          [[ "$connected" == 1 ]] || { echo HOSTINGER_SSH_UNREACHABLE=1 >&2; exit 30; }
-          scp "${opts[@]}" "$RUNNER_TEMP/sofia-whatsapp-guard.tgz" "$SSH_USER@$HOST:/root/"
-          ssh "${opts[@]}" "$SSH_USER@$HOST" 'bash -s' <<'REMOTE'
+          opts=(-o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=12 -o ConnectionAttempts=1 -i "$SSH_KEY_PATH")
+          ssh "${opts[@]}" "$HOSTINGER_USER@$HOSTINGER_HOST" 'printf HOSTINGER_SSH_OK' | grep -q HOSTINGER_SSH_OK
+          scp "${opts[@]}" "$RUNNER_TEMP/sofia-whatsapp-guard.tgz" "$HOSTINGER_USER@$HOSTINGER_HOST:/root/"
+          ssh "${opts[@]}" "$HOSTINGER_USER@$HOSTINGER_HOST" 'bash -s' <<'REMOTE'
           set -euo pipefail
           STATE=/var/lib/sahjony-openclaw-state
           CONFIG="$STATE/openclaw.json"
@@ -86,6 +113,7 @@ jobs:
           [[ -s "$CONFIG" ]] || { echo OPENCLAW_CONFIG_MISSING=1 >&2; exit 31; }
           systemctl is-active --quiet openclaw-gateway.service || { echo OPENCLAW_GATEWAY_INACTIVE=1 >&2; exit 32; }
           cp -a "$CONFIG" "$CONFIG_BACKUP"
+          BEFORE_MODEL="$(env HOME=/home/node OPENCLAW_HOME=/home/node OPENCLAW_STATE_DIR="$STATE" OPENCLAW_CONFIG_PATH="$CONFIG" openclaw config get agents.defaults.model.primary 2>/dev/null || true)"
           [[ ! -d "$DST" ]] || mv "$DST" "$BACKUP"
           tar -xzf /root/sofia-whatsapp-guard.tgz -C "$TMP"
           SRC="$TMP/openclaw/sahjony-whatsapp-output-guard"
@@ -95,10 +123,6 @@ jobs:
           chown -R 0:0 "$DST"
           find "$DST" -type d -exec chmod 755 {} +
           find "$DST" -type f -exec chmod 644 {} +
-          grep -Fq 'GUARD_VERSION = "3.0.1"' "$DST/index.js"
-          grep -Fq 'OWNER_COMMAND' "$DST/index.js"
-          grep -Fq 'CUSTOMER_PARTNER' "$DST/index.js"
-          grep -Fq 'internal_commercial_output_external' "$DST/index.js"
           CONFIG="$CONFIG" python3 - <<'PY'
           import json, os
           p=os.environ['CONFIG']
@@ -116,15 +140,15 @@ jobs:
           PY
           oc(){ env HOME=/home/node OPENCLAW_HOME=/home/node OPENCLAW_STATE_DIR="$STATE" OPENCLAW_CONFIG_PATH="$CONFIG" openclaw "$@"; }
           oc config validate >/dev/null
-          BEFORE_MODEL="$(oc config get agents.defaults.model.primary 2>/dev/null || true)"
           systemctl restart openclaw-gateway.service
           sleep 10
           systemctl is-active --quiet openclaw-gateway.service || { echo OPENCLAW_GATEWAY_RESTART_FAILED=1 >&2; exit 34; }
           AFTER_MODEL="$(oc config get agents.defaults.model.primary 2>/dev/null || true)"
           [[ "$BEFORE_MODEL" == "$AFTER_MODEL" ]] || { echo MODEL_MUTATION_DETECTED=1 >&2; exit 35; }
-          journalctl -u openclaw-gateway.service --since '-2 min' --no-pager | grep -Fq 'version=3.0.1' || { echo SOFIA_GUARD_STARTUP_NOT_OBSERVED=1 >&2; exit 36; }
-          journalctl -u openclaw-gateway.service --since '-2 min' --no-pager | grep -Fq 'recipient-context=active' || { echo SOFIA_RECIPIENT_CONTEXT_NOT_OBSERVED=1 >&2; exit 37; }
-          journalctl -u openclaw-gateway.service --since '-2 min' --no-pager | grep -Fq 'external-commercial-leak-guard=fail-closed' || { echo SOFIA_EXTERNAL_GUARD_NOT_OBSERVED=1 >&2; exit 38; }
+          logs="$(journalctl -u openclaw-gateway.service --since '-3 min' --no-pager)"
+          grep -Fq 'version=3.0.1' <<<"$logs" || { echo SOFIA_GUARD_STARTUP_NOT_OBSERVED=1 >&2; exit 36; }
+          grep -Fq 'recipient-context=active' <<<"$logs" || { echo SOFIA_RECIPIENT_CONTEXT_NOT_OBSERVED=1 >&2; exit 37; }
+          grep -Fq 'external-commercial-leak-guard=fail-closed' <<<"$logs" || { echo SOFIA_EXTERNAL_GUARD_NOT_OBSERVED=1 >&2; exit 38; }
           rm -rf "$BACKUP" "$CONFIG_BACKUP"
           echo SOFIA_WHATSAPP_GUARD_VERSION=3.0.1
           echo SOFIA_OWNER_CUSTOMER_CONTEXT=ACTIVE
@@ -157,6 +181,34 @@ jobs:
           echo WHATSAPP_PUBLIC_HEALTH_FAILED=1 >&2
           exit 40
 
-      - name: Cleanup
+      - name: Remove per-run ephemeral guest key
         if: always()
-        run: rm -f ~/.ssh/hostinger-final-repair "$RUNNER_TEMP/sofia-whatsapp-guard.tgz"
+        run: |
+          set +e
+          if [[ "${EPHEMERAL_MANAGEMENT_KEY:-false}" == true && -s "${SSH_KEY_PATH:-}" && -s "${SSH_KEY_PATH:-}.pub" ]]; then
+            pub_b64="$(base64 -w0 "$SSH_KEY_PATH.pub")"
+            ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 -i "$SSH_KEY_PATH" "$HOSTINGER_USER@$HOSTINGER_HOST" "PUB_B64='$pub_b64' bash -s" <<'REMOTE'
+          set +e
+          auth=/root/.ssh/authorized_keys
+          pub="$(printf '%s' "$PUB_B64" | base64 -d)"
+          if [[ -f "$auth" ]]; then
+            core="$(awk '{print $1" "$2}' <<<"$pub")"
+            tmp="$(mktemp)"
+            awk -v core="$core" '{line=$1" "$2; if(line!=core) print}' "$auth" > "$tmp"
+            cat "$tmp" > "$auth"
+            chmod 600 "$auth"
+            rm -f "$tmp"
+          fi
+          REMOTE
+          fi
+          rm -f "${SSH_KEY_PATH:-}" "${SSH_KEY_PATH:-}.pub" "$RUNNER_TEMP/sofia-whatsapp-guard.tgz"
+          exit 0
+
+      - name: Upload access evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sofia-whatsapp-guard-${{ github.run_id }}
+          path: ${{ runner.temp }}/sofia-guard/
+          if-no-files-found: warn
+          retention-days: 7
