@@ -58,6 +58,10 @@ async function boot(){
    const {default:DealEconomicsCenter}=await import('./DealEconomicsCenter');
    createRoot(rootElement).render(withI18n(<StrictMode><AppBoundary><DealEconomicsCenter/></AppBoundary></StrictMode>));return
  }
+ if(path==='/owner/priorities'||path.startsWith('/owner/priorities/')){
+   const {default:DealPriorityEngine}=await import('./DealPriorityEngine');
+   createRoot(rootElement).render(withI18n(<StrictMode><AppBoundary><DealPriorityEngine/></AppBoundary></StrictMode>));return
+ }
  if(path==='/owner/intelligence'||path==='/owner/research-intelligence'||path.startsWith('/owner/intelligence/')||path.startsWith('/owner/research-intelligence/')){
    const {default:ResearchIntelligenceCenter}=await import('./ResearchIntelligenceCenter');
    createRoot(rootElement).render(withI18n(<StrictMode><AppBoundary><ResearchIntelligenceCenter/></AppBoundary></StrictMode>));return
