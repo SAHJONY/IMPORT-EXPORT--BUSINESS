@@ -46,6 +46,10 @@ async function boot(){
    createRoot(rootElement).render(withI18n(<StrictMode><AppBoundary><NeonAuthPage/></AppBoundary></StrictMode>));return
  }
  if(path==='/owner'){location.replace('/owner/dashboard');return}
+ if(path==='/owner/dashboard'||path.startsWith('/owner/dashboard/')){
+   const {default:OwnerCommandCenter}=await import('./OwnerCommandCenter');
+   createRoot(rootElement).render(withI18n(<StrictMode><AppBoundary><OwnerCommandCenter/></AppBoundary></StrictMode>));return
+ }
  if(path==='/owner/intelligence'||path==='/owner/research-intelligence'||path.startsWith('/owner/intelligence/')||path.startsWith('/owner/research-intelligence/')){
    const {default:ResearchIntelligenceCenter}=await import('./ResearchIntelligenceCenter');
    createRoot(rootElement).render(withI18n(<StrictMode><AppBoundary><ResearchIntelligenceCenter/></AppBoundary></StrictMode>));return
