@@ -1,0 +1,141 @@
+name: Hostinger Sofia Self Heal
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 * * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hostinger-sofia-self-heal
+  cancel-in-progress: false
+
+jobs:
+  heal:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      HOST: '69.62.68.67'
+      USER: root
+      PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Prepare SSH
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "$PRIVATE_KEY" ]] || { echo HOSTINGER_SSH_PRIVATE_KEY_MISSING=1 >&2; exit 2; }
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/sofia-self-heal
+          chmod 600 ~/.ssh/sofia-self-heal
+          ssh-keygen -y -f ~/.ssh/sofia-self-heal >/dev/null
+
+      - name: Diagnose and self-heal Sofia runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -i ~/.ssh/sofia-self-heal "$USER@$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          CANON=/var/lib/sahjony-openclaw-state/openclaw.json
+          SKILL=/var/lib/sahjony-openclaw-state/skills/whatsapp-crm-bridge/SKILL.md
+          ROOT_SKILL=/root/.openclaw/skills/whatsapp-crm-bridge/SKILL.md
+          BRIDGE=/usr/local/sbin/sahjony-crm-bridge
+          repaired=0
+
+          echo SOFIA_SELF_HEAL_START=1
+
+          if ! systemctl is-active --quiet openclaw-gateway.service; then
+            systemctl restart openclaw-gateway.service
+            repaired=1
+            sleep 12
+            echo SOFIA_GATEWAY_RESTARTED=1
+          fi
+
+          if ! systemctl is-active --quiet sahjony-crm-bridge.timer; then
+            systemctl enable --now sahjony-crm-bridge.timer
+            repaired=1
+            echo SOFIA_CRM_TIMER_RECOVERED=1
+          fi
+
+          if [[ -f "$SKILL" ]]; then
+            if ! grep -q '^description:' "$SKILL"; then
+              echo SOFIA_SKILL_METADATA_INVALID=1 >&2
+              exit 20
+            fi
+            install -d -m 700 /root/.openclaw/skills/whatsapp-crm-bridge
+            if [[ ! -f "$ROOT_SKILL" ]] || ! cmp -s "$SKILL" "$ROOT_SKILL"; then
+              cp "$SKILL" "$ROOT_SKILL"
+              chmod 600 "$ROOT_SKILL"
+              repaired=1
+              echo SOFIA_SKILL_RUNTIME_RESYNCED=1
+            fi
+          else
+            echo SOFIA_SKILL_MISSING=1 >&2
+            exit 21
+          fi
+
+          if [[ -x "$BRIDGE" ]]; then
+            doctor_json="$($BRIDGE doctor || true)"
+            if ! python3 - "$doctor_json" <<'PY'
+          import json,sys
+          try: d=json.loads(sys.argv[1])
+          except Exception: raise SystemExit(1)
+          ok=d.get('status')=='ok' and (d.get('health') or {}).get('status')=='ok'
+          raise SystemExit(0 if ok else 1)
+          PY
+            then
+              systemctl restart sahjony-crm-bridge.timer || true
+              sleep 3
+              $BRIDGE flush || true
+              repaired=1
+              echo SOFIA_CRM_BRIDGE_RECOVERY_ATTEMPTED=1
+            fi
+          else
+            echo SOFIA_CRM_BRIDGE_BINARY_MISSING=1 >&2
+            exit 22
+          fi
+
+          if [[ -f "$CANON" ]]; then
+            OPENCLAW_CONFIG="$CANON" openclaw config validate --json >/tmp/sofia-config-validate.json
+            python3 - <<'PY'
+          import json
+          d=json.load(open('/tmp/sofia-config-validate.json'))
+          if d.get('valid') is False or d.get('ok') is False: raise SystemExit(1)
+          print('SOFIA_OPENCLAW_CONFIG_VALID=1')
+          PY
+          else
+            echo SOFIA_CANONICAL_CONFIG_MISSING=1 >&2
+            exit 23
+          fi
+
+          if ! journalctl -u openclaw-gateway.service --since '-12 minutes' --no-pager | grep -q 'Listening for WhatsApp inbound messages'; then
+            systemctl restart openclaw-gateway.service
+            repaired=1
+            sleep 14
+            echo SOFIA_WHATSAPP_LISTENER_RECOVERY_ATTEMPTED=1
+          fi
+
+          systemctl is-active --quiet openclaw-gateway.service
+          systemctl is-active --quiet sahjony-crm-bridge.timer
+          journalctl -u openclaw-gateway.service --since '-5 minutes' --no-pager | grep -q 'Listening for WhatsApp inbound messages'
+
+          final_doctor="$($BRIDGE doctor)"
+          python3 - "$final_doctor" <<'PY'
+          import json,sys
+          d=json.loads(sys.argv[1])
+          if d.get('status')!='ok' or (d.get('health') or {}).get('status')!='ok': raise SystemExit(1)
+          if d.get('pending_count',0) < 0: raise SystemExit(1)
+          print('SOFIA_CRM_BRIDGE_HEALTHY=1')
+          print('SOFIA_QUEUE_PENDING='+str(d.get('pending_count',0)))
+          PY
+
+          echo SOFIA_WHATSAPP_LISTENING=1
+          echo SOFIA_SELF_HEAL_REPAIRED=$repaired
+          echo SAHJONY_SOFIA_SELF_HEAL_HEALTHY=1
+          REMOTE
+
+      - name: Cleanup
+        if: always()
+        shell: bash
+        run: rm -f ~/.ssh/sofia-self-heal
