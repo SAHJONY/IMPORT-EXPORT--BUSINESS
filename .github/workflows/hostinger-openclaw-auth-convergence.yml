@@ -65,7 +65,7 @@ jobs:
           # Gather candidate secrets without printing any secret value. A candidate is
           # accepted only if it can authenticate a real signed production request.
           python3 - "$ENV_FILE" "$APP_URL" <<'PY'
-          import hashlib, hmac, os, pathlib, subprocess, sys, time, urllib.error, urllib.request
+          import hashlib, hmac, os, pathlib, subprocess, sys, time, urllib.request
           env_path=pathlib.Path(sys.argv[1]); base=sys.argv[2].rstrip('/')
           vals={}
           for line in env_path.read_text(errors='replace').splitlines():
@@ -125,8 +125,6 @@ jobs:
           sleep 14
           systemctl is-active --quiet openclaw-gateway.service
 
-          # Sidecar and plugin now consume one credential source. Prove the sidecar
-          # against the real endpoint without revealing credentials.
           sidecar_json="$($SIDECAR || true)"
           SIDECAR_JSON="$sidecar_json" python3 - <<'PY'
           import json,os
@@ -136,7 +134,6 @@ jobs:
           print('SOFIA_HEARTBEAT_AUTHORIZED=1')
           PY
 
-          # A single gateway process is the only allowed OpenClaw production authority.
           main_pid="$(systemctl show openclaw-gateway.service -p MainPID --value)"
           [[ "$main_pid" =~ ^[1-9][0-9]*$ ]] || { echo OPENCLAW_MAINPID_INVALID=1 >&2; exit 32; }
           echo OPENCLAW_GATEWAY_SINGLE_SYSTEMD_AUTHORITY=1
