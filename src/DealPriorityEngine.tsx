@@ -30,7 +30,7 @@ function rank(deal:Deal):Ranked{
 
 export default function DealPriorityEngine(){
  const [rows,setRows]=useState<Ranked[]>([]);const [loading,setLoading]=useState(true);
- useEffect(()=>{void(async()=>{try{const r=await fetch('/canonical-deals.json',{cache:'no-store'});const j=await r.json();const deals=Array.isArray(j.deals)?j.deals:[];setRows(deals.map(rank).sort((a,b)=>b.qualityScore-a.qualityScore))}finally{setLoading(false)}})()},[]);
+ useEffect(()=>{void(async()=>{try{const r=await fetch('/canonical-deals.json',{cache:'no-store'});const j=await r.json() as {deals?:Deal[]};const deals:Deal[]=Array.isArray(j.deals)?j.deals:[];setRows(deals.map(rank).sort((a:Ranked,b:Ranked)=>b.qualityScore-a.qualityScore))}finally{setLoading(false)}})()},[]);
  const execute=useMemo(()=>rows.filter(r=>r.band==='EXECUTE NOW').length,[rows]);
  const derisk=useMemo(()=>rows.filter(r=>r.band==='DE-RISK').length,[rows]);
  const totalExpected=useMemo(()=>rows.reduce((s,r)=>s+r.expectedGrossProfit,0),[rows]);
