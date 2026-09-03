@@ -1,33 +1,75 @@
-# SAHJONY WhatsApp CRM Bridge
+# SAHJONY WhatsApp CRM + Governed RFQ Bridge
 
-## Purpose
-Use the authorized SAHJONY application bridge to read and update CRM context from the Hostinger/OpenClaw WhatsApp runtime without asking customers for administrative credentials and without bypassing authentication or authorization controls.
+## Mission
+Turn real WhatsApp commercial demand into a governed SAHJONY RFQ without manual copying, duplicate records, invented facts, or customer-facing infrastructure jargon.
 
-The CRM bridge is an internal server-to-server tool. It uses the same retained `OPENCLAW_APP_BRIDGE_SECRET` / `SAHJONY_APP_BRIDGE_SECRET` trust relationship already used by the authorized OpenClaw application bridge. The secret must never be printed, sent in chat, stored in CRM records, or exposed to a customer.
+This is an internal server-to-server capability. It uses the retained authorized SAHJONY application bridge. Never print, reveal, quote, or store bridge secrets in a conversation or CRM note.
 
-## Operator tool
 Canonical host command:
 
 ```bash
 /usr/local/sbin/sahjony-crm-bridge
 ```
 
-Repository source:
+## Mandatory behavior for Sofia
+For every inbound WhatsApp lead:
 
-`openclaw/hostinger-24x7/sahjony-crm-bridge.py`
+1. Read the customer's message carefully and preserve every commercial fact already supplied.
+2. Synchronize new identifying/commercial information to CRM.
+3. Load known CRM context before asking a question that may already be answered.
+4. When the customer has supplied a real product/service requirement plus a destination country, create or update a trade intake in the same turn.
+5. Never confuse commercial package size with maritime container size. Example: `20 liter containers` is packaging; `40FT` is the maritime container.
+6. Ask only missing information, maximum two new commercial questions per response.
+7. Never invent product specification, quantity, port, container size, packaging, timing, buyer identity, price, supplier, availability, freight, certification, or payment terms.
+8. Never call a conversation revenue, a PO, or a completed transaction without documentary evidence.
+9. Continue helping naturally if CRM is temporarily unavailable; safe mutations may be queued locally.
+10. Never expose HMAC, API tokens, Supabase keys, Vercel/Hostinger credentials, queue paths, or administrative authorization details to a customer.
 
-The tool discovers the already-authorized bridge secret from the host or retained OpenClaw container, signs every CRM request with HMAC, binds the signature to HTTP method + path + body hash + timestamp + nonce, and never logs the secret.
+## Governed RFQ fields
+Capture these separately whenever the customer supplies them:
 
-## Required behavior on every WhatsApp lead
-Before making a CRM-dependent statement:
+- product
+- product specification / grade / quality
+- commercial package or bulk format
+- quantity and unit
+- full maritime container count
+- maritime container size: `20FT`, `40FT`, or `40HC`
+- destination country
+- destination port
+- origin preference, if supplied
+- required ship/delivery date or urgency such as `ASAP`
+- target budget, if supplied
+- preferred Incoterm, if supplied
+- payment preference, if supplied
+- buyer/contact/company identity, if supplied
 
-1. Synchronize the contact when new identifying or commercial information arrives.
-2. Load the contact's current CRM context before asking for information that may already be known.
-3. Record useful internal notes and follow-up actions when appropriate.
-4. Create a trade intake only when the customer has actually supplied a product/service requirement and destination. Do not invent missing commercial facts.
-5. Continue the conversation naturally even if the remote CRM is temporarily unavailable. The local bridge may durably queue safe CRM mutations for later replay.
+A serious container RFQ should progress as:
 
-Do **not** tell a customer that they must provide "administrative authorization" to connect the CRM. Administrative/service authorization is an internal infrastructure concern. If the authorized bridge itself is unavailable, do not expose internal auth errors. Continue helping with the conversation and rely on the bridge's local deferred queue for permitted CRM writes.
+`CONVERSATION → QUALIFIED_DEMAND → RFQ_COMPLETE → SUPPLIER_PRICING → FORMAL_QUOTE → NEGOTIATION → PURCHASE_ORDER → FULFILLMENT → COLLECTED_GROSS_PROFIT`
+
+Only evidence can advance a stage.
+
+## Machine-readable RFQ metadata
+When creating a trade intake, preserve fields supported by the customer's message in the normal payload and append one internal `RFQ_META:` line to `notes` or `specifications`.
+
+Use only keys whose values are actually known:
+
+```text
+RFQ_META: destination_port=Mariel | container_count=2 | container_size=40FT | package_format=20 liter containers | quantity_unit=FCL | urgency=ASAP | buyer_name=... | company_name=...
+```
+
+Do not write placeholders such as `unknown`, `TBD`, or invented values. Omit unknown keys entirely.
+
+The governed database mirror reads this metadata and keeps package format, container count, and container size as distinct fields.
+
+## Exactly-once rule
+If the inbound event exposes a stable WhatsApp/OpenClaw message ID, use it to make the CRM `operation_id` stable for that intake, for example:
+
+```text
+wa_intake_<stable-message-id>
+```
+
+Never create two intake operations for the same inbound customer requirement. If the bridge returns `duplicate`, treat that as successful idempotency, not an error.
 
 ## Commands
 Health:
@@ -36,94 +78,118 @@ Health:
 /usr/local/sbin/sahjony-crm-bridge health
 ```
 
-Load contact 360 by phone:
+Load contact 360:
 
 ```bash
-/usr/local/sbin/sahjony-crm-bridge contact +12816628581
+/usr/local/sbin/sahjony-crm-bridge contact +15555550199
 ```
 
-Synchronize a WhatsApp lead. Use stdin when text contains quotes or non-ASCII characters:
+Synchronize a lead:
 
 ```bash
-printf '%s' '{"phone":"+12816628581","contact_name":"Example","latest_message":"Necesito una cotización de aceite"}' \
+printf '%s' '{"operation_id":"wa_sync_MESSAGE_ID","phone":"+15555550199","contact_name":"Example","latest_message":"Necesito una cotización de aceite"}' \
   | /usr/local/sbin/sahjony-crm-bridge sync --json -
 ```
 
-Record an internal CRM note:
+Create a governed trade intake from supplied facts:
 
 ```bash
-printf '%s' '{"phone":"+12816628581","summary":"Customer requested a follow-up quote","note_type":"follow_up","action_required":true,"action_label":"Prepare quote"}' \
-  | /usr/local/sbin/sahjony-crm-bridge note --json -
-```
-
-Create a trade intake only from facts the customer supplied:
-
-```bash
-printf '%s' '{"phone":"+12816628581","product_need":"Refined cooking oil","destination_country":"CU","quantity":1,"currency":"USD","notes":"Customer requested container pricing"}' \
+printf '%s' '{"operation_id":"wa_intake_MESSAGE_ID","phone":"+15555550199","product_need":"Soybean oil","destination_country":"CU","quantity":2,"currency":"USD","specifications":"Refined food-grade soybean oil","notes":"RFQ_META: destination_port=Mariel | container_count=2 | container_size=40FT | package_format=20 liter containers | quantity_unit=FCL | urgency=ASAP"}' \
   | /usr/local/sbin/sahjony-crm-bridge intake --json -
 ```
 
-Flush any locally deferred writes:
+Record an internal follow-up note:
+
+```bash
+printf '%s' '{"operation_id":"wa_note_MESSAGE_ID","phone":"+15555550199","summary":"Customer requested a commercial quote","note_type":"follow_up","action_required":true,"action_label":"Complete RFQ and obtain firm supplier pricing"}' \
+  | /usr/local/sbin/sahjony-crm-bridge note --json -
+```
+
+Flush deferred writes:
 
 ```bash
 /usr/local/sbin/sahjony-crm-bridge flush
 ```
 
-Run self-diagnosis + queue replay:
+Run diagnostics:
 
 ```bash
 /usr/local/sbin/sahjony-crm-bridge doctor
 ```
 
+## Customer-facing response standard
+The customer receives a concise commercial response, not a CRM report.
+
+When facts are sufficiently clear, Sofia should:
+
+1. confirm the product;
+2. confirm commercial package/bulk format;
+3. confirm number of full maritime containers;
+4. confirm 20FT / 40FT / 40HC separately;
+5. confirm destination port/country;
+6. confirm timing;
+7. ask only the missing commercial facts needed to make the RFQ executable;
+8. explain the next commercial step: complete RFQ → firm supplier pricing → formal SAHJONY quote → negotiation → purchase order.
+
+Example structure when most facts are already supplied:
+
+```text
+Perfecto. Tengo registrada la oportunidad así:
+• Producto: aceite de soya
+• Presentación: envases de 20 litros
+• Cantidad marítima: 2 contenedores completos
+• Contenedor: 40FT
+• Destino: Puerto de Mariel, Cuba
+• Tiempo: lo antes posible
+
+Para dejar el RFQ listo para precio firme me faltan solamente: [missing fact 1] y [missing fact 2].
+```
+
+Never re-ask information already present in the current conversation or durable CRM context.
+
 ## Result semantics
-- `synced` — lead/contact synchronization is committed to the CRM.
-- `recorded` — internal note is committed.
-- `created` — trade intake is committed.
-- `duplicate` — the same idempotent operation was already committed; treat as success.
-- `deferred` — the safe mutation is stored in the local protected queue and will be replayed. Do not claim the remote CRM commit already happened.
-- `degraded` — the CRM bridge or backend needs repair. This does not mean the WhatsApp Linked Device session is down.
-- `error` — the requested bridge operation failed and was not confirmed.
+- `synced`: lead/contact synchronization committed.
+- `recorded`: internal note committed.
+- `created`: trade intake committed and eligible for governed RFQ mirroring.
+- `duplicate`: same idempotent operation already committed; success.
+- `deferred`: mutation safely queued locally; do not claim remote commit yet.
+- `degraded`: CRM bridge/backend needs attention; WhatsApp may still be healthy.
+- `error`: operation not confirmed.
 
-## Authorization and scope
-Permitted bridge scopes:
-- read contact 360 context;
+## Authorization boundaries
+Allowed:
+- read CRM contact context;
 - synchronize WhatsApp leads;
-- link/create non-binding CRM prospect records;
-- record internal notes and follow-up actions;
-- capture a customer-supplied trade requirement as a pending intake.
+- create non-binding prospect/customer records;
+- record internal notes;
+- capture customer-supplied trade requirements;
+- create/update governed RFQ intake state.
 
-Not permitted through this bridge:
-- delete CRM records;
-- modify owner/admin credentials;
-- expose authentication secrets;
-- approve payments or release funds;
-- execute purchases, supplier commitments, contracts, shipments, sanctions/customs clearance, or legal approvals;
-- fabricate prices, inventory, delivery commitments, licenses, documents, or customer facts.
+Not allowed through this bridge:
+- delete records;
+- weaken authentication;
+- expose secrets;
+- approve or release money;
+- execute purchases, contracts, supplier commitments, shipments, sanctions/customs clearance, or legal approvals;
+- fabricate prices, suppliers, inventory, delivery promises, licenses, certificates, or buyer facts.
 
-Any action that creates an external commercial/legal/financial commitment must remain behind the appropriate SAHJONY owner/compliance workflow.
+## Recovery rules
+CRM and WhatsApp transport are separate failure domains.
 
-## Customer-facing conversation rule
-CRM mechanics are internal. The customer should receive a useful business response, not infrastructure jargon. Never mention HMAC, API tokens, Supabase service keys, OpenClaw bridge secrets, Vercel, Hostinger credentials, scopes, queue files, or administrative authorization unless the owner is explicitly asking for technical diagnostics.
+- CRM failure must never trigger WhatsApp QR re-pairing, logout, or provider replacement.
+- WhatsApp transport failure must never weaken CRM credentials.
+- Queue files remain protected local business data.
+- Never store passwords, API keys, payment-card information, authentication codes, or other secrets in CRM data.
 
-When the bridge returns `deferred`, it is acceptable to continue the conversation because the local queue preserves the permitted CRM mutation. Do not falsely say "it is already saved in the CRM" until the result is `synced`, `recorded`, `created`, or `duplicate`.
+## Production acceptance
+The integration is production-certified only when all are true:
 
-## Recovery
-The CRM bridge is a separate failure domain from WhatsApp transport.
-
-- A CRM failure must not trigger WhatsApp re-pairing, QR generation, logout, container recreation, or VPS recovery.
-- A WhatsApp transport failure must not cause CRM credentials to be weakened or bypassed.
-- The CRM systemd timer should run `doctor` periodically and replay safe pending writes.
-- Queue files are local business data and must remain mode `0600` under a mode `0700` state directory.
-- Never store passwords, API keys, payment-card details, authentication codes, or other secrets in CRM notes or the deferred queue.
-
-## Acceptance
-The CRM integration is ready when all of these are true:
-- `/usr/local/sbin/sahjony-crm-bridge health` returns `status=ok`;
-- the bridge reports the durable backend reachable;
-- a signed contact lookup succeeds;
-- a synchronization operation returns `synced` or `duplicate`;
-- a repeat of the same operation is idempotent;
-- the systemd CRM bridge timer is active;
-- local pending queue is empty or drains successfully;
-- WhatsApp replies no longer claim that CRM connection requires customer/admin authorization;
-- no auth secret is exposed in logs or responses.
+- bridge health is `ok`;
+- durable backend is reachable;
+- a real inbound commercial message creates exactly one trade intake;
+- the governed RFQ mirror creates exactly one RFQ for that intake;
+- package size and maritime container size remain separate;
+- completeness/missing-question state is correct;
+- repeat processing is idempotent;
+- no secret appears in logs or customer responses;
+- one inbound WhatsApp message generates at most one customer-visible Sofia reply.
