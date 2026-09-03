@@ -17,11 +17,11 @@ env:
 jobs:
   probe:
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 8
     env:
       PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
     steps:
-      - name: Inspect native gateway and guardian ownership
+      - name: Inspect native gateway, guardian, and health sidecar
         shell: bash
         run: |
           set -euo pipefail
@@ -33,22 +33,52 @@ jobs:
           echo '=== PORT_OWNER ==='
           ss -ltnp 2>/dev/null | grep ':18789' || true
           echo '=== PROCESS_TREE ==='
-          ps -o pid,ppid,lstart,cmd -p 701,706,788 2>/dev/null || true
-          echo '=== GUARDIAN_SCRIPT ==='
-          if [[ -f /usr/local/sbin/sahjony-openclaw-runtime-guardian ]]; then
-            sed -n '1,240p' /usr/local/sbin/sahjony-openclaw-runtime-guardian
-          else
-            echo GUARDIAN_SCRIPT_MISSING
-          fi
-          echo '=== SYSTEMD_RELEVANT ==='
-          systemctl list-unit-files --type=service --no-pager 2>/dev/null | grep -Ei 'openclaw|sahjony|guardian|hermes' || true
-          systemctl list-units --type=service --all --no-pager 2>/dev/null | grep -Ei 'openclaw|sahjony|guardian|hermes' || true
-          echo '=== CRON_RELEVANT ==='
-          grep -RniE 'openclaw|sahjony-openclaw-runtime-guardian|18789' /etc/cron* /var/spool/cron 2>/dev/null | head -n 200 || true
-          echo '=== INIT_RELEVANT ==='
-          grep -RniE 'openclaw|sahjony-openclaw-runtime-guardian|18789' /etc/systemd/system /lib/systemd/system /usr/lib/systemd/system 2>/dev/null | head -n 300 || true
-          echo '=== SUPERVISORS ==='
-          command -v supervisorctl >/dev/null && supervisorctl status 2>/dev/null || true
-          command -v pm2 >/dev/null && pm2 ls 2>/dev/null || true
+          ps -eo pid,ppid,lstart,cmd | grep -E 'openclaw|sahjony-openclaw-runtime-guardian' | grep -v grep | head -n 120 || true
+          echo '=== GUARDIAN_STATUS ==='
+          systemctl status sahjony-openclaw-runtime-guardian.service --no-pager -l || true
+          echo '=== SIDECAR_UNIT ==='
+          systemctl cat sahjony-openclaw-health-sidecar.service || true
+          echo '=== SIDECAR_STATUS ==='
+          systemctl status sahjony-openclaw-health-sidecar.service --no-pager -l || true
+          echo '=== SIDECAR_SCRIPT ==='
+          sed -n '1,320p' /usr/local/sbin/sahjony-openclaw-health-sidecar 2>/dev/null || true
+          echo '=== STATE_FILES ==='
+          find /var/lib/sahjony-openclaw-state /var/lib/sahjony-openclaw-guardian -maxdepth 2 -type f -printf '%p %s bytes\n' 2>/dev/null | sort || true
+          echo '=== STATE_JSON_SAFE ==='
+          for f in /var/lib/sahjony-openclaw-state/*.json /var/lib/sahjony-openclaw-guardian/*.json; do
+            [[ -f "$f" ]] || continue
+            echo "FILE=$f"
+            python3 - "$f" <<'PY'
+import json,sys
+p=sys.argv[1]
+try:
+    d=json.load(open(p))
+except Exception as e:
+    print('PARSE_ERROR',type(e).__name__); raise SystemExit
+sensitive=('key','token','secret','password','credential','auth','cookie')
+def clean(v,k=''):
+    if any(x in k.lower() for x in sensitive): return '<redacted>'
+    if isinstance(v,dict): return {a:clean(b,a) for a,b in v.items()}
+    if isinstance(v,list): return [clean(x,k) for x in v[:20]]
+    if isinstance(v,str) and len(v)>300: return v[:300]+'...'
+    return v
+print(json.dumps(clean(d),indent=2,sort_keys=True))
+PY
+          done
+          echo '=== ENV_PRESENCE ==='
+          for f in /etc/openclaw-sahjony-bridge.env /etc/openclaw-gateway.env /etc/openclaw-openai.env; do
+            if [[ -f "$f" ]]; then
+              echo "FILE_PRESENT=$f"
+              sed -n 's/^\([A-Za-z_][A-Za-z0-9_]*\)=.*/ENV_KEY=\1/p' "$f" | sort -u
+            else
+              echo "FILE_MISSING=$f"
+            fi
+          done
+          echo '=== SIDECAR_LOGS ==='
+          journalctl -u sahjony-openclaw-health-sidecar.service --since '-20 minutes' --no-pager -n 260 || true
+          echo '=== GATEWAY_LOGS_SAFE ==='
+          journalctl -u openclaw-gateway.service --since '-20 minutes' --no-pager -n 220 | sed -E 's/(sk-[A-Za-z0-9_-]{8})[A-Za-z0-9_-]+/\1<redacted>/g' || true
+          echo '=== PUBLIC_HEALTH ==='
+          curl -fsS --max-time 20 https://www.sahjony.com/whatsapp/health | python3 -m json.tool || true
           REMOTE
           rm -f ~/.ssh/hostinger-key
