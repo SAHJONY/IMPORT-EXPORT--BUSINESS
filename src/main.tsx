@@ -66,6 +66,10 @@ async function boot(){
    const {default:RfqIntakeCenter}=await import('./RfqIntakeCenter');
    createRoot(rootElement).render(withI18n(<StrictMode><AppBoundary><RfqIntakeCenter/></AppBoundary></StrictMode>));return
  }
+ if(path==='/owner/sofia-performance'||path.startsWith('/owner/sofia-performance/')){
+   const {default:SofiaSalesPerformanceCenter}=await import('./SofiaSalesPerformanceCenter');
+   createRoot(rootElement).render(withI18n(<StrictMode><AppBoundary><SofiaSalesPerformanceCenter/></AppBoundary></StrictMode>));return
+ }
  if(path==='/owner/intelligence'||path==='/owner/research-intelligence'||path.startsWith('/owner/intelligence/')||path.startsWith('/owner/research-intelligence/')){
    const {default:ResearchIntelligenceCenter}=await import('./ResearchIntelligenceCenter');
    createRoot(rootElement).render(withI18n(<StrictMode><AppBoundary><ResearchIntelligenceCenter/></AppBoundary></StrictMode>));return
