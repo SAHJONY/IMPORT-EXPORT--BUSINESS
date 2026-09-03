@@ -54,6 +54,10 @@ async function boot(){
    const {default:ExecutiveExceptionEngine}=await import('./ExecutiveExceptionEngine');
    createRoot(rootElement).render(withI18n(<StrictMode><AppBoundary><ExecutiveExceptionEngine/></AppBoundary></StrictMode>));return
  }
+ if(path==='/owner/economics'||path.startsWith('/owner/economics/')){
+   const {default:DealEconomicsCenter}=await import('./DealEconomicsCenter');
+   createRoot(rootElement).render(withI18n(<StrictMode><AppBoundary><DealEconomicsCenter/></AppBoundary></StrictMode>));return
+ }
  if(path==='/owner/intelligence'||path==='/owner/research-intelligence'||path.startsWith('/owner/intelligence/')||path.startsWith('/owner/research-intelligence/')){
    const {default:ResearchIntelligenceCenter}=await import('./ResearchIntelligenceCenter');
    createRoot(rootElement).render(withI18n(<StrictMode><AppBoundary><ResearchIntelligenceCenter/></AppBoundary></StrictMode>));return
