@@ -35,7 +35,7 @@ type EcononomicsStatus=EconomicsRow['status'];
 
 export default function DealEconomicsCenter(){
   const [rows,setRows]=useState<EconomicsRow[]>([]);const [loading,setLoading]=useState(true);
-  useEffect(()=>{void (async()=>{try{const r=await fetch('/canonical-deals.json',{cache:'no-store'});const j=await r.json();const deals=Array.isArray(j.deals)?j.deals:[];setRows(deals.map(normalize).sort((a,b)=>b.score-a.score))}finally{setLoading(false)}})()},[]);
+  useEffect(()=>{void (async()=>{try{const r=await fetch('/canonical-deals.json',{cache:'no-store'});const j=await r.json() as {deals?:Deal[]};const deals:Deal[]=Array.isArray(j.deals)?j.deals:[];setRows(deals.map(normalize).sort((a:EconomicsRow,b:EconomicsRow)=>b.score-a.score))}finally{setLoading(false)}})()},[]);
   const evidenced=useMemo(()=>rows.filter(r=>r.status==='EVIDENCED'),[rows]);
   const projected=useMemo(()=>evidenced.reduce((sum,r)=>sum+(r.max||0),0),[evidenced]);
   const recurring=useMemo(()=>evidenced.reduce((sum,r)=>sum+(r.recurring||0),0),[evidenced]);
