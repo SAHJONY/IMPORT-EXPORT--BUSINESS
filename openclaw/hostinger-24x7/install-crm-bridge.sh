@@ -41,21 +41,33 @@ install_native_skill(){
   log "Installed WhatsApp CRM/RFQ skill into $installed native OpenClaw skill paths"
 }
 
-find_container(){
+find_running_container(){
   command -v docker >/dev/null 2>&1 || return 0
-  docker ps -a --format '{{.ID}}|{{.Names}}|{{.Image}}' 2>/dev/null \
+  docker ps --filter status=running --format '{{.ID}}|{{.Names}}|{{.Image}}' 2>/dev/null \
     | awk -F'|' 'tolower($0) ~ /openclaw|claw/ {print $1; exit}'
 }
 
 install_container_skill(){
   command -v docker >/dev/null 2>&1 || return 0
   local cid
-  cid="$(find_container || true)"
-  [[ -n "$cid" ]] || return 0
-  docker exec "$cid" sh -lc 'mkdir -p "$HOME/.openclaw/skills/whatsapp-crm-bridge" && chmod 700 "$HOME/.openclaw/skills/whatsapp-crm-bridge"' >/dev/null
-  docker cp "$SKILL_SOURCE" "$cid:/tmp/sahjony-whatsapp-crm-skill.md" >/dev/null
-  docker exec "$cid" sh -lc 'mv /tmp/sahjony-whatsapp-crm-skill.md "$HOME/.openclaw/skills/whatsapp-crm-bridge/SKILL.md" && chmod 600 "$HOME/.openclaw/skills/whatsapp-crm-bridge/SKILL.md"' >/dev/null
-  log "Installed WhatsApp CRM/RFQ skill into retained OpenClaw container $cid"
+  cid="$(find_running_container || true)"
+  if [[ -z "$cid" ]]; then
+    log "No running OpenClaw container detected; native OpenClaw skill install is authoritative"
+    return 0
+  fi
+  if ! docker exec "$cid" sh -lc 'mkdir -p "$HOME/.openclaw/skills/whatsapp-crm-bridge" && chmod 700 "$HOME/.openclaw/skills/whatsapp-crm-bridge"' >/dev/null 2>&1; then
+    log "Running OpenClaw container $cid became unavailable; skipping optional container skill install"
+    return 0
+  fi
+  if ! docker cp "$SKILL_SOURCE" "$cid:/tmp/sahjony-whatsapp-crm-skill.md" >/dev/null 2>&1; then
+    log "Container copy failed for $cid; native OpenClaw skill install remains authoritative"
+    return 0
+  fi
+  if ! docker exec "$cid" sh -lc 'mv /tmp/sahjony-whatsapp-crm-skill.md "$HOME/.openclaw/skills/whatsapp-crm-bridge/SKILL.md" && chmod 600 "$HOME/.openclaw/skills/whatsapp-crm-bridge/SKILL.md"' >/dev/null 2>&1; then
+    log "Container finalization failed for $cid; native OpenClaw skill install remains authoritative"
+    return 0
+  fi
+  log "Installed WhatsApp CRM/RFQ skill into running OpenClaw container $cid"
 }
 
 cat >/etc/systemd/system/sahjony-crm-bridge.service <<EOF
