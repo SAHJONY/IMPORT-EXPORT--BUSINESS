@@ -7,7 +7,8 @@ on:
       - '.github/workflows/hostinger-public-key-api-probe.yml'
   workflow_dispatch:
 
-# Non-destructive API capability probe. No VPS mutation.
+# Capability probe. Creates one temporary account-level SSH key and deletes it.
+# It does NOT attach the key to the VPS or modify the VPS.
 permissions:
   contents: read
 
@@ -22,34 +23,41 @@ jobs:
     env:
       HOSTINGER_API_TOKEN: ${{ secrets.HOSTINGER_API_TOKEN }}
     steps:
-      - name: Probe non-destructive Hostinger endpoints
+      - name: Probe Hostinger public-key capabilities
         shell: bash
         run: |
           set -euo pipefail
           [[ -n "${HOSTINGER_API_TOKEN:-}" ]]
           auth=(-H "Authorization: Bearer $HOSTINGER_API_TOKEN" -H 'Accept: application/json')
-          probe(){
-            local label="$1" url="$2"
-            local code
-            code="$(curl -sS -o "/tmp/$label.json" -w '%{http_code}' "${auth[@]}" "$url" || true)"
-            echo "$label=$code"
-            if [[ "$code" != 200 ]]; then
-              jq -c '{error,message}' "/tmp/$label.json" 2>/dev/null || head -c 500 "/tmp/$label.json" || true
-              echo
-            fi
-          }
-          probe VM_DETAILS "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$HOSTINGER_VM_ID"
-          probe ACCOUNT_PUBLIC_KEYS "$HOSTINGER_API_BASE/api/vps/v1/public-keys?page=1"
-          probe VM_ATTACHED_PUBLIC_KEYS "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$HOSTINGER_VM_ID/public-keys?page=1"
 
-          vm_code="$(curl -sS -o /dev/null -w '%{http_code}' "${auth[@]}" "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$HOSTINGER_VM_ID" || true)"
-          keys_code="$(curl -sS -o /dev/null -w '%{http_code}' "${auth[@]}" "$HOSTINGER_API_BASE/api/vps/v1/public-keys?page=1" || true)"
-          attached_code="$(curl -sS -o /dev/null -w '%{http_code}' "${auth[@]}" "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$HOSTINGER_VM_ID/public-keys?page=1" || true)"
-          [[ "$vm_code" == 200 ]]
-          if [[ "$keys_code" == 404 || "$attached_code" == 404 ]]; then
-            echo HOSTINGER_PUBLIC_KEY_API_UNAVAILABLE=1
-            exit 44
+          get_code(){ curl -sS -o "$2" -w '%{http_code}' "${auth[@]}" "$1" || true; }
+          vm_code="$(get_code "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$HOSTINGER_VM_ID" /tmp/vm.json)"
+          keys_code="$(get_code "$HOSTINGER_API_BASE/api/vps/v1/public-keys?page=1" /tmp/keys.json)"
+          attached_code="$(get_code "$HOSTINGER_API_BASE/api/vps/v1/virtual-machines/$HOSTINGER_VM_ID/public-keys?page=1" /tmp/attached.json)"
+          echo "VM_DETAILS=$vm_code"
+          echo "ACCOUNT_PUBLIC_KEYS=$keys_code"
+          echo "VM_ATTACHED_PUBLIC_KEYS=$attached_code"
+          if [[ "$attached_code" != 200 ]]; then jq -c '{error,message}' /tmp/attached.json 2>/dev/null || true; fi
+          [[ "$vm_code" == 200 && "$keys_code" == 200 ]]
+
+          install -d -m 700 /tmp/hostinger-key-probe
+          ssh-keygen -q -t rsa -b 3072 -N '' -f /tmp/hostinger-key-probe/key -C "api-probe-${GITHUB_RUN_ID}"
+          pub="$(cat /tmp/hostinger-key-probe/key.pub)"
+          name="sahjony-api-probe-${GITHUB_RUN_ID}"
+          payload="$(jq -n --arg name "$name" --arg key "$pub" '{name:$name,key:$key}')"
+          create_code="$(curl -sS -o /tmp/create.json -w '%{http_code}' -X POST "${auth[@]}" -H 'Content-Type: application/json' --data "$payload" "$HOSTINGER_API_BASE/api/vps/v1/public-keys" || true)"
+          echo "ACCOUNT_PUBLIC_KEY_CREATE=$create_code"
+          if [[ "$create_code" != 200 ]]; then
+            jq -c '{error,message}' /tmp/create.json 2>/dev/null || head -c 500 /tmp/create.json || true
+            echo
+            rm -rf /tmp/hostinger-key-probe
+            exit 45
           fi
-          [[ "$keys_code" == 200 ]]
-          [[ "$attached_code" == 200 ]]
-          echo HOSTINGER_PUBLIC_KEY_API=READY
+
+          key_id="$(jq -r '.id // empty' /tmp/create.json)"
+          [[ "$key_id" =~ ^[0-9]+$ ]]
+          delete_code="$(curl -sS -o /tmp/delete.json -w '%{http_code}' -X DELETE "${auth[@]}" "$HOSTINGER_API_BASE/api/vps/v1/public-keys/$key_id" || true)"
+          echo "ACCOUNT_PUBLIC_KEY_DELETE=$delete_code"
+          rm -rf /tmp/hostinger-key-probe
+          [[ "$delete_code" == 200 ]]
+          echo HOSTINGER_ACCOUNT_PUBLIC_KEY_CRUD=READY
