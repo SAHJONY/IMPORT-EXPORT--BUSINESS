@@ -21,7 +21,7 @@ jobs:
     env:
       PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
     steps:
-      - name: Inspect native gateway, guardian, and health sidecar
+      - name: Inspect native gateway and health reporter
         shell: bash
         run: |
           set -euo pipefail
@@ -32,40 +32,22 @@ jobs:
           set -euo pipefail
           echo '=== PORT_OWNER ==='
           ss -ltnp 2>/dev/null | grep ':18789' || true
-          echo '=== PROCESS_TREE ==='
-          ps -eo pid,ppid,lstart,cmd | grep -E 'openclaw|sahjony-openclaw-runtime-guardian' | grep -v grep | head -n 120 || true
-          echo '=== GUARDIAN_STATUS ==='
-          systemctl status sahjony-openclaw-runtime-guardian.service --no-pager -l || true
+          echo '=== SYSTEMD ==='
+          systemctl status openclaw-gateway.service sahjony-openclaw-runtime-guardian.service sahjony-openclaw-health-sidecar.service --no-pager -l || true
           echo '=== SIDECAR_UNIT ==='
           systemctl cat sahjony-openclaw-health-sidecar.service || true
-          echo '=== SIDECAR_STATUS ==='
-          systemctl status sahjony-openclaw-health-sidecar.service --no-pager -l || true
           echo '=== SIDECAR_SCRIPT ==='
           sed -n '1,320p' /usr/local/sbin/sahjony-openclaw-health-sidecar 2>/dev/null || true
           echo '=== STATE_FILES ==='
           find /var/lib/sahjony-openclaw-state /var/lib/sahjony-openclaw-guardian -maxdepth 2 -type f -printf '%p %s bytes\n' 2>/dev/null | sort || true
-          echo '=== STATE_JSON_SAFE ==='
-          for f in /var/lib/sahjony-openclaw-state/*.json /var/lib/sahjony-openclaw-guardian/*.json; do
+          echo '=== HEALTH_STATE_RAW ==='
+          for f in /var/lib/sahjony-openclaw-state/*health*.json /var/lib/sahjony-openclaw-state/*status*.json /var/lib/sahjony-openclaw-guardian/status.json; do
             [[ -f "$f" ]] || continue
             echo "FILE=$f"
-            python3 - "$f" <<'PY'
-import json,sys
-p=sys.argv[1]
-try:
-    d=json.load(open(p))
-except Exception as e:
-    print('PARSE_ERROR',type(e).__name__); raise SystemExit
-sensitive=('key','token','secret','password','credential','auth','cookie')
-def clean(v,k=''):
-    if any(x in k.lower() for x in sensitive): return '<redacted>'
-    if isinstance(v,dict): return {a:clean(b,a) for a,b in v.items()}
-    if isinstance(v,list): return [clean(x,k) for x in v[:20]]
-    if isinstance(v,str) and len(v)>300: return v[:300]+'...'
-    return v
-print(json.dumps(clean(d),indent=2,sort_keys=True))
-PY
+            sed -E 's/("?(key|token|secret|password|credential|auth|cookie)"?[[:space:]]*:[[:space:]]*)"[^"]*"/\1"<redacted>"/Ig' "$f" | head -c 12000
+            echo
           done
-          echo '=== ENV_PRESENCE ==='
+          echo '=== ENV_KEYS ==='
           for f in /etc/openclaw-sahjony-bridge.env /etc/openclaw-gateway.env /etc/openclaw-openai.env; do
             if [[ -f "$f" ]]; then
               echo "FILE_PRESENT=$f"
@@ -75,10 +57,9 @@ PY
             fi
           done
           echo '=== SIDECAR_LOGS ==='
-          journalctl -u sahjony-openclaw-health-sidecar.service --since '-20 minutes' --no-pager -n 260 || true
-          echo '=== GATEWAY_LOGS_SAFE ==='
-          journalctl -u openclaw-gateway.service --since '-20 minutes' --no-pager -n 220 | sed -E 's/(sk-[A-Za-z0-9_-]{8})[A-Za-z0-9_-]+/\1<redacted>/g' || true
+          journalctl -u sahjony-openclaw-health-sidecar.service --since '-30 minutes' --no-pager -n 300 || true
           echo '=== PUBLIC_HEALTH ==='
-          curl -fsS --max-time 20 https://www.sahjony.com/whatsapp/health | python3 -m json.tool || true
+          curl -fsS --max-time 20 https://www.sahjony.com/whatsapp/health || true
+          echo
           REMOTE
           rm -f ~/.ssh/hostinger-key
