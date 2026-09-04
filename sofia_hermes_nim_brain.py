@@ -5,6 +5,8 @@ from typing import Any
 
 import httpx
 
+from sofia_autonomy_os import AUTONOMY_MANDATE, health as autonomy_health
+
 NVIDIA_CHAT_URL = os.getenv("NVIDIA_NIM_BASE_URL", "https://integrate.api.nvidia.com/v1").rstrip("/") + "/chat/completions"
 DEFAULT_NVIDIA_MODEL = "openai/gpt-oss-120b"
 
@@ -84,7 +86,7 @@ async def generate(
     payload = {
         "model": model_name(),
         "messages": [
-            {"role": "system", "content": HERMES_OPERATING_KERNEL + "\n\n" + system},
+            {"role": "system", "content": HERMES_OPERATING_KERNEL + "\n\n" + AUTONOMY_MANDATE + "\n\n" + system},
             {"role": "user", "content": user},
         ],
         "temperature": temperature,
@@ -135,6 +137,7 @@ def health() -> dict[str, Any]:
         "reusable_skills_expected": True,
         "reflection_from_validated_outcomes": True,
         "tool_discipline": True,
+        "autonomy_os": autonomy_health(),
         "private_reasoning_not_exposed": True,
         "secrets_exposed": False,
     }
