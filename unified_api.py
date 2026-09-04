@@ -58,6 +58,7 @@ from sofia_deal_match_api import app as sofia_deal_match_app
 from world_clock_trade_api import app as world_clock_trade_app
 from lead_scout_api import app as lead_scout_app
 from managed_trade_gateway_api import app as managed_trade_app
+from demand_intelligence_api import app as demand_intelligence_app
 from managed_trade_intermediary_api import app as intermediary_app
 from global_supplier_sourcing_api import app as global_sourcing_app
 from global_marketplace_api import app as global_marketplace_app
@@ -178,7 +179,7 @@ for subapp in (
     activation_app, telegram_app, business_email_app, email_agent_app, gmail_transport_app, owner_auth_app, higgsfield_cloud_app, core_app, customer_crm_app, crm_quality_10x_app, external_trade_prospects_app, profit_machine_app, record_registry_app, latam_trade_research_app, country_crm_app, global_lead_search_app, cloudflare_crawler_app, worldwide_connect_app, cuba_private_fuels_app, cuba_mipymes_app, cuba_sofia_sales_bridge_app, competition_intelligence_app, sofia_deal_match_app, world_clock_trade_app,
     energy_app, energy_origination_app, energy_intelligence_app, energy_provider_hub_app, energy_provider_ingestion_app, energy_provider_catalog_app, energy_ofac_screening_app, energy_eia_app, energy_deal_flow_app, energy_revenue_intelligence_app,
     communications_app, communication_os_security_app, communication_os_app, communication_agentic_app, communication_platform_app, direct_text_app, wifi_connectivity_app, cuba_communications_app, voice_inbound_app, voice_agent_app, direct_voice_app, voice_autonomy_app, whatsapp_voice_orchestrator_app, documents_app, document_storage_app, shipments_app, compliance_app, commercial_app, language_app, collaboration_app, finance_app,
-    countries_app, cuba_current_app, cuba_transition_app, cuba_trade_desk_app, cuba_private_business_app, cuba_private_sector_lead_app, lead_scout_app, managed_trade_app, intermediary_app, global_sourcing_app, global_marketplace_app, business_readiness_app, us_import_app,
+    countries_app, cuba_current_app, cuba_transition_app, cuba_trade_desk_app, cuba_private_business_app, cuba_private_sector_lead_app, lead_scout_app, managed_trade_app, demand_intelligence_app, intermediary_app, global_sourcing_app, global_marketplace_app, business_readiness_app, us_import_app,
     ai_brain_app, ai_trade_agent_app, agentic_trade_engine_app, trade_certification_app,
 ):
     app.include_router(subapp.router)
