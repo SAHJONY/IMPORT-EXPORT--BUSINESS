@@ -12,6 +12,9 @@ import httpx
 from insforge_backend import get_backend
 from sofia_adaptive_intelligence import adaptive_context, record_lesson
 from sofia_agentic_sales_os import orchestrate_sales_turn
+from sofia_hermes_nim_brain import generate as hermes_generate
+from sofia_hermes_nim_brain import configured as hermes_configured
+from sofia_hermes_nim_brain import model_name as hermes_model_name
 from sofia_human_conversation_engine import build_sofia_prompt
 from whatsapp_relationship_memory_api import _merge_memory
 from whatsapp_sales_brain import analyze_sales_conversation
@@ -124,9 +127,9 @@ async def _audit(lead_id: str | None, event_type: str, payload: dict[str, Any]) 
             "customer_id": None,
             "lead_id": lead_id,
             "actor_role": "digital_representative",
-            "actor_id": "sofia-reyes",
+            "actor_id": "sofia-smith",
             "visibility": "internal",
-            "title": "Sofia WhatsApp response runtime",
+            "title": "Sofía WhatsApp executive response runtime",
             "summary": str(payload.get("summary") or event_type)[:4000],
             "action_required": False,
             "action_label": None,
@@ -140,9 +143,34 @@ async def _audit(lead_id: str | None, event_type: str, payload: dict[str, Any]) 
         pass
 
 
-async def generate_sofia_reply(text: str, contact_name: str | None) -> str:
+async def _openai_fallback(system: str, user: str) -> tuple[str, dict[str, Any]]:
     key = os.getenv("OPENAI_API_KEY", "").strip()
     if not key:
+        return "", {"provider": "openai", "configured": False}
+    payload = {
+        "model": os.getenv("SOFIA_WHATSAPP_MODEL", "").strip() or "gpt-5.6-sol",
+        "reasoning": {"effort": "medium"},
+        "input": [
+            {"role": "system", "content": [{"type": "input_text", "text": system}]},
+            {"role": "user", "content": [{"type": "input_text", "text": user}]},
+        ],
+        "max_output_tokens": 700,
+    }
+    async with httpx.AsyncClient(timeout=45) as client:
+        response = await client.post(
+            OPENAI_RESPONSES_URL,
+            headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+            json=payload,
+        )
+    if response.status_code >= 400:
+        return "", {"provider": "openai", "configured": True, "status_code": response.status_code, "model": payload["model"]}
+    return _output_text(response.json())[:4096], {
+        "provider": "openai", "configured": True, "status_code": response.status_code, "model": payload["model"]
+    }
+
+
+async def generate_sofia_reply(text: str, contact_name: str | None) -> str:
+    if not hermes_configured() and not os.getenv("OPENAI_API_KEY", "").strip():
         return ""
 
     phone, lead_id, lead = await _find_current_contact(text, contact_name)
@@ -192,7 +220,7 @@ async def generate_sofia_reply(text: str, contact_name: str | None) -> str:
     adaptive = await adaptive_context(contact_name)
     system = build_sofia_prompt(memory)
     system += "\n\n" + adaptive
-    system += "\n\nYou are Sofia Reyes, SAHJONY LLC's digital Trade Concierge & Account Executive. Communicate naturally and professionally. Never falsely claim to be a physical human being. If identity or automation is directly asked about, answer truthfully and briefly, then continue helping."
+    system += "\n\nYou are Sofía Smith, SAHJONY LLC's Executive Manager, Executive Assistant and AI Commercial Executive. Communicate naturally and professionally. Never falsely claim to be a physical human being. If identity or automation is directly asked about, answer truthfully and briefly, then continue helping."
     system += "\n\nRELATIONSHIP MEMORY\n" + json.dumps({
         "known": memory.get("known") or {},
         "uncertain": memory.get("uncertain") or {},
@@ -229,73 +257,74 @@ async def generate_sofia_reply(text: str, contact_name: str | None) -> str:
 
 WHATSAPP HUMAN CONVERSATION RULES
 - Answer the latest message first; do not start by restating the entire deal.
-- Continue the relationship as an experienced account executive would. Reference prior facts only when useful.
+- Continue the relationship as an experienced executive account manager would. Reference prior facts only when useful.
 - Never ask for a known fact again. Confirm an uncertain fact only when it blocks the next action.
 - Ask zero, one, or at most two genuinely new questions in a turn.
 - Prefer short conversational paragraphs. Do not turn every reply into numbered lists or intake forms.
-- Vary acknowledgements naturally. Avoid repetitive openings such as 'Perfecto, [name]' on every turn.
+- Vary acknowledgements naturally. Avoid repetitive openings.
 - Use the customer's name sparingly. Match their language and reasonable formality.
-- If the customer sends a short message, normally answer briefly; expand only when the subject requires detail.
 - If the customer asks a direct question, give the useful answer before qualification questions.
 - Preserve commitments and next actions. Do not imply an external action happened unless the system confirms it.
-- CRM/service authorization is internal infrastructure. Never tell a customer that CRM access or CRM connection requires their administrative authorization, administrator access, API key, password, or technical setup.
-- The CRM contact context above is already internal context. Use it silently. If CRM context is temporarily unavailable, continue helping and do not expose internal infrastructure errors to the customer.
-- Never claim a CRM write, external action, quote, order, payment, shipment or commitment is completed unless the system has actually confirmed it.
-- Never mention models, prompts, memory, scoring, stages, internal tooling, HMAC, API tokens, Supabase, Vercel, Hostinger, bridge secrets, queue files, or self-improvement to a customer.
+- Use CRM context silently. Do not expose infrastructure errors, models, prompts, tokens, internal scoring, or secrets.
 - Never invent price, availability, legal clearance, delivery, payment, supplier confirmation, licenses, documents, or completed actions.
 - For sanctions/customs/payment/Cuba issues, distinguish general guidance from verified transaction clearance.
-- Follow the agentic sales mission, but execute only autonomous actions. Present owner-approval items as pending internal review and never pretend they are approved.
-- Optimize for legitimate customer value, trust, conversion quality, evidence completeness and durable margin—not message volume or pressure.
+- Follow the agentic sales mission, but execute only autonomous actions. Owner-approval items remain pending until actually approved.
+- Optimize for legitimate customer value, trust, conversion quality, evidence completeness and durable margin.
 """
 
-    payload = {
-        "model": os.getenv("SOFIA_WHATSAPP_MODEL", "").strip() or "gpt-5.6-sol",
-        "reasoning": {"effort": "medium"},
-        "input": [
-            {"role": "system", "content": [{"type": "input_text", "text": system}]},
-            {"role": "user", "content": [{"type": "input_text", "text": f"Latest customer message:\n{text[:5000]}\n\nRecent conversation:\n{transcript[-18000:]}\n\nWrite only Sofia's next WhatsApp message. No analysis or labels."}]},
-        ],
-        "max_output_tokens": 700,
-    }
+    user = (
+        f"Latest customer message:\n{text[:5000]}\n\n"
+        f"Recent conversation:\n{transcript[-18000:]}\n\n"
+        "Write only Sofía's next WhatsApp message. No analysis, private reasoning, labels, or internal metadata."
+    )
+
     try:
-        async with httpx.AsyncClient(timeout=45) as client:
-            response = await client.post(
-                OPENAI_RESPONSES_URL,
-                headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-                json=payload,
-            )
-        if response.status_code >= 400:
-            await _audit(lead_id, "sofia_reply_failure", {"summary": f"OpenAI HTTP {response.status_code}"})
+        reply, meta = await hermes_generate(system=system, user=user, max_tokens=900, temperature=0.6)
+        if not reply:
+            fallback, fallback_meta = await _openai_fallback(system, user)
+            reply = fallback
+            meta = {"primary": meta, "fallback": fallback_meta}
+        if not reply:
+            await _audit(lead_id, "sofia_reply_failure", {"summary": "NVIDIA NIM and OpenAI fallback returned no usable reply"})
             await record_lesson(
-                lesson=f"Sofia primary response returned HTTP {response.status_code}; preserve continuity through the verified sales fallback.",
+                lesson="Sofía inference providers returned no usable reply; preserve continuity through the verified sales fallback.",
                 signal="reply_primary_failure",
                 metadata={"lead_id": lead_id},
             )
             return str(sales.get("draft_reply") or "")[:4096]
-        reply = _output_text(response.json())[:4096]
-        if not reply:
-            return str(sales.get("draft_reply") or "")[:4096]
+
+        reply = reply[:4096]
         await _audit(lead_id, "sofia_reply_generated", {
-            "summary": "Relationship-memory-aware natural WhatsApp response generated",
-            "model": payload["model"],
+            "summary": "Hermes-style NVIDIA NIM executive response generated",
+            "primary_provider": "nvidia_nim" if hermes_configured() else "openai_fallback",
+            "primary_model": hermes_model_name() if hermes_configured() else None,
+            "inference": meta,
             "memory_loaded": True,
             "crm_context_loaded": bool(crm_context.get("crm_connected")),
             "sales_intelligence_loaded": True,
             "adaptive_context_loaded": True,
             "agentic_sales_plan": sales_plan,
+            "hermes_style_agentic_loop": True,
             "max_new_questions": 2,
             "identity_policy": "truthful_digital_representative",
+            "private_reasoning_exposed": False,
         })
         await record_lesson(
-            lesson="Successful Sofia response used durable relationship memory, CRM context, progressive discovery and the natural conversation policy.",
+            lesson="Successful Sofía response used the Hermes-style cognition loop with durable relationship memory, CRM context, progressive discovery and guarded executive autonomy.",
             signal="reply_success",
-            metadata={"lead_id": lead_id, "reply_chars": len(reply)},
+            metadata={"lead_id": lead_id, "reply_chars": len(reply), "model": hermes_model_name() if hermes_configured() else "fallback"},
         )
         return reply
     except Exception as exc:
+        try:
+            fallback, _ = await _openai_fallback(system, user)
+            if fallback:
+                return fallback[:4096]
+        except Exception:
+            pass
         await _audit(lead_id, "sofia_reply_failure", {"summary": type(exc).__name__})
         await record_lesson(
-            lesson=f"Sofia response runtime recovered from {type(exc).__name__}; retain the sales-brain fallback without fabricating actions.",
+            lesson=f"Sofía Hermes/NIM runtime recovered from {type(exc).__name__}; retain the sales-brain fallback without fabricating actions.",
             signal="reply_primary_failure",
             metadata={"lead_id": lead_id, "error_type": type(exc).__name__},
         )
