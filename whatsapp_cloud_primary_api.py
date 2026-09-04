@@ -39,8 +39,9 @@ from sofia_self_marketing import growth_health
 from sofia_self_selling import self_selling_health
 from sofia_agentic_sales_os import sales_os_health
 from whatsapp_crm_bridge import crm_bridge_status, router as crm_bridge_router
+from sofia_agentmail_api import router as agentmail_router
 
-app = FastAPI(title="SAHJONY WhatsApp Hostinger OpenClaw Authority", version="5.5.0", docs_url=None, redoc_url=None)
+app = FastAPI(title="SAHJONY WhatsApp Hostinger OpenClaw Authority", version="5.6.0", docs_url=None, redoc_url=None)
 
 # Mandatory inbound reply runtime: the original customer text is preserved for safe
 # contact resolution, then Sofia loads durable history/memory and sales intelligence.
@@ -58,6 +59,7 @@ app.add_api_route("/whatsapp/openclaw/events", openclaw_event, methods=["POST"])
 app.add_api_route("/whatsapp/openclaw/outbox", openclaw_outbox, methods=["GET"])
 app.add_api_route("/whatsapp/openclaw/outbox/ack", openclaw_outbox_ack, methods=["POST"])
 app.include_router(crm_bridge_router)
+app.include_router(agentmail_router)
 
 
 async def _named_openclaw_gateway_state(gateway_id: str) -> dict[str, Any]:
@@ -119,7 +121,7 @@ async def whatsapp_health_hostinger_authority() -> dict[str, Any]:
     return {
         "status": "ok" if hostinger_ready else ("degraded" if hostinger_configured else "configuration_required"),
         "service": "whatsapp-transport",
-        "version": "5.5.0",
+        "version": "5.6.0",
         "provider": "hostinger_openclaw",
         "primary_provider": "hostinger_openclaw",
         "authority": {
