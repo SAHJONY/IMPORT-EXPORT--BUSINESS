@@ -1,8 +1,10 @@
+import hashlib
+import hmac
 import os
 import secrets
 
 from fastapi import FastAPI, Header, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 
 from auth import decode_supabase_jwt, supabase_auth_jwks_url, supabase_auth_url, verify_employee_neon_token
 from insforge_backend import PersistentBackendConfigurationError, get_backend, persistent_backend_status
@@ -166,6 +168,105 @@ async def crm_runtime_health():
         "persistence":status["provider"],"canonical_backend":"supabase","backend_configured":status["configured"],
         "supabase_configured":status.get("supabase_configured",False),"operational":status["configured"],
     }
+
+def _messenger_verify_token() -> str:
+    return os.getenv("META_MESSENGER_VERIFY_TOKEN", "").strip()
+
+
+def _messenger_app_secret() -> str:
+    return os.getenv("META_MESSENGER_APP_SECRET", "").strip()
+
+
+@app.get("/api/meta/messenger/health")
+async def meta_messenger_health():
+    return {
+        "status": "ok" if _messenger_verify_token() else "configuration_required",
+        "service": "meta-messenger-webhook",
+        "verify_token_configured": bool(_messenger_verify_token()),
+        "app_secret_configured": bool(_messenger_app_secret()),
+        "canonical_agent_id": "sofia-smith",
+        "canonical_agent_name": "Sofia Smith",
+        "crm_event_capture": True,
+        "binding_commitments": False,
+        "bulk_unsolicited_outreach": False,
+        "secrets_exposed": False,
+    }
+
+
+@app.get("/api/meta/messenger/webhook")
+async def meta_messenger_verify(request: Request):
+    mode = request.query_params.get("hub.mode", "")
+    supplied = request.query_params.get("hub.verify_token", "")
+    challenge = request.query_params.get("hub.challenge", "")
+    expected = _messenger_verify_token()
+    if not expected:
+        raise HTTPException(status_code=503, detail="Messenger verify token is not configured")
+    if mode != "subscribe" or not hmac.compare_digest(supplied, expected):
+        raise HTTPException(status_code=403, detail="Messenger webhook verification failed")
+    return PlainTextResponse(challenge, status_code=200)
+
+
+@app.post("/api/meta/messenger/webhook")
+async def meta_messenger_receive(request: Request):
+    secret = _messenger_app_secret()
+    if not secret:
+        raise HTTPException(status_code=503, detail="Messenger app secret is not configured")
+    raw = await request.body()
+    signature = request.headers.get("x-hub-signature-256", "")
+    expected = "sha256=" + hmac.new(secret.encode(), raw, hashlib.sha256).hexdigest()
+    if not signature or not hmac.compare_digest(signature, expected):
+        raise HTTPException(status_code=401, detail="Invalid Messenger webhook signature")
+    payload = await request.json()
+    if payload.get("object") != "page":
+        return {"status": "ignored", "reason": "unsupported_object"}
+    captured = 0
+    for entry in payload.get("entry", []):
+        for event in entry.get("messaging", []):
+            sender_id = str((event.get("sender") or {}).get("id") or "unknown")[:200]
+            message = event.get("message") or {}
+            text = str(message.get("text") or "")[:4000]
+            event_id = f"evt_{secrets.token_urlsafe(16)}"
+            try:
+                await get_backend().insert("business_events", {
+                    "event_id": event_id,
+                    "event_type": "meta_messenger_inbound",
+                    "source_type": "meta_messenger",
+                    "source_id": sender_id,
+                    "trade_case_id": None,
+                    "customer_id": None,
+                    "lead_id": None,
+                    "actor_role": "prospect",
+                    "actor_id": sender_id,
+                    "visibility": "business",
+                    "title": (text or "Messenger event")[:240],
+                    "summary": (text or "Inbound Messenger event")[:4000],
+                    "action_required": True,
+                    "action_label": "Sofia Smith Messenger triage",
+                    "priority": "normal",
+                    "event_status": "open",
+                    "payload": {
+                        "channel": "facebook_messenger",
+                        "canonical_agent_id": "sofia-smith",
+                        "canonical_agent_name": "Sofia Smith",
+                        "page_id": str(entry.get("id") or "")[:200],
+                        "sender_id": sender_id,
+                        "message_mid": str(message.get("mid") or "")[:240],
+                        "message_text": text,
+                        "postback": event.get("postback"),
+                        "referral": event.get("referral"),
+                        "binding_commitments_allowed": False,
+                        "capital_at_risk_usd": 0,
+                    },
+                })
+                captured += 1
+            except PersistentBackendConfigurationError:
+                raise
+            except Exception:
+                # Meta requires a fast 200 to avoid duplicate retries; persistence failures
+                # are surfaced through service logs without exposing event content.
+                pass
+    return {"status": "received", "captured_events": captured}
+
 
 @app.get("/health")
 async def platform_health():
