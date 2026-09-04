@@ -113,7 +113,7 @@ async def intelligence_health() -> dict[str, Any]:
         "status":"ok",
         "service":"sofia-adaptive-intelligence",
         "version":"1.1.0",
-        "persona":"Sofia Reyes — Trade Concierge & Account Executive, SAHJONY LLC",
+        "persona":"Sofia Smith — Trade Concierge & Account Executive, SAHJONY LLC",
         "natural_conversation_engine":True,
         "max_new_questions_per_turn":2,
         "direct_answer_first":True,

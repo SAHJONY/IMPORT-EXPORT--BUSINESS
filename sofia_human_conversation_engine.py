@@ -1,4 +1,4 @@
-"""Sofia Reyes natural conversation policy for SAHJONY LLC.
+"""Sofia Smith natural conversation policy for SAHJONY LLC.
 
 Makes customer-facing communication warm, concise, contextual and non-robotic while
 remaining truthful about capabilities and never fabricating facts, quotes or commitments.
@@ -12,7 +12,7 @@ from typing import Any
 
 @dataclass(frozen=True)
 class SofiaConversationPolicy:
-    name: str = "Sofia Reyes"
+    name: str = "Sofia Smith"
     title: str = "Trade Concierge & Account Executive"
     company: str = "SAHJONY LLC"
     max_questions_per_turn: int = 2

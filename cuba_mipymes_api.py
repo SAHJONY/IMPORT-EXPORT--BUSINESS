@@ -35,6 +35,15 @@ async def rows():
    if len(p)<1000: break
    off+=len(p)
  return out
+async def private_row_count():
+ u,k=cfg(); h={'apikey':k,'Authorization':f'Bearer {k}','Accept':'application/json','Prefer':'count=exact'}
+ params={'logical_table':'eq.external_trade_prospects','data->>actor_type':'in.(MIPYME_PRIVADA,EMPRESA_PRIVADA,OTHER_NON_STATE_VERIFIED)','select':'record_key','limit':'1'}
+ async with httpx.AsyncClient(timeout=12) as c:
+  r=await c.get(f'{u}/rest/v1/sahjony_trade_records',headers=h,params=params); r.raise_for_status()
+  cr=r.headers.get('content-range','')
+  try:return int(cr.rsplit('/',1)[1])
+  except Exception:return len(r.json() if r.content else [])
+
 async def upsert(items):
  if not items:return 0
  u,k=cfg(); h={'apikey':k,'Authorization':f'Bearer {k}','Content-Type':'application/json','Prefer':'resolution=merge-duplicates,return=minimal'}
@@ -143,7 +152,7 @@ async def mep_ceiling():
 @app.get('/cuba-mipymes-api/health')
 @app.get('/crm/cuba-mipymes/health')
 async def health():
- cur=len({norm(r.get('buyer_company') or r.get('company_name') or r.get('business_name')) for r in await rows() if is_private(r)}); return {'status':'ok','service':'cuba-private-sector-read-only-crm','version':'3.1.1','record_count':cur,'target':TARGET,'remaining_shortfall':max(TARGET-cur,0),'source_scope':'public_registry_and_official_actor_lists_research','ownership_policy':'evidence_only','binding_actions':False}
+ cur=await private_row_count(); return {'status':'ok','service':'cuba-private-sector-read-only-crm','version':'3.1.2','record_count':cur,'count_semantics':'canonical_private_records','target':TARGET,'remaining_shortfall':max(TARGET-cur,0),'source_scope':'public_registry_and_official_actor_lists_research','ownership_policy':'evidence_only','binding_actions':False}
 @app.get('/cuba-mipymes-api/list')
 @app.get('/crm/cuba-mipymes')
 @app.get('/crm/cuba-mipymes/list')
