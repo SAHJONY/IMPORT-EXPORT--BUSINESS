@@ -1,0 +1,12 @@
+[Unit]
+Description=Check for official Hermes releases every 6 hours
+
+[Timer]
+OnBootSec=10m
+OnUnitActiveSec=6h
+Persistent=true
+RandomizedDelaySec=15m
+Unit=hermes-autoupdate.service
+
+[Install]
+WantedBy=timers.target
