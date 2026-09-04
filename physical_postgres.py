@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import os
 from typing import Any
+from urllib.parse import urlsplit
 
 import psycopg
 from psycopg import sql
@@ -22,18 +23,66 @@ _ALLOWED_TABLES = {
 }
 
 
-def _database_url() -> str:
-    for name in (
-        "DATABASE_URL",
-        "POSTGRES_URL",
-        "NEON_DATABASE_URL",
-        "NEON_POSTGRES_URL",
-        "POSTGRES_PRISMA_URL",
-    ):
+_SUPABASE_ENV_NAMES = (
+    "SUPABASE_POSTGRES_URL",
+    "SUPABASE_DATABASE_URL",
+    "SUPABASE_DB_URL",
+)
+_GENERIC_ENV_NAMES = (
+    "POSTGRES_URL",
+    "DATABASE_URL",
+    "POSTGRES_PRISMA_URL",
+)
+_NEON_ENV_NAMES = (
+    "NEON_DATABASE_URL",
+    "NEON_POSTGRES_URL",
+)
+
+
+def _provider_for_url(value: str) -> str:
+    """Classify a DSN without returning or logging any credential material."""
+    try:
+        host = (urlsplit(value).hostname or "").lower()
+    except ValueError:
+        host = ""
+    if host.endswith(".supabase.co") or host.endswith(".supabase.com"):
+        return "supabase"
+    if host.endswith(".neon.tech"):
+        return "neon"
+    return "postgres"
+
+
+def _database_candidates() -> list[tuple[str, str]]:
+    """Return unique DSNs in governed provider order.
+
+    Explicit Supabase variables always win. Supabase URLs found in generic
+    variables are tried next, while every Neon URL remains a final fallback.
+    """
+    configured: list[tuple[str, str, str, int]] = []
+    names = _SUPABASE_ENV_NAMES + _GENERIC_ENV_NAMES + _NEON_ENV_NAMES
+    for position, name in enumerate(names):
         value = os.getenv(name, "").strip()
-        if value:
-            return value
-    raise RuntimeError("A Postgres database URL is required for governed physical ledgers")
+        if not value:
+            continue
+        provider = _provider_for_url(value)
+        if name in _SUPABASE_ENV_NAMES:
+            priority = 0
+        elif provider == "supabase":
+            priority = 1
+        elif provider == "neon" or name in _NEON_ENV_NAMES:
+            priority = 3
+        else:
+            priority = 2
+        configured.append((name, value, provider, priority * 100 + position))
+
+    candidates: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for _name, value, provider, _priority in sorted(configured, key=lambda item: item[3]):
+        if value in seen:
+            continue
+        seen.add(value)
+        candidates.append((provider, value))
+    return candidates
 
 
 def _table(name: str) -> sql.Identifier:
@@ -46,13 +95,25 @@ def _connect():
     # Supabase Transaction Pooler is the canonical serverless connection path.
     # Disable psycopg server-side prepared statements: transaction poolers do not
     # guarantee session affinity and prepared statements can fail across requests.
-    return psycopg.connect(
-        _database_url(),
-        autocommit=True,
-        connect_timeout=10,
-        row_factory=dict_row,
-        prepare_threshold=None,
-    )
+    candidates = _database_candidates()
+    if not candidates:
+        raise RuntimeError("A Postgres database URL is required for governed physical ledgers")
+
+    last_error: psycopg.Error | None = None
+    for _provider, database_url in candidates:
+        try:
+            return psycopg.connect(
+                database_url,
+                autocommit=True,
+                connect_timeout=10,
+                row_factory=dict_row,
+                prepare_threshold=None,
+            )
+        except psycopg.Error as exc:
+            last_error = exc
+    if last_error is not None:
+        raise last_error
+    raise RuntimeError("No usable Postgres database URL is configured")
 
 
 async def database_health() -> dict[str, Any]:
