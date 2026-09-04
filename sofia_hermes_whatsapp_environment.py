@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import secrets
 from datetime import datetime, timezone
 from typing import Any
@@ -22,6 +23,32 @@ def _now() -> str:
 def environment_enabled() -> bool:
     value = os.getenv("SOFIA_WHATSAPP_ENVIRONMENT", "hermes").strip().lower()
     return value in {"hermes", "hermes-agent", "enabled", "true", "1"}
+
+
+def _asks_about_runtime(text: str) -> bool:
+    normalized = re.sub(r"\s+", " ", (text or "").strip().lower())
+    if not normalized:
+        return False
+    runtime_terms = (
+        "hermes", "openclaw", "entorno", "environment", "runtime", "modelo",
+        "model", "donde operas", "dónde operas", "como operas", "cómo operas",
+        "whatsapp", "gpt-oss", "nvidia nim",
+    )
+    question_terms = (
+        "estas en", "estás en", "operas", "usas", "use", "running", "run",
+        "which", "what", "cual", "cuál", "donde", "dónde", "inside",
+    )
+    return any(term in normalized for term in runtime_terms) and any(term in normalized for term in question_terms)
+
+
+def _runtime_identity_reply() -> str:
+    model = nim_health().get("model") or "openai/gpt-oss-120b"
+    return (
+        f"Sí. En WhatsApp opero dentro de Hermes Agent v{HERMES_BASELINE} como mi entorno ejecutivo. "
+        f"Hostinger/OpenClaw es el transporte que conecta el canal de WhatsApp, no mi entorno de razonamiento. "
+        f"Mi inferencia primaria es NVIDIA NIM con {model}. Mi identidad operativa es Sofía Smith y comparto "
+        "memoria comercial, CRM, contexto de relaciones y controles de autorización de SAHJONY."
+    )
 
 
 async def _audit(event_type: str, payload: dict[str, Any]) -> None:
@@ -78,6 +105,24 @@ async def generate_hermes_whatsapp_reply(text: str, contact_name: str | None) ->
             "nim_configured": nim_configured(),
         },
     )
+
+    # Runtime questions are answered deterministically from the actual configured
+    # architecture so Sofía never confuses the WhatsApp transport with her
+    # executive cognition environment.
+    if _asks_about_runtime(text):
+        reply = _runtime_identity_reply()
+        await _audit(
+            "hermes_runtime_identity_reported",
+            {
+                "summary": "Sofía truthfully reported Hermes as the WhatsApp operating environment",
+                "channel": HERMES_CHANNEL,
+                "hermes_version": HERMES_BASELINE,
+                "transport": "hostinger_openclaw",
+                "primary_inference": nim_health().get("model"),
+            },
+        )
+        return reply
+
     reply = await generate_sofia_reply(text, contact_name)
     if reply:
         await _audit(
