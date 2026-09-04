@@ -10,4 +10,6 @@ Rules:
 - Runtime secrets remain in the deployment secret store and must never be committed to Git.
 - If production and `main` drift, restore `main` as the canonical source before advancing further feature work.
 
+Deployment source-of-record marker: canonical `main` deployment retriggered on 2026-09-04 after feature-branch production drift was detected.
+
 This policy exists to prevent stale preview SHAs from becoming the production source of record.
