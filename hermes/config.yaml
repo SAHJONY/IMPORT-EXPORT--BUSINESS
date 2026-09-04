@@ -1,0 +1,7 @@
+web:
+  search_backend: "ddgs"
+  extract_backend: "firecrawl"
+
+# Sofía production policy: web_search is available by default through a keyless
+# DuckDuckGo backend. web_extract uses Hermes' Firecrawl backend, which can run
+# keyless when supported by Hermes or use FIRECRAWL_API_KEY when configured.
