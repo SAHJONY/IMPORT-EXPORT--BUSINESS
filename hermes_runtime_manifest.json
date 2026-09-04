@@ -1,0 +1,22 @@
+{
+  "upstream": "NousResearch/hermes-agent",
+  "baseline_version": "0.21.0",
+  "baseline_tag": "v0.21.0",
+  "official_site": "https://hermes-agent.nousresearch.com/",
+  "update_command": "hermes update",
+  "policy": {
+    "official_releases_only": true,
+    "allow_prerelease": false,
+    "allow_draft": false,
+    "auto_update": true,
+    "pre_update_snapshot_required": true,
+    "post_update_doctor_required": true,
+    "rollback_on_failed_health": true
+  },
+  "sofia": {
+    "agent_id": "sofia-smith",
+    "brain_profile": "hermes-0.21-compatible",
+    "primary_model_provider": "nvidia_nim",
+    "primary_model": "openai/gpt-oss-120b"
+  }
+}
