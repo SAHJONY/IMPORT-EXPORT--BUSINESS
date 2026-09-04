@@ -33,18 +33,21 @@ from whatsapp_api import (
 from insforge_backend import get_backend, persistent_backend_status
 from whatsapp_self_healing import diagnose, repair_plan, record_recovery_event
 from sofia_adaptive_intelligence import intelligence_health
-from sofia_whatsapp_runtime import generate_sofia_reply
+from sofia_hermes_whatsapp_environment import generate_hermes_whatsapp_reply, health as hermes_environment_health
 from whatsapp_backlog_recovery import drain_backlog, find_unanswered
 from sofia_self_marketing import growth_health
 from sofia_self_selling import self_selling_health
 from sofia_agentic_sales_os import sales_os_health
 from whatsapp_crm_bridge import crm_bridge_status, router as crm_bridge_router
 
-app = FastAPI(title="SAHJONY WhatsApp Hostinger OpenClaw Authority", version="5.5.0", docs_url=None, redoc_url=None)
+app = FastAPI(title="SAHJONY WhatsApp Hostinger OpenClaw + Hermes Authority", version="6.0.0", docs_url=None, redoc_url=None)
 
-# Mandatory inbound reply runtime: the original customer text is preserved for safe
-# contact resolution, then Sofia loads durable history/memory and sales intelligence.
-whatsapp_core._generate_ai_reply = generate_sofia_reply
+# Mandatory WhatsApp execution chain:
+# Hostinger/OpenClaw is the transport authority; Hermes is Sofía's operating
+# environment; NVIDIA NIM GPT-OSS-120B is the preferred inference provider.
+# CRM, relationship memory, sales intelligence and owner governance remain inside
+# the Sofía runtime. No parallel/non-Hermes autonomous reply path is mounted here.
+whatsapp_core._generate_ai_reply = generate_hermes_whatsapp_reply
 
 app.add_api_route("/whatsapp/setup", whatsapp_setup_status, methods=["GET"])
 app.add_api_route("/whatsapp/setup", whatsapp_setup_save, methods=["POST"])
@@ -96,21 +99,18 @@ async def whatsapp_health_hostinger_authority() -> dict[str, Any]:
     cfg = await _config()
     persistence = persistent_backend_status()
 
-    # hostinger-vps is the sole production authority. The generic/default gateway
-    # is retained only for diagnostics and can never make production ready.
     hostinger = await _named_openclaw_gateway_state("hostinger-vps")
     default_openclaw = await _openclaw_gateway_state()
     hostinger_ready = bool(hostinger.get("connected"))
     hostinger_configured = bool(hostinger.get("configured"))
 
-    # Any cloud-provider configuration is diagnostic-only and cannot promote,
-    # downgrade, route, or release production WhatsApp traffic.
     cloud_send = _send_ready(cfg)
     cloud_webhook = _webhook_ready(cfg)
     cloud_ready = _configured(cfg)
 
     recovery = await diagnose()
     sofia = await intelligence_health()
+    hermes = hermes_environment_health()
     marketing = await growth_health()
     selling = await self_selling_health()
     crm_bridge = await crm_bridge_status()
@@ -119,7 +119,7 @@ async def whatsapp_health_hostinger_authority() -> dict[str, Any]:
     return {
         "status": "ok" if hostinger_ready else ("degraded" if hostinger_configured else "configuration_required"),
         "service": "whatsapp-transport",
-        "version": "5.5.0",
+        "version": "6.0.0",
         "provider": "hostinger_openclaw",
         "primary_provider": "hostinger_openclaw",
         "authority": {
@@ -129,7 +129,14 @@ async def whatsapp_health_hostinger_authority() -> dict[str, Any]:
             "sole_production_authority": True,
             "fallback_authority_allowed": False,
         },
+        "sofia_execution_environment": {
+            "environment": "hermes-agent",
+            "mandatory": True,
+            "agent_id": "sofia-smith",
+            "health": hermes,
+        },
         "transport_policy": "hostinger_openclaw_single_authority",
+        "cognition_policy": "hermes_mandatory_for_sofia_whatsapp",
         "business_suite_connection": True,
         "hostinger_independent_runtime": hostinger_ready,
         "send_ready": hostinger_ready,
@@ -189,6 +196,11 @@ async def whatsapp_health_hostinger_authority() -> dict[str, Any]:
         "secrets_exposed": False,
         "durable_owner_configuration": True,
     }
+
+
+@app.get("/whatsapp/sofia/hermes/health")
+async def sofia_hermes_whatsapp_health() -> dict[str, Any]:
+    return hermes_environment_health()
 
 
 @app.get("/whatsapp/recovery/health")
@@ -258,11 +270,14 @@ async def whatsapp_send_hostinger_primary(
 ) -> dict[str, Any]:
     _owner(authorization)
 
-    # The durable OpenClaw outbox is the only production outbound path. The
-    # Hostinger gateway consumes it. No alternate provider may hijack delivery.
     result = await _enqueue_openclaw_message(payload)
     await record_recovery_event(
         "hostinger_openclaw_authoritative_enqueue",
-        {"status": "ok", "provider": "hostinger_openclaw", "gateway_id": "hostinger-vps"},
+        {
+            "status": "ok",
+            "provider": "hostinger_openclaw",
+            "gateway_id": "hostinger-vps",
+            "sofia_environment": "hermes-agent",
+        },
     )
     return result
