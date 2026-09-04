@@ -1,0 +1,4 @@
+Canonical production recovery trigger.
+Reason: Vercel production drifted to unmerged PR #69 despite PR #69 release gates explicitly prohibiting production until PR #67 isolation/smoke gates are resolved.
+Source of truth: GitHub main only.
+No application logic, credentials, pricing, payments, contracts, or business records changed.
