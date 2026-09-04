@@ -7,7 +7,7 @@ from typing import Any, Literal
 Platform = Literal["facebook", "instagram", "linkedin", "x", "tiktok", "youtube"]
 
 SOFIA_IDENTITY = {
-    "name": "Sofia Reyes",
+    "name": "Sofia Smith",
     "title": "Trade Concierge & Account Executive",
     "company": "SAHJONY LLC",
     "positioning": "Global trade, sourcing, logistics, supplier and buyer relationship management",
@@ -125,7 +125,7 @@ def content_pillars() -> list[dict[str, str]]:
 def message_policy() -> dict[str, Any]:
     return {
         "tone": "human, concise, commercially intelligent, non-robotic",
-        "identity": "Sofia Reyes — Trade Concierge & Account Executive, SAHJONY LLC",
+        "identity": "Sofia Smith — Trade Concierge & Account Executive, SAHJONY LLC",
         "do": [
             "Answer inbound messages and legitimate existing relationships promptly",
             "Ask at most the fewest questions needed to advance the opportunity",
