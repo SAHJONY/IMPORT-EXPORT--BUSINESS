@@ -43,7 +43,9 @@ export default function OwnerCommandCenter(){
         let parsed:any={};
         try{parsed=raw?JSON.parse(raw):{}}catch{parsed={}}
         const explicitReady=parsed.production_ready??parsed.send_ready??parsed.gateway_connected??parsed.ready;
-        const ok=response.ok&&(explicitReady===undefined?true:Boolean(explicitReady));
+        const status=String(parsed.status||'').toLowerCase();
+        const statusReady=!['configuration_required','degraded','error','unavailable','offline'].includes(status);
+        const ok=response.ok&&statusReady&&(explicitReady===undefined?true:Boolean(explicitReady));
         const detail=ok?String(parsed.status||parsed.service||'Operational'):String(parsed.reason||parsed.status||`HTTP ${response.status}`);
         return [probe.key,{ok,label:probe.label,detail}] as const;
       }catch(error){return [probe.key,{ok:false,label:probe.label,detail:error instanceof Error?error.message:'Unavailable'}] as const}
