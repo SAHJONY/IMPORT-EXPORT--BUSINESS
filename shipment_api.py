@@ -55,6 +55,7 @@ class ShipmentPatch(BaseModel):
     current_status: str | None = Field(default=None, max_length=100)
     current_location: str | None = Field(default=None, max_length=240)
     estimated_delivery_at: str | None = None
+    actual_delivery_at: str | None = None
     exception_code: str | None = Field(default=None, max_length=100)
     exception_detail: str | None = Field(default=None, max_length=2000)
     customer_visible: bool | None = None
@@ -273,6 +274,11 @@ async def patch_shipment(shipment_id: str, payload: ShipmentPatch, x_role: str |
         raise HTTPException(403, "Customers cannot alter operational shipment state")
     shipment = await get_shipment_or_404(shipment_id, actor)
     values = {k: v for k, v in payload.model_dump().items() if v is not None}
+    if values.get("actual_delivery_at"):
+        if shipment.get("exception_code"):
+            raise HTTPException(409, "Shipment delivery cannot be confirmed while an exception is unresolved")
+        values["current_stage"] = "delivered"
+        values["current_status"] = "delivered"
     values["updated_at"] = now()
     result = await get_backend().patch("shipments", values, params={"shipment_id": f"eq.{shipment_id}"})
     shipment.update(values)
