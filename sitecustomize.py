@@ -29,6 +29,16 @@ def _sanitize_postgres_environment() -> None:
             os.environ.pop(name, None)
 
 
+def _install_whatsapp_env_aliases() -> None:
+    """Normalize legacy Meta env names without exposing or duplicating secrets."""
+    if not os.getenv("WHATSAPP_APP_SECRET", "").strip():
+        meta_secret = os.getenv("META_WHATSAPP_APP_SECRET", "").strip()
+        if meta_secret:
+            os.environ["WHATSAPP_APP_SECRET"] = meta_secret
+    if not os.getenv("WHATSAPP_GRAPH_API_VERSION", "").strip():
+        os.environ["WHATSAPP_GRAPH_API_VERSION"] = "v25.0"
+
+
 def _install_neon_ipv4_preference() -> None:
     if not (os.getenv("VERCEL") or os.getenv("VERCEL_ENV")):
         return
@@ -67,4 +77,5 @@ def _install_neon_ipv4_preference() -> None:
 
 
 _sanitize_postgres_environment()
+_install_whatsapp_env_aliases()
 _install_neon_ipv4_preference()
