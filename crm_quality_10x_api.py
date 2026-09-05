@@ -6,7 +6,7 @@ from fastapi import FastAPI, Header, HTTPException
 from auth import verify_owner_token
 from insforge_backend import get_backend
 
-app = FastAPI(title='SAHJONY CRM 10X Quality OS', version='1.0.0', docs_url=None, redoc_url=None)
+app = FastAPI(title='SAHJONY CRM 10X Quality OS', version='1.1.0', docs_url=None, redoc_url=None)
 
 
 def _now():
@@ -123,7 +123,6 @@ def assess_record(r):
         'next_action': _has_next_action(r),
         'fresh_30d': _fresh(r, 30),
     }
-    # CRM maturity intentionally weights verification and demand more heavily than raw record count.
     weights = {
         'identity': 5, 'contactability': 8, 'activity_segmented': 7, 'location': 5,
         'source_evidence': 8, 'registry_or_research_verified': 7, 'kyb_verified': 15,
@@ -133,7 +132,7 @@ def assess_record(r):
     score = sum(weights[k] for k,v in checks.items() if v)
     missing = [k for k,v in checks.items() if not v]
     if not checks['contactability']:
-        next_action = 'Enrich a legitimate public business contact; do not auto-send outreach.'
+        next_action = 'Enrich a legitimate public business contact; continue research autonomously through approved public-source fallbacks.'
     elif not checks['kyb_verified']:
         next_action = 'Obtain/validate KYB and authorized representative evidence before commercial promotion.'
     elif not checks['current_need']:
@@ -184,9 +183,10 @@ async def _load():
 @app.get('/crm/quality-10x/health')
 async def health():
     return {
-        'status':'ok','service':'crm-quality-10x','version':'1.0.0',
+        'status':'ok','service':'crm-quality-10x','version':'1.1.0',
         'principle':'verification + actionable demand + supplier fit + protected economics > raw record count',
         'fail_closed_promotion':True,'cold_bulk_outreach':False,'revenue_inference':False,
+        'sofia_super_proactive_sales_os':True,'owner_dependency_for_research':False,
         'target_standard':'10/10 when verified, current, actionable and transaction-linked data thresholds are met',
     }
 
@@ -209,7 +209,6 @@ async def scorecard():
     real_intakes = len(intakes)
     qualified_intakes = sum(1 for r in intakes if str(r.get('qualification_status') or '').upper() == 'QUALIFIED')
     matched = len(matches)
-    # Platform score is intentionally conservative. High record volume cannot compensate for absent verified demand.
     dimensions = {
         'data_foundation': min(100.0, round(pct(sum(1 for r in mipymes if _has_evidence(r)), count),1)),
         'contactability': pct(with_contact,count),
@@ -255,7 +254,6 @@ async def activation_queue(limit:int=100, x_role:str|None=Header(None,alias='X-R
             'linked_intakes':len(intake_by_customer.get(r.get('customer_id'),[])),
             'outreach_policy':'CONSENT_OR_PRIOR_BUSINESS_RELATIONSHIP_REQUIRED_FOR_AUTONOMOUS_PROMOTIONAL_SEND',
         })
-    # Highest maturity first; within same tier prioritize records that can be activated fastest.
     candidates.sort(key=lambda x:(x['score'], x['has_contact'], x['current_need']), reverse=True)
     return {'status':'ok','count':min(len(candidates),max(1,min(limit,500))),'queue':candidates[:max(1,min(limit,500))],'pii_exposed':False}
 
@@ -270,3 +268,8 @@ async def standards():
         'required_for_transaction_ready':['buyer verified','supplier verified','written demand','commercial terms','compliance path','payment path','logistics path','SAHJONY fee protection','no unsupported binding commitment'],
         'revenue_rule':'Revenue/commission is never marked earned or collected without evidence of an actual transaction and receipt.',
     }
+
+
+# Keep SOFIA inside the existing CRM serverless surface so this upgrade does not consume another Vercel function.
+from sofia_proactive_sales_os import app as sofia_proactive_sales_app
+app.include_router(sofia_proactive_sales_app.router)
