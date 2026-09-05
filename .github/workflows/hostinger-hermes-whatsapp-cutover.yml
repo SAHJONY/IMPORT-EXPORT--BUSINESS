@@ -45,46 +45,53 @@ jobs:
           set -euo pipefail
           ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/hostinger-hermes "$SSH_USER@$HOST" 'bash -s' <<'REMOTE'
           set -u
-          echo '=== SYSTEM ==='
+          HERMES_PY=/root/.hermes/hermes-agent/venv/bin/python
+          echo '=== CORE RUNTIME ==='
           uname -a || true
-          echo '=== RUNTIMES ==='
-          command -v docker || true; docker --version 2>/dev/null || true
-          command -v hermes || true; hermes --version 2>/dev/null || true
-          command -v node || true; node --version 2>/dev/null || true
-          command -v python3 || true; python3 --version 2>/dev/null || true
-          echo '=== SYSTEMD MATCHES ==='
-          systemctl list-unit-files --type=service 2>/dev/null | grep -Ei 'openclaw|hermes|whatsapp|sahjony' || true
-          systemctl list-unit-files --type=timer 2>/dev/null | grep -Ei 'openclaw|hermes|whatsapp|sahjony' || true
-          echo '=== OPENCLAW UNIT ==='
-          systemctl cat openclaw-gateway.service 2>/dev/null | sed -E 's/(TOKEN|KEY|SECRET|PASSWORD)=.*/\1=***REDACTED***/Ig' || true
-          echo '=== RUNNING MATCHES ==='
-          ps -eo pid,ppid,user,cmd | grep -Ei 'openclaw|hermes|whatsapp' | grep -v grep | head -80 || true
-          echo '=== DOCKER CONTAINERS ==='
-          docker ps -a --format '{{.Names}}|{{.Image}}|{{.Status}}|{{.Ports}}' 2>/dev/null || true
-          echo '=== OPENCLAW CONTAINER MOUNTS ==='
-          for c in $(docker ps -a --format '{{.Names}}' 2>/dev/null | grep -Ei 'openclaw|sahjony' || true); do
-            echo "CONTAINER=$c"
-            docker inspect "$c" --format '{{range .Mounts}}{{.Type}}|{{.Source}}|{{.Destination}}{{println}}{{end}}' 2>/dev/null || true
-          done
-          echo '=== HERMES WHATSAPP PLATFORM FILES ==='
-          find /root/.hermes/platforms/whatsapp -maxdepth 3 -type f -printf '%p\n' 2>/dev/null | head -200 || true
-          echo '=== HERMES AGENT ENTRYPOINTS ==='
-          find /root/.hermes/hermes-agent -maxdepth 3 -type f \( -name '*.py' -o -name '*.sh' -o -name 'pyproject.toml' -o -name 'README*' \) -printf '%p\n' 2>/dev/null | head -220 || true
-          echo '=== HERMES WHATSAPP SAFE CONFIG SHAPE ==='
-          find /root/.hermes/platforms/whatsapp -maxdepth 2 -type f \( -name '*.json' -o -name '*.yaml' -o -name '*.yml' -o -name '*.toml' \) -print 2>/dev/null | while read -r f; do echo "FILE=$f"; sed -E 's/((token|key|secret|password|session|auth)[^:=]*[:=])[[:space:]]*.*/\1 ***REDACTED***/Ig' "$f" | head -80; done || true
-          echo '=== HERMES CLI DISCOVERY ==='
-          find /root/.hermes/hermes-agent -type f -path '*/bin/hermes' -o -type f -name 'hermes.py' 2>/dev/null | head -20 || true
-          python3 - <<'PY'
-          import sys
-          sys.path.insert(0, '/root/.hermes/hermes-agent')
-          try:
-              import hermes_cli
-              print('HERMES_PYTHON_IMPORT=READY', getattr(hermes_cli, '__file__', ''))
-          except Exception as e:
-              print('HERMES_PYTHON_IMPORT=FAILED', type(e).__name__)
+          echo "HERMES_PROCESS=$(pgrep -af 'hermes_cli.main gateway run' | head -1 || true)"
+          echo "OPENCLAW_PROCESS=$(pgrep -af 'openclaw gateway' | head -1 || true)"
+          echo '=== HERMES GATEWAY STATUS ==='
+          "$HERMES_PY" -m hermes_cli.main gateway status 2>&1 | head -120 || true
+          echo '=== HERMES GATEWAY HELP ==='
+          "$HERMES_PY" -m hermes_cli.main gateway --help 2>&1 | head -140 || true
+          echo '=== HERMES CONFIG KEYS ==='
+          "$HERMES_PY" - <<'PY'
+          from pathlib import Path
+          import yaml
+          p=Path('/root/.hermes/config.yaml')
+          if not p.exists():
+              print('HERMES_CONFIG_MISSING=1'); raise SystemExit
+          data=yaml.safe_load(p.read_text()) or {}
+          sensitive=('token','key','secret','password','cookie','session','auth')
+          def walk(obj,prefix=''):
+              if isinstance(obj,dict):
+                  for k,v in obj.items():
+                      path=f'{prefix}.{k}' if prefix else str(k)
+                      if any(s in str(k).lower() for s in sensitive):
+                          print(path+'=<redacted-present>' if v else path+'=<empty>')
+                      elif isinstance(v,(dict,list)):
+                          print(path+f'=<'+type(v).__name__+'>')
+                          walk(v,path)
+                      elif isinstance(v,(str,int,float,bool)) or v is None:
+                          txt=str(v)
+                          if len(txt)>120: txt=txt[:117]+'...'
+                          print(path+'='+txt)
+              elif isinstance(obj,list):
+                  for i,v in enumerate(obj): walk(v,f'{prefix}[{i}]')
+          walk(data)
           PY
+          echo '=== HERMES WHATSAPP BRIDGE LOG ==='
+          tail -120 /root/.hermes/platforms/whatsapp/bridge.log 2>/dev/null | sed -E 's/([A-Za-z0-9_]*(token|key|secret|password|cookie|session|auth)[A-Za-z0-9_]*[=:])[[:space:]]*[^ ]+/\1***REDACTED***/Ig' || true
+          echo '=== HERMES WHATSAPP PLATFORM CODE SIGNALS ==='
+          grep -nE 'class |def |bridge|pair|qr|session|connect|status|auth|whatsapp' /root/.hermes/hermes-agent/gateway/platforms/whatsapp.py 2>/dev/null | head -220 || true
+          echo '=== HERMES PLATFORM PROCESSES ==='
+          ps -eo pid,ppid,user,cmd | grep -E '/root/.hermes|whatsapp|bridge' | grep -v grep | head -100 || true
+          echo '=== OPENCLAW / HERMES SERVICES ==='
+          systemctl is-active openclaw-gateway.service 2>/dev/null || true
+          systemctl is-enabled openclaw-gateway.service 2>/dev/null || true
+          systemctl list-units --type=service --all 2>/dev/null | grep -Ei 'hermes|openclaw|whatsapp' || true
           echo '=== LISTENERS ==='
-          ss -lntp 2>/dev/null | grep -E ':(80|443|18789|3000|8000|8080|8787)\b' || true
+          ss -lntp 2>/dev/null | grep -E ':(18789|3000|8000|8080|8787|8765|8766)\b' || true
           echo HOSTINGER_HERMES_AUDIT_COMPLETE=1
           REMOTE
       - name: Stage Hermes application files
@@ -108,7 +115,7 @@ jobs:
           set -euo pipefail
           independent=0
           systemctl is-active --quiet sahjony-hermes-whatsapp.service 2>/dev/null && independent=1 || true
-          docker ps --format '{{.Names}}' 2>/dev/null | grep -qx 'sahjony-hermes-whatsapp' && independent=1 || true
+          pgrep -f 'hermes_cli.main gateway run' >/dev/null 2>&1 && grep -Eqi 'connected|ready|logged.?in|authenticated' /root/.hermes/platforms/whatsapp/bridge.log 2>/dev/null && independent=1 || true
           if [[ "$independent" != 1 ]]; then
             echo HERMES_INDEPENDENT_WHATSAPP_TRANSPORT_NOT_READY=1 >&2
             echo OPENCLAW_PRESERVED_TO_AVOID_WHATSAPP_OUTAGE=1 >&2
@@ -123,12 +130,18 @@ jobs:
           set -euo pipefail
           ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/hostinger-hermes "$SSH_USER@$HOST" 'bash -s' <<'REMOTE'
           set -euo pipefail
-          systemctl is-active --quiet sahjony-hermes-whatsapp.service || { echo HERMES_SERVICE_NOT_ACTIVE=1 >&2; exit 21; }
+          pgrep -f 'hermes_cli.main gateway run' >/dev/null || { echo HERMES_GATEWAY_NOT_RUNNING=1 >&2; exit 21; }
+          grep -Eqi 'connected|ready|logged.?in|authenticated' /root/.hermes/platforms/whatsapp/bridge.log || { echo HERMES_WHATSAPP_NOT_VERIFIED=1 >&2; exit 22; }
           mkdir -p /root/sahjony-cutover-backups
           ts=$(date -u +%Y%m%dT%H%M%SZ)
-          docker ps -a --format '{{.Names}}' | grep -Ei 'openclaw' > "/root/sahjony-cutover-backups/openclaw-containers-$ts.txt" || true
-          for c in $(docker ps -a --format '{{.Names}}' | grep -Ei 'openclaw' || true); do docker stop "$c"; done
-          systemctl disable --now 'openclaw*' 2>/dev/null || true
+          tar -C /var/lib -czf "/root/sahjony-cutover-backups/openclaw-state-$ts.tgz" sahjony-openclaw-state sahjony-openclaw-auth 2>/dev/null || true
+          systemctl disable --now openclaw-gateway.service sahjony-openclaw-runtime-guardian.service 2>/dev/null || true
+          systemctl disable --now sahjony-openclaw-health-sidecar.timer 2>/dev/null || true
+          for c in $(docker ps -a --format '{{.Names}}' | grep -Ei 'openclaw' || true); do docker stop "$c" 2>/dev/null || true; done
+          sleep 3
+          pgrep -af 'openclaw gateway' && { echo OPENCLAW_STILL_RUNNING=1 >&2; exit 23; } || true
+          pgrep -f 'hermes_cli.main gateway run' >/dev/null || { echo HERMES_DIED_DURING_CUTOVER=1 >&2; exit 24; }
           echo OPENCLAW_RUNTIME_STOPPED_AND_DISABLED=1
-          echo OPENCLAW_DATA_PRESERVED_FOR_ROLLBACK=1
+          echo OPENCLAW_DATA_BACKED_UP_FOR_ROLLBACK=1
+          echo HERMES_REMAINS_RUNNING=1
           REMOTE
