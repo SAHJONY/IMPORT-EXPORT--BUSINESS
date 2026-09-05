@@ -21,7 +21,8 @@ const config = JSON.parse(read('vercel.json'));
 const workflow = read('.github/workflows/vercel-recovery-deploy.yml');
 const script = read('scripts/vercel_deploy_recovery.sh');
 const skill = read('skills/deployment-recovery/SKILL.md');
-const submodules = read('.gitmodules');
+const hasGitmodules = fs.existsSync('.gitmodules');
+const submodules = hasGitmodules ? read('.gitmodules') : '';
 
 check(
   config.git?.deploymentEnabled?.main === true && config.git?.deploymentEnabled?.['*'] === false,
@@ -38,8 +39,10 @@ check(script.includes('MODE="${1:-deploy}"'), 'Recovery script supports determin
 check(script.includes('https://www.sahjony.com'), 'Canonical production URL is verified');
 check(skill.startsWith('---\nname: deployment-recovery\n'), 'Recovery skill has valid frontmatter');
 check(
-  ['gstack', 'superpowers', 'ui-ux-pro-max-skill'].every((path) => submodules.includes(`path = ${path}`)),
-  'Git submodule pointers have complete metadata',
+  !hasGitmodules || ['gstack', 'superpowers', 'ui-ux-pro-max-skill'].every((path) => submodules.includes(`path = ${path}`)),
+  hasGitmodules
+    ? 'Git submodule pointers have complete metadata'
+    : 'Git submodule metadata is optional in the Vercel build context',
 );
 
 console.log(`\nSummary: ${passes} passed, ${failures} failed`);
