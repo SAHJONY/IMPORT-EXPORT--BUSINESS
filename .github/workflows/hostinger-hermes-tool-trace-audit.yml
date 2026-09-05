@@ -1,0 +1,41 @@
+name: Hostinger Hermes Tool Trace Audit
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/hostinger-hermes-tool-trace-audit.yml
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      HOST: 69.62.68.67
+      SSH_USER: root
+      PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Prepare SSH
+        shell: bash
+        run: |
+          set -euo pipefail
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/key
+          chmod 600 ~/.ssh/key
+      - name: Audit trace emitters
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/key "$SSH_USER@$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          ROOT=/root/.hermes/hermes-agent
+          echo '=== skill_view refs ==='
+          grep -Rni --exclude-dir=.git --exclude='*.pyc' 'skill_view' "$ROOT" | head -80 || true
+          echo '=== execute_code refs ==='
+          grep -Rni --exclude-dir=.git --exclude='*.pyc' 'execute_code' "$ROOT" | head -80 || true
+          echo '=== tool progress refs ==='
+          grep -Rni --exclude-dir=.git --exclude='*.pyc' -E 'tool.*progress|progress.*tool|tool_call|tool.*message' "$ROOT/gateway" | head -120 || true
+          REMOTE
+      - name: Cleanup
+        if: always()
+        run: rm -f ~/.ssh/key
