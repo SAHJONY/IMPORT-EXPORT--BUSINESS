@@ -245,6 +245,7 @@
     { "src": "/ui-language(.*)", "dest": "ui_language_api.py" },
     { "src": "/cuba-language(.*)", "dest": "cuba_language_api.py" },
     { "src": "/api/meta/messenger(.*)", "dest": "unified_api.py" },
+    { "src": "/api/meta/whatsapp(.*)", "dest": "unified_api.py" },
     { "src": "/crawler(.*)", "dest": "unified_api.py" },
     { "src": "/lead-scout/(health|leads.*)", "dest": "unified_api.py" },
     { "src": "/lead-search(.*)", "dest": "unified_api.py" },

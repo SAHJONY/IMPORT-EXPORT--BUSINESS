@@ -274,6 +274,94 @@ async def platform_health():
     cloudflare_crawler_configured = bool(os.getenv("CLOUDFLARE_ACCOUNT_ID", "").strip()) and bool(os.getenv("CLOUDFLARE_API_TOKEN", "").strip())
     return {"status":"ok","service":"sahjony-llc-global-trade-intelligence-os","version":"7.4.0","canonical_platform":"supabase","release_policy":"fail-closed","production_ready":activation["production_ready"],"readiness_score":activation["readiness_score"],"passed_gates":activation["passed_gates"],"total_gates":activation["total_gates"],"blocker_count":activation["blocker_count"],"release_gate":activation["release_gate"],"identity_provider":activation["providers"]["identity"]["provider"],"persistence_provider":activation["providers"]["persistence"]["provider"],"persistence_configured":activation["providers"]["persistence"]["configured"],"openai_configured":activation["providers"]["ai"]["openai_configured"],"anthropic_configured":activation["providers"]["ai"]["anthropic_configured"],"translation_configured":activation["providers"]["translation"]["configured"],"frontier_agentic_trade_engine":True,"dual_frontier_consensus":True,"autonomous_internal_research":True,"external_commitments_fail_closed":True,"global_industrial_marketplace":True,"marketplace_zero_own_inventory":True,"marketplace_rfq_first":True,"email_agent_control_plane":True,"native_gmail_transport_control_plane":True,"communication_os_control_plane":True,"communication_os_conversation_graph":True,"communication_os_private_human_webrtc":True,"communication_os_ai_consent_gate":True,"communication_os_contact_360":True,"communication_os_agentic_missions":True,"communication_os_agentic_mcp_tools":True,"communication_os_binding_tools_exposed":False,"communication_platform_industry_agnostic":True,"communication_platform_core_plus_industry_packs":True,"communication_platform_generic_context_graph":True,"communication_platform_workspace_policy_engine":True,"communication_platform_binding_tools_exposed":False,"communication_platform_regulated_tools_exposed":False,"communication_os_video_vision":True,"communication_os_screen_share":True,"communication_os_human_takeover":True,"communication_os_room_token_guard":True,"communication_os_direct_text":True,"communication_os_autonomous_notifications":True,"communication_os_free_wifi_control_plane":True,"communication_os_local_lan_mode":True,"communication_os_free_to_end_user_wifi_supported":True,"communication_os_internet_backhaul_fail_closed":True,"cuba_communications_department":True,"cuba_starlink_optional_gate":True,"cuba_free_wifi_program":True,"cuba_sofia_sales_os_bridge":True,"cuba_sofia_sales_autonomy":"AUTONOMOUS_NONBINDING_CONSENT_GATED","sofia_deal_supplier_match":True,"competition_price_scanner":True,"competition_supplier_source_discovery":True,"competition_customer_segment_discovery":True,"global_world_clock":True,"timezone_aware_trade_routing":True,"follow_the_sun_24x7":True,"voice_agent_control_plane":True,"voice_provider":"openai_realtime","voice_direct_webrtc":True,"voice_autonomous_24x7":True,"voice_whatsapp_unified":True,"voice_legacy_bland_ai_runtime":False,"tmobile_byon_control_plane":True,"trade_agent_control_plane":True,"trade_workflow_certification_monitor":True,"country_segmented_crm":True,"cuba_crm_department":True,"cuba_mipymes_crm":True,"crm_quality_10x":True,"crm_verified_trade_standard":True,"global_lead_search_control_plane":True,"external_trade_prospects":True,"external_trade_prospects_research_only":True,"profit_machine_control_plane":True,"zero_own_capital_gate":True,"fee_protection_gate":True,"cash_collected_primary_metric":True,"cloudflare_research_crawler":True,"cloudflare_research_crawler_configured":cloudflare_crawler_configured,"energy_crude_oil_os":True,"energy_autonomous_origination":True,"energy_origination_markets":21,"energy_market_intelligence":True,"energy_autonomous_matching":True,"energy_provider_hub":True,"energy_provider_normalization":True,"energy_authoritative_provider_catalog":True,"energy_ofac_authoritative_screening":True,"energy_ofac_complete_legacy_series":True,"energy_eia_native_adapter":True,"energy_eia_profile_driven":True,"energy_buyer_requirement_ingestion":True,"energy_seller_offer_ingestion":True,"energy_autonomous_matching_v2":True,"energy_deal_room_agent":True,"energy_revenue_intelligence":True,"energy_probability_weighted_pipeline":True,"energy_portfolio_prioritization":True,"energy_next_action_engine":True,"energy_fail_closed_release":True,"blockers":activation["blockers"]}
 
+def _whatsapp_shadow_verify_token() -> str:
+    return os.getenv("META_WHATSAPP_VERIFY_TOKEN", "").strip()
+
+
+def _whatsapp_shadow_app_secret() -> str:
+    return os.getenv("META_WHATSAPP_APP_SECRET", "").strip()
+
+
+@app.get("/api/meta/whatsapp/health")
+async def meta_whatsapp_shadow_health():
+    return {
+        "status": "ok" if _whatsapp_shadow_verify_token() else "configuration_required",
+        "service": "meta-whatsapp-shadow-webhook",
+        "mode": "shadow_non_authoritative",
+        "verify_token_configured": bool(_whatsapp_shadow_verify_token()),
+        "app_secret_configured": bool(_whatsapp_shadow_app_secret()),
+        "production_authority": False,
+        "auto_reply": False,
+        "binding_commitments": False,
+        "secrets_exposed": False,
+    }
+
+
+@app.get("/api/meta/whatsapp/webhook")
+async def meta_whatsapp_shadow_verify(request: Request):
+    mode = request.query_params.get("hub.mode", "")
+    supplied = request.query_params.get("hub.verify_token", "")
+    challenge = request.query_params.get("hub.challenge", "")
+    expected = _whatsapp_shadow_verify_token()
+    if not expected:
+        raise HTTPException(status_code=503, detail="WhatsApp shadow verify token is not configured")
+    if mode != "subscribe" or not hmac.compare_digest(supplied, expected):
+        raise HTTPException(status_code=403, detail="WhatsApp shadow webhook verification failed")
+    return PlainTextResponse(challenge, status_code=200)
+
+
+@app.post("/api/meta/whatsapp/webhook")
+async def meta_whatsapp_shadow_receive(request: Request):
+    secret = _whatsapp_shadow_app_secret()
+    if not secret:
+        raise HTTPException(status_code=503, detail="WhatsApp shadow app secret is not configured")
+    raw = await request.body()
+    signature = request.headers.get("x-hub-signature-256", "")
+    expected = "sha256=" + hmac.new(secret.encode(), raw, hashlib.sha256).hexdigest()
+    if not signature or not hmac.compare_digest(signature, expected):
+        raise HTTPException(status_code=401, detail="Invalid WhatsApp shadow webhook signature")
+    payload = await request.json()
+    if payload.get("object") != "whatsapp_business_account":
+        return {"status": "ignored", "reason": "unsupported_object", "auto_reply": False}
+    captured = 0
+    for entry in payload.get("entry", []):
+        for change in entry.get("changes", []):
+            value = change.get("value") or {}
+            for message in value.get("messages", []):
+                sender_id = str(message.get("from") or "unknown")[:200]
+                message_id = str(message.get("id") or secrets.token_urlsafe(16))[:512]
+                msg_type = str(message.get("type") or "message")[:80]
+                text = str(((message.get("text") or {}).get("body") or f"[{msg_type} received]"))[:4000]
+                try:
+                    await get_backend().insert("business_events", {
+                        "event_id": f"meta_wa_shadow_{hashlib.sha256(message_id.encode()).hexdigest()[:32]}",
+                        "event_type": "meta_whatsapp_shadow_inbound",
+                        "source_type": "meta_whatsapp_shadow",
+                        "source_id": sender_id,
+                        "trade_case_id": None,
+                        "customer_id": None,
+                        "lead_id": None,
+                        "actor_role": "prospect",
+                        "actor_id": sender_id,
+                        "visibility": "business",
+                        "title": (text or "WhatsApp shadow event")[:240],
+                        "summary": (text or "Inbound WhatsApp shadow event")[:4000],
+                        "action_required": False,
+                        "action_label": "Shadow capture only — OpenClaw remains authority",
+                        "priority": "normal",
+                    })
+                    captured += 1
+                except Exception:
+                    pass
+    return {
+        "status": "accepted",
+        "mode": "shadow_non_authoritative",
+        "events_captured": captured,
+        "auto_reply": False,
+        "production_authority": False,
+    }
+
+
 for subapp in (
     google_contacts_app,
     activation_app, telegram_app, business_email_app, email_agent_app, gmail_transport_app, owner_auth_app, higgsfield_cloud_app, core_app, customer_crm_app, crm_quality_10x_app, external_trade_prospects_app, profit_machine_app, record_registry_app, latam_trade_research_app, country_crm_app, global_lead_search_app, cloudflare_crawler_app, worldwide_connect_app, cuba_private_fuels_app, cuba_mipymes_app, cuba_sofia_sales_bridge_app, competition_intelligence_app, sofia_deal_match_app, world_clock_trade_app,
