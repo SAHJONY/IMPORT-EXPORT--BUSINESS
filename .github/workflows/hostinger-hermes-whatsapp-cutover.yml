@@ -1,0 +1,119 @@
+name: Hostinger Hermes WhatsApp Cutover
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: audit | stage | cutover | retire-openclaw
+        required: true
+        default: audit
+        type: choice
+        options: [audit, stage, cutover, retire-openclaw]
+
+concurrency:
+  group: hostinger-vm-767852-mutation
+  cancel-in-progress: false
+
+jobs:
+  hermes-cutover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      HOST: '69.62.68.67'
+      SSH_USER: root
+      PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+      MODE: ${{ inputs.mode }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare SSH
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "${PRIVATE_KEY:-}" ]] || { echo HOSTINGER_SSH_PRIVATE_KEY_MISSING=1 >&2; exit 2; }
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/hostinger-hermes
+          chmod 600 ~/.ssh/hostinger-hermes
+          for i in {1..12}; do
+            if ssh -o BatchMode=yes -o ConnectTimeout=8 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/hostinger-hermes "$SSH_USER@$HOST" 'printf HOSTINGER_SSH_OK' 2>/dev/null | grep -q HOSTINGER_SSH_OK; then exit 0; fi
+            sleep 5
+          done
+          echo HOSTINGER_SSH_UNAVAILABLE=1 >&2
+          exit 3
+      - name: Audit Hostinger runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/hostinger-hermes "$SSH_USER@$HOST" 'bash -s' <<'REMOTE'
+          set -u
+          echo '=== SYSTEM ==='
+          uname -a || true
+          echo '=== RUNTIMES ==='
+          command -v docker || true
+          docker --version 2>/dev/null || true
+          command -v hermes || true
+          hermes --version 2>/dev/null || true
+          command -v node || true
+          node --version 2>/dev/null || true
+          command -v python3 || true
+          python3 --version 2>/dev/null || true
+          echo '=== SYSTEMD MATCHES ==='
+          systemctl list-unit-files --type=service 2>/dev/null | grep -Ei 'openclaw|hermes|whatsapp|sahjony' || true
+          systemctl list-unit-files --type=timer 2>/dev/null | grep -Ei 'openclaw|hermes|whatsapp|sahjony' || true
+          echo '=== DOCKER CONTAINERS ==='
+          docker ps -a --format '{{.Names}}|{{.Image}}|{{.Status}}|{{.Ports}}' 2>/dev/null || true
+          echo '=== OPENCLAW CONTAINER MOUNTS ==='
+          for c in $(docker ps -a --format '{{.Names}}' 2>/dev/null | grep -Ei 'openclaw|sahjony' || true); do
+            echo "CONTAINER=$c"
+            docker inspect "$c" --format '{{range .Mounts}}{{.Type}}|{{.Source}}|{{.Destination}}{{println}}{{end}}' 2>/dev/null || true
+          done
+          echo '=== HERMES / WHATSAPP FILES ==='
+          find /root /opt /srv /var/lib -maxdepth 3 -type d \( -iname '*hermes*' -o -iname '*openclaw*' -o -iname '*whatsapp*' \) 2>/dev/null | head -160 || true
+          echo '=== LISTENERS ==='
+          ss -lntp 2>/dev/null | grep -E ':(80|443|18789|3000|8000|8080|8787)\b' || true
+          echo HOSTINGER_HERMES_AUDIT_COMPLETE=1
+          REMOTE
+      - name: Stage Hermes application files
+        if: ${{ inputs.mode == 'stage' || inputs.mode == 'cutover' || inputs.mode == 'retire-openclaw' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          files=(sofia_hermes_whatsapp_environment.py sofia_whatsapp_runtime.py sofia_hermes_nim_brain.py sofia_crm_growth_engine.py insforge_backend.py auth.py)
+          for f in "${files[@]}"; do [[ -f "$f" ]] || { echo "MISSING_FILE=$f" >&2; exit 4; }; done
+          ssh_opts=(-o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/hostinger-hermes)
+          ssh "${ssh_opts[@]}" "$SSH_USER@$HOST" 'install -d -m 750 /opt/sahjony-hermes'
+          scp "${ssh_opts[@]}" "${files[@]}" "$SSH_USER@$HOST:/opt/sahjony-hermes/"
+          scp "${ssh_opts[@]}" scripts/configure_sofia_hermes_web.sh "$SSH_USER@$HOST:/opt/sahjony-hermes/" 2>/dev/null || true
+          echo HOSTINGER_HERMES_STAGE_COMPLETE=1
+      - name: Guard cutover until independent WhatsApp transport exists
+        if: ${{ inputs.mode == 'cutover' || inputs.mode == 'retire-openclaw' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/hostinger-hermes "$SSH_USER@$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          independent=0
+          if systemctl is-active --quiet sahjony-hermes-whatsapp.service 2>/dev/null; then independent=1; fi
+          if docker ps --format '{{.Names}}' 2>/dev/null | grep -qx 'sahjony-hermes-whatsapp'; then independent=1; fi
+          if [[ "$independent" != 1 ]]; then
+            echo HERMES_INDEPENDENT_WHATSAPP_TRANSPORT_NOT_READY=1 >&2
+            echo OPENCLAW_PRESERVED_TO_AVOID_WHATSAPP_OUTAGE=1 >&2
+            exit 20
+          fi
+          echo HERMES_INDEPENDENT_WHATSAPP_TRANSPORT_READY=1
+          REMOTE
+      - name: Retire OpenClaw only after independent transport gate
+        if: ${{ inputs.mode == 'retire-openclaw' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/hostinger-hermes "$SSH_USER@$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          systemctl is-active --quiet sahjony-hermes-whatsapp.service || { echo HERMES_SERVICE_NOT_ACTIVE=1 >&2; exit 21; }
+          mkdir -p /root/sahjony-cutover-backups
+          ts=$(date -u +%Y%m%dT%H%M%SZ)
+          docker ps -a --format '{{.Names}}' | grep -Ei 'openclaw' > "/root/sahjony-cutover-backups/openclaw-containers-$ts.txt" || true
+          for c in $(docker ps -a --format '{{.Names}}' | grep -Ei 'openclaw' || true); do docker stop "$c"; done
+          systemctl disable --now 'openclaw*' 2>/dev/null || true
+          echo OPENCLAW_RUNTIME_STOPPED_AND_DISABLED=1
+          echo OPENCLAW_DATA_PRESERVED_FOR_ROLLBACK=1
+          REMOTE
