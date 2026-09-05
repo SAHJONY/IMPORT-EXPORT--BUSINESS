@@ -1,0 +1,80 @@
+name: Hostinger Hermes Remove Retired Initiative
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/hostinger-hermes-remove-primo.yml
+
+jobs:
+  purge:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    concurrency:
+      group: hostinger-vm-767852-mutation
+      cancel-in-progress: false
+    env:
+      HOST: 69.62.68.67
+      SSH_USER: root
+      PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Prepare SSH
+        shell: bash
+        run: |
+          set -euo pipefail
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/key
+          chmod 600 ~/.ssh/key
+      - name: Purge retired initiative from Sofia runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=15 -i ~/.ssh/key "$SSH_USER@$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          H=/root/.hermes
+          stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+          cp "$H/SOUL.md" "$H/SOUL.md.pre-retired-cleanup.$stamp" 2>/dev/null || true
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          roots=[Path('/root/.hermes/skills'),Path('/root/.hermes/SOUL.md'),Path('/root/.hermes/config.yaml'),Path('/opt/sahjony-hermes')]
+          pat=re.compile(r'\bprimo\b',re.I)
+          changed=0
+          for root in roots:
+              paths=[root] if root.is_file() else ([p for p in root.rglob('*') if p.is_file()] if root.exists() else [])
+              for p in paths:
+                  try: raw=p.read_text(errors='ignore')
+                  except Exception: continue
+                  if not pat.search(raw): continue
+                  lines=[ln for ln in raw.splitlines() if not pat.search(ln)]
+                  p.write_text('\n'.join(lines)+('\n' if raw.endswith('\n') else ''))
+                  changed+=1
+          print(f'RUNTIME_FILES_CLEANED={changed}')
+          PY
+          if [ -d "$H/sessions" ]; then mv "$H/sessions" "$H/sessions.pre-retired-cleanup.$stamp"; fi
+          mkdir -m 700 "$H/sessions"
+          if ! grep -q 'CANONICAL INITIATIVE DISCIPLINE V1' "$H/SOUL.md"; then
+          cat >> "$H/SOUL.md" <<'SOUL'
+
+          ## CANONICAL INITIATIVE DISCIPLINE V1
+          - Never invent, revive, or attribute ownership of internal projects, agents, products, initiatives, or systems that are not present in the current canonical SAHJONY platform, CRM, repository, or an explicit owner instruction.
+          - When describing Juan's role, use only verified current SAHJONY responsibilities and initiatives.
+          SOUL
+          fi
+          chmod 600 "$H/SOUL.md"
+          if grep -Rni --exclude='*.pyc' -E '\bPRIMO\b|\bPrimo\b|\bprimo\b' "$H/SOUL.md" "$H/skills" /opt/sahjony-hermes 2>/dev/null | head -1 | grep -q .; then
+            echo RETIRED_REFERENCE_REMAINS=1
+            exit 42
+          fi
+          systemctl --user restart hermes-gateway.service
+          sleep 10
+          systemctl --user is-active --quiet hermes-gateway.service
+          pgrep -f '/whatsapp-bridge/bridge.js.*--mode bot' >/dev/null
+          echo RETIRED_REFERENCE_PURGE=PASS
+          echo SESSION_CACHE_RESET=PASS
+          echo HERMES_GATEWAY_ACTIVE=1
+          echo WHATSAPP_BOT_ACTIVE=1
+          REMOTE
+      - name: Cleanup
+        if: always()
+        run: rm -f ~/.ssh/key
