@@ -40,6 +40,26 @@ jobs:
             printf '%s' "$NVIDIA_API_KEY_GH" > "$RUNNER_TEMP/nvidia-key"
             chmod 600 "$RUNNER_TEMP/nvidia-key"
           fi
+      - name: Probe NVIDIA hosted model catalog
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "${NVIDIA_API_KEY_GH:-}" == nvapi-* ]] || { echo NVIDIA_CATALOG_PROBE_SKIPPED_NO_KEY=1; exit 0; }
+          code="$(curl -sS -o "$RUNNER_TEMP/nvidia-models.json" -w '%{http_code}' --connect-timeout 10 --max-time 45 -H "Authorization: Bearer $NVIDIA_API_KEY_GH" https://integrate.api.nvidia.com/v1/models || true)"
+          echo NVIDIA_MODELS_HTTP="$code"
+          if [[ "$code" == 200 ]]; then
+            python3 - "$RUNNER_TEMP/nvidia-models.json" <<'PYMODEL'
+          import json,sys
+          data=json.load(open(sys.argv[1]))
+          ids=[]
+          for item in data.get('data',[]) if isinstance(data,dict) else []:
+              mid=str(item.get('id','')) if isinstance(item,dict) else ''
+              if 'oss' in mid.lower() or 'openai' in mid.lower(): ids.append(mid)
+          print('NVIDIA_OPENAI_OSS_MODELS='+(','.join(sorted(set(ids))) if ids else 'none'))
+          PYMODEL
+          fi
+          rm -f "$RUNNER_TEMP/nvidia-models.json"
+
       - name: Audit Hermes model runtime
         shell: bash
         run: |
