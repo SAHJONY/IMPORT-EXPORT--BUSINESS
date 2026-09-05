@@ -29,12 +29,13 @@ jobs:
           ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/key "$SSH_USER@$HOST" 'bash -s' <<'REMOTE'
           set -euo pipefail
           ROOT=/root/.hermes/hermes-agent
-          echo '=== skill_view refs ==='
-          grep -Rni --exclude-dir=.git --exclude='*.pyc' 'skill_view' "$ROOT" | head -80 || true
-          echo '=== execute_code refs ==='
-          grep -Rni --exclude-dir=.git --exclude='*.pyc' 'execute_code' "$ROOT" | head -80 || true
-          echo '=== tool progress refs ==='
-          grep -Rni --exclude-dir=.git --exclude='*.pyc' -E 'tool.*progress|progress.*tool|tool_call|tool.*message' "$ROOT/gateway" | head -120 || true
+          echo '=== gateway progress refs ==='
+          grep -Rni --exclude='*.pyc' -E 'tool_call|tool call|tool_progress|progress_callback|on_tool|display_tool|format_tool|send.*tool' "$ROOT/gateway" | head -180 || true
+          echo '=== display relevant ==='
+          sed -n '150,240p' "$ROOT/agent/display.py" || true
+          sed -n '900,990p' "$ROOT/agent/display.py" || true
+          echo '=== whatsapp send refs ==='
+          grep -nE 'send_message|send_text|progress|tool|typing' "$ROOT/gateway/platforms/whatsapp.py" | head -180 || true
           REMOTE
       - name: Cleanup
         if: always()
