@@ -8,7 +8,11 @@ import httpx
 from sofia_autonomy_os import AUTONOMY_MANDATE, health as autonomy_health
 
 NVIDIA_CHAT_URL = os.getenv("NVIDIA_NIM_BASE_URL", "https://integrate.api.nvidia.com/v1").rstrip("/") + "/chat/completions"
-DEFAULT_NVIDIA_MODEL = "openai/gpt-oss-120b"
+PREFERRED_NVIDIA_MODEL = "openai/gpt-oss-120b"
+# NVIDIA's hosted catalog currently exposes gpt-oss-20b while the hosted
+# gpt-oss-120b endpoint returns HTTP 410. Keep the runtime fail-safe on the
+# available OpenAI OSS model until a 120B partner endpoint is configured.
+DEFAULT_NVIDIA_MODEL = "openai/gpt-oss-20b"
 
 HERMES_OPERATING_KERNEL = """
 HERMES-STYLE EXECUTIVE COGNITION KERNEL
@@ -109,6 +113,7 @@ async def generate(
         "provider": "nvidia_nim",
         "configured": True,
         "model": payload["model"],
+        "preferred_model": PREFERRED_NVIDIA_MODEL,
         "status_code": response.status_code,
     }
     if response.status_code >= 400:
@@ -131,6 +136,7 @@ def health() -> dict[str, Any]:
         "service": "sofia-hermes-nim-brain",
         "provider": "nvidia_nim",
         "model": model_name(),
+        "preferred_model": PREFERRED_NVIDIA_MODEL,
         "endpoint": NVIDIA_CHAT_URL,
         "hermes_style_agentic_loop": True,
         "persistent_context_expected": True,
