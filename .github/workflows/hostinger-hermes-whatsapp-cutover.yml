@@ -164,7 +164,30 @@ jobs:
           pgrep -f 'openclaw gateway' >/dev/null && { echo OPENCLAW_STILL_RUNNING=1 >&2; exit 23; } || true
           pgrep -f 'hermes_cli.main gateway run' >/dev/null || { echo HERMES_DIED_DURING_CUTOVER=1 >&2; exit 24; }
           grep -Eqi 'connected|ready|authenticated' /root/.hermes/platforms/whatsapp/bridge.log || { echo HERMES_WHATSAPP_DIED_DURING_CUTOVER=1 >&2; exit 25; }
-          echo OPENCLAW_RUNTIME_STOPPED_AND_DISABLED=1
+
+          # Remove the retired OpenClaw runtime only after the independent Hermes
+          # WhatsApp transport has survived the cutover. Keep only the timestamped
+          # rollback archive under /root/sahjony-cutover-backups.
+          systemctl disable --now sahjony-whatsapp-guardian.timer sahjony-whatsapp-guardian.service 2>/dev/null || true
+          for c in $(docker ps -a --format '{{.Names}}' | grep -Ei 'openclaw' || true); do docker rm -f "$c" 2>/dev/null || true; done
+          if command -v npm >/dev/null 2>&1; then npm uninstall -g openclaw >/dev/null 2>&1 || true; fi
+          rm -f /usr/bin/openclaw /usr/local/bin/openclaw
+          rm -rf /etc/systemd/system/openclaw-gateway.service /etc/systemd/system/openclaw-gateway.service.d
+          rm -f /etc/systemd/system/sahjony-openclaw-runtime-guardian.service
+          rm -f /etc/systemd/system/sahjony-openclaw-health-sidecar.service /etc/systemd/system/sahjony-openclaw-health-sidecar.timer
+          rm -f /etc/systemd/system/sahjony-whatsapp-guardian.service /etc/systemd/system/sahjony-whatsapp-guardian.timer
+          rm -rf /opt/sahjony/openclaw /opt/sahjony-openclaw /root/.openclaw /root/.cache/openclaw
+          rm -rf /var/lib/sahjony-openclaw-state /var/lib/sahjony-openclaw-auth /var/lib/sahjony-openclaw-guardian /var/lib/sahjony-openclaw-correlator /var/lib/sahjony-openclaw-forensics /var/lib/sahjony-openclaw-recovery
+          rm -f /usr/local/sbin/sahjony-openclaw-runtime-guardian /usr/local/sbin/sahjony-openclaw-health-sidecar
+          systemctl daemon-reload
+          systemctl reset-failed 2>/dev/null || true
+
+          command -v openclaw >/dev/null 2>&1 && { echo OPENCLAW_BINARY_STILL_PRESENT=1 >&2; exit 26; } || true
+          pgrep -af 'openclaw' >/dev/null && { echo OPENCLAW_PROCESS_STILL_PRESENT=1 >&2; exit 27; } || true
+          pgrep -f 'hermes_cli.main gateway run' >/dev/null || { echo HERMES_DIED_AFTER_OPENCLAW_DELETE=1 >&2; exit 28; }
+          pgrep -f '/whatsapp-bridge/bridge.js' >/dev/null || { echo HERMES_WHATSAPP_BRIDGE_DIED_AFTER_OPENCLAW_DELETE=1 >&2; exit 29; }
+          grep -Eqi 'connected|ready|authenticated' /root/.hermes/platforms/whatsapp/bridge.log || { echo HERMES_WHATSAPP_DIED_AFTER_OPENCLAW_DELETE=1 >&2; exit 30; }
+          echo OPENCLAW_RUNTIME_DELETED=1
           echo OPENCLAW_DATA_BACKED_UP_FOR_ROLLBACK=1
           echo HERMES_WHATSAPP_IS_PRODUCTION_AUTHORITY=1
           REMOTE
