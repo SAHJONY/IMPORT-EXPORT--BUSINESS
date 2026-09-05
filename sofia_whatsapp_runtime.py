@@ -19,6 +19,7 @@ from sofia_human_conversation_engine import build_sofia_prompt
 from whatsapp_relationship_memory_api import _merge_memory
 from whatsapp_sales_brain import analyze_sales_conversation
 from whatsapp_crm_bridge import get_contact_context
+from sofia_knowledge_layer import build_business_knowledge
 
 OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses"
 
@@ -217,6 +218,7 @@ async def generate_sofia_reply(text: str, contact_name: str | None) -> str:
         crm_context=crm_context,
     )
 
+    knowledge = await build_business_knowledge(text, crm_context)
     adaptive = await adaptive_context(contact_name)
     system = build_sofia_prompt(memory)
     system += "\n\n" + adaptive
@@ -230,6 +232,7 @@ async def generate_sofia_reply(text: str, contact_name: str | None) -> str:
         "next_action": memory.get("next_action"),
         "next_questions": (memory.get("next_questions") or [])[:2],
     }, ensure_ascii=False, default=str)
+    system += "\n\nBUSINESS KNOWLEDGE PREFLIGHT — SOURCE-GROUNDED\n" + json.dumps(knowledge, ensure_ascii=False, default=str)[:24000]
     system += "\n\nCRM CONTACT CONTEXT\n" + json.dumps({
         "crm_connected": bool(crm_context.get("crm_connected")),
         "customers": (crm_context.get("customers") or [])[:3],
