@@ -1,0 +1,88 @@
+name: Hostinger Hermes Sofia Commercial Focus
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/hostinger-hermes-sofia-commercial-focus.yml
+
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    concurrency:
+      group: hostinger-vm-767852-mutation
+      cancel-in-progress: false
+    env:
+      HOST: 69.62.68.67
+      SSH_USER: root
+      PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Prepare SSH
+        shell: bash
+        run: |
+          set -euo pipefail
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/key
+          chmod 600 ~/.ssh/key
+      - name: Harden Sofia WhatsApp output and commercial priority
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/key "$SSH_USER@$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          CFG=/root/.hermes/config.yaml
+          SOUL=/root/.hermes/SOUL.md
+          stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+          cp "$CFG" "$CFG.pre-sofia-commercial.$stamp" 2>/dev/null || true
+          cp "$SOUL" "$SOUL.pre-sofia-commercial.$stamp" 2>/dev/null || true
+
+          /root/.hermes/hermes-agent/venv/bin/python - <<'PY'
+          from pathlib import Path
+          import yaml
+          p=Path('/root/.hermes/config.yaml')
+          data=yaml.safe_load(p.read_text()) if p.exists() and p.read_text().strip() else {}
+          if not isinstance(data, dict): data={}
+          display=data.setdefault('display', {})
+          platforms=display.setdefault('platforms', {})
+          wa=platforms.setdefault('whatsapp', {})
+          wa['tool_progress']='off'
+          p.write_text(yaml.safe_dump(data, sort_keys=False))
+          PY
+          chmod 600 "$CFG"
+
+          if ! grep -q 'SAHJONY COMMERCIAL CONVERSION PRIORITY V1' "$SOUL"; then
+          cat >> "$SOUL" <<'SOULADD'
+
+          ## SAHJONY COMMERCIAL CONVERSION PRIORITY V1
+          - In WhatsApp, never expose tool-progress events, tool names, skill names, code execution previews, search traces, implementation details, or internal diagnostics. The user should receive only the finished business answer unless a genuine owner-facing technical diagnostic is explicitly requested.
+          - The current operating priority is conversion, not database size: work the highest-intent eligible/contactable prospects toward ENGAGED -> QUALIFIED DEMAND -> RFQ COMPLETE -> FIRM QUOTE -> NEGOTIATION -> CONTRACTED -> INVOICED -> PAID -> DELIVERED -> COLLECTED.
+          - Prioritize prospects with explicit demand, recent activity, reachable business contact paths, clear product/category fit, quantity/timing evidence, repeat-purchase potential, low compliance friction, and low/no SAHJONY capital exposure.
+          - For every real buyer requirement, capture only the missing facts needed for RFQ completion: product, specification/presentation, quantity, destination, timing, Incoterm/payment preference when relevant.
+          - Match qualified RFQs to credible suppliers and compare supplier-backed pricing, MOQ, availability, lead time, terms, logistics fit, documentation, and reliability. Benchmarks are not firm quotes.
+          - Protect SAHJONY economics before uncontrolled counterparty introduction. Prefer buyer-funded/supplier-funded structures and zero SAHJONY inventory or credit exposure.
+          - Keep CRM stages evidence-gated and log the next action. Do not report a research lead as a deal, an intake as a firm RFQ without sufficient facts, a benchmark as a quote, or an invoice as collected revenue.
+          - Notify Juan only for high-value qualified opportunities needing a decision, binding contract/payment/credit matters, sanctions/compliance exceptions, protected counterparty release, positive capital exposure, material security incidents, or unrecoverable operational blockers.
+          SOULADD
+          fi
+          chmod 600 "$SOUL"
+
+          /root/.hermes/hermes-agent/venv/bin/python - <<'PY'
+          import yaml
+          d=yaml.safe_load(open('/root/.hermes/config.yaml')) or {}
+          mode=(((d.get('display') or {}).get('platforms') or {}).get('whatsapp') or {}).get('tool_progress')
+          assert mode == 'off', mode
+          print('WHATSAPP_TOOL_PROGRESS=OFF')
+          print('COMMERCIAL_CONVERSION_PRIORITY=PASS')
+          PY
+          grep -q 'SAHJONY COMMERCIAL CONVERSION PRIORITY V1' "$SOUL"
+          systemctl --user restart hermes-gateway.service
+          sleep 10
+          systemctl --user is-active --quiet hermes-gateway.service
+          pgrep -f '/whatsapp-bridge/bridge.js.*--mode bot' >/dev/null
+          echo HERMES_GATEWAY_ACTIVE=1
+          echo WHATSAPP_BOT_ACTIVE=1
+          REMOTE
+      - name: Cleanup
+        if: always()
+        run: rm -f ~/.ssh/key
