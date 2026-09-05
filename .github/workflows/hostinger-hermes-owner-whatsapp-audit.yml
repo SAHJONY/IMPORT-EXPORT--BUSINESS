@@ -1,0 +1,42 @@
+name: Hostinger Hermes Owner WhatsApp Audit
+
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/hostinger-hermes-owner-whatsapp-audit.yml']
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      HOST: 69.62.68.67
+      SSH_USER: root
+      PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Prepare SSH
+        shell: bash
+        run: |
+          set -euo pipefail
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/key
+          chmod 600 ~/.ssh/key
+          ssh-keygen -y -f ~/.ssh/key >/dev/null
+      - name: Audit owner routing support
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=12 -i ~/.ssh/key "$SSH_USER@$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          echo '=== GATEWAY ENV KEYS ==='
+          systemctl --user show hermes-gateway.service -p Environment --value | tr ' ' '\n' | grep -E 'WHATSAPP|OWNER|HERMES_HOME' | sed -E 's/(TOKEN|KEY|SECRET)=.*/\1=<redacted>/' || true
+          echo '=== WHATSAPP SENDER CONTEXT ==='
+          grep -Rni --exclude-dir='__pycache__' -E 'sender|phone|from_me|fromMe|allowed_users|WHATSAPP_ALLOWED_USERS|metadata|platform_user|user_id' /root/.hermes/hermes-agent/gateway/platforms/whatsapp* /root/.hermes/hermes-agent/gateway 2>/dev/null | head -260 || true
+          echo '=== ACTIVE SOUL OWNER RULES ==='
+          grep -nEi 'owner|Juan|Juanito|WhatsApp' /root/.hermes/SOUL.md | head -120 || true
+          echo '=== BRIDGE COMMAND ==='
+          pgrep -af '/whatsapp-bridge/bridge.js' || true
+          REMOTE
+      - name: Cleanup
+        if: always()
+        run: rm -f ~/.ssh/key
