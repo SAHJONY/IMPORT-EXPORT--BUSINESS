@@ -248,6 +248,7 @@
     { "src": "/api/meta/whatsapp(.*)", "dest": "unified_api.py" },
     { "src": "/crawler(.*)", "dest": "unified_api.py" },
     { "src": "/lead-scout/(health|leads.*)", "dest": "unified_api.py" },
+    { "src": "/demand-intelligence(.*)", "dest": "unified_api.py" },
     { "src": "/lead-search(.*)", "dest": "unified_api.py" },
     { "src": "/energy(.*)", "dest": "unified_api.py" },
     { "src": "/activation(.*)", "dest": "unified_api.py" },
