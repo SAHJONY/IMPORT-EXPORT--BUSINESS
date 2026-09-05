@@ -22,20 +22,22 @@ jobs:
           printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/key
           chmod 600 ~/.ssh/key
           ssh-keygen -y -f ~/.ssh/key >/dev/null
-      - name: Audit owner routing support
+      - name: Inspect sender context
         shell: bash
         run: |
           set -euo pipefail
           ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=12 -i ~/.ssh/key "$SSH_USER@$HOST" 'bash -s' <<'REMOTE'
           set -euo pipefail
-          echo '=== GATEWAY ENV KEYS ==='
-          systemctl --user show hermes-gateway.service -p Environment --value | tr ' ' '\n' | grep -E 'WHATSAPP|OWNER|HERMES_HOME' | sed -E 's/(TOKEN|KEY|SECRET)=.*/\1=<redacted>/' || true
-          echo '=== WHATSAPP SENDER CONTEXT ==='
-          grep -Rni --exclude-dir='__pycache__' -E 'sender|phone|from_me|fromMe|allowed_users|WHATSAPP_ALLOWED_USERS|metadata|platform_user|user_id' /root/.hermes/hermes-agent/gateway/platforms/whatsapp* /root/.hermes/hermes-agent/gateway 2>/dev/null | head -260 || true
-          echo '=== ACTIVE SOUL OWNER RULES ==='
-          grep -nEi 'owner|Juan|Juanito|WhatsApp' /root/.hermes/SOUL.md | head -120 || true
-          echo '=== BRIDGE COMMAND ==='
-          pgrep -af '/whatsapp-bridge/bridge.js' || true
+          echo '=== WHATSAPP MESSAGE ROUTING 440-490 ==='
+          sed -n '440,490p' /root/.hermes/hermes-agent/gateway/platforms/whatsapp.py
+          echo '=== WHATSAPP SOURCE CREATION 1160-1200 ==='
+          sed -n '1160,1200p' /root/.hermes/hermes-agent/gateway/platforms/whatsapp.py
+          echo '=== SESSION CONTEXT 260-330 ==='
+          sed -n '260,330p' /root/.hermes/hermes-agent/gateway/session.py
+          echo '=== BASE PROMPT SENDER LOGIC 960-1010 ==='
+          sed -n '960,1010p' /root/.hermes/hermes-agent/gateway/platforms/base.py
+          echo '=== ACTIVE ENV OWNER KEYS ==='
+          systemctl --user show hermes-gateway.service -p Environment --value | tr ' ' '\n' | grep -E 'OWNER|WHATSAPP' | sed -E 's/(TOKEN|KEY|SECRET)=.*/\1=<redacted>/' || true
           REMOTE
       - name: Cleanup
         if: always()
