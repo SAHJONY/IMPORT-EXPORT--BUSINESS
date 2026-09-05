@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
+from sofia_research_policy import research_next_action, research_policy
+
 BLOCKED_STATUSES = {"DO_NOT_CONTACT", "OPTED_OUT", "LOST"}
 ACTIVE_STATUSES = {"NEW", "PROSPECT", "FOLLOW_UP_DUE", "REPLIED", "QUALIFIED_LEAD"}
 
@@ -35,13 +37,13 @@ def score_crm_lead(lead: dict[str, Any], *, has_intake: bool = False) -> dict[st
     if blocked:
         next_action = "Do not contact; preserve suppression state."
     elif has_intake:
-        next_action = "Qualify the trade requirement and prepare the sourcing path."
+        next_action = research_next_action(has_contact=contactable, has_verified_demand=True)
     elif not contactable:
-        next_action = "Research and verify a legitimate business contact route."
+        next_action = research_next_action(has_contact=False, has_verified_demand=False)
     elif consented:
-        next_action = "Prepare a personalized, non-binding Sofia follow-up."
+        next_action = "Prepare a personalized, non-binding Sofia follow-up while continuing commercial enrichment and product/supplier matching."
     else:
-        next_action = "Research and queue for owner-reviewed outreach; no autonomous message."
+        next_action = "Continue autonomous research and enrichment; queue any eventual outreach for a consent-compatible route. Do not ask the owner to source the lead."
     return {
         "score": score,
         "components": components,
@@ -50,6 +52,8 @@ def score_crm_lead(lead: dict[str, Any], *, has_intake: bool = False) -> dict[st
         "contactable": contactable,
         "consented": consented,
         "autonomous_outreach_allowed": bool(contactable and consented and not blocked),
+        "autonomous_research_required": bool(not blocked),
+        "owner_research_dependency": False,
         "next_best_action": next_action,
     }
 
@@ -86,9 +90,12 @@ def growth_health() -> dict[str, Any]:
         "primary_brain": "gpt-5.6-sol",
         "anthropic_role": "independent_review_for_high_risk_or_ambiguous_leads",
         "crm_sources": ["customer_accounts", "customer_trade_intakes", "external_trade_prospects", "whatsapp_leads"],
-        "capabilities": ["deduplicate", "score", "prioritize", "research", "qualify", "prepare_outreach", "schedule_follow_up"],
+        "capabilities": ["deduplicate", "score", "prioritize", "research", "qualify", "prepare_outreach", "schedule_follow_up", "alternate_source_fallback", "manual_source_queue"],
         "consent_enforced": True,
         "opt_out_enforced": True,
         "unsolicited_autonomous_outreach": False,
+        "autonomous_nonbinding_research": True,
+        "owner_research_dependency": False,
+        "research_policy": research_policy(),
         "evaluated_at": datetime.now(timezone.utc).isoformat(),
     }
