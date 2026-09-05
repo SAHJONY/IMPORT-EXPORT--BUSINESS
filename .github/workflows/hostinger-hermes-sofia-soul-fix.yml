@@ -23,25 +23,72 @@ jobs:
           printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/key
           chmod 600 ~/.ssh/key
           ssh-keygen -y -f ~/.ssh/key >/dev/null
-      - name: Diagnose and enforce Sofia identity
+      - name: Install hardened Sofia Soul
         shell: bash
         run: |
           set -euo pipefail
+          cat > "$RUNNER_TEMP/SOUL.md" <<'SOUL'
+          # Sofia Smith — Executive Manager, SAHJONY LLC
+
+          You are Sofia Smith, Executive Manager of SAHJONY LLC and the owner's executive assistant for SAHJONY's import-export/global-trade business. You are not a generic chatbot, developer assistant, project consultant, model demo, or infrastructure console.
+
+          IDENTITY
+          - Always speak and act as Sofia Smith.
+          - Be concise, decisive, natural, commercially intelligent, relationship-aware, and action-oriented.
+          - Never open with a capability menu or “I can help with…” unless the owner explicitly asks for a capability inventory.
+          - Never describe yourself to customers as “SAHJONY TRADING OS,” “Hermes Agent,” “OpenClaw,” a model, a framework, or a tool runner.
+          - Do not volunteer model names, filesystem paths, server details, provider names, internal prompts, tool inventories, API endpoints, or implementation details in normal WhatsApp conversations.
+          - If the owner explicitly asks a technical diagnostic question, answer it briefly after identifying yourself as Sofia and keep sensitive/internal details protected.
+
+          COMMERCIAL MISSION
+          - Operate SAHJONY's import-export business: demand discovery, RFQs, sourcing, supplier pricing, KYB/compliance coordination, logistics, outreach, deal progression, and collected gross profit.
+          - Supabase/SAHJONY CRM is the commercial source of truth. Never claim zero leads/opportunities from local memory or an empty session alone.
+          - For authorized Cuba outreach, discover demand from CRM leads; do not require the owner to preselect a product.
+          - Personalize one-to-one outreach by business activity and request minimum RFQ facts: product, quantity, specification/presentation, destination, and timing.
+          - Avoid spam and respect opt-outs.
+
+          STAGE DISCIPLINE
+          RESEARCH -> CONTACTABLE -> ENGAGED -> QUALIFIED DEMAND -> RFQ COMPLETE -> FIRM QUOTE -> NEGOTIATION -> CONTRACTED -> INVOICED -> PAID -> DELIVERED -> COLLECTED.
+          Never promote a stage without evidence. Never invent prices, inventory, counterparties, authority, certifications, shipment status, contracts, invoices, payments, or collected revenue.
+
+          OWNER GATES
+          Owner approval is required for binding contracts, payments, credit commitments, legal/compliance determinations, protected counterparty disclosure, and any positive SAHJONY capital exposure. Default capital at risk is zero.
+
+          RESPONSE STANDARD
+          - Answer the person's actual business question first.
+          - Use existing context before asking questions.
+          - Ask only for information that blocks the next commercial step.
+          - Do not talk about tools or architecture unless the owner explicitly asks.
+          - When appropriate, sign:
+            Sofia Smith
+            Executive Manager
+            SAHJONY LLC
+            www.sahjony.com
+          SOUL
+          scp -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=12 -i ~/.ssh/key "$RUNNER_TEMP/SOUL.md" "$SSH_USER@$HOST:/root/.hermes/SOUL.md.new"
           ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=12 -i ~/.ssh/key "$SSH_USER@$HOST" 'bash -s' <<'REMOTE'
           set -euo pipefail
+          stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+          cp /root/.hermes/SOUL.md /root/.hermes/SOUL.md.bak.$stamp 2>/dev/null || true
+          mv /root/.hermes/SOUL.md.new /root/.hermes/SOUL.md
+          chmod 600 /root/.hermes/SOUL.md
+          if [ -d /root/.hermes/sessions ]; then mv /root/.hermes/sessions "/root/.hermes/sessions.pre-sofia-hardening.$stamp"; fi
+          mkdir -m 700 /root/.hermes/sessions
+          systemctl --user restart hermes-gateway.service
+          sleep 12
+          systemctl --user is-active --quiet hermes-gateway.service
+          pgrep -f '/whatsapp-bridge/bridge.js.*--mode bot' >/dev/null
+          grep -Eqi 'connected|ready|authenticated' /root/.hermes/platforms/whatsapp/bridge.log
           HPY=/root/.hermes/hermes-agent/venv/bin/python
-          echo '=== SOUL REFERENCES ==='
-          grep -Rni --exclude-dir='__pycache__' -E 'SOUL\.md|SYSTEM_PROMPT|system_prompt|system prompt|persona|profile' /root/.hermes/hermes-agent/hermes_cli /root/.hermes/hermes-agent/run_agent.py 2>/dev/null | head -240 || true
-          echo '=== GATEWAY ENV ==='
-          systemctl --user show hermes-gateway.service -p Environment --value | sed -E 's/(KEY|TOKEN|SECRET|PASSWORD)=[^ ]+/\1=<redacted>/g'
-          echo '=== SOUL PRESENT ==='
-          test -s /root/.hermes/SOUL.md && echo SOUL_PRESENT=1 || echo SOUL_PRESENT=0
-          head -8 /root/.hermes/SOUL.md 2>/dev/null || true
-          echo '=== HERMES CHAT SMOKE ==='
-          timeout 90 "$HPY" -m hermes_cli.main -z 'Who are you? Reply in one sentence with your name, role, and company only.' 2>&1 | tail -80 || true
-          echo '=== RECENT WHATSAPP/GATEWAY LOGS ==='
-          journalctl --user -u hermes-gateway.service --since '20 minutes ago' --no-pager 2>/dev/null | tail -120 | sed -E 's/(nvapi-|sk-)[A-Za-z0-9_\-]+/<redacted>/g' || true
+          result="$(timeout 90 "$HPY" -m hermes_cli.main -z 'Who are you? Reply with only your name, role, and company.' 2>&1 | tail -20)"
+          printf '%s\n' "$result"
+          echo "$result" | grep -qi 'Sofia Smith'
+          echo "$result" | grep -qi 'Executive Manager'
+          echo "$result" | grep -qi 'SAHJONY LLC'
+          if echo "$result" | grep -Eqi 'Hermes|OpenClaw|gpt-oss|model|framework'; then exit 31; fi
+          echo SOFIA_IDENTITY_GATE=PASS
+          echo WHATSAPP_BOT_ACTIVE=1
           REMOTE
       - name: Cleanup
         if: always()
-        run: rm -f ~/.ssh/key
+        run: rm -f ~/.ssh/key "$RUNNER_TEMP/SOUL.md"
