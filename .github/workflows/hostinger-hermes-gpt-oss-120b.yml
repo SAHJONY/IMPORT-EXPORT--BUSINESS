@@ -74,8 +74,15 @@ jobs:
                   for i,v in enumerate(o): walk(v,f'{pfx}[{i}]')
           walk(d)
           PY
-          echo '=== EOL MODEL REFERENCES ==='
-          grep -Rni --exclude-dir=node_modules --exclude='*.log' 'qwen/qwen3-next-80b-a3b-thinking\|qwen3-next-80b' /root/.hermes /opt/sahjony-hermes 2>/dev/null | head -120 || true
+          echo '=== SCHEDULER / CRON DISCOVERY ==='
+          "$HPY" -m hermes_cli.main cron --help 2>&1 | head -120 || true
+          "$HPY" -m hermes_cli.main cronjob --help 2>&1 | head -120 || true
+          "$HPY" -m hermes_cli.main schedule --help 2>&1 | head -120 || true
+          echo '=== ACTIVE CONFIG EOL MODEL REFERENCES ==='
+          for root in /root/.hermes/config.yaml /root/.config/systemd/user /root/.hermes/cron /root/.hermes/schedules /root/.hermes/jobs /opt/sahjony-hermes; do
+            [[ -e "$root" ]] || continue
+            grep -Rni --exclude-dir=node_modules --exclude-dir=sessions --exclude-dir=logs --exclude='*.log' 'qwen/qwen3-next-80b-a3b-thinking\|qwen3-next-80b' "$root" 2>/dev/null | head -80 || true
+          done
           echo '=== ACTIVE GATEWAY ==='
           "$HPY" -m hermes_cli.main gateway status 2>&1 | head -100 || true
           REMOTE
