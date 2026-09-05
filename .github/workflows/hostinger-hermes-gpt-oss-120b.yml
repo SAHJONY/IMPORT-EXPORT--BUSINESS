@@ -74,6 +74,25 @@ jobs:
                   for i,v in enumerate(o): walk(v,f'{pfx}[{i}]')
           walk(d)
           PY
+          echo '=== ACTIVE MODEL / PROVIDER SUMMARY ==='
+          "$HPY" - <<'PY2'
+          from pathlib import Path
+          import yaml
+          p=Path('/root/.hermes/config.yaml')
+          d=yaml.safe_load(p.read_text()) or {}
+          print('MODEL_SECTION=', d.get('model'))
+          providers=d.get('providers') or {}
+          if isinstance(providers,dict):
+              for name,cfg in providers.items():
+                  if isinstance(cfg,dict):
+                      safe={k:v for k,v in cfg.items() if not any(x in k.lower() for x in ('key','token','secret','password','auth','cookie'))}
+                      print('PROVIDER',name,'SAFE',safe,'CREDENTIAL_PRESENT',any(bool(v) for k,v in cfg.items() if any(x in k.lower() for x in ('key','token','secret','password','auth','cookie'))))
+                  else:
+                      print('PROVIDER',name,'TYPE',type(cfg).__name__)
+          print('FALLBACK_PROVIDERS=',d.get('fallback_providers'))
+          PY2
+          "$HPY" -m hermes_cli.main fallback list 2>&1 | head -120 || true
+          "$HPY" -m hermes_cli.main auth list 2>&1 | head -160 || true
           echo '=== SCHEDULER / CRON DISCOVERY ==='
           "$HPY" -m hermes_cli.main cron --help 2>&1 | head -120 || true
           "$HPY" -m hermes_cli.main cronjob --help 2>&1 | head -120 || true
