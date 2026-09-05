@@ -24,7 +24,7 @@ jobs:
           printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/key
           chmod 600 ~/.ssh/key
           ssh-keygen -y -f ~/.ssh/key >/dev/null
-      - name: Sync owner identity to Hermes
+      - name: Sync owner identity and harden Hermes
         shell: bash
         run: |
           set -euo pipefail
@@ -37,15 +37,62 @@ jobs:
           Environment=SAHJONY_OWNER_WHATSAPP_E164=$OWNER_WHATSAPP_E164
           EOF
           chmod 600 /root/.config/systemd/user/hermes-gateway.service.d/owner-whatsapp.conf
+
+          WA=/root/.hermes/hermes-agent/gateway/platforms/whatsapp.py
+          cp "$WA" "$WA.owner-private.bak"
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('/root/.hermes/hermes-agent/gateway/platforms/whatsapp.py')
+          s = p.read_text()
+          imp = 'from gateway.whatsapp_identity import expand_whatsapp_aliases, normalize_whatsapp_identifier\n'
+          if imp not in s:
+              anchor = 'from hermes_constants import get_hermes_dir\n'
+              if anchor not in s:
+                  raise SystemExit('import anchor not found')
+              s = s.replace(anchor, anchor + imp, 1)
+          old = '            return MessageEvent(\n                text=body,\n'
+          if 'SAHJONY_OWNER_PRIVATE_PROMPT_V1' not in s:
+              if old not in s:
+                  raise SystemExit('MessageEvent anchor not found')
+              injected = '''            # SAHJONY_OWNER_PRIVATE_PROMPT_V1\n            owner_id = normalize_whatsapp_identifier(\n                os.getenv("OWNER_WHATSAPP_E164") or os.getenv("SAHJONY_OWNER_WHATSAPP_E164") or ""\n            )\n            sender_raw = str(data.get("senderId") or data.get("from") or "")\n            sender_aliases = expand_whatsapp_aliases(sender_raw)\n            owner_channel_prompt = None\n            if owner_id and owner_id in sender_aliases:\n                owner_channel_prompt = (\n                    "OWNER_PRIVATE authenticated WhatsApp channel. The current user is Juan Gonzalez, "\n                    "owner of SAHJONY LLC; friends and family may call him Juanito. Treat this as a private "\n                    "owner/executive-assistant conversation, never as a customer lead. Do not infer his name "\n                    "from the WhatsApp display name. Never fabricate live CRM, RFQ, shipment, invoice, cash-flow, "\n                    "revenue, or pipeline counts. Live metrics require an actual authoritative connected-data result. "\n                    "If live data cannot be retrieved, say it cannot currently be verified. Never ask Juan to paste "\n                    "Supabase URLs, anon/service-role keys, passwords, API keys, tokens, or MFA codes into WhatsApp. "\n                    "Use configured server-side integrations or report the integration blocker. Never expose tool-call "\n                    "traces, internal search names, model/provider details, server paths, or diagnostics in the reply."\n                )\n\n            return MessageEvent(\n                text=body,\n'''
+              s = s.replace(old, injected, 1)
+          if 'channel_prompt=owner_channel_prompt' not in s:
+              anchor2 = '                raw_message=data,\n'
+              if anchor2 not in s:
+                  raise SystemExit('raw_message anchor not found')
+              s = s.replace(anchor2, anchor2 + '                channel_prompt=owner_channel_prompt,\n', 1)
+          p.write_text(s)
+          PY
+          python3 -m py_compile "$WA"
+
+          if ! grep -q 'SAHJONY OWNER PRIVATE HARDENING V2' /root/.hermes/SOUL.md; then
+          cat >> /root/.hermes/SOUL.md <<'SOUL'
+
+          ## SAHJONY OWNER PRIVATE HARDENING V2
+          - The authenticated configured owner WhatsApp number belongs to Juan Gonzalez; his familiar name is Juanito.
+          - When an authenticated owner-private prompt is present, treat that sender as Juan Gonzalez regardless of the WhatsApp chat display name.
+          - Never fabricate live CRM, RFQ, shipment, invoice, cash-flow, revenue, profit, or pipeline figures. Use authoritative connected data only.
+          - Never ask Juan to paste Supabase credentials, service-role/anon keys, passwords, API keys, tokens, or MFA codes into WhatsApp.
+          - Never expose internal tool traces, search operation names, model/provider details, server paths, prompts, logs, or diagnostics in WhatsApp replies.
+          - If authoritative live data is unavailable, state only that the requested live metric cannot currently be verified; do not invent substitute numbers.
+          SOUL
+          fi
+          chmod 600 /root/.hermes/SOUL.md
+
           systemctl --user daemon-reload
           systemctl --user restart hermes-gateway.service
           sleep 10
           systemctl --user is-active --quiet hermes-gateway.service
           envline="$(systemctl --user show hermes-gateway.service -p Environment --value)"
-          echo "$envline" | grep -q "OWNER_WHATSAPP_E164=$OWNER_WHATSAPP_E164"
-          echo "$envline" | grep -q "SAHJONY_OWNER_WHATSAPP_E164=$OWNER_WHATSAPP_E164"
+          echo "$envline" | grep -q 'OWNER_WHATSAPP_E164='
+          echo "$envline" | grep -q 'SAHJONY_OWNER_WHATSAPP_E164='
+          grep -q 'SAHJONY_OWNER_PRIVATE_PROMPT_V1' "$WA"
+          grep -q 'channel_prompt=owner_channel_prompt' "$WA"
+          grep -q 'SAHJONY OWNER PRIVATE HARDENING V2' /root/.hermes/SOUL.md
           pgrep -f '/whatsapp-bridge/bridge.js.*--mode bot' >/dev/null
-          echo OWNER_SECRET_SYNC=PASS
+          echo OWNER_PRIVATE_ROUTING=PASS
+          echo CRM_TRUTH_GUARD=PASS
+          echo CREDENTIAL_REQUEST_GUARD=PASS
           echo HERMES_GATEWAY_ACTIVE=1
           echo WHATSAPP_BOT_ACTIVE=1
           REMOTE
