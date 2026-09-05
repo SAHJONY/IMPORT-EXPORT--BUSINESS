@@ -19,7 +19,7 @@ def test_inbound_uses_sofia_hermes_runtime(monkeypatch):
     monkeypatch.setattr(wa, "_is_owner_whatsapp", fake_owner)
     monkeypatch.setattr(wa, "_upsert_whatsapp_lead", fake_upsert)
     monkeypatch.setattr(wa, "_record_inbound_event", fake_event)
-    monkeypatch.setattr(wa, "generate_sofia_reply", fake_generate)
+    monkeypatch.setattr(wa, "_generate_ai_reply", fake_generate)
     monkeypatch.setattr(wa, "_send_text", fake_send)
     monkeypatch.setattr(wa, "_ai_auto_reply_enabled", lambda: True)
     monkeypatch.setattr(wa, "hermes_configured", lambda: True)

@@ -660,7 +660,7 @@ async def _process_inbound(
     cognition_ready = hermes_configured() or _openai_ready()
     if not (_ai_auto_reply_enabled() and cognition_ready and _send_ready(cfg)):
         return
-    reply = await generate_sofia_reply(text, contact_name)
+    reply = await _generate_ai_reply(text, contact_name)
     if not reply:
         return
     try:
