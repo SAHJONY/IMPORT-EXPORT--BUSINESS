@@ -74,6 +74,8 @@ jobs:
           echo '=== WHATSAPP MODE SEMANTICS ==='
           grep -nE 'self-chat|MODE|mode|allowlist|allowed' /root/.hermes/hermes-agent/scripts/whatsapp-bridge/bridge.js 2>/dev/null | head -160 || true
           sed -n '250,325p' /root/.hermes/hermes-agent/scripts/whatsapp-bridge/bridge.js 2>/dev/null || true
+          echo '=== WHATSAPP ALLOWLIST SEMANTICS ==='
+          sed -n '1,240p' /root/.hermes/hermes-agent/scripts/whatsapp-bridge/allowlist.js 2>/dev/null || true
           echo '=== PROCESSES ==='
           pgrep -af 'hermes_cli.main gateway run|openclaw gateway|whatsapp-bridge|bridge.js' || true
           echo HOSTINGER_HERMES_AUDIT_COMPLETE=1
