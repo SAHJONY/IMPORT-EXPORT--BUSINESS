@@ -185,18 +185,36 @@ jobs:
           test -f "$CFG"
           cp "$CFG" "$CFG.bak.gpt-oss-120b.$(date -u +%Y%m%dT%H%M%SZ)"
           nkey="$(tr -d '\r\n' </root/.nvidia-key-hermes)"
-          code="$(curl -sS -o /tmp/gptoss-smoke.json -w '%{http_code}' --connect-timeout 10 --max-time 120 -H "Authorization: Bearer $nkey" -H 'Content-Type: application/json' -d '{"model":"openai/gpt-oss-120b","messages":[{"role":"user","content":"Reply exactly SOFIA_GPT_OSS_120B_OK"}],"max_tokens":64,"temperature":0}' https://integrate.api.nvidia.com/v1/chat/completions || true)"
-          [[ "$code" == 200 ]] || { echo GPT_OSS_120B_NVIDIA_SMOKE_HTTP="$code" >&2; cat /tmp/gptoss-smoke.json >&2; exit 20; }
-          grep -q 'SOFIA_GPT_OSS_120B_OK' /tmp/gptoss-smoke.json || { echo GPT_OSS_120B_SMOKE_CONTENT_MISMATCH=1 >&2; exit 21; }
+          smoke_model() {
+            local model="$1" marker="$2"
+            curl -sS -o /tmp/gptoss-smoke.json -w '%{http_code}' --connect-timeout 10 --max-time 120 \
+              -H "Authorization: Bearer $nkey" -H 'Content-Type: application/json' \
+              -d "{\"model\":\"$model\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply exactly $marker\"}],\"max_tokens\":64,\"temperature\":0}" \
+              https://integrate.api.nvidia.com/v1/chat/completions || true
+          }
+          preferred_model='openai/gpt-oss-120b'
+          active_model="$preferred_model"
+          code="$(smoke_model "$preferred_model" SOFIA_GPT_OSS_120B_OK)"
+          if [[ "$code" == 200 ]] && grep -q 'SOFIA_GPT_OSS_120B_OK' /tmp/gptoss-smoke.json; then
+            echo GPT_OSS_120B_PROVIDER_READY=1
+          else
+            echo GPT_OSS_120B_NVIDIA_HOSTED_UNAVAILABLE_HTTP="$code"
+            active_model='openai/gpt-oss-20b'
+            code="$(smoke_model "$active_model" SOFIA_GPT_OSS_20B_OK)"
+            [[ "$code" == 200 ]] || { echo GPT_OSS_20B_NVIDIA_SMOKE_HTTP="$code" >&2; exit 20; }
+            grep -q 'SOFIA_GPT_OSS_20B_OK' /tmp/gptoss-smoke.json || { echo GPT_OSS_20B_SMOKE_CONTENT_MISMATCH=1 >&2; exit 21; }
+            echo GPT_OSS_120B_PROVIDER_UPGRADE_REQUIRED=1
+            echo GPT_OSS_20B_TEMPORARY_RESTORE_READY=1
+          fi
           install -d -m 700 /root/.config/systemd/user/hermes-gateway.service.d
-          { printf '[Service]\nEnvironment=NVIDIA_API_KEY='; printf '%s' "$nkey"; printf '\nEnvironment=SOFIA_NVIDIA_MODEL=openai/gpt-oss-120b\n'; } > /root/.config/systemd/user/hermes-gateway.service.d/30-sahjony-gpt-oss-120b.conf
+          { printf '[Service]\nEnvironment=NVIDIA_API_KEY='; printf '%s' "$nkey"; printf '\nEnvironment=SOFIA_NVIDIA_MODEL=%s\nEnvironment=SOFIA_PREFERRED_MODEL=openai/gpt-oss-120b\n' "$active_model"; } > /root/.config/systemd/user/hermes-gateway.service.d/30-sahjony-gpt-oss-120b.conf
           chmod 600 /root/.config/systemd/user/hermes-gateway.service.d/30-sahjony-gpt-oss-120b.conf
-          "$HPY" - "$CFG" <<'PY'
+          "$HPY" - "$CFG" "$active_model" <<'PY'
           import sys,yaml
           p=sys.argv[1]
           with open(p,encoding='utf-8') as f: d=yaml.safe_load(f) or {}
           old='qwen/qwen3-next-80b-a3b-thinking'
-          new='openai/gpt-oss-120b'
+          new=sys.argv[2]
           changed=[]
           def repl(o,path=''):
               if isinstance(o,dict):
@@ -226,7 +244,8 @@ jobs:
           pgrep -f '/whatsapp-bridge/bridge.js.*--mode bot' >/dev/null
           grep -Eqi 'connected|ready|authenticated' /root/.hermes/platforms/whatsapp/bridge.log
           if grep -Rni --exclude-dir=node_modules --exclude='*.log' 'qwen/qwen3-next-80b-a3b-thinking' /root/.hermes/config.yaml 2>/dev/null; then echo EOL_QWEN_REFERENCE_REMAINS_IN_ACTIVE_CONFIG=1 >&2; exit 22; fi
-          echo SOFIA_PRIMARY_MODEL=openai/gpt-oss-120b
+          echo SOFIA_PRIMARY_MODEL="$active_model"
+          echo SOFIA_PREFERRED_MODEL=openai/gpt-oss-120b
           echo SOFIA_MODEL_PROVIDER=nvidia_nim
           echo EOL_QWEN_MODEL_REMOVED_FROM_ACTIVE_HERMES_CONFIG=1
           echo HERMES_GATEWAY_ACTIVE=1
