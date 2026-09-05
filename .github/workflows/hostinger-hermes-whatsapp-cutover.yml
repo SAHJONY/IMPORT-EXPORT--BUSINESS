@@ -91,9 +91,16 @@ jobs:
           test -f "$BRIDGE/package.json"
           cd "$BRIDGE"
           if [[ ! -f node_modules/@whiskeysockets/baileys/lib/index.js && ! -f node_modules/@whiskeysockets/baileys/index.js ]]; then
-            npm install --omit=dev
+            npm install --include=dev
           fi
           test -d node_modules/@whiskeysockets/baileys
+          if [[ ! -f node_modules/@whiskeysockets/baileys/lib/index.js && ! -f node_modules/@whiskeysockets/baileys/index.js ]]; then
+            cd node_modules/@whiskeysockets/baileys
+            npm install --include=dev
+            npm run build
+            cd "$BRIDGE"
+          fi
+          test -f node_modules/@whiskeysockets/baileys/lib/index.js || test -f node_modules/@whiskeysockets/baileys/index.js
           echo HERMES_WHATSAPP_DEPENDENCIES_READY=1
           REMOTE
           echo HOSTINGER_HERMES_STAGE_COMPLETE=1
