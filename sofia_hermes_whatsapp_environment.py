@@ -83,8 +83,8 @@ def _claims_cuba_crm_empty(reply: str) -> bool:
 def _runtime_identity_reply() -> str:
     model = nim_health().get("model") or "openai/gpt-oss-120b"
     return (
-        f"Sí. En WhatsApp opero dentro de Hermes Agent v{HERMES_BASELINE} como mi entorno ejecutivo. "
-        f"Hostinger/OpenClaw es el transporte que conecta el canal de WhatsApp, no mi entorno de razonamiento. "
+        f"Sí. En WhatsApp opero directamente en Hostinger dentro de Hermes Agent v{HERMES_BASELINE} como mi entorno ejecutivo. "
+        "WhatsApp Cloud transporta los mensajes directamente hacia mi runtime; OpenClaw no forma parte de esta ruta. "
         f"Mi inferencia primaria es NVIDIA NIM con {model}. Mi identidad operativa es Sofía Smith y comparto "
         "memoria comercial, CRM, contexto de relaciones y controles de autorización de SAHJONY."
     )
@@ -171,9 +171,10 @@ async def generate_hermes_whatsapp_reply(text: str, contact_name: str | None) ->
     await _audit(
         "hermes_turn_started",
         {
-            "summary": "Sofía WhatsApp turn entered Hermes environment",
+            "summary": "Sofía WhatsApp turn entered Hostinger Hermes environment",
             "channel": HERMES_CHANNEL,
             "hermes_version": HERMES_BASELINE,
+            "transport": "meta_whatsapp_cloud",
             "nim_configured": nim_configured(),
         },
     )
@@ -183,10 +184,11 @@ async def generate_hermes_whatsapp_reply(text: str, contact_name: str | None) ->
         await _audit(
             "hermes_runtime_identity_reported",
             {
-                "summary": "Sofía truthfully reported Hermes as the WhatsApp operating environment",
+                "summary": "Sofía truthfully reported Hostinger Hermes as the WhatsApp operating environment",
                 "channel": HERMES_CHANNEL,
                 "hermes_version": HERMES_BASELINE,
-                "transport": "hostinger_openclaw",
+                "transport": "meta_whatsapp_cloud",
+                "openclaw_required": False,
                 "primary_inference": nim_health().get("model"),
             },
         )
@@ -230,7 +232,7 @@ async def generate_hermes_whatsapp_reply(text: str, contact_name: str | None) ->
         await _audit(
             "hermes_turn_completed",
             {
-                "summary": "Sofía WhatsApp turn completed in Hermes environment",
+                "summary": "Sofía WhatsApp turn completed in Hostinger Hermes environment",
                 "channel": HERMES_CHANNEL,
                 "hermes_version": HERMES_BASELINE,
                 "reply_chars": len(reply),
@@ -241,7 +243,7 @@ async def generate_hermes_whatsapp_reply(text: str, contact_name: str | None) ->
         await _audit(
             "hermes_turn_failed_closed",
             {
-                "summary": "Hermes environment produced no releasable WhatsApp reply",
+                "summary": "Hostinger Hermes produced no releasable WhatsApp reply",
                 "channel": HERMES_CHANNEL,
                 "hermes_version": HERMES_BASELINE,
             },
@@ -255,11 +257,13 @@ def health() -> dict[str, Any]:
     return {
         "status": "ok" if enabled and nim_configured() else ("degraded" if enabled else "configuration_required"),
         "service": "sofia-hermes-whatsapp-environment",
-        "environment": "hermes-agent",
+        "environment": "hostinger-hermes",
         "hermes_version": HERMES_BASELINE,
         "agent_id": HERMES_AGENT_ID,
         "channel": HERMES_CHANNEL,
-        "transport": "hostinger_openclaw",
+        "transport": "meta_whatsapp_cloud",
+        "host_runtime": "hostinger-vps",
+        "openclaw_required": False,
         "cognition_runtime": "hermes",
         "primary_inference": {
             "provider": brain.get("provider"),
