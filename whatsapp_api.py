@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 
 from auth import verify_owner_token
 from insforge_backend import get_backend, persistent_backend_status
+from sofia_hermes_whatsapp_environment import generate_hermes_whatsapp_reply
 from sofia_whatsapp_runtime import generate_sofia_reply
 from sofia_hermes_nim_brain import configured as hermes_configured, model_name as hermes_model_name
 
@@ -611,47 +612,14 @@ def _opt_out(text: str) -> bool:
 
 
 async def _generate_ai_reply(text: str, contact_name: str | None) -> str:
-    key = os.getenv("OPENAI_API_KEY", "").strip()
-    if not key:
-        return ""
-    model = os.getenv("OPENAI_PRIMARY_MODEL", "").strip() or "gpt-5.6-sol"
-    system = (
-        "You are the multilingual WhatsApp AI Agent for SAHJONY Global Trade. "
-        "Reply in the customer's language. Be concise, professional, commercially useful, and transparent that you are an AI assistant representing SAHJONY Global Trade. "
-        "Qualify legitimate import/export and sourcing needs by gathering product, specifications, quantity, destination, target timing and budget when missing. "
-        "Never promise legal authorization, sanctions clearance, product availability, price, credit, payment release, shipment release, supplier commitment, or guaranteed delivery. "
-        "Never request passwords, full payment-card details, API keys, or authentication secrets. "
-        "For regulated, Cuba-related, sanctions-sensitive, payment, customs or legal questions, state that SAHJONY Global Trade's trade/compliance team must verify the transaction before commitment. "
-        "If the person asks for a human, acknowledge and say the conversation has been routed for human attention."
-    )
-    user = f"Contact name: {contact_name or 'unknown'}\nInbound WhatsApp message:\n{text[:5000]}"
-    payload = {
-        "model": model,
-        "input": [
-            {"role": "system", "content": [{"type": "input_text", "text": system}]},
-            {"role": "user", "content": [{"type": "input_text", "text": user}]},
-        ],
-        "max_output_tokens": 500,
-    }
+    """Route every WhatsApp AI turn through the governed Sofia/Hermes runtime.
+
+    This is the authoritative cognition path. Direct model calls are intentionally
+    not used here because they bypass CRM, relationship memory, knowledge preflight,
+    owner governance and the sales policy stack.
+    """
     try:
-        async with httpx.AsyncClient(timeout=45) as client:
-            response = await client.post(
-                "https://api.openai.com/v1/responses",
-                headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-                json=payload,
-            )
-        if response.status_code >= 400:
-            return ""
-        data = response.json()
-        text_out = str(data.get("output_text") or "").strip()
-        if not text_out:
-            parts: list[str] = []
-            for item in data.get("output") or []:
-                for content in item.get("content") or []:
-                    if content.get("type") in {"output_text", "text"} and content.get("text"):
-                        parts.append(str(content["text"]))
-            text_out = "\n".join(parts).strip()
-        return text_out[:4096]
+        return (await generate_hermes_whatsapp_reply(text, contact_name))[:4096]
     except Exception:
         return ""
 

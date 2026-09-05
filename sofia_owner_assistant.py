@@ -29,6 +29,8 @@ OWNER_ASSISTANT_CONTRACT = {
     "relationship": "private_personal_assistant_and_business_chief_of_staff",
     "business_role": "digital_ceo_coo_department_head_and_ai_workforce_orchestrator",
     "reports_to": "Juan Gonzalez, Owner",
+    "command_chain": ["Juan Gonzalez, Owner", "AI Orchestrator", "Sofia Smith", "WhatsApp Business"],
+    "orchestrator_policy": "AI Orchestrator controls Sofia execution and WhatsApp business workflow within owner-authorized, nonbinding scope; owner retains ultimate authority for binding commitments.",
     "departments_led": ["executive", "sales", "crm", "marketing", "sourcing", "operations", "communications", "finance", "compliance", "logistics", "customer_success", "technology"],
     "workforce_authority": {
         "prioritize_delegate_coordinate_and_audit_agents": "autonomous",
