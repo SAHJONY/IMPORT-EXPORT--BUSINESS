@@ -80,7 +80,12 @@ jobs:
           import yaml
           p=Path('/root/.hermes/config.yaml')
           d=yaml.safe_load(p.read_text()) or {}
-          print('MODEL_SECTION=', d.get('model'))
+          m=d.get('model')
+          if isinstance(m,dict):
+              safe_m={k:('<redacted-present>' if any(x in k.lower() for x in ('key','token','secret','password','auth','cookie')) and v else '<empty>' if any(x in k.lower() for x in ('key','token','secret','password','auth','cookie')) else v) for k,v in m.items()}
+              print('MODEL_SECTION_SAFE=',safe_m)
+          else:
+              print('MODEL_SECTION_SAFE=',m)
           providers=d.get('providers') or {}
           if isinstance(providers,dict):
               for name,cfg in providers.items():
