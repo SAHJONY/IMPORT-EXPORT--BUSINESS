@@ -16,6 +16,8 @@ from pydantic import BaseModel, Field
 
 from auth import verify_owner_token
 from insforge_backend import get_backend, persistent_backend_status
+from sofia_whatsapp_runtime import generate_sofia_reply
+from sofia_hermes_nim_brain import configured as hermes_configured, model_name as hermes_model_name
 
 app = FastAPI(title="SAHJONY WhatsApp Transport", version="3.1.0", docs_url=None, redoc_url=None)
 
@@ -687,9 +689,10 @@ async def _process_inbound(
         except Exception:
             pass
         return
-    if not (_ai_auto_reply_enabled() and _openai_ready() and _send_ready(cfg)):
+    cognition_ready = hermes_configured() or _openai_ready()
+    if not (_ai_auto_reply_enabled() and cognition_ready and _send_ready(cfg)):
         return
-    reply = await _generate_ai_reply(text, contact_name)
+    reply = await generate_sofia_reply(text, contact_name)
     if not reply:
         return
     try:
@@ -725,7 +728,11 @@ async def whatsapp_health() -> dict[str, Any]:
             "lead_capture_enabled": persistence["configured"],
             "webhook_idempotency_enabled": persistence["configured"],
             "ai_auto_reply_enabled": True,
-            "ai_ready": _openai_ready(),
+            "ai_ready": hermes_configured() or _openai_ready(),
+            "cognition_runtime": "hermes",
+            "hermes_primary_configured": hermes_configured(),
+            "hermes_primary_model": hermes_model_name() if hermes_configured() else None,
+            "openai_fallback_configured": _openai_ready(),
             "outbound_owner_governed": True,
             "autonomous_reply_release_authority": False,
             "secrets_exposed": False,
@@ -752,7 +759,11 @@ async def whatsapp_health() -> dict[str, Any]:
         "lead_capture_enabled": persistence["configured"],
         "webhook_idempotency_enabled": persistence["configured"],
         "ai_auto_reply_enabled": _ai_auto_reply_enabled(),
-        "ai_ready": _openai_ready(),
+        "ai_ready": hermes_configured() or _openai_ready(),
+        "cognition_runtime": "hermes",
+        "hermes_primary_configured": hermes_configured(),
+        "hermes_primary_model": hermes_model_name() if hermes_configured() else None,
+        "openai_fallback_configured": _openai_ready(),
         "outbound_owner_governed": True,
         "autonomous_reply_release_authority": False,
         "secrets_exposed": False,
