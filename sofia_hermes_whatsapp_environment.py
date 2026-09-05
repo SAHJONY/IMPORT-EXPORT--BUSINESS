@@ -61,6 +61,25 @@ def _asks_about_cuba_crm(text: str) -> bool:
     return any(term in normalized for term in cuba_terms) and any(term in normalized for term in crm_terms)
 
 
+def _mentions_cuba_private_business(text: str) -> bool:
+    normalized = _normalized(text)
+    return any(term in normalized for term in (
+        "cuba", "cubana", "cubanas", "cubano", "cubanos", "mipyme", "mipymes",
+        "sector privado", "negocio privado", "negocios privados", "gestor", "gestores",
+    ))
+
+
+def _claims_cuba_crm_empty(reply: str) -> bool:
+    normalized = _normalized(reply)
+    empty_claims = (
+        "no hay leads", "no tenemos leads", "no existen leads",
+        "no hay oportunidades", "no tenemos oportunidades",
+        "no hay registros", "no tenemos registros",
+        "crm está vacío", "crm esta vacio", "crm se encuentra vacío", "crm se encuentra vacio",
+    )
+    return any(claim in normalized for claim in empty_claims)
+
+
 def _runtime_identity_reply() -> str:
     model = nim_health().get("model") or "openai/gpt-oss-120b"
     return (
@@ -194,6 +213,19 @@ async def generate_hermes_whatsapp_reply(text: str, contact_name: str | None) ->
         )
 
     reply = await generate_sofia_reply(text, contact_name)
+    if reply and _mentions_cuba_private_business(text) and _claims_cuba_crm_empty(reply):
+        snapshot = await _cuba_crm_snapshot()
+        if snapshot.get("verified") and int(snapshot.get("record_count") or 0) > 0:
+            reply = _cuba_crm_reply(snapshot)
+            await _audit(
+                "cuba_crm_false_empty_claim_blocked",
+                {
+                    "summary": "Hermes blocked a generated false-empty Cuba CRM claim and replaced it with verified CRM truth",
+                    "record_count": snapshot.get("record_count"),
+                    "target": snapshot.get("target"),
+                    "remaining_shortfall": snapshot.get("remaining_shortfall"),
+                },
+            )
     if reply:
         await _audit(
             "hermes_turn_completed",
