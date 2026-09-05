@@ -1,0 +1,147 @@
+name: Hostinger Hermes Sofia Platform Access
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/hostinger-hermes-sofia-platform-access.yml
+
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    concurrency:
+      group: hostinger-vm-767852-mutation
+      cancel-in-progress: false
+    env:
+      HOST: 69.62.68.67
+      SSH_USER: root
+      PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Prepare SSH
+        shell: bash
+        run: |
+          set -euo pipefail
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/key
+          chmod 600 ~/.ssh/key
+          ssh-keygen -y -f ~/.ssh/key >/dev/null
+
+      - name: Install canonical SAHJONY platform skill
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=12 -i ~/.ssh/key "$SSH_USER@$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          SKILL=/root/.hermes/skills/sahjony-platform
+          install -d -m 700 "$SKILL"
+          cat > "$SKILL/status.py" <<'PY'
+          #!/usr/bin/env python3
+          import json, urllib.request
+          from datetime import datetime, timezone
+
+          BASE='https://www.sahjony.com'
+          ENDPOINTS={
+              'crm_health':'/crm/health',
+              'registry':'/crm/record-registry/summary',
+              'crm_data':'/crm/data-health',
+              'backend':'/backend/health',
+              'shipments':'/shipments/health',
+              'finance':'/finance/health',
+          }
+
+          def get(path):
+              req=urllib.request.Request(BASE+path, headers={'User-Agent':'SAHJONY-Sofia-Platform/1.0'})
+              with urllib.request.urlopen(req, timeout=20) as r:
+                  return json.loads(r.read().decode('utf-8'))
+
+          out={'status':'ok','source':'SAHJONY canonical production API','base':BASE,'verified_at':datetime.now(timezone.utc).isoformat(),'endpoints':{},'metrics':{}}
+          for name,path in ENDPOINTS.items():
+              try:
+                  out['endpoints'][name]={'ok':True,'data':get(path)}
+              except Exception as exc:
+                  out['endpoints'][name]={'ok':False,'error_type':type(exc).__name__}
+
+          reg=(out['endpoints'].get('registry') or {}).get('data') or {}
+          counts={row.get('logical_table'):int(row.get('count') or 0) for row in reg.get('logical_tables',[]) if row.get('logical_table')}
+          out['metrics']={
+              'total_canonical_records':reg.get('total_records'),
+              'external_trade_prospects':counts.get('external_trade_prospects',0),
+              'customer_accounts':counts.get('customer_accounts',0),
+              'customer_trade_intakes':counts.get('customer_trade_intakes',0),
+              'lead_scout_leads':counts.get('lead_scout_leads',0),
+              'whatsapp_leads':counts.get('whatsapp_leads',0),
+              'supplier_candidates':counts.get('global_supplier_candidates',0),
+              'supplier_price_benchmarks':counts.get('supplier_product_benchmarks',0)+counts.get('us_supplier_price_benchmarks',0),
+              'logistics_quotes':counts.get('logistics_quotes',0),
+              'shipments_registry_records':counts.get('shipments',0),
+              'invoice_registry_records':counts.get('invoices',0),
+              'payment_registry_records':counts.get('payments',0),
+              'revenue_registry_records':counts.get('revenue',0),
+          }
+          if not (out['endpoints'].get('registry') or {}).get('ok'):
+              out['status']='degraded'
+          print(json.dumps(out,separators=(',',':')))
+          PY
+          chmod 700 "$SKILL/status.py"
+
+          cat > "$SKILL/SKILL.md" <<'SKILL'
+          # SAHJONY Platform Truth Access
+
+          Use this skill whenever Juan asks for business status, CRM counts, pipeline metrics, suppliers, RFQs/intakes, logistics, shipments, finance readiness, or whether the platform is connected.
+
+          Run:
+          `python3 /root/.hermes/skills/sahjony-platform/status.py`
+
+          The script reads SAHJONY's canonical production API at sahjony.com, whose backend is already connected server-side to Supabase. This means Sofia does NOT need Supabase credentials in WhatsApp and must never ask Juan to paste database URLs, service-role keys, anon keys, API keys, passwords, tokens, or MFA codes.
+
+          Rules:
+          - Treat returned figures as verified only for the exact fields returned and the `verified_at` timestamp.
+          - Preserve stage discipline. A research lead is not qualified demand; an intake is not necessarily an RFQ; a benchmark is not a firm quote; an invoice is not collected revenue.
+          - If a metric is absent, say it is not currently represented by the canonical status surface. Do not invent it.
+          - If an endpoint fails, report that specific platform surface as temporarily unavailable; do not ask the owner for secrets.
+          - Do not expose internal paths, tool traces, or implementation details in normal WhatsApp replies.
+          - For write/binding actions, continue to use existing governed platform workflows and owner gates. This skill is a read/truth layer, not a bypass.
+          SKILL
+          chmod 600 "$SKILL/SKILL.md"
+
+          if ! grep -q 'SAHJONY PLATFORM TRUTH ACCESS V1' /root/.hermes/SOUL.md; then
+          cat >> /root/.hermes/SOUL.md <<'SOUL'
+
+          ## SAHJONY PLATFORM TRUTH ACCESS V1
+          - You have a canonical server-side SAHJONY platform truth bridge. For business-status, CRM, pipeline, supplier, RFQ/intake, logistics, shipment, finance-readiness, or platform-connectivity questions, retrieve current data using the SAHJONY platform skill before answering.
+          - Never say Supabase credentials are unavailable merely because they are not present in the WhatsApp conversation. The production application already holds its own server-side credentials.
+          - Never ask Juan to export CSVs or run local database commands when the canonical platform status bridge is available.
+          - Never ask Juan to paste Supabase URLs, anon/service-role keys, database credentials, API keys, tokens, passwords, or MFA codes into WhatsApp.
+          - If live data cannot be verified through the platform bridge, say exactly which platform surface is unavailable and continue with the safest next step.
+          SOUL
+          fi
+          chmod 600 /root/.hermes/SOUL.md
+
+          python3 "$SKILL/status.py" >/tmp/sofia-platform-status.json
+          python3 - <<'PY'
+          import json
+          d=json.load(open('/tmp/sofia-platform-status.json'))
+          assert d.get('status') in {'ok','degraded'}
+          assert d.get('source')=='SAHJONY canonical production API'
+          assert (d.get('endpoints',{}).get('registry') or {}).get('ok') is True
+          assert isinstance(d.get('metrics',{}).get('external_trade_prospects'), int)
+          print('SOFIA_PLATFORM_TRUTH=PASS')
+          print('CANONICAL_CRM_READ=PASS')
+          print('SECRET_REQUEST_NOT_REQUIRED=PASS')
+          PY
+
+          stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+          if [ -d /root/.hermes/sessions ]; then mv /root/.hermes/sessions "/root/.hermes/sessions.pre-platform-access.$stamp"; fi
+          mkdir -m 700 /root/.hermes/sessions
+          systemctl --user restart hermes-gateway.service
+          sleep 10
+          systemctl --user is-active --quiet hermes-gateway.service
+          pgrep -f '/whatsapp-bridge/bridge.js.*--mode bot' >/dev/null
+          echo HERMES_GATEWAY_ACTIVE=1
+          echo WHATSAPP_BOT_ACTIVE=1
+          REMOTE
+
+      - name: Cleanup
+        if: always()
+        run: rm -f ~/.ssh/key
