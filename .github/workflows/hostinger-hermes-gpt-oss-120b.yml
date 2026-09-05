@@ -118,6 +118,9 @@ jobs:
           PY2
           "$HPY" -m hermes_cli.main fallback list 2>&1 | head -120 || true
           "$HPY" -m hermes_cli.main auth list 2>&1 | head -160 || true
+          echo '=== HOST GPU / MEMORY CAPACITY ==='
+          if command -v nvidia-smi >/dev/null 2>&1; then nvidia-smi --query-gpu=name,memory.total --format=csv,noheader 2>/dev/null || true; else echo NVIDIA_GPU_PRESENT=0; fi
+          free -h 2>/dev/null | head -4 || true
           echo '=== PROVIDER CREDENTIAL PRESENCE ==='
           "$HPY" - <<'PY3'
           import os,re,subprocess
