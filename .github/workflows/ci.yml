@@ -49,5 +49,7 @@ jobs:
         run: python -m compileall -q .
       - name: Unified API runtime import smoke
         run: python -c "import unified_api; print('Unified API import OK')"
+      - name: A-to-Z business flow gate
+        run: python -m pytest -q tests/test_business_flow_a2z.py
       - name: Backend test suite
         run: python -m pytest -q

@@ -113,7 +113,14 @@ async def whatsapp_health_hostinger_authority() -> dict[str, Any]:
     marketing = await growth_health()
     selling = await self_selling_health()
     crm_bridge = await crm_bridge_status()
-    pending = await find_unanswered(50)
+    backlog_available = True
+    backlog_error_type = None
+    try:
+        pending = await find_unanswered(50)
+    except Exception as exc:
+        pending = []
+        backlog_available = False
+        backlog_error_type = type(exc).__name__
     hermes = hermes_whatsapp_health()
 
     return {
@@ -184,7 +191,12 @@ async def whatsapp_health_hostinger_authority() -> dict[str, Any]:
         "adaptive_sofia": sofia,
         "self_marketing": marketing,
         "self_selling": selling,
-        "backlog_recovery": {"enabled": True, "pending_conversations": len(pending)},
+        "backlog_recovery": {
+            "enabled": True,
+            "available": backlog_available,
+            "pending_conversations": len(pending),
+            "error_type": backlog_error_type,
+        },
         "recovery_status": recovery,
         "outbound_owner_governed": True,
         "autonomous_reply_release_authority": False,
