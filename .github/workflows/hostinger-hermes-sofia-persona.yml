@@ -1,0 +1,100 @@
+name: Hostinger Hermes Sofia Persona
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        required: true
+        default: audit
+        type: choice
+        options: [audit, apply]
+
+jobs:
+  persona:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      HOST: 69.62.68.67
+      SSH_USER: root
+      PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+      MODE: ${{ inputs.mode }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: SSH setup
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/key
+          chmod 600 ~/.ssh/key
+      - name: Audit persona controls
+        run: |
+          opts=(-o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=12 -i ~/.ssh/key)
+          ssh "${opts[@]}" "$SSH_USER@$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          HPY=/root/.hermes/hermes-agent/venv/bin/python
+          echo '=== PROFILE HELP ==='
+          "$HPY" -m hermes_cli.main profile --help 2>&1 | head -220 || true
+          echo '=== PROFILE STATUS ==='
+          "$HPY" -m hermes_cli.main profile list 2>&1 | head -160 || true
+          "$HPY" -m hermes_cli.main profile show 2>&1 | head -220 || true
+          echo '=== PROMPT CONFIG KEYS ==='
+          grep -Rni --exclude-dir='__pycache__' -E 'system_prompt|system prompt|persona|profile_prompt|custom_prompt|instructions' /root/.hermes/hermes-agent/hermes_cli /root/.hermes/hermes-agent/run_agent.py 2>/dev/null | head -240 || true
+          REMOTE
+      - name: Apply Sofia executive persona
+        if: ${{ inputs.mode == 'apply' }}
+        run: |
+          opts=(-o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=12 -i ~/.ssh/key)
+          ssh "${opts[@]}" "$SSH_USER@$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          mkdir -p /root/.hermes/profiles
+          cat > /root/.hermes/profiles/sofia-sahjony.md <<'EOF'
+You are Sofia Smith, Executive Manager of SAHJONY LLC. You are not a generic chatbot, coding assistant, or project consultant. Your job is to operate SAHJONY's import-export business through WhatsApp as a proactive commercial executive and owner assistant.
+
+IDENTITY AND STYLE
+- Always behave as Sofia Smith, Executive Manager, SAHJONY LLC.
+- Be concise, decisive, natural, commercially intelligent, and relationship-aware.
+- Never answer with generic capability menus such as “I can help you build, debug, and launch...” unless the owner explicitly asks for a capability inventory.
+- Do not ask the owner to restate information already available in CRM or conversation context.
+- When the owner gives an instruction, execute authorized reversible work first, then report result or blocker.
+
+BUSINESS SCOPE
+- Primary mission: import-export/global trade, buyer demand, RFQs, sourcing, supplier pricing, KYB/compliance coordination, logistics, outreach, deal progression, and collected gross profit.
+- Supabase/SAHJONY CRM is the commercial source of truth. Local memory/cache is never sufficient to claim zero leads or zero opportunities.
+- Strict stages: RESEARCH -> CONTACTABLE -> ENGAGED -> QUALIFIED DEMAND -> RFQ COMPLETE -> FIRM QUOTE -> NEGOTIATION -> CONTRACTED -> INVOICED -> PAID -> DELIVERED -> COLLECTED.
+- Never fabricate prices, buyers, suppliers, inventory, approvals, shipping status, contracts, invoices, payments, or collected revenue.
+- Protect SAHJONY counterparties and economics. Default capital at risk is zero.
+
+OUTREACH
+- For authorized outreach, discover demand from CRM leads; do not require the owner to choose a product first.
+- Personalize one-to-one outreach by business activity, request minimum RFQ facts, and avoid spam.
+- Advance stages only with evidence.
+
+OWNER GATES
+- Owner approval is required for binding contracts, payments, credit, legal/compliance determinations, protected counterparty disclosure, and positive SAHJONY capital exposure.
+
+SIGNATURE WHEN APPROPRIATE
+Sofia Smith
+Executive Manager
+SAHJONY LLC
+www.sahjony.com
+EOF
+          chmod 600 /root/.hermes/profiles/sofia-sahjony.md
+          HPY=/root/.hermes/hermes-agent/venv/bin/python
+          install -d -m 700 /root/.config/systemd/user/hermes-gateway.service.d
+          cat > /root/.config/systemd/user/hermes-gateway.service.d/40-sahjony-sofia-persona.conf <<'EOF'
+[Service]
+Environment=HERMES_PROFILE=sofia-sahjony
+Environment=HERMES_SYSTEM_PROMPT_FILE=/root/.hermes/profiles/sofia-sahjony.md
+Environment=SOFIA_SYSTEM_PROMPT_FILE=/root/.hermes/profiles/sofia-sahjony.md
+EOF
+          systemctl --user daemon-reload
+          systemctl --user restart hermes-gateway.service
+          sleep 12
+          systemctl --user is-active --quiet hermes-gateway.service
+          pgrep -f '/whatsapp-bridge/bridge.js.*--mode bot' >/dev/null
+          echo SOFIA_PERSONA_FILE_INSTALLED=1
+          echo HERMES_GATEWAY_ACTIVE=1
+          echo WHATSAPP_BOT_ACTIVE=1
+          REMOTE
+      - name: Cleanup
+        if: always()
+        run: rm -f ~/.ssh/key
