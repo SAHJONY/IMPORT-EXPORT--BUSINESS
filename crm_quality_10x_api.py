@@ -272,4 +272,6 @@ async def standards():
 
 # Keep SOFIA inside the existing CRM serverless surface so this upgrade does not consume another Vercel function.
 from sofia_proactive_sales_os import app as sofia_proactive_sales_app
+from sofia_fortune500_hardening_api import app as sofia_hardening_app
 app.include_router(sofia_proactive_sales_app.router)
+app.include_router(sofia_hardening_app.router)
