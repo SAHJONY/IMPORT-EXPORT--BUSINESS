@@ -1,0 +1,146 @@
+name: Hostinger Hermes GPT OSS 120B
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: audit | apply
+        required: true
+        default: audit
+        type: choice
+        options: [audit, apply]
+
+concurrency:
+  group: hostinger-vm-767852-mutation
+  cancel-in-progress: false
+
+jobs:
+  configure:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      HOST: '69.62.68.67'
+      SSH_USER: root
+      PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+      NVIDIA_API_KEY_GH: ${{ secrets.NVIDIA_API_KEY }}
+      MODE: ${{ inputs.mode }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare SSH
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "${PRIVATE_KEY:-}" ]] || { echo HOSTINGER_SSH_PRIVATE_KEY_MISSING=1 >&2; exit 2; }
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/hostinger-hermes-model
+          chmod 600 ~/.ssh/hostinger-hermes-model
+          ssh-keygen -y -f ~/.ssh/hostinger-hermes-model >/dev/null
+          if [[ "$MODE" == apply ]]; then
+            [[ "$NVIDIA_API_KEY_GH" == nvapi-* ]] || { echo NVIDIA_API_KEY_MISSING_OR_INVALID=1 >&2; exit 3; }
+            printf '%s' "$NVIDIA_API_KEY_GH" > "$RUNNER_TEMP/nvidia-key"
+            chmod 600 "$RUNNER_TEMP/nvidia-key"
+          fi
+      - name: Audit Hermes model runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          opts=(-o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=12 -i ~/.ssh/hostinger-hermes-model)
+          ssh "${opts[@]}" "$SSH_USER@$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          HPY=/root/.hermes/hermes-agent/venv/bin/python
+          echo '=== HERMES CLI ==='
+          "$HPY" -m hermes_cli.main --help 2>&1 | head -160 || true
+          echo '=== MODEL COMMAND DISCOVERY ==='
+          "$HPY" -m hermes_cli.main model --help 2>&1 | head -180 || true
+          "$HPY" -m hermes_cli.main models --help 2>&1 | head -180 || true
+          echo '=== SAFE MODEL CONFIG ==='
+          "$HPY" - <<'PY'
+          from pathlib import Path
+          import yaml
+          p=Path('/root/.hermes/config.yaml')
+          d=yaml.safe_load(p.read_text()) or {} if p.exists() else {}
+          sensitive=('token','key','secret','password','cookie','session','auth')
+          def walk(o,pfx=''):
+              if isinstance(o,dict):
+                  for k,v in o.items():
+                      q=f'{pfx}.{k}' if pfx else str(k)
+                      if any(s in str(k).lower() for s in sensitive):
+                          print(q+'=<redacted-present>' if v else q+'=<empty>')
+                      elif any(t in q.lower() for t in ('model','provider','base_url','baseurl','api_url','apiurl','endpoint')):
+                          if isinstance(v,(str,int,float,bool)) or v is None: print(q+'='+str(v))
+                          else: print(q+'=<'+type(v).__name__+'>')
+                      elif isinstance(v,(dict,list)): walk(v,q)
+              elif isinstance(o,list):
+                  for i,v in enumerate(o): walk(v,f'{pfx}[{i}]')
+          walk(d)
+          PY
+          echo '=== EOL MODEL REFERENCES ==='
+          grep -Rni --exclude-dir=node_modules --exclude='*.log' 'qwen/qwen3-next-80b-a3b-thinking\|qwen3-next-80b' /root/.hermes /opt/sahjony-hermes 2>/dev/null | head -120 || true
+          echo '=== ACTIVE GATEWAY ==='
+          "$HPY" -m hermes_cli.main gateway status 2>&1 | head -100 || true
+          REMOTE
+      - name: Apply GPT OSS 120B
+        if: ${{ inputs.mode == 'apply' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          opts=(-o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=12 -i ~/.ssh/hostinger-hermes-model)
+          scp "${opts[@]}" "$RUNNER_TEMP/nvidia-key" "$SSH_USER@$HOST:/root/.nvidia-key-hermes"
+          ssh "${opts[@]}" "$SSH_USER@$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          trap 'rm -f /root/.nvidia-key-hermes /tmp/gptoss-smoke.json' EXIT
+          HPY=/root/.hermes/hermes-agent/venv/bin/python
+          CFG=/root/.hermes/config.yaml
+          test -f "$CFG"
+          cp "$CFG" "$CFG.bak.gpt-oss-120b.$(date -u +%Y%m%dT%H%M%SZ)"
+          nkey="$(tr -d '\r\n' </root/.nvidia-key-hermes)"
+          code="$(curl -sS -o /tmp/gptoss-smoke.json -w '%{http_code}' --connect-timeout 10 --max-time 120 -H "Authorization: Bearer $nkey" -H 'Content-Type: application/json' -d '{"model":"openai/gpt-oss-120b","messages":[{"role":"user","content":"Reply exactly SOFIA_GPT_OSS_120B_OK"}],"max_tokens":64,"temperature":0}' https://integrate.api.nvidia.com/v1/chat/completions || true)"
+          [[ "$code" == 200 ]] || { echo GPT_OSS_120B_NVIDIA_SMOKE_HTTP="$code" >&2; cat /tmp/gptoss-smoke.json >&2; exit 20; }
+          grep -q 'SOFIA_GPT_OSS_120B_OK' /tmp/gptoss-smoke.json || { echo GPT_OSS_120B_SMOKE_CONTENT_MISMATCH=1 >&2; exit 21; }
+          install -d -m 700 /root/.config/systemd/user/hermes-gateway.service.d
+          { printf '[Service]\nEnvironment=NVIDIA_API_KEY='; printf '%s' "$nkey"; printf '\nEnvironment=SOFIA_NVIDIA_MODEL=openai/gpt-oss-120b\n'; } > /root/.config/systemd/user/hermes-gateway.service.d/30-sahjony-gpt-oss-120b.conf
+          chmod 600 /root/.config/systemd/user/hermes-gateway.service.d/30-sahjony-gpt-oss-120b.conf
+          "$HPY" - "$CFG" <<'PY'
+          import sys,yaml
+          p=sys.argv[1]
+          with open(p,encoding='utf-8') as f: d=yaml.safe_load(f) or {}
+          old='qwen/qwen3-next-80b-a3b-thinking'
+          new='openai/gpt-oss-120b'
+          changed=[]
+          def repl(o,path=''):
+              if isinstance(o,dict):
+                  for k,v in list(o.items()):
+                      q=f'{path}.{k}' if path else str(k)
+                      if isinstance(v,str) and v==old:
+                          o[k]=new; changed.append(q)
+                      else: repl(v,q)
+              elif isinstance(o,list):
+                  for i,v in enumerate(o):
+                      q=f'{path}[{i}]'
+                      if isinstance(v,str) and v==old:
+                          o[i]=new; changed.append(q)
+                      else: repl(v,q)
+          repl(d)
+          # Common Hermes configuration keys. Only set keys that already exist,
+          # except top-level model which is Hermes' canonical default selector.
+          if isinstance(d.get('model'),str) or 'model' not in d:
+              if d.get('model') != new: d['model']=new; changed.append('model')
+          with open(p,'w',encoding='utf-8') as f: yaml.safe_dump(d,f,sort_keys=False,allow_unicode=True)
+          print('HERMES_MODEL_PATHS_UPDATED='+(','.join(changed) if changed else 'none'))
+          PY
+          systemctl --user daemon-reload
+          systemctl --user restart hermes-gateway.service
+          sleep 15
+          systemctl --user is-active --quiet hermes-gateway.service
+          pgrep -f '/whatsapp-bridge/bridge.js.*--mode bot' >/dev/null
+          grep -Eqi 'connected|ready|authenticated' /root/.hermes/platforms/whatsapp/bridge.log
+          if grep -Rni --exclude-dir=node_modules --exclude='*.log' 'qwen/qwen3-next-80b-a3b-thinking' /root/.hermes/config.yaml 2>/dev/null; then echo EOL_QWEN_REFERENCE_REMAINS_IN_ACTIVE_CONFIG=1 >&2; exit 22; fi
+          echo SOFIA_PRIMARY_MODEL=openai/gpt-oss-120b
+          echo SOFIA_MODEL_PROVIDER=nvidia_nim
+          echo EOL_QWEN_MODEL_REMOVED_FROM_ACTIVE_HERMES_CONFIG=1
+          echo HERMES_GATEWAY_ACTIVE=1
+          echo WHATSAPP_CONNECTED=1
+          REMOTE
+      - name: Cleanup
+        if: always()
+        run: rm -f ~/.ssh/hostinger-hermes-model "$RUNNER_TEMP/nvidia-key"
