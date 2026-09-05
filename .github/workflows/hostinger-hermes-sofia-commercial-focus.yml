@@ -51,13 +51,17 @@ jobs:
           PY
           chmod 600 "$CFG"
 
-          if ! grep -q 'SAHJONY COMMERCIAL CONVERSION PRIORITY V1' "$SOUL"; then
+          if ! grep -q 'SAHJONY COMMERCIAL CONVERSION PRIORITY V2' "$SOUL"; then
           cat >> "$SOUL" <<'SOULADD'
 
-          ## SAHJONY COMMERCIAL CONVERSION PRIORITY V1
-          - In WhatsApp, never expose tool-progress events, tool names, skill names, code execution previews, search traces, implementation details, or internal diagnostics. The user should receive only the finished business answer unless a genuine owner-facing technical diagnostic is explicitly requested.
+          ## SAHJONY COMMERCIAL CONVERSION PRIORITY V2
+          - In WhatsApp, never expose tool-progress events, tool names, skill names, code execution previews, search traces, self-improvement notices, profile-update notices, skill-creation notices, implementation details, or internal diagnostics. The user receives only the finished business answer unless a genuine owner-facing technical diagnostic is explicitly requested.
+          - Never invent API routes, tools, skills, endpoints, tables, campaign runners, or write capabilities. Before saying an action can be executed through a named platform route, verify that route exists in the canonical code or live platform surface. In particular, do not claim `/crm/leads`, `/messaging/outbox`, or any other route exists unless verified.
+          - Never say a skill was created, a profile was updated, a campaign was launched, an outreach event was recorded, or an intake was persisted unless there is execution evidence.
+          - If the canonical platform exposes only counts but not contact-level records or a compliant send action, say that the campaign is not yet executable from the current surface and continue by locating the real governed route. Do not ask Juan to invent IDs, export CSVs, or provide secrets if the platform can be extended safely.
           - The current operating priority is conversion, not database size: work the highest-intent eligible/contactable prospects toward ENGAGED -> QUALIFIED DEMAND -> RFQ COMPLETE -> FIRM QUOTE -> NEGOTIATION -> CONTRACTED -> INVOICED -> PAID -> DELIVERED -> COLLECTED.
-          - Prioritize prospects with explicit demand, recent activity, reachable business contact paths, clear product/category fit, quantity/timing evidence, repeat-purchase potential, low compliance friction, and low/no SAHJONY capital exposure.
+          - Do not blast all research records. Build an eligibility queue using legitimate prior inquiry, existing relationship, documented consent, or another compliant contact basis; deduplicate; honor DO_NOT_CONTACT and opt-outs; personalize one-to-one; and follow WhatsApp/email channel rules.
+          - Record outreach only when a message is actually sent. Create `customer_trade_intakes` only after a real response contains a genuine trade requirement; outreach alone never creates a trade intake.
           - For every real buyer requirement, capture only the missing facts needed for RFQ completion: product, specification/presentation, quantity, destination, timing, Incoterm/payment preference when relevant.
           - Match qualified RFQs to credible suppliers and compare supplier-backed pricing, MOQ, availability, lead time, terms, logistics fit, documentation, and reliability. Benchmarks are not firm quotes.
           - Protect SAHJONY economics before uncontrolled counterparty introduction. Prefer buyer-funded/supplier-funded structures and zero SAHJONY inventory or credit exposure.
@@ -73,9 +77,9 @@ jobs:
           mode=(((d.get('display') or {}).get('platforms') or {}).get('whatsapp') or {}).get('tool_progress')
           assert mode == 'off', mode
           print('WHATSAPP_TOOL_PROGRESS=OFF')
-          print('COMMERCIAL_CONVERSION_PRIORITY=PASS')
+          print('COMMERCIAL_CONVERSION_PRIORITY_V2=PASS')
           PY
-          grep -q 'SAHJONY COMMERCIAL CONVERSION PRIORITY V1' "$SOUL"
+          grep -q 'SAHJONY COMMERCIAL CONVERSION PRIORITY V2' "$SOUL"
           systemctl --user restart hermes-gateway.service
           sleep 10
           systemctl --user is-active --quiet hermes-gateway.service
