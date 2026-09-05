@@ -1,0 +1,46 @@
+name: Hostinger Hermes Owner LID Hotfix
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/hostinger-hermes-owner-lid-hotfix.yml']
+jobs:
+  hotfix:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      HOST: 69.62.68.67
+      SSH_USER: root
+      PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Prepare SSH
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/key
+          chmod 600 ~/.ssh/key
+      - name: Apply owner LID hotfix
+        run: |
+          ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/key "$SSH_USER@$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          f=/root/.hermes/hermes-agent/gateway/platforms/whatsapp.py
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('/root/.hermes/hermes-agent/gateway/platforms/whatsapp.py')
+          s=p.read_text()
+          old='            if owner_id and owner_id in sender_aliases:\n'
+          new='            if (owner_id and owner_id in sender_aliases) or normalize_whatsapp_identifier(str(data.get("chatId") or "")) == "225679811580025":\n'
+          if old in s:
+              s=s.replace(old,new,1)
+          elif '225679811580025' not in s:
+              raise SystemExit('owner routing anchor not found')
+          p.write_text(s)
+          PY
+          python3 -m py_compile "$f"
+          systemctl --user restart hermes-gateway.service
+          sleep 10
+          systemctl --user is-active --quiet hermes-gateway.service
+          pgrep -f '/whatsapp-bridge/bridge.js.*--mode bot' >/dev/null
+          echo OWNER_LID_HOTFIX=PASS
+          REMOTE
+      - name: Cleanup
+        if: always()
+        run: rm -f ~/.ssh/key
