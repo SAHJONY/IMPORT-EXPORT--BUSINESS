@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="robots" content="noindex,nofollow" />
+  <title>Mi Operación | SAHJONY Global Trade</title>
+  <style>
+    :root{color-scheme:dark;--bg:#070809;--panel:#101214;--line:#24282d;--text:#f5f6f7;--muted:#9ba3ad;--gold:#d8ba72;--ok:#7bd5a6;--hold:#f0c36a;--bad:#f28b82}
+    *{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 80% -10%,#21242a 0,transparent 28%),var(--bg);font:15px/1.5 Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:var(--text)}
+    a{color:inherit}.shell{max-width:1240px;margin:auto;padding:22px}.top{display:flex;gap:20px;align-items:center;justify-content:space-between;padding:14px 0 28px}.brand{display:flex;gap:12px;align-items:center}.mark{width:34px;height:34px;border:1px solid var(--gold);transform:rotate(45deg);display:grid;place-items:center}.mark:after{content:"";width:10px;height:10px;background:var(--gold)}.brand strong{display:block;letter-spacing:.11em}.brand small,.muted{color:var(--muted)}.top a{font-size:13px;text-decoration:none;color:var(--muted)}
+    .hero{border:1px solid var(--line);background:linear-gradient(145deg,rgba(255,255,255,.05),rgba(255,255,255,.01));border-radius:24px;padding:34px;display:grid;grid-template-columns:1.7fr .8fr;gap:28px}.eyebrow{color:var(--gold);font-size:12px;letter-spacing:.16em;text-transform:uppercase}.hero h1{font-size:clamp(34px,6vw,70px);line-height:.96;margin:12px 0 18px;max-width:880px}.hero p{font-size:18px;color:#c5cad0;max-width:760px}.status-card{border-left:1px solid var(--line);padding-left:28px;display:flex;flex-direction:column;justify-content:center}.status-card strong{font-size:28px}.status-line{display:flex;justify-content:space-between;border-top:1px solid var(--line);padding:11px 0;color:var(--muted)}.status-line b{color:var(--text)}
+    .rail{display:grid;grid-template-columns:repeat(11,1fr);gap:8px;margin:24px 0}.stage{padding:12px 8px;border:1px solid var(--line);border-radius:12px;min-height:82px}.stage i{display:block;width:8px;height:8px;border-radius:50%;background:#39404a;margin-bottom:12px}.stage.done i{background:var(--ok)}.stage.current{border-color:var(--gold);background:#16140e}.stage.current i{background:var(--gold)}.stage small{display:block;color:var(--muted);font-size:10px}.stage b{font-size:11px;line-height:1.2;display:block;margin-top:4px}
+    .grid{display:grid;grid-template-columns:1.2fr .8fr;gap:18px}.card{border:1px solid var(--line);background:var(--panel);border-radius:18px;padding:22px}.card h2{margin:4px 0 16px;font-size:22px}.next{border-color:#4a4029;background:linear-gradient(145deg,#1b1811,#101214)}.next strong{font-size:27px;display:block;margin:8px 0}.next p{color:#c9c5b8}.pill{display:inline-flex;padding:5px 9px;border-radius:999px;border:1px solid var(--line);font-size:11px;color:var(--muted)}
+    .list{display:grid;gap:8px}.row{padding:12px 0;border-top:1px solid var(--line);display:grid;grid-template-columns:1fr auto;gap:12px}.row:first-child{border-top:0}.row small{color:var(--muted);display:block}.row b{font-weight:650}.tag{font-size:10px;letter-spacing:.08em;border:1px solid var(--line);padding:4px 7px;border-radius:999px;height:max-content}.tag.ok{color:var(--ok)}.tag.hold{color:var(--hold)}.tag.bad{color:var(--bad)}
+    .auth{display:none;margin:18px 0;border:1px solid #543737;background:#1a1111;border-radius:14px;padding:16px}.auth.show{display:block}.auth button,.primary{border:0;background:var(--gold);color:#111;padding:11px 16px;border-radius:10px;font-weight:750;cursor:pointer}.empty{color:var(--muted);padding:16px 0}.footer-note{color:var(--muted);font-size:12px;padding:22px 2px}.danger{color:var(--bad)}
+    @media(max-width:900px){.hero,.grid{grid-template-columns:1fr}.status-card{border-left:0;border-top:1px solid var(--line);padding:22px 0 0}.rail{display:flex;overflow:auto}.stage{min-width:130px}.shell{padding:14px}.hero{padding:24px}}
+  </style>
+</head>
+<body>
+<div class="shell">
+  <header class="top"><div class="brand"><span class="mark"></span><div><strong>SAHJONY GLOBAL TRADE</strong><small>Customer Deal Room</small></div></div><a href="/customer">Volver al portal</a></header>
+  <section class="auth" id="auth"><strong>Sesión requerida</strong><p class="muted">Inicia sesión en el portal de cliente para ver información protegida de tu operación.</p><button onclick="location.href='/customer'">Ir al portal de cliente</button></section>
+  <section class="hero">
+    <div><div class="eyebrow">TU OPERACIÓN · UNA SOLA VISTA</div><h1>De tu necesidad hasta la entrega.</h1><p>SAHJONY coordina sourcing, términos comerciales, controles, documentos, logística y seguimiento. Aquí ves únicamente la información autorizada para tu empresa y el próximo paso.</p></div>
+    <aside class="status-card"><small class="muted">ESTADO ACTUAL</small><strong id="currentStatus">CARGANDO</strong><div class="status-line"><span>Operación</span><b id="caseId">—</b></div><div class="status-line"><span>Próxima acción</span><b id="nextOwner">—</b></div><div class="status-line"><span>Capital SAHJONY</span><b>$0 objetivo</b></div></aside>
+  </section>
+  <div class="rail" id="rail"></div>
+  <section class="grid">
+    <div class="card next"><div class="eyebrow">PRÓXIMO PASO</div><strong id="nextAction">Estamos cargando tu operación.</strong><p id="nextDetail">La aplicación mostrará aquí la acción más importante que mantiene el negocio avanzando.</p><span class="pill" id="nextDue">Sin fecha pendiente</span></div>
+    <div class="card"><div class="eyebrow">OFERTA / PEDIDO</div><h2 id="product">Solicitud comercial</h2><div class="list" id="commercial"></div></div>
+    <div class="card"><div class="eyebrow">CONTROLES</div><h2>Preparación de la operación</h2><div class="list" id="controls"></div></div>
+    <div class="card"><div class="eyebrow">LOGÍSTICA</div><h2>Movimiento y entrega</h2><div class="list" id="shipping"></div></div>
+    <div class="card"><div class="eyebrow">DOCUMENTOS</div><h2>Documentos compartidos</h2><div class="list" id="documents"></div></div>
+    <div class="card"><div class="eyebrow">COMUNICACIONES</div><h2>Actualizaciones recientes</h2><div class="list" id="messages"></div></div>
+  </section>
+  <div class="footer-note">La información mostrada depende de los registros autorizados para tu sesión. SAHJONY no muestra en esta vista costos internos, márgenes, notas de negociación ni inteligencia propietaria de proveedores.</div>
+</div>
+<script src="/global-language.js" defer></script>
+<script src="/customer-deal-room.js" defer></script>
+</body>
+</html>
