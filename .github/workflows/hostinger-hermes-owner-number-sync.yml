@@ -1,0 +1,54 @@
+name: Hostinger Hermes Owner Number Sync
+
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/hostinger-hermes-owner-number-sync.yml']
+
+jobs:
+  sync:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      HOST: 69.62.68.67
+      SSH_USER: root
+      PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+      OWNER_WHATSAPP_E164: ${{ secrets.OWNER_WHATSAPP_E164 }}
+    steps:
+      - name: Prepare SSH
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$OWNER_WHATSAPP_E164"
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/key
+          chmod 600 ~/.ssh/key
+          ssh-keygen -y -f ~/.ssh/key >/dev/null
+      - name: Sync owner identity to Hermes
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=12 -i ~/.ssh/key "$SSH_USER@$HOST" "OWNER_WHATSAPP_E164='$OWNER_WHATSAPP_E164' bash -s" <<'REMOTE'
+          set -euo pipefail
+          install -d -m 700 /root/.config/systemd/user/hermes-gateway.service.d
+          cat > /root/.config/systemd/user/hermes-gateway.service.d/owner-whatsapp.conf <<EOF
+          [Service]
+          Environment=OWNER_WHATSAPP_E164=$OWNER_WHATSAPP_E164
+          Environment=SAHJONY_OWNER_WHATSAPP_E164=$OWNER_WHATSAPP_E164
+          EOF
+          chmod 600 /root/.config/systemd/user/hermes-gateway.service.d/owner-whatsapp.conf
+          systemctl --user daemon-reload
+          systemctl --user restart hermes-gateway.service
+          sleep 10
+          systemctl --user is-active --quiet hermes-gateway.service
+          envline="$(systemctl --user show hermes-gateway.service -p Environment --value)"
+          echo "$envline" | grep -q "OWNER_WHATSAPP_E164=$OWNER_WHATSAPP_E164"
+          echo "$envline" | grep -q "SAHJONY_OWNER_WHATSAPP_E164=$OWNER_WHATSAPP_E164"
+          pgrep -f '/whatsapp-bridge/bridge.js.*--mode bot' >/dev/null
+          echo OWNER_SECRET_SYNC=PASS
+          echo HERMES_GATEWAY_ACTIVE=1
+          echo WHATSAPP_BOT_ACTIVE=1
+          REMOTE
+      - name: Cleanup
+        if: always()
+        run: rm -f ~/.ssh/key
