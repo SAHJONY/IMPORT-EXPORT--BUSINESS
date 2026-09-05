@@ -93,6 +93,24 @@ jobs:
           PY2
           "$HPY" -m hermes_cli.main fallback list 2>&1 | head -120 || true
           "$HPY" -m hermes_cli.main auth list 2>&1 | head -160 || true
+          echo '=== PROVIDER CREDENTIAL PRESENCE ==='
+          "$HPY" - <<'PY3'
+          import os,re,subprocess
+          names=['OPENAI_API_KEY','OPENROUTER_API_KEY','TOGETHER_API_KEY','FIREWORKS_API_KEY','GROQ_API_KEY','NVIDIA_API_KEY','HF_TOKEN','HUGGINGFACE_API_KEY']
+          found={n:bool(os.environ.get(n)) for n in names}
+          try:
+              out=subprocess.check_output(['systemctl','--user','show','hermes-gateway.service','-p','Environment','--value'],text=True,stderr=subprocess.DEVNULL)
+              for n in names:
+                  if re.search(r'(?:^|\s)'+re.escape(n)+r'=',out): found[n]=True
+          except Exception: pass
+          for path in ['/root/.hermes/.env','/root/.hermes/hermes-agent/.env','/root/.config/hermes/.env']:
+              try:
+                  txt=open(path,encoding='utf-8').read()
+                  for n in names:
+                      if re.search(r'(?m)^'+re.escape(n)+r'=.+$',txt): found[n]=True
+              except Exception: pass
+          for n,v in found.items(): print(f'{n}_PRESENT={1 if v else 0}')
+          PY3
           echo '=== SCHEDULER / CRON DISCOVERY ==='
           "$HPY" -m hermes_cli.main cron --help 2>&1 | head -120 || true
           "$HPY" -m hermes_cli.main cronjob --help 2>&1 | head -120 || true
