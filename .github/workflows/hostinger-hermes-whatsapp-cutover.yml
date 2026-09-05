@@ -46,102 +46,118 @@ jobs:
           ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/hostinger-hermes "$SSH_USER@$HOST" 'bash -s' <<'REMOTE'
           set -u
           HERMES_PY=/root/.hermes/hermes-agent/venv/bin/python
-          echo '=== CORE RUNTIME ==='
-          uname -a || true
-          echo "HERMES_PROCESS=$(pgrep -af 'hermes_cli.main gateway run' | head -1 || true)"
-          echo "OPENCLAW_PROCESS=$(pgrep -af 'openclaw gateway' | head -1 || true)"
-          echo '=== HERMES GATEWAY STATUS ==='
-          "$HERMES_PY" -m hermes_cli.main gateway status 2>&1 | head -120 || true
-          echo '=== HERMES GATEWAY HELP ==='
-          "$HERMES_PY" -m hermes_cli.main gateway --help 2>&1 | head -140 || true
-          echo '=== HERMES CONFIG KEYS ==='
+          echo '=== GATEWAY STATUS ==='
+          "$HERMES_PY" -m hermes_cli.main gateway status 2>&1 | head -100 || true
+          echo '=== HERMES BRIDGE PACKAGE ==='
+          ls -la /root/.hermes/hermes-agent/scripts/whatsapp-bridge 2>/dev/null || true
+          cat /root/.hermes/hermes-agent/scripts/whatsapp-bridge/package.json 2>/dev/null | head -120 || true
+          echo '=== HERMES SESSION FILE NAMES ==='
+          find /root/.hermes/platforms/whatsapp/session -maxdepth 3 -type f -printf '%P\n' 2>/dev/null | sort | head -200 || true
+          echo '=== OPENCLAW WHATSAPP CREDENTIAL FILE NAMES ==='
+          find /var/lib/sahjony-openclaw-state/credentials/whatsapp -maxdepth 4 -type f -printf '%P\n' 2>/dev/null | sort | head -240 || true
+          echo '=== CREDS JSON SHAPES ==='
           "$HERMES_PY" - <<'PY'
+          import json
           from pathlib import Path
-          import yaml
-          p=Path('/root/.hermes/config.yaml')
-          if not p.exists():
-              print('HERMES_CONFIG_MISSING=1'); raise SystemExit
-          data=yaml.safe_load(p.read_text()) or {}
-          sensitive=('token','key','secret','password','cookie','session','auth')
-          def walk(obj,prefix=''):
-              if isinstance(obj,dict):
-                  for k,v in obj.items():
-                      path=f'{prefix}.{k}' if prefix else str(k)
-                      if any(s in str(k).lower() for s in sensitive):
-                          print(path+'=<redacted-present>' if v else path+'=<empty>')
-                      elif isinstance(v,(dict,list)):
-                          print(path+f'=<'+type(v).__name__+'>')
-                          walk(v,path)
-                      elif isinstance(v,(str,int,float,bool)) or v is None:
-                          txt=str(v)
-                          if len(txt)>120: txt=txt[:117]+'...'
-                          print(path+'='+txt)
-              elif isinstance(obj,list):
-                  for i,v in enumerate(obj): walk(v,f'{prefix}[{i}]')
-          walk(data)
+          roots=[Path('/root/.hermes/platforms/whatsapp/session'),Path('/var/lib/sahjony-openclaw-state/credentials/whatsapp')]
+          for root in roots:
+              print('ROOT',root)
+              for p in root.rglob('creds.json') if root.exists() else []:
+                  try:
+                      d=json.loads(p.read_text())
+                      print('CREDS',p,'TOP_KEYS',sorted(d.keys()) if isinstance(d,dict) else type(d).__name__)
+                  except Exception as e:
+                      print('CREDS_PARSE_FAILED',p,type(e).__name__)
           PY
-          echo '=== HERMES WHATSAPP BRIDGE LOG ==='
-          tail -120 /root/.hermes/platforms/whatsapp/bridge.log 2>/dev/null | sed -E 's/([A-Za-z0-9_]*(token|key|secret|password|cookie|session|auth)[A-Za-z0-9_]*[=:])[[:space:]]*[^ ]+/\1***REDACTED***/Ig' || true
-          echo '=== HERMES WHATSAPP PLATFORM CODE SIGNALS ==='
-          grep -nE 'class |def |bridge|pair|qr|session|connect|status|auth|whatsapp' /root/.hermes/hermes-agent/gateway/platforms/whatsapp.py 2>/dev/null | head -220 || true
-          echo '=== HERMES PLATFORM PROCESSES ==='
-          ps -eo pid,ppid,user,cmd | grep -E '/root/.hermes|whatsapp|bridge' | grep -v grep | head -100 || true
-          echo '=== OPENCLAW / HERMES SERVICES ==='
-          systemctl is-active openclaw-gateway.service 2>/dev/null || true
-          systemctl is-enabled openclaw-gateway.service 2>/dev/null || true
-          systemctl list-units --type=service --all 2>/dev/null | grep -Ei 'hermes|openclaw|whatsapp' || true
-          echo '=== LISTENERS ==='
-          ss -lntp 2>/dev/null | grep -E ':(18789|3000|8000|8080|8787|8765|8766)\b' || true
+          echo '=== HERMES BRIDGE LOG TAIL ==='
+          tail -80 /root/.hermes/platforms/whatsapp/bridge.log 2>/dev/null || true
+          echo '=== PROCESSES ==='
+          pgrep -af 'hermes_cli.main gateway run|openclaw gateway|whatsapp-bridge|bridge.js' || true
           echo HOSTINGER_HERMES_AUDIT_COMPLETE=1
           REMOTE
-      - name: Stage Hermes application files
+      - name: Stage Hermes application and WhatsApp bridge
         if: ${{ inputs.mode == 'stage' || inputs.mode == 'cutover' || inputs.mode == 'retire-openclaw' }}
         shell: bash
         run: |
           set -euo pipefail
+          ssh_opts=(-o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/hostinger-hermes)
           files=(sofia_hermes_whatsapp_environment.py sofia_whatsapp_runtime.py sofia_hermes_nim_brain.py sofia_crm_growth_engine.py insforge_backend.py auth.py)
           for f in "${files[@]}"; do [[ -f "$f" ]] || { echo "MISSING_FILE=$f" >&2; exit 4; }; done
-          ssh_opts=(-o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/hostinger-hermes)
           ssh "${ssh_opts[@]}" "$SSH_USER@$HOST" 'install -d -m 750 /opt/sahjony-hermes'
           scp "${ssh_opts[@]}" "${files[@]}" "$SSH_USER@$HOST:/opt/sahjony-hermes/"
-          scp "${ssh_opts[@]}" scripts/configure_sofia_hermes_web.sh "$SSH_USER@$HOST:/opt/sahjony-hermes/" 2>/dev/null || true
+          ssh "${ssh_opts[@]}" "$SSH_USER@$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          BRIDGE=/root/.hermes/hermes-agent/scripts/whatsapp-bridge
+          test -f "$BRIDGE/package.json"
+          cd "$BRIDGE"
+          if [[ ! -f node_modules/@whiskeysockets/baileys/lib/index.js && ! -f node_modules/@whiskeysockets/baileys/index.js ]]; then
+            npm install --omit=dev
+          fi
+          test -d node_modules/@whiskeysockets/baileys
+          echo HERMES_WHATSAPP_DEPENDENCIES_READY=1
+          REMOTE
           echo HOSTINGER_HERMES_STAGE_COMPLETE=1
-      - name: Guard cutover until independent WhatsApp transport exists
+      - name: Migrate compatible linked-device credentials and restart Hermes
         if: ${{ inputs.mode == 'cutover' || inputs.mode == 'retire-openclaw' }}
         shell: bash
         run: |
           set -euo pipefail
           ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/hostinger-hermes "$SSH_USER@$HOST" 'bash -s' <<'REMOTE'
           set -euo pipefail
-          independent=0
-          systemctl is-active --quiet sahjony-hermes-whatsapp.service 2>/dev/null && independent=1 || true
-          pgrep -f 'hermes_cli.main gateway run' >/dev/null 2>&1 && grep -Eqi 'connected|ready|logged.?in|authenticated' /root/.hermes/platforms/whatsapp/bridge.log 2>/dev/null && independent=1 || true
-          if [[ "$independent" != 1 ]]; then
-            echo HERMES_INDEPENDENT_WHATSAPP_TRANSPORT_NOT_READY=1 >&2
-            echo OPENCLAW_PRESERVED_TO_AVOID_WHATSAPP_OUTAGE=1 >&2
-            exit 20
+          HSESSION=/root/.hermes/platforms/whatsapp/session
+          OROOT=/var/lib/sahjony-openclaw-state/credentials/whatsapp
+          mkdir -p "$HSESSION" /root/sahjony-cutover-backups
+          src=""
+          while IFS= read -r f; do
+            d=$(dirname "$f")
+            if [[ -f "$d/creds.json" ]]; then src="$d"; break; fi
+          done < <(find "$OROOT" -type f -name creds.json 2>/dev/null)
+          if [[ -z "$src" ]]; then
+            echo OPENCLAW_BAILEYS_CREDS_NOT_FOUND=1 >&2
+            exit 18
           fi
+          python3 - "$src/creds.json" <<'PY'
+          import json,sys
+          d=json.load(open(sys.argv[1]))
+          need={'noiseKey','signedIdentityKey','signedPreKey','registrationId','advSecretKey','me','account','signalIdentities','platform'}
+          keys=set(d) if isinstance(d,dict) else set()
+          if len(keys & need) < 5:
+              print('OPENCLAW_CREDS_NOT_BAILEYS_COMPATIBLE=1')
+              raise SystemExit(19)
+          print('OPENCLAW_CREDS_BAILEYS_COMPATIBLE=1')
+          PY
+          ts=$(date -u +%Y%m%dT%H%M%SZ)
+          [[ ! -d "$HSESSION" || -z "$(find "$HSESSION" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ]] || tar -C "$(dirname "$HSESSION")" -czf "/root/sahjony-cutover-backups/hermes-whatsapp-session-$ts.tgz" "$(basename "$HSESSION")"
+          rm -rf "$HSESSION"/*
+          cp -a "$src"/. "$HSESSION"/
+          chmod -R go-rwx "$HSESSION"
+          systemctl --user restart hermes-gateway.service
+          sleep 12
+          /root/.hermes/hermes-agent/venv/bin/python -m hermes_cli.main gateway status 2>&1 | head -120
+          grep -Eqi 'connected|ready|authenticated' /root/.hermes/platforms/whatsapp/bridge.log || { echo HERMES_WHATSAPP_NOT_CONNECTED_AFTER_MIGRATION=1 >&2; tail -80 /root/.hermes/platforms/whatsapp/bridge.log >&2; exit 20; }
           echo HERMES_INDEPENDENT_WHATSAPP_TRANSPORT_READY=1
           REMOTE
-      - name: Retire OpenClaw only after independent transport gate
+      - name: Retire OpenClaw only after Hermes WhatsApp is healthy
         if: ${{ inputs.mode == 'retire-openclaw' }}
         shell: bash
         run: |
           set -euo pipefail
           ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/hostinger-hermes "$SSH_USER@$HOST" 'bash -s' <<'REMOTE'
           set -euo pipefail
+          grep -Eqi 'connected|ready|authenticated' /root/.hermes/platforms/whatsapp/bridge.log || { echo HERMES_WHATSAPP_NOT_VERIFIED=1 >&2; exit 22; }
           pgrep -f 'hermes_cli.main gateway run' >/dev/null || { echo HERMES_GATEWAY_NOT_RUNNING=1 >&2; exit 21; }
-          grep -Eqi 'connected|ready|logged.?in|authenticated' /root/.hermes/platforms/whatsapp/bridge.log || { echo HERMES_WHATSAPP_NOT_VERIFIED=1 >&2; exit 22; }
           mkdir -p /root/sahjony-cutover-backups
           ts=$(date -u +%Y%m%dT%H%M%SZ)
           tar -C /var/lib -czf "/root/sahjony-cutover-backups/openclaw-state-$ts.tgz" sahjony-openclaw-state sahjony-openclaw-auth 2>/dev/null || true
-          systemctl disable --now openclaw-gateway.service sahjony-openclaw-runtime-guardian.service 2>/dev/null || true
+          systemctl disable --now sahjony-openclaw-runtime-guardian.service 2>/dev/null || true
           systemctl disable --now sahjony-openclaw-health-sidecar.timer 2>/dev/null || true
+          systemctl disable --now openclaw-gateway.service
           for c in $(docker ps -a --format '{{.Names}}' | grep -Ei 'openclaw' || true); do docker stop "$c" 2>/dev/null || true; done
-          sleep 3
-          pgrep -af 'openclaw gateway' && { echo OPENCLAW_STILL_RUNNING=1 >&2; exit 23; } || true
+          sleep 5
+          pgrep -f 'openclaw gateway' >/dev/null && { echo OPENCLAW_STILL_RUNNING=1 >&2; exit 23; } || true
           pgrep -f 'hermes_cli.main gateway run' >/dev/null || { echo HERMES_DIED_DURING_CUTOVER=1 >&2; exit 24; }
+          grep -Eqi 'connected|ready|authenticated' /root/.hermes/platforms/whatsapp/bridge.log || { echo HERMES_WHATSAPP_DIED_DURING_CUTOVER=1 >&2; exit 25; }
           echo OPENCLAW_RUNTIME_STOPPED_AND_DISABLED=1
           echo OPENCLAW_DATA_BACKED_UP_FOR_ROLLBACK=1
-          echo HERMES_REMAINS_RUNNING=1
+          echo HERMES_WHATSAPP_IS_PRODUCTION_AUTHORITY=1
           REMOTE
