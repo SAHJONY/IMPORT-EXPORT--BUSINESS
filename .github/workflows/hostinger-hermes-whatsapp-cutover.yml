@@ -106,6 +106,20 @@ jobs:
             cd "$BRIDGE"
           fi
           test -f node_modules/@whiskeysockets/baileys/lib/index.js || test -f node_modules/@whiskeysockets/baileys/index.js
+          install -d -m 700 /root/.config/systemd/user/hermes-gateway.service.d
+          cat > /root/.config/systemd/user/hermes-gateway.service.d/20-sahjony-whatsapp-sales.conf <<'EOF'
+          [Service]
+          Environment=WHATSAPP_MODE=bot
+          Environment=WHATSAPP_ALLOWED_USERS=*
+          EOF
+          systemctl --user daemon-reload
+          systemctl --user restart hermes-gateway.service
+          sleep 10
+          pgrep -f 'hermes_cli.main gateway run' >/dev/null
+          pgrep -f '/whatsapp-bridge/bridge.js.*--mode bot' >/dev/null
+          grep -Eqi 'connected|ready|authenticated' /root/.hermes/platforms/whatsapp/bridge.log
+          echo HERMES_WHATSAPP_MODE=bot
+          echo HERMES_WHATSAPP_INBOUND_POLICY=all_direct_inbound
           echo HERMES_WHATSAPP_DEPENDENCIES_READY=1
           REMOTE
           echo HOSTINGER_HERMES_STAGE_COMPLETE=1
