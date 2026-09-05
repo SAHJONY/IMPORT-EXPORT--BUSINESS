@@ -22,19 +22,16 @@ jobs:
           printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/key
           chmod 600 ~/.ssh/key
           ssh-keygen -y -f ~/.ssh/key >/dev/null
-      - name: Inspect types and identity helpers
+      - name: Inspect MessageEvent
         shell: bash
         run: |
           set -euo pipefail
           ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=12 -i ~/.ssh/key "$SSH_USER@$HOST" 'bash -s' <<'REMOTE'
           set -euo pipefail
-          echo '=== MESSAGE EVENT DEFINITIONS ==='
-          grep -Rni --exclude-dir='__pycache__' -E '^class MessageEvent|@dataclass[[:space:]]*$|channel_prompt:' /root/.hermes/hermes-agent/gateway | head -180 || true
-          echo '=== WHATSAPP IDENTITY HELPERS ==='
-          grep -nE '^def |^class ' /root/.hermes/hermes-agent/gateway/whatsapp_identity.py | head -120 || true
-          sed -n '1,180p' /root/.hermes/hermes-agent/gateway/whatsapp_identity.py | head -180
-          echo '=== WHATSAPP IMPORTS ==='
-          sed -n '1,90p' /root/.hermes/hermes-agent/gateway/platforms/whatsapp.py
+          echo '=== MESSAGEEVENT REFERENCES ==='
+          grep -Rni --exclude-dir='__pycache__' 'MessageEvent' /root/.hermes/hermes-agent/gateway | head -120 || true
+          echo '=== BASE EVENT REGION ==='
+          grep -nE 'class .*Event|channel_prompt' /root/.hermes/hermes-agent/gateway/platforms/base.py | head -120 || true
           REMOTE
       - name: Cleanup
         if: always()
