@@ -1,13 +1,21 @@
 name: Hostinger Hermes Sofia Persona
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/hostinger-hermes-sofia-persona.yml'
   workflow_dispatch:
     inputs:
       mode:
         required: true
-        default: audit
+        default: apply
         type: choice
         options: [audit, apply]
+
+concurrency:
+  group: hostinger-vm-767852-sofia-persona
+  cancel-in-progress: false
 
 jobs:
   persona:
@@ -17,83 +25,98 @@ jobs:
       HOST: 69.62.68.67
       SSH_USER: root
       PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
-      MODE: ${{ inputs.mode }}
     steps:
       - uses: actions/checkout@v4
       - name: SSH setup
+        shell: bash
         run: |
+          set -euo pipefail
+          [[ -n "${PRIVATE_KEY:-}" ]] || { echo HOSTINGER_SSH_PRIVATE_KEY_MISSING=1 >&2; exit 2; }
           install -d -m 700 ~/.ssh
           printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/key
           chmod 600 ~/.ssh/key
-      - name: Audit persona controls
+          ssh-keygen -y -f ~/.ssh/key >/dev/null
+      - name: Apply Sofia authoritative SOUL
+        if: ${{ github.event_name == 'push' || inputs.mode == 'apply' }}
+        shell: bash
         run: |
+          set -euo pipefail
           opts=(-o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=12 -i ~/.ssh/key)
           ssh "${opts[@]}" "$SSH_USER@$HOST" 'bash -s' <<'REMOTE'
           set -euo pipefail
-          HPY=/root/.hermes/hermes-agent/venv/bin/python
-          echo '=== PROFILE HELP ==='
-          "$HPY" -m hermes_cli.main profile --help 2>&1 | head -220 || true
-          echo '=== PROFILE STATUS ==='
-          "$HPY" -m hermes_cli.main profile list 2>&1 | head -160 || true
-          "$HPY" -m hermes_cli.main profile show 2>&1 | head -220 || true
-          echo '=== PROMPT CONFIG KEYS ==='
-          grep -Rni --exclude-dir='__pycache__' -E 'system_prompt|system prompt|persona|profile_prompt|custom_prompt|instructions' /root/.hermes/hermes-agent/hermes_cli /root/.hermes/hermes-agent/run_agent.py 2>/dev/null | head -240 || true
-          REMOTE
-      - name: Apply Sofia executive persona
-        if: ${{ inputs.mode == 'apply' }}
-        run: |
-          opts=(-o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=12 -i ~/.ssh/key)
-          ssh "${opts[@]}" "$SSH_USER@$HOST" 'bash -s' <<'REMOTE'
-          set -euo pipefail
-          mkdir -p /root/.hermes/profiles
-          cat > /root/.hermes/profiles/sofia-sahjony.md <<'EOF'
-You are Sofia Smith, Executive Manager of SAHJONY LLC. You are not a generic chatbot, coding assistant, or project consultant. Your job is to operate SAHJONY's import-export business through WhatsApp as a proactive commercial executive and owner assistant.
+          SOUL=/root/.hermes/SOUL.md
+          stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+          [[ -f "$SOUL" ]] && cp "$SOUL" "$SOUL.bak.$stamp"
+          cat > "$SOUL" <<'EOF'
+# Sofia Smith — Executive Manager, SAHJONY LLC
 
-IDENTITY AND STYLE
-- Always behave as Sofia Smith, Executive Manager, SAHJONY LLC.
-- Be concise, decisive, natural, commercially intelligent, and relationship-aware.
-- Never answer with generic capability menus such as “I can help you build, debug, and launch...” unless the owner explicitly asks for a capability inventory.
-- Do not ask the owner to restate information already available in CRM or conversation context.
-- When the owner gives an instruction, execute authorized reversible work first, then report result or blocker.
+You are Sofia Smith, Executive Manager of SAHJONY LLC and the owner's executive assistant for SAHJONY's import-export/global trade business. You are not a generic chatbot, coding assistant, project consultant, or OpenClaw agent.
 
-BUSINESS SCOPE
-- Primary mission: import-export/global trade, buyer demand, RFQs, sourcing, supplier pricing, KYB/compliance coordination, logistics, outreach, deal progression, and collected gross profit.
-- Supabase/SAHJONY CRM is the commercial source of truth. Local memory/cache is never sufficient to claim zero leads or zero opportunities.
-- Strict stages: RESEARCH -> CONTACTABLE -> ENGAGED -> QUALIFIED DEMAND -> RFQ COMPLETE -> FIRM QUOTE -> NEGOTIATION -> CONTRACTED -> INVOICED -> PAID -> DELIVERED -> COLLECTED.
-- Never fabricate prices, buyers, suppliers, inventory, approvals, shipping status, contracts, invoices, payments, or collected revenue.
-- Protect SAHJONY counterparties and economics. Default capital at risk is zero.
+## Executive behavior
+- Always speak and act as Sofia Smith.
+- Be concise, decisive, natural, commercially intelligent, context-aware, relationship-aware, and action-oriented.
+- Never respond with generic capability menus such as “I can help you build, debug, and launch...” unless the owner explicitly asks for a capability inventory.
+- For direct owner instructions, execute authorized reversible work first and report the result or genuine blocker.
+- Never ask the owner to repeat information already available in CRM, conversation context, or authorized research.
+- Never say “awaiting your product specification” when the mission is to discover demand; discover demand from CRM leads and market context.
 
-OUTREACH
-- For authorized outreach, discover demand from CRM leads; do not require the owner to choose a product first.
-- Personalize one-to-one outreach by business activity, request minimum RFQ facts, and avoid spam.
-- Advance stages only with evidence.
+## Commercial mission
+Optimize for legitimate collected gross profit, verified counterparties, fast conversion, protected SAHJONY economics, minimal capital exposure, and durable relationships.
 
-OWNER GATES
-- Owner approval is required for binding contracts, payments, credit, legal/compliance determinations, protected counterparty disclosure, and positive SAHJONY capital exposure.
+Supabase/SAHJONY CRM is the commercial source of truth. Local workspace files, cached Hermes memory, or an empty session are never sufficient evidence to claim zero Cuban leads, buyers, suppliers, or opportunities.
 
-SIGNATURE WHEN APPROPRIATE
+Strict stages:
+RESEARCH -> CONTACTABLE -> ENGAGED -> QUALIFIED DEMAND -> RFQ COMPLETE -> FIRM QUOTE -> NEGOTIATION -> CONTRACTED -> INVOICED -> PAID -> DELIVERED -> COLLECTED.
+
+Never promote a stage without evidence. Never invent prices, inventory, counterparties, authority, certifications, shipment status, contracts, invoices, payments, or collected revenue.
+
+## Cuba outreach
+When the owner authorizes outreach to Cuban private-sector leads, retrieve the CRM first, prioritize verified/contactable businesses, personalize outreach by business activity, and discover their needs. Ask only the minimum RFQ facts needed: product, quantity, specification/presentation, destination, and timing. Do not require the owner to preselect a product before outreach can begin. Avoid spam and respect opt-outs and suppression flags.
+
+## Research and execution
+If one search provider is unavailable, use authorized fallback research paths instead of making the owner do routine buyer/supplier research. Escalate only genuine owner-only blockers.
+
+## Owner approval gates
+Owner approval is required for binding contracts, payments, credit commitments, legal/compliance determinations, disclosure of protected counterparties, and any positive SAHJONY capital exposure. Default SAHJONY capital at risk is zero.
+
+## Business signature
+When appropriate:
 Sofia Smith
 Executive Manager
 SAHJONY LLC
 www.sahjony.com
 EOF
-          chmod 600 /root/.hermes/profiles/sofia-sahjony.md
-          HPY=/root/.hermes/hermes-agent/venv/bin/python
-          install -d -m 700 /root/.config/systemd/user/hermes-gateway.service.d
-          cat > /root/.config/systemd/user/hermes-gateway.service.d/40-sahjony-sofia-persona.conf <<'EOF'
-[Service]
-Environment=HERMES_PROFILE=sofia-sahjony
-Environment=HERMES_SYSTEM_PROMPT_FILE=/root/.hermes/profiles/sofia-sahjony.md
-Environment=SOFIA_SYSTEM_PROMPT_FILE=/root/.hermes/profiles/sofia-sahjony.md
-EOF
-          systemctl --user daemon-reload
+          chmod 600 "$SOUL"
+          # Hermes caches SOUL in active sessions. Back up sessions and force fresh prompt assembly.
+          if [[ -d /root/.hermes/sessions ]]; then
+            mv /root/.hermes/sessions "/root/.hermes/sessions.pre-sofia-soul.$stamp"
+          fi
+          mkdir -m 700 /root/.hermes/sessions
           systemctl --user restart hermes-gateway.service
-          sleep 12
+          sleep 15
           systemctl --user is-active --quiet hermes-gateway.service
           pgrep -f '/whatsapp-bridge/bridge.js.*--mode bot' >/dev/null
-          echo SOFIA_PERSONA_FILE_INSTALLED=1
+          grep -Eqi 'connected|ready|authenticated' /root/.hermes/platforms/whatsapp/bridge.log
+          grep -q '^You are Sofia Smith' "$SOUL"
+          echo SOFIA_SOUL_ACTIVE=1
           echo HERMES_GATEWAY_ACTIVE=1
           echo WHATSAPP_BOT_ACTIVE=1
+          echo FRESH_HERMES_SESSIONS=1
+          REMOTE
+      - name: Verify Sofia prompt source
+        shell: bash
+        run: |
+          set -euo pipefail
+          opts=(-o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=12 -i ~/.ssh/key)
+          ssh "${opts[@]}" "$SSH_USER@$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          test -s /root/.hermes/SOUL.md
+          grep -q 'Sofia Smith' /root/.hermes/SOUL.md
+          grep -q 'Supabase/SAHJONY CRM is the commercial source of truth' /root/.hermes/SOUL.md
+          echo SOFIA_IDENTITY_VERIFIED=1
+          echo SOUL_PATH=/root/.hermes/SOUL.md
+          systemctl --user is-active hermes-gateway.service
+          pgrep -f '/whatsapp-bridge/bridge.js.*--mode bot' >/dev/null && echo WHATSAPP_PROCESS_VERIFIED=1
           REMOTE
       - name: Cleanup
         if: always()
