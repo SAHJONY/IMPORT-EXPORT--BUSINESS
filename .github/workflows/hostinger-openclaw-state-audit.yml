@@ -4,6 +4,7 @@ on:
   push:
     paths:
       - '.github/workflows/hostinger-openclaw-state-audit.yml'
+      - 'openclaw/hostinger-24x7/hermes-runtime-inspector.sh'
   workflow_dispatch:
 
 permissions:
@@ -46,6 +47,13 @@ jobs:
           chmod +x openclaw/hostinger-24x7/openclaw-state-audit.sh
           scp -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/hostinger openclaw/hostinger-24x7/openclaw-state-audit.sh "$USER@$HOST:/tmp/openclaw-state-audit.sh"
           ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/hostinger "$USER@$HOST" 'ROOT_PREFIX=/ bash /tmp/openclaw-state-audit.sh; rm -f /tmp/openclaw-state-audit.sh'
+      - name: Inspect Hermes runtime without mutation
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x openclaw/hostinger-24x7/hermes-runtime-inspector.sh
+          scp -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/hostinger openclaw/hostinger-24x7/hermes-runtime-inspector.sh "$USER@$HOST:/tmp/hermes-runtime-inspector.sh"
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/hostinger "$USER@$HOST" 'bash /tmp/hermes-runtime-inspector.sh; rm -f /tmp/hermes-runtime-inspector.sh'
       - name: Remove runner key
         if: always()
         shell: bash
