@@ -4,7 +4,7 @@ from typing import Literal
 from fastapi import FastAPI
 from pydantic import BaseModel, Field
 
-app = FastAPI(title="SAHJONY US National Shipping Network", version="1.1.0", docs_url=None, redoc_url=None)
+app = FastAPI(title="SAHJONY US National Shipping Network", version="1.2.0", docs_url=None, redoc_url=None)
 
 Mode = Literal["AIR", "SEA", "MULTIMODAL"]
 CargoUnit = Literal["SINGLE_ITEM", "BOX", "MULTIPLE_BOXES", "PALLET", "LTL", "CONSOLIDATED_LCL", "FCL", "VEHICLE", "MOTORCYCLE", "OVERSIZED", "SPECIAL_REGULATED"]
@@ -20,8 +20,16 @@ US_ZONES = {
 }
 
 PRIMARY_HUBS = {
-    "HOUSTON": {"state": "TX", "role": ["TEXAS_GULF", "CENTRAL_US", "SEA", "AIR", "LINEHAUL"]},
-    "MIAMI": {"state": "FL", "role": ["SOUTH_FLORIDA", "CARIBBEAN_GATEWAY", "SEA", "AIR", "CONSOLIDATION"]},
+    "HOUSTON": {
+        "state": "TX", "owner": "SAHJONY", "facility_type": "OWNED_WAREHOUSE",
+        "role": ["TEXAS_GULF", "CENTRAL_US", "SEA", "AIR", "LINEHAUL", "CONSOLIDATION", "VEHICLE_STAGING"],
+        "capabilities": ["RECEIVING", "WEIGHING", "DIMENSIONING", "PHOTO_EVIDENCE", "QR_INTAKE", "PALLETIZATION", "LCL", "FCL", "AIR_CONSOLIDATION", "VEHICLE_MOTORCYCLE_STAGING", "CUSTODY_HANDOFF"],
+    },
+    "MIAMI": {
+        "state": "FL", "owner": "SAHJONY", "facility_type": "OWNED_WAREHOUSE",
+        "role": ["SOUTH_FLORIDA", "CARIBBEAN_GATEWAY", "SEA", "AIR", "CONSOLIDATION", "VEHICLE_STAGING"],
+        "capabilities": ["RECEIVING", "WEIGHING", "DIMENSIONING", "PHOTO_EVIDENCE", "QR_INTAKE", "PALLETIZATION", "LCL", "FCL", "AIR_CONSOLIDATION", "VEHICLE_MOTORCYCLE_STAGING", "CUSTODY_HANDOFF"],
+    },
 }
 
 class NationalIntake(BaseModel):
@@ -71,11 +79,7 @@ def recommend_hub(p: NationalIntake) -> str:
 
 def final_delivery_policy(p: NationalIntake) -> dict:
     if p.customer_requests_terminal_delivery:
-        return {
-            "delivery_type": "TERMINAL_OPTIONAL",
-            "door_to_door_default_overridden": True,
-            "override_reason": "CUSTOMER_REQUEST",
-        }
+        return {"delivery_type": "TERMINAL_OPTIONAL", "door_to_door_default_overridden": True, "override_reason": "CUSTOMER_REQUEST"}
     return {
         "delivery_type": "DOOR_TO_BUSINESS" if p.recipient_type == "BUSINESS" else "DOOR_TO_DOOR",
         "door_to_door_default_overridden": False,
@@ -88,8 +92,9 @@ async def health():
     return {
         "status": "ok",
         "national_coverage": True,
-        "asset_light": True,
-        "primary_hubs": list(PRIMARY_HUBS),
+        "operating_model": "HYBRID_OWNED_HUBS_PLUS_PARTNER_FEEDER_NETWORK",
+        "owned_warehouses": ["HOUSTON", "MIAMI"],
+        "primary_hubs": PRIMARY_HUBS,
         "air_sea_separated": True,
         "universal_cargo_units": True,
         "customer_technical_knowledge_required": False,
@@ -107,13 +112,16 @@ async def route(p: NationalIntake):
     return {
         "origin_zone": zone_for(p.origin_state),
         "recommended_hub": hub,
+        "hub_owner": "SAHJONY",
+        "hub_facility_type": "OWNED_WAREHOUSE",
         "recommended_mode": mode,
-        "origin_leg": "HOME_OR_BUSINESS_PICKUP_TO_COLLECTION_PARTNER_OR_HUB",
-        "domestic_leg": "LOCAL_PICKUP_OR_PARCEL_LTL_LINEHAUL",
+        "origin_leg": "HOME_OR_BUSINESS_PICKUP_TO_PARTNER_OR_DIRECT_TO_SAHJONY_WAREHOUSE",
+        "warehouse_leg": "SAHJONY_RECEIVE_WEIGH_DIMENSION_PHOTO_QR_STAGE_CONSOLIDATE",
+        "domestic_leg": "LOCAL_PICKUP_OR_PARCEL_LTL_LINEHAUL_TO_SAHJONY_HUB",
         "international_leg": mode,
         "destination_leg": "CUSTOMS_TO_LAST_MILE_TO_FINAL_ADDRESS",
         "final_delivery": final_delivery,
-        "pricing_rule": "Quote must include origin pickup/collection, domestic transfer, hub handling, international freight, customs/destination handling where applicable, last-mile delivery and POD unless explicitly disclosed otherwise.",
+        "pricing_rule": "Quote must include origin pickup/collection, domestic transfer, SAHJONY warehouse handling, international freight, customs/destination handling where applicable, last-mile delivery and POD unless explicitly disclosed otherwise.",
         "completion_rule": "Shipment is not complete until delivered to the final home/business address and POD is recorded, unless a customer-selected or legally required terminal exception applies.",
         "booking_status": "COMPLIANCE_REVIEW" if p.dangerous_or_regulated else "RATE_AND_CAPACITY_REVIEW",
         "customer_message_rule": "Ask what, from where, to where, quantity/size and urgency. Do not require port, terminal, incoterm, HAWB or HBL from the customer at first contact.",
