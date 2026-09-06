@@ -18,7 +18,7 @@ from typing import Any
 
 SIGNATURE_VERSION = "crm-v1"
 DEFAULT_APP_URL = "https://www.sahjony.com"
-MUTATING_ACTIONS = {"sync", "note", "intake"}
+MUTATING_ACTIONS = {"sync", "note", "intake", "outreach-pilot"}
 
 
 def now_iso() -> str:
@@ -227,6 +227,8 @@ def endpoint(action: str) -> tuple[str, str]:
         "sync": ("POST", "/whatsapp/crm/sync"),
         "note": ("POST", "/whatsapp/crm/note"),
         "intake": ("POST", "/whatsapp/crm/intake"),
+        "outreach-pilot": ("POST", "/whatsapp/crm/outreach-pilot"),
+        "outreach-status": ("POST", "/whatsapp/crm/outreach-pilot/status"),
     }
     return mapping[action]
 
@@ -346,7 +348,7 @@ def parser() -> argparse.ArgumentParser:
     sub.add_parser("health")
     contact = sub.add_parser("contact")
     contact.add_argument("phone")
-    for action in ("sync", "note", "intake"):
+    for action in ("sync", "note", "intake", "outreach-pilot", "outreach-status"):
         item = sub.add_parser(action)
         item.add_argument("--json", required=True, help="JSON object, or '-' to read JSON from stdin")
     sub.add_parser("flush")

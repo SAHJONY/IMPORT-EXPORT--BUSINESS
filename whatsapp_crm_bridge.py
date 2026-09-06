@@ -4,7 +4,8 @@ import hashlib
 import hmac
 import json
 import os
-from datetime import datetime, timezone
+import secrets
+from datetime import datetime, timedelta, timezone
 from typing import Any, Literal
 
 from fastapi import APIRouter, Header, HTTPException, Request
@@ -120,12 +121,130 @@ class CRMIntakeIn(BaseModel):
     notes: str | None = Field(default=None, max_length=4000)
 
 
+class CRMOutreachPilotIn(BaseModel):
+    operation_id: str = Field(min_length=8, max_length=160)
+    limit: int = Field(default=25, ge=1, le=50)
+    dry_run: bool = False
+
+
+class CRMOutreachStatusIn(BaseModel):
+    operation_id: str = Field(min_length=8, max_length=160)
+
+
 async def _operation(operation_id: str) -> dict[str, Any] | None:
     rows = await get_backend().select(
         "crm_bridge_operations",
         params={"operation_id": f"eq.{operation_id}", "limit": "1"},
     ) or []
     return rows[0] if rows else None
+
+
+def _safe_phone(value: Any) -> str:
+    try:
+        return _normalize_phone(str(value or ""))
+    except HTTPException:
+        return ""
+
+
+def _parse_time(value: Any) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        return datetime.fromisoformat(text.replace("Z", "+00:00")).astimezone(timezone.utc)
+    except Exception:
+        return None
+
+
+async def run_outreach_pilot(payload: CRMOutreachPilotIn) -> dict[str, Any]:
+    prior = await _operation(payload.operation_id)
+    if prior:
+        result = prior.get("result") if isinstance(prior.get("result"), dict) else {}
+        return {"status": "duplicate", "operation_id": payload.operation_id, **result}
+    backend = get_backend()
+    accounts = await backend.select("customer_accounts", params={"limit": "5000"}) or []
+    messages = await backend.select("whatsapp_messages", params={"limit": "5000"}) or []
+    outbound = await backend.select("outbound_notifications", params={"channel": "eq.whatsapp", "limit": "5000"}) or []
+    inbound_phones = {_safe_phone(r.get("phone")) for r in messages if str(r.get("direction") or "").lower() == "inbound"}
+    inbound_phones.discard("")
+    recent_cutoff = datetime.now(timezone.utc) - timedelta(days=7)
+    recently_contacted = set()
+    for row in outbound:
+        phone = _safe_phone(row.get("destination"))
+        created = _parse_time(row.get("created_at") or row.get("updated_at"))
+        if phone and created and created >= recent_cutoff:
+            recently_contacted.add(phone)
+    blocked = {"DO_NOT_CONTACT", "OPTED_OUT", "LOST"}
+    candidates = []
+    seen = set()
+    for row in accounts:
+        status = str(row.get("sales_status") or row.get("status") or "NEW").upper()
+        consent_status = str(row.get("consent_status") or "").upper()
+        phone = _safe_phone(row.get("phone"))
+        if not phone or phone in seen or phone in recently_contacted:
+            continue
+        seen.add(phone)
+        if status in blocked or consent_status in {"REVOKED", "DO_NOT_CONTACT"}:
+            continue
+        explicit_consent = row.get("consent_to_business_contact") is True or consent_status == "CONSENTED"
+        prior_relationship = phone in inbound_phones
+        if not (explicit_consent or prior_relationship):
+            continue
+        score = 0
+        if status in {"REPLIED", "QUALIFIED_LEAD", "FOLLOW_UP_DUE"}: score += 50
+        if prior_relationship: score += 30
+        if explicit_consent: score += 20
+        if row.get("legal_name") or row.get("trade_name"): score += 10
+        candidates.append((score, row, phone))
+    candidates.sort(key=lambda x: (-x[0], str(x[1].get("updated_at") or "")), reverse=False)
+    selected = candidates[:payload.limit]
+    if payload.dry_run:
+        result = {"status": "planned", "operation_id": payload.operation_id, "eligible": len(candidates), "selected": len(selected), "queued": 0, "messages_sent": 0}
+        await _record_operation(payload.operation_id, "outreach_pilot_dry_run", result)
+        return result
+    queued = 0
+    for _, row, phone in selected:
+        customer_id = str(row.get("customer_id") or "") or None
+        name = str(row.get("contact_name") or row.get("trade_name") or row.get("legal_name") or "").strip()
+        greeting = f"Hola {name}," if name else "Hola,"
+        body = (
+            f"{greeting} soy Sofía de SAHJONY LLC. Gracias por tu contacto/interés previo. "
+            "¿Sigue activo tu proyecto de importación o abastecimiento? Si me indicas producto, cantidad, destino y fecha objetivo, preparo el siguiente paso. "
+            "Si no deseas más mensajes, dímelo y no volveremos a contactarte."
+        )[:4096]
+        command_id = f"waq_{secrets.token_urlsafe(18)}"
+        ts = _now()
+        await backend.insert("whatsapp_openclaw_outbox", {
+            "command_id": command_id, "channel": "whatsapp", "account_id": "default", "recipient": phone, "body": body,
+            "preview_url": False, "lead_id": None, "customer_id": customer_id, "source_url": f"crm:outreach-pilot:{payload.operation_id}",
+            "status": "queued", "attempts": 0, "lease_token": None, "lease_expires_at": None, "provider_message_id": None,
+            "last_error": None, "created_at": ts, "updated_at": ts,
+        })
+        await backend.insert("outbound_notifications", {
+            "notification_id": command_id, "event_id": payload.operation_id, "recipient_role": "customer", "recipient_id": customer_id or "external",
+            "channel": "whatsapp", "destination": phone, "subject": "Governed WhatsApp reactivation", "body": body,
+            "delivery_status": "queued", "provider": "hermes_whatsapp", "provider_message_id": None,
+            "source_url": f"crm:outreach-pilot:{payload.operation_id}", "autonomous": True, "attempts": 0, "last_error": None,
+            "created_at": ts, "updated_at": ts,
+        })
+        await backend.insert("customer_crm_audit", {
+            "event_id": f"crm_{secrets.token_urlsafe(10)}", "customer_id": customer_id, "intake_id": None, "actor_role": "ai_agent",
+            "actor_id": "sofia-smith", "event_type": "sofia_outreach_queued", "summary": "Governed WhatsApp reactivation queued; send evidence pending transport acknowledgement.",
+            "payload": {"operation_id": payload.operation_id, "command_id": command_id, "consent_evidence": "explicit_or_prior_inbound", "message_sent": False}, "created_at": ts,
+        })
+        queued += 1
+    result = {"status": "queued", "operation_id": payload.operation_id, "eligible": len(candidates), "selected": len(selected), "queued": queued, "messages_sent": 0}
+    await _record_operation(payload.operation_id, "outreach_pilot", result)
+    return result
+
+
+async def outreach_pilot_status(payload: CRMOutreachStatusIn) -> dict[str, Any]:
+    rows = await get_backend().select("outbound_notifications", params={"event_id": f"eq.{payload.operation_id}", "channel": "eq.whatsapp", "limit": "5000"}) or []
+    counts = {}
+    for row in rows:
+        key = str(row.get("delivery_status") or "unknown").lower()
+        counts[key] = counts.get(key, 0) + 1
+    return {"status": "ok", "operation_id": payload.operation_id, "total": len(rows), "delivery": counts, "messages_sent": counts.get("sent", 0)}
 
 
 async def _record_operation(operation_id: str, action: str, result: dict[str, Any]) -> None:
@@ -589,6 +708,38 @@ async def crm_note(
     except Exception as exc:
         raise HTTPException(status_code=400, detail="Invalid CRM note payload") from exc
     return await add_note(payload)
+
+
+@router.post("/whatsapp/crm/outreach-pilot")
+async def crm_outreach_pilot(
+    request: Request,
+    x_sahjony_timestamp: str | None = Header(None, alias="X-SAHJONY-Timestamp"),
+    x_sahjony_nonce: str | None = Header(None, alias="X-SAHJONY-Nonce"),
+    x_sahjony_crm_signature: str | None = Header(None, alias="X-SAHJONY-CRM-Signature"),
+) -> dict[str, Any]:
+    raw = await request.body()
+    _verify_bridge_request(request, raw, *_headers(x_sahjony_timestamp, x_sahjony_nonce, x_sahjony_crm_signature))
+    try:
+        payload = CRMOutreachPilotIn.model_validate_json(raw)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Invalid outreach pilot payload") from exc
+    return await run_outreach_pilot(payload)
+
+
+@router.post("/whatsapp/crm/outreach-pilot/status")
+async def crm_outreach_pilot_status(
+    request: Request,
+    x_sahjony_timestamp: str | None = Header(None, alias="X-SAHJONY-Timestamp"),
+    x_sahjony_nonce: str | None = Header(None, alias="X-SAHJONY-Nonce"),
+    x_sahjony_crm_signature: str | None = Header(None, alias="X-SAHJONY-CRM-Signature"),
+) -> dict[str, Any]:
+    raw = await request.body()
+    _verify_bridge_request(request, raw, *_headers(x_sahjony_timestamp, x_sahjony_nonce, x_sahjony_crm_signature))
+    try:
+        payload = CRMOutreachStatusIn.model_validate_json(raw)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Invalid outreach status payload") from exc
+    return await outreach_pilot_status(payload)
 
 
 @router.post("/whatsapp/crm/intake")
