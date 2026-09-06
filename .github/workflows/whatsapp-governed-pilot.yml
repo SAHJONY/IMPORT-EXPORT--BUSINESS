@@ -1,0 +1,85 @@
+name: Governed WhatsApp Pilot
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/whatsapp-governed-pilot.yml
+
+jobs:
+  pilot:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    concurrency:
+      group: governed-whatsapp-pilot-20260906
+      cancel-in-progress: false
+    env:
+      HOST: 69.62.68.67
+      SSH_USER: root
+      PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+      DRY_OPERATION_ID: ceo-pilot-20260906-dry-v1
+      LIVE_OPERATION_ID: ceo-pilot-20260906-live-v1
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify production transport
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS https://www.sahjony.com/whatsapp/health > /tmp/wa-health.json
+          python3 - <<'PY'
+          import json
+          d=json.load(open('/tmp/wa-health.json'))
+          assert d.get('send_ready') is True, d
+          assert d.get('gateway_connected') is True, d
+          print('WHATSAPP_TRANSPORT=READY')
+          PY
+      - name: Prepare SSH
+        shell: bash
+        run: |
+          set -euo pipefail
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/key
+          chmod 600 ~/.ssh/key
+      - name: Run governed pilot
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/key "$SSH_USER@$HOST" "DRY_OPERATION_ID='$DRY_OPERATION_ID' LIVE_OPERATION_ID='$LIVE_OPERATION_ID' bash -s" <<'REMOTE'
+          set -euo pipefail
+          test -x /usr/local/sbin/sahjony-crm-bridge
+          /usr/local/sbin/sahjony-crm-bridge --help | grep -q outreach-pilot
+          dry=$(/usr/local/sbin/sahjony-crm-bridge outreach-pilot --json "{\"operation_id\":\"$DRY_OPERATION_ID\",\"limit\":25,\"dry_run\":true}")
+          printf '%s\n' "$dry" > /tmp/sahjony-pilot-dry.json
+          python3 - <<'PY'
+          import json
+          d=json.load(open('/tmp/sahjony-pilot-dry.json'))
+          assert d.get('status') in {'planned','duplicate'}, d
+          assert int(d.get('selected',0)) <= 25, d
+          print('PILOT_DRY_RUN_OK selected=%s eligible=%s' % (d.get('selected',0), d.get('eligible',0)))
+          PY
+          selected=$(python3 -c "import json; print(int(json.load(open('/tmp/sahjony-pilot-dry.json')).get('selected',0)))")
+          if [ "$selected" -gt 0 ]; then
+            live=$(/usr/local/sbin/sahjony-crm-bridge outreach-pilot --json "{\"operation_id\":\"$LIVE_OPERATION_ID\",\"limit\":25,\"dry_run\":false}")
+            printf '%s\n' "$live" > /tmp/sahjony-pilot-live.json
+            python3 - <<'PY'
+          import json
+          d=json.load(open('/tmp/sahjony-pilot-live.json'))
+          assert d.get('status') in {'queued','duplicate'}, d
+          assert int(d.get('queued',0)) <= 25, d
+          print('PILOT_QUEUE_OK queued=%s sent_at_queue_time=%s' % (d.get('queued',0), d.get('messages_sent',0)))
+          PY
+            sleep 45
+            status=$(/usr/local/sbin/sahjony-crm-bridge outreach-status --json "{\"operation_id\":\"$LIVE_OPERATION_ID\"}")
+            printf '%s\n' "$status" > /tmp/sahjony-pilot-status.json
+            python3 - <<'PY'
+          import json
+          d=json.load(open('/tmp/sahjony-pilot-status.json'))
+          print('PILOT_DELIVERY total=%s sent=%s delivery=%s' % (d.get('total',0), d.get('messages_sent',0), d.get('delivery',{})))
+          PY
+          else
+            echo 'PILOT_NO_ELIGIBLE_CONTACTS'
+          fi
+          REMOTE
+      - name: Cleanup
+        if: always()
+        run: rm -f ~/.ssh/key /tmp/wa-health.json
