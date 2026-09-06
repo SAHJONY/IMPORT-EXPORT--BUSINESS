@@ -12,7 +12,8 @@ def test_unconsented_lead_is_research_only() -> None:
     result = score_crm_lead({"customer_id": "c1", "sales_status": "NEW", "email": "lead@example.com"})
     assert result["contactable"] is True
     assert result["autonomous_outreach_allowed"] is False
-    assert "owner-reviewed" in result["next_best_action"]
+    assert "consent-compatible" in result["next_best_action"]
+    assert "do not transfer research responsibility to the owner" in result["next_best_action"]
 
 
 def test_consented_lead_can_enter_follow_up_queue() -> None:

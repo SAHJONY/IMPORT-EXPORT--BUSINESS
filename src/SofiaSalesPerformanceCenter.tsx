@@ -15,6 +15,16 @@ type Rfq={
   updated_at:string;
 };
 
+
+type GrowthRow={lead_ref:string;source:string;company?:string;contact_name?:string;assessment:{score:number;blocked:boolean;autonomous_outreach_allowed:boolean;next_best_action?:string}};
+
+function ownerAuthHeaders():Record<string,string>{
+  const token=sessionStorage.getItem('sahjony.owner.token')||'';
+  const headers:Record<string,string>={'Content-Type':'application/json','X-Role':'owner'};
+  if(token)headers.Authorization=`Bearer ${token}`;
+  return headers;
+}
+
 type Segment='Edible Oils'|'Food & Beverage'|'Construction'|'Energy'|'Industrial'|'Other';
 type SegmentMetrics={name:Segment;total:number;qualified:number;complete:number;quoted:number;po:number;rfqRate:number;quoteRate:number;poRate:number;avgCompleteness:number};
 
@@ -47,6 +57,9 @@ export default function SofiaSalesPerformanceCenter(){
   const [rows,setRows]=useState<Rfq[]>([]);
   const [loading,setLoading]=useState(true);
   const [status,setStatus]=useState('');
+  const [growthQueue,setGrowthQueue]=useState<GrowthRow[]>([]);
+  const [growthStatus,setGrowthStatus]=useState('');
+  const [growthLoading,setGrowthLoading]=useState(false);
 
   async function refresh(){
     setLoading(true);setStatus('');
@@ -58,7 +71,33 @@ export default function SofiaSalesPerformanceCenter(){
     else setRows((data||[]) as Rfq[]);
     setLoading(false);
   }
-  useEffect(()=>{void refresh()},[]);
+  useEffect(()=>{void refresh();void loadGrowthQueue()},[]);
+  async function loadGrowthQueue(){
+    setGrowthLoading(true);setGrowthStatus('');
+    try{
+      const r=await fetch('/crm/sofia/growth-queue',{cache:'no-store',headers:ownerAuthHeaders()});
+      const body=await r.json().catch(()=>({detail:`HTTP ${r.status}`}));
+      if(!r.ok)throw new Error(body.detail||`HTTP ${r.status}`);
+      const queue=(body.queue||[]) as GrowthRow[];
+      setGrowthQueue(queue);
+      const eligible=queue.filter(row=>!row.assessment.blocked&&row.assessment.autonomous_outreach_allowed).length;
+      setGrowthStatus(`${queue.length} scored · ${eligible} eligible for governed pursuit · no messages sent by this action.`);
+    }catch(err:any){setGrowthStatus(`Growth queue unavailable: ${err?.message||String(err)}`)}
+    setGrowthLoading(false);
+  }
+
+  async function queueGovernedPursuit(){
+    setGrowthLoading(true);setGrowthStatus('');
+    try{
+      const r=await fetch('/crm/sofia/pursue',{method:'POST',headers:ownerAuthHeaders(),body:JSON.stringify({limit:50,execute_reversible_steps:true})});
+      const body=await r.json().catch(()=>({detail:`HTTP ${r.status}`}));
+      if(!r.ok)throw new Error(body.detail||`HTTP ${r.status}`);
+      setGrowthStatus(`${body.selected||0} eligible pursuits queued from ${body.evaluated||0} evaluated · ${body.messages_sent||0} messages sent.`);
+      await loadGrowthQueue();
+    }catch(err:any){setGrowthStatus(`Pursuit queue unavailable: ${err?.message||String(err)}`)}
+    setGrowthLoading(false);
+  }
+
 
   const metrics=useMemo(()=>{
     const total=rows.length;
@@ -117,6 +156,16 @@ export default function SofiaSalesPerformanceCenter(){
     </header>
 
     <section style={s.metrics}>{cards.map(([label,value])=><article style={s.metric} key={label}><small>{label}</small><strong>{value}</strong></article>)}</section>
+
+
+    <section style={s.panel}>
+      <div style={s.kicker}>GOVERNED OUTREACH PILOT</div><h2 style={s.h2}>Authenticated growth queue</h2>
+      <p style={s.muted}>Owner-session control only. Queueing is reversible and records no outreach send. Only prospects explicitly marked autonomous_outreach_allowed are eligible; actual messages still require a verified channel send event.</p>
+      <div style={{display:'flex',gap:10,flexWrap:'wrap',margin:'14px 0'}}><button style={s.button} onClick={()=>void loadGrowthQueue()}>{growthLoading?'Checking…':'Load scored queue'}</button><button style={s.button} onClick={()=>void queueGovernedPursuit()} disabled={growthLoading}>Queue up to 50 eligible pursuits</button></div>
+      <div style={s.funnel}><div>Total scored <b>{growthQueue.length}</b></div><div>Eligible <b>{growthQueue.filter(r=>!r.assessment.blocked&&r.assessment.autonomous_outreach_allowed).length}</b></div><div>Blocked/ineligible <b>{growthQueue.filter(r=>r.assessment.blocked||!r.assessment.autonomous_outreach_allowed).length}</b></div></div>
+      {growthQueue.length>0&&<div style={s.tableWrap}><table style={s.table}><thead><tr><th>Prospect</th><th>Source</th><th>Score</th><th>Eligible</th><th>Next action</th></tr></thead><tbody>{growthQueue.slice(0,50).map(row=><tr key={`${row.source}:${row.lead_ref}`}><td>{row.company||row.contact_name||row.lead_ref}</td><td>{row.source}</td><td>{row.assessment.score}</td><td>{!row.assessment.blocked&&row.assessment.autonomous_outreach_allowed?'YES':'NO'}</td><td>{row.assessment.next_best_action||'—'}</td></tr>)}</tbody></table></div>}
+      {growthStatus&&<p style={s.status}>{growthStatus}</p>}
+    </section>
 
     <section style={s.panel}><div style={s.kicker}>FUNNEL HEALTH</div><h2 style={s.h2}>Conversion gates</h2><div style={s.funnel}><div>Qualified <b>{pct(metrics.qualified,metrics.total)}%</b></div><div>RFQ complete <b>{pct(metrics.complete,metrics.qualified)}%</b></div><div>Formal quote <b>{pct(metrics.quoted,metrics.complete)}%</b></div><div>Purchase order <b>{pct(metrics.po,metrics.quoted)}%</b></div><div>Collected GP <b>{pct(metrics.collected,metrics.po)}%</b></div></div></section>
 
