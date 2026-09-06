@@ -36,3 +36,22 @@ def test_only_agency_owner_updates_employee_access(monkeypatch):
     assert r.status_code==200
     assert b.tables['logistics_agency_employees'][0]['status']=='suspended'
     assert b.tables['logistics_agency_employees'][0]['access_granted_by_owner_id']=='owner_a'
+
+def test_paperless_record_is_tenant_scoped_and_signature_not_stored_raw(monkeypatch):
+    b=FakeBackend(); b.tables['logistics_agency_paperless_records']=[]; monkeypatch.setattr(mod,'get_backend',lambda:b)
+    c=TestClient(mod.app); h={'Authorization':'Bearer secret-a','X-Agency-Id':'agy_a'}
+    r=c.post('/agency-os/paperless/records',headers=h,json={'record_type':'POD','title':'Final delivery','related_type':'shipment','related_id':'s1','signer_name':'Receiver','signature_method':'DRAWN','signature_value':'raw-signature'})
+    assert r.status_code==200
+    row=b.tables['logistics_agency_paperless_records'][0]
+    assert row['agency_id']=='agy_a' and row['status']=='SIGNED'
+    assert row['signature_hash']==mod.digest('raw-signature')
+    assert 'signature_value' not in row
+    assert c.get('/agency-os/paperless/records',headers={**h,'X-Agency-Id':'agy_b'}).status_code==403
+
+def test_agency_owner_controls_paperless_release(monkeypatch):
+    b=FakeBackend(); b.tables['logistics_agency_paperless_records']=[{'record_id':'apr_1','agency_id':'agy_a','record_type':'POD','title':'Delivery','status':'SIGNED'}]; monkeypatch.setattr(mod,'get_backend',lambda:b)
+    c=TestClient(mod.app); h={'Authorization':'Bearer secret-a','X-Agency-Id':'agy_a'}
+    r=c.patch('/agency-os/paperless/records/apr_1/status',headers=h,json={'status':'RELEASED','note':'Owner approved'})
+    assert r.status_code==200
+    assert b.tables['logistics_agency_paperless_records'][0]['status']=='RELEASED'
+    assert b.tables['logistics_agency_paperless_records'][0]['updated_by_owner_id']=='owner_a'

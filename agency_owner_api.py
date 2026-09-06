@@ -34,9 +34,25 @@ class ShipmentIn(BaseModel):
 class CarrierPreferenceIn(BaseModel):
     mode:str=Field(default="OPEN_CHOICE",max_length=80); preferred_provider:str|None=Field(default=None,max_length=240); use_sahjony_when_better:bool=True
 
+class PaperlessRecordIn(BaseModel):
+    record_type:str=Field(min_length=2,max_length=80)
+    title:str=Field(min_length=2,max_length=240)
+    related_type:str|None=Field(default=None,max_length=80)
+    related_id:str|None=Field(default=None,max_length=180)
+    content:dict[str,Any]=Field(default_factory=dict)
+    signer_name:str|None=Field(default=None,max_length=240)
+    signer_phone:str|None=Field(default=None,max_length=80)
+    signature_method:str|None=Field(default=None,max_length=40)
+    signature_value:str|None=Field(default=None,max_length=4000)
+    customer_visible:bool=False
+
+class PaperlessStatusPatch(BaseModel):
+    status:str=Field(max_length=40)
+    note:str|None=Field(default=None,max_length=2000)
+
 @app.get("/agency-os/health")
 async def health():
-    p=persistent_backend_status(); return {"status":"ok" if p.get("configured") else "configuration_required","service":"agency-owner-command-center","multi_tenant":True,"agency_data_isolation":True,"sahjony_internal_economics_hidden":True,"carrier_choice_open":True,"offline_pwa_ready":True}
+    p=persistent_backend_status(); return {"status":"ok" if p.get("configured") else "configuration_required","service":"agency-owner-command-center","multi_tenant":True,"agency_data_isolation":True,"sahjony_internal_economics_hidden":True,"carrier_choice_open":True,"offline_pwa_ready":True,"paperless_by_default":True,"electronic_signatures":True,"paper_required_only_by_exception":True}
 
 @app.post("/agency-os/agencies")
 async def create_agency(p:AgencyIn, authorization:str|None=Header(None,alias="Authorization")):
@@ -93,3 +109,29 @@ async def shipments(x_agency_id:str|None=Header(None,alias="X-Agency-Id"),author
 @app.post("/agency-os/carrier-preference")
 async def carrier_preference(p:CarrierPreferenceIn,x_agency_id:str|None=Header(None,alias="X-Agency-Id"),authorization:str|None=Header(None,alias="Authorization")):
     a=await agency_actor(x_agency_id,authorization); row={"carrier_mode":p.mode,"preferred_provider":p.preferred_provider,"use_sahjony_when_better":p.use_sahjony_when_better,"updated_at":now()}; await get_backend().patch("logistics_agencies",row,params={"agency_id":f"eq.{a['agency_id']}"}); return {"agency_id":a["agency_id"],**row}
+
+
+@app.post("/agency-os/paperless/records")
+async def create_paperless_record(p:PaperlessRecordIn,x_agency_id:str|None=Header(None,alias="X-Agency-Id"),authorization:str|None=Header(None,alias="Authorization")):
+    a=await agency_actor(x_agency_id,authorization); ts=now(); rid="apr_"+secrets.token_urlsafe(12)
+    sig_hash=None
+    if p.signature_value:
+        sig_hash=hashlib.sha256(p.signature_value.encode()).hexdigest()
+    row={"record_id":rid,"agency_id":a["agency_id"],"record_type":p.record_type.upper(),"title":p.title,"related_type":p.related_type,"related_id":p.related_id,"content":p.content,"signer_name":p.signer_name,"signer_phone":p.signer_phone,"signature_method":p.signature_method,"signature_hash":sig_hash,"status":"SIGNED" if sig_hash else "DRAFT","customer_visible":p.customer_visible,"created_by_owner_id":a["owner_id"],"created_at":ts,"updated_at":ts}
+    await get_backend().insert("logistics_agency_paperless_records",row)
+    return {"record":row,"paperless":True,"signature_value_persisted":False}
+
+@app.get("/agency-os/paperless/records")
+async def list_paperless_records(x_agency_id:str|None=Header(None,alias="X-Agency-Id"),authorization:str|None=Header(None,alias="Authorization")):
+    a=await agency_actor(x_agency_id,authorization); rows=await get_backend().select("logistics_agency_paperless_records",params={"agency_id":f"eq.{a['agency_id']}","order":"created_at.desc","limit":"1000"}) or []
+    return {"records":rows,"paperless_by_default":True}
+
+@app.patch("/agency-os/paperless/records/{record_id}/status")
+async def update_paperless_status(record_id:str,p:PaperlessStatusPatch,x_agency_id:str|None=Header(None,alias="X-Agency-Id"),authorization:str|None=Header(None,alias="Authorization")):
+    a=await agency_actor(x_agency_id,authorization)
+    if p.status not in {"DRAFT","SIGNED","APPROVED","RELEASED","VOID","SUPERSEDED"}: raise HTTPException(422,"Invalid paperless record status")
+    rows=await get_backend().select("logistics_agency_paperless_records",params={"record_id":f"eq.{record_id}","agency_id":f"eq.{a['agency_id']}","limit":"1"}) or []
+    if not rows: raise HTTPException(404,"Paperless record not found in this agency")
+    patch={"status":p.status,"status_note":p.note,"updated_at":now(),"updated_by_owner_id":a["owner_id"]}
+    await get_backend().patch("logistics_agency_paperless_records",patch,params={"record_id":f"eq.{record_id}","agency_id":f"eq.{a['agency_id']}"})
+    return {"record_id":record_id,"status":p.status,"authority":"AGENCY_OWNER"}
