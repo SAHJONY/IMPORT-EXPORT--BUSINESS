@@ -38,6 +38,10 @@ window.addEventListener('unhandledrejection',e=>{console.error('SAHJONY_UNHANDLE
 
 function protectedRoleFromPath(){const first=location.pathname.split('/').filter(Boolean)[0];return first==='customer'||first==='employee'?first:null}
 function withI18n(node:ReactNode){return <I18nextProvider i18n={i18n}>{node}</I18nextProvider>}
+async function renderTravel(){
+ const {default:TravelMobilityCenter}=await import('./TravelMobilityCenter');
+ createRoot(rootElement!).render(withI18n(<StrictMode><AppBoundary><TravelMobilityCenter/></AppBoundary></StrictMode>));
+}
 async function boot(){
  if(!rootElement)return;
  const path=location.pathname;
@@ -45,11 +49,13 @@ async function boot(){
    const {default:NeonAuthPage}=await import('./NeonAuthPage');
    createRoot(rootElement).render(withI18n(<StrictMode><AppBoundary><NeonAuthPage/></AppBoundary></StrictMode>));return
  }
+ if(path==='/travel'||path.startsWith('/travel/')){await renderTravel();return}
  if(path==='/owner'){location.replace('/owner/dashboard');return}
  if(path==='/owner/dashboard'||path.startsWith('/owner/dashboard/')){
    const {default:OwnerCommandCenter}=await import('./OwnerCommandCenter');
    createRoot(rootElement).render(withI18n(<StrictMode><AppBoundary><OwnerCommandCenter/></AppBoundary></StrictMode>));return
  }
+ if(path==='/owner/travel'||path.startsWith('/owner/travel/')){await renderTravel();return}
  if(path==='/owner/exceptions'||path.startsWith('/owner/exceptions/')){
    const {default:ExecutiveExceptionEngine}=await import('./ExecutiveExceptionEngine');
    createRoot(rootElement).render(withI18n(<StrictMode><AppBoundary><ExecutiveExceptionEngine/></AppBoundary></StrictMode>));return
