@@ -1,0 +1,302 @@
+{
+  "version": "2026-09-06",
+  "policy": "research_and_quote_readiness_only",
+  "partners": [
+    {
+      "partner_id": "airline_ibc_airways",
+      "name": "IBC Airways",
+      "layer": "AIRLINE_LIFT",
+      "country": "US",
+      "modes": [
+        "AIR"
+      ],
+      "origin_nodes": [
+        "MIA",
+        "FLL"
+      ],
+      "cuba_nodes": [
+        "HAV"
+      ],
+      "capabilities": [
+        "DEDICATED_FREIGHTER",
+        "HAZMAT_AUTHORIZED",
+        "CHARTER",
+        "MAWB_DOCUMENTATION",
+        "BUILDUP_BREAKDOWN"
+      ],
+      "commercial_status": "RATE_REQUEST_REQUIRED",
+      "verification_status": "OFFICIAL_SOURCE_VERIFIED",
+      "risk_level": "MEDIUM",
+      "website": "https://ibcairways.com/",
+      "contact_phone": "305-871-9100",
+      "contact_email": "sales@ibcairways.com",
+      "evidence_summary": "Official carrier source: FAA Part 135 air carrier, Saab 340 freighters up to 7,500 lb, frequent Havana service, hazardous-material authorization."
+    },
+    {
+      "partner_id": "forwarder_six_world",
+      "name": "Six World Shipping",
+      "layer": "FREIGHT_FORWARDER",
+      "country": "US",
+      "modes": [
+        "AIR",
+        "SEA"
+      ],
+      "origin_nodes": [
+        "MIA",
+        "US_SEAPORTS"
+      ],
+      "cuba_nodes": [
+        "HAV",
+        "CMW",
+        "VRA",
+        "HOG",
+        "SCU",
+        "MARIEL"
+      ],
+      "capabilities": [
+        "IAC",
+        "AIR_CONSOLIDATION",
+        "OCEAN_FCL",
+        "CUBA_SPECIALIST"
+      ],
+      "commercial_status": "RATE_REQUEST_REQUIRED",
+      "verification_status": "OFFICIAL_SOURCE_VERIFIED",
+      "risk_level": "MEDIUM",
+      "website": "https://www.sixworldshipping.com/",
+      "contact_phone": "917-776-2796",
+      "contact_email": "info@sixworldshipping.com",
+      "evidence_summary": "Official source states IAC-certified Cuba specialist, weekly MIA air service to HAV/CMW/VRA/HOG/SCU and weekly ocean FCL from multiple U.S. seaports."
+    },
+    {
+      "partner_id": "forwarder_wtdc",
+      "name": "WTDC",
+      "layer": "FREIGHT_FORWARDER",
+      "country": "US",
+      "modes": [
+        "AIR",
+        "SEA"
+      ],
+      "origin_nodes": [
+        "MIA"
+      ],
+      "cuba_nodes": [],
+      "capabilities": [
+        "IATA",
+        "IAC",
+        "AIR_CONSOLIDATION",
+        "DANGEROUS_GOODS",
+        "CUSTOMS_COORDINATION",
+        "DOOR_TO_DOOR"
+      ],
+      "commercial_status": "CUBA_SCOPE_VERIFY",
+      "verification_status": "PUBLIC_SOURCE_RESEARCH",
+      "risk_level": "VERIFY",
+      "website": "https://wtdc.com/",
+      "contact_phone": "305-594-7484",
+      "contact_email": "info@wtdc.com",
+      "evidence_summary": "Strong Miami freight-forwarding/DG capability; Cuba-specific commercial acceptance and rates must be confirmed in writing."
+    },
+    {
+      "partner_id": "cuba_aerovaradero",
+      "name": "Aerovaradero S.A.",
+      "layer": "CUBA_AIR_HANDLING",
+      "country": "CU",
+      "modes": [
+        "AIR"
+      ],
+      "origin_nodes": [],
+      "cuba_nodes": [
+        "HAV",
+        "VRA",
+        "SNU",
+        "CMW",
+        "HOG",
+        "SCU",
+        "GAO",
+        "BCA"
+      ],
+      "capabilities": [
+        "AIR_CARGO_HANDLING",
+        "TERMINAL_OPERATIONS",
+        "TERRITORIAL_NETWORK"
+      ],
+      "commercial_status": "COMPLIANCE_AND_CONTRACT_VERIFY",
+      "verification_status": "PUBLIC_SOURCE_VERIFIED",
+      "risk_level": "HIGH",
+      "website": "",
+      "contact_phone": "",
+      "contact_email": "",
+      "evidence_summary": "Cuban air-cargo handling/terminal network; transaction eligibility, ownership, contract path and exact customs responsibility require written verification."
+    },
+    {
+      "partner_id": "cuba_transcargo",
+      "name": "Transcargo",
+      "layer": "CUBA_TRANSITARY",
+      "country": "CU",
+      "modes": [
+        "AIR",
+        "SEA",
+        "GROUND"
+      ],
+      "origin_nodes": [],
+      "cuba_nodes": [
+        "HAV",
+        "SCU"
+      ],
+      "capabilities": [
+        "TRANSITARY",
+        "DECONSOLIDATION",
+        "INLAND_DISTRIBUTION"
+      ],
+      "commercial_status": "COMPLIANCE_HOLD",
+      "verification_status": "PUBLIC_SOURCE_VERIFIED",
+      "risk_level": "CRITICAL",
+      "website": "",
+      "contact_phone": "",
+      "contact_email": "",
+      "evidence_summary": "Large Cuban transit/logistics node; enhanced ownership/sanctions review required before commercial use."
+    },
+    {
+      "partner_id": "cuba_satsa",
+      "name": "SATSA",
+      "layer": "CUBA_CUSTOMS_TRANSITARY",
+      "country": "CU",
+      "modes": [
+        "AIR",
+        "SEA",
+        "GROUND"
+      ],
+      "origin_nodes": [],
+      "cuba_nodes": [
+        "HAV"
+      ],
+      "capabilities": [
+        "CUSTOMS_AGENCY",
+        "TRANSITARY",
+        "FREIGHT_FORWARDING"
+      ],
+      "commercial_status": "AUTHORITY_AND_RATE_VERIFY",
+      "verification_status": "PUBLIC_SOURCE_VERIFIED",
+      "risk_level": "HIGH",
+      "website": "",
+      "contact_phone": "",
+      "contact_email": "",
+      "evidence_summary": "Cuban customs/transitary candidate; authority, ownership, transaction eligibility and rate card must be verified before use."
+    },
+    {
+      "partner_id": "cuba_cubanacan_express",
+      "name": "Cubanacán Express",
+      "layer": "CUBA_TRANSITARY_LAST_MILE",
+      "country": "CU",
+      "modes": [
+        "AIR",
+        "SEA",
+        "GROUND"
+      ],
+      "origin_nodes": [],
+      "cuba_nodes": [
+        "HAV",
+        "HOG"
+      ],
+      "capabilities": [
+        "TRANSITARY",
+        "CUSTOMS_PROCEDURES",
+        "COURIER",
+        "DISTRIBUTION"
+      ],
+      "commercial_status": "COMPLIANCE_AND_RATE_VERIFY",
+      "verification_status": "PUBLIC_SOURCE_VERIFIED",
+      "risk_level": "HIGH",
+      "website": "",
+      "contact_phone": "",
+      "contact_email": "",
+      "evidence_summary": "Cuban transit/courier/distribution candidate; current scope, ownership and commercial terms require confirmation."
+    },
+    {
+      "partner_id": "cuba_cubapack",
+      "name": "Cubapack",
+      "layer": "CUBA_LAST_MILE",
+      "country": "CU",
+      "modes": [
+        "AIR",
+        "SEA",
+        "GROUND"
+      ],
+      "origin_nodes": [],
+      "cuba_nodes": [
+        "HAV",
+        "MARIEL"
+      ],
+      "capabilities": [
+        "PARCEL_DISTRIBUTION",
+        "HOME_DELIVERY",
+        "PROVINCE_DELIVERY"
+      ],
+      "commercial_status": "COMPLIANCE_AND_RATE_VERIFY",
+      "verification_status": "PUBLIC_SOURCE_VERIFIED",
+      "risk_level": "HIGH",
+      "website": "",
+      "contact_phone": "",
+      "contact_email": "",
+      "evidence_summary": "Cuban parcel/distribution candidate; exact commercial cargo scope and ownership/compliance must be verified."
+    },
+    {
+      "partner_id": "cuba_correos_emci",
+      "name": "Correos de Cuba / EMCI",
+      "layer": "CUBA_POSTAL_LAST_MILE",
+      "country": "CU",
+      "modes": [
+        "AIR",
+        "SEA",
+        "GROUND"
+      ],
+      "origin_nodes": [],
+      "cuba_nodes": [
+        "NATIONAL_POSTAL_NETWORK"
+      ],
+      "capabilities": [
+        "POSTAL_PARCELS",
+        "SMALL_SHIPMENTS",
+        "NATIONAL_DISTRIBUTION"
+      ],
+      "commercial_status": "WEIGHT_RATE_COMPLIANCE_VERIFY",
+      "verification_status": "PUBLIC_SOURCE_RESEARCH",
+      "risk_level": "HIGH",
+      "website": "https://www.correos.cu/",
+      "contact_phone": "",
+      "contact_email": "",
+      "evidence_summary": "Potential small-parcel/postal last-mile channel; weight, dimensions, customs path, service levels and commercial-contract availability require current verification."
+    },
+    {
+      "partner_id": "cuba_hm_paquetes",
+      "name": "HM Paquetes S.R.L.",
+      "layer": "CUBA_PRIVATE_LAST_MILE",
+      "country": "CU",
+      "modes": [
+        "AIR",
+        "SEA",
+        "GROUND"
+      ],
+      "origin_nodes": [],
+      "cuba_nodes": [
+        "HAV",
+        "CFG",
+        "HOG",
+        "SCU"
+      ],
+      "capabilities": [
+        "WAREHOUSING",
+        "CARGO_EXTRACTION_COORDINATION",
+        "LAST_MILE",
+        "PROVINCE_DISTRIBUTION"
+      ],
+      "commercial_status": "KYB_AND_RATE_VERIFY",
+      "verification_status": "OFFICIAL_BUSINESS_SOURCE_VERIFIED",
+      "risk_level": "MEDIUM",
+      "website": "https://www.hmpaquetes.com/",
+      "contact_phone": "+53 63 415156",
+      "contact_email": "hmpaquetes1@hmpaquetes.com",
+      "evidence_summary": "Private Cuba logistics operator publicly offering air/sea cargo coordination and final delivery; exact customs authority and commercial rate card require verification."
+    }
+  ]
+}

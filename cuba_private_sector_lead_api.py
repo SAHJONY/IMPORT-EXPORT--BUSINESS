@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field, model_validator
 from auth import verify_owner_token
 from insforge_backend import get_backend
 
-app = FastAPI(title='SAHJONY Cuba Private Sector Acquisition', version='1.1.0', docs_url=None, redoc_url=None)
+app = FastAPI(title='SAHJONY Cuba Private Sector Acquisition', version='1.2.0', docs_url=None, redoc_url=None)
 
 
 def now() -> str:
@@ -40,6 +40,7 @@ def internal_identity(role: str | None, authorization: str | None, employee_id: 
 
 ShippingOption = Literal['SAHJONY_ARRANGED','CUSTOMER_ARRANGED','CONSOLIDATED']
 OrderMode = Literal['SMALL_ORDER','LCL_CONSOLIDATED','FCL']
+TransportMode = Literal['SEA','AIR','BEST_AVAILABLE']
 
 
 class PublicLeadIn(BaseModel):
@@ -63,6 +64,7 @@ class PublicLeadIn(BaseModel):
     payment_preference: str | None = Field(default=None, max_length=240)
     order_mode: OrderMode = 'SMALL_ORDER'
     shipping_option: ShippingOption = 'SAHJONY_ARRANGED'
+    transport_mode: TransportMode = 'SEA'
     customer_pays_shipping: bool = True
     consolidation_ok: bool = True
     notes: str | None = Field(default=None, max_length=3000)
@@ -94,18 +96,20 @@ class PromoteIn(BaseModel):
 
 @app.get('/cuba-private-sector/health')
 async def health():
-    return {'status': 'ok', 'service': 'cuba-private-sector-acquisition', 'version':'1.1.0', 'public_intake': True, 'small_orders_enabled':True, 'lcl_consolidation_enabled':True, 'fcl_enabled':True, 'customer_paid_shipping_enabled':True, 'shipping_quote_separate':True, 'default_business_readiness':'BUSINESS_REVIEW_REQUIRED', 'auto_authorization': False, 'auto_eligibility': False, 'fail_closed': True}
+    return {'status': 'ok', 'service': 'cuba-private-sector-acquisition', 'version':'1.2.0', 'public_intake': True, 'small_orders_enabled':True, 'lcl_consolidation_enabled':True, 'fcl_enabled':True, 'air_shipping_enabled':True, 'sea_shipping_enabled':True, 'customer_paid_shipping_enabled':True, 'shipping_quote_separate':True, 'default_business_readiness':'BUSINESS_REVIEW_REQUIRED', 'auto_authorization': False, 'auto_eligibility': False, 'fail_closed': True}
 
 
 @app.post('/cuba-private-sector/leads')
 async def create_public_lead(payload: PublicLeadIn):
     lead_id = f'cpsl_{secrets.token_urlsafe(10)}'
     ts = now()
-    row = payload.model_dump(exclude={'website','order_mode','shipping_option','customer_pays_shipping','consolidation_ok'})
+    row = payload.model_dump(exclude={'website','order_mode','shipping_option','transport_mode','customer_pays_shipping','consolidation_ok'})
     logistics_note = '\n'.join([
         (payload.notes or '').strip(),
         f'ORDER_MODE={payload.order_mode}',
         f'SHIPPING_OPTION={payload.shipping_option}',
+        f'TRANSPORT_MODE={payload.transport_mode}',
+        'AIR_DG_REVIEW_REQUIRED=TRUE' if payload.transport_mode in {'AIR','BEST_AVAILABLE'} else 'AIR_DG_REVIEW_REQUIRED=FALSE',
         'SHIPPING_PAYER=CUSTOMER',
         'SHIPPING_QUOTED_SEPARATELY=TRUE',
         f'CONSOLIDATION_OK={str(bool(payload.consolidation_ok)).upper()}',
@@ -117,7 +121,7 @@ async def create_public_lead(payload: PublicLeadIn):
         await get_backend().insert('cuba_private_sector_leads', row)
     except Exception as exc:
         raise HTTPException(503, 'Lead intake is not available until the production schema is applied') from exc
-    return {'lead_id': lead_id, 'status': 'NEW', 'business_readiness':'BUSINESS_REVIEW_REQUIRED', 'order_mode':payload.order_mode, 'shipping_option':payload.shipping_option, 'customer_pays_shipping':True, 'shipping_quote_separate':True, 'message': 'Solicitud recibida. SAHJONY revisará la empresa, el producto, la ruta de pago y los requisitos aplicables antes de presentar opciones de suministro.', 'important': 'El envío o la compra no quedan autorizados por esta solicitud. Cada operación requiere revisión específica.'}
+    return {'lead_id': lead_id, 'status': 'NEW', 'business_readiness':'BUSINESS_REVIEW_REQUIRED', 'order_mode':payload.order_mode, 'shipping_option':payload.shipping_option, 'transport_mode':payload.transport_mode, 'customer_pays_shipping':True, 'shipping_quote_separate':True, 'message': 'Solicitud recibida. SAHJONY revisará la empresa, el producto, la ruta de pago y los requisitos aplicables antes de presentar opciones de suministro.', 'important': 'El envío o la compra no quedan autorizados por esta solicitud. Cada operación requiere revisión específica.'}
 
 
 @app.get('/cuba-private-sector/leads')
