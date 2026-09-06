@@ -132,7 +132,7 @@ async def sofia_growth_queue(x_role:str|None=Header(None,alias='X-Role'),authori
 async def sofia_pursue(p:SofiaPursuitIn,x_role:str|None=Header(None,alias='X-Role'),authorization:str|None=Header(None,alias='Authorization'),x_employee_id:str|None=Header(None,alias='X-Employee-Id')):
     actor=identity(x_role,authorization,x_employee_id)
     queue=(await _sofia_growth_queue())[:p.limit]
-    selected=[row for row in queue if not row['assessment']['blocked']]
+    selected=[row for row in queue if not row['assessment']['blocked'] and row['assessment']['autonomous_outreach_allowed']]
     if p.execute_reversible_steps:
         for row in selected:
             customer_id=row['lead_ref'] if row['source']=='customer_crm' else None
@@ -143,9 +143,9 @@ async def sofia_pursue(p:SofiaPursuitIn,x_role:str|None=Header(None,alias='X-Rol
             })
     return {
         'status':'queued' if p.execute_reversible_steps else 'planned',
-        'evaluated':len(queue),'selected':len(selected),'blocked':len(queue)-len(selected),
+        'evaluated':len(queue),'selected':len(selected),'blocked_or_ineligible':len(queue)-len(selected),
         'actions':selected,'messages_sent':0,
-        'rule':'Sofia may research, score and queue pursuit autonomously; actual outreach requires a consent-compatible route and channel execution evidence.',
+        'rule':'Sofia may queue pursuit only for prospects explicitly assessed as autonomous_outreach_allowed; actual outreach still requires a consent-compatible route and channel execution evidence.',
     }
 
 @app.get('/crm/data-health')
