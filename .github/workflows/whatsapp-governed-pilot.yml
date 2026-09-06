@@ -29,8 +29,10 @@ jobs:
           python3 - <<'PY'
           import json
           d=json.load(open('/tmp/wa-health.json'))
+          hostinger=d.get('hostinger_openclaw') or {}
           assert d.get('send_ready') is True, d
-          assert d.get('gateway_connected') is True, d
+          assert hostinger.get('connected') is True, d
+          assert hostinger.get('heartbeat_fresh') is True, d
           print('WHATSAPP_TRANSPORT=READY')
           PY
       - name: Prepare SSH
