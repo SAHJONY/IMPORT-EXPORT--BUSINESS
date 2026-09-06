@@ -14,6 +14,7 @@ from document_storage_api import health as document_health
 from profit_machine_api import profit_machine_health
 from gmail_transport_api import native_email_health
 from google_calendar_transport_api import calendar_health
+from telegram_api import telegram_health
 from sofia_crm_growth_engine import growth_health
 
 app = FastAPI(title='SAHJONY Institutional Capability Control', version='10.0.0', docs_url=None, redoc_url=None)
@@ -25,7 +26,7 @@ CAPABILITIES = [
     ('pricing_margin','Pricing and margin','landed cost + margin floor + customer/internal isolation'),
     ('kyb_compliance','KYB/compliance','counterparty verification + sanctions/compliance controls'),
     ('logistics','Logistics intelligence','shipment/container/port/carrier evidence'),
-    ('executive_comms','Executive communications','Gmail + WhatsApp relationship context + calendar coordination'),
+    ('executive_comms','Executive communications','Gmail + WhatsApp + Telegram relationship context + calendar coordination'),
     ('deal_room','Deal room/document control','durable document storage + trade-document traceability'),
     ('production_health','Production health','fail-closed module health + reversible recovery'),
     ('business_intelligence','Business intelligence','qualified demand -> quote -> PO -> collected GP truth'),
@@ -54,9 +55,9 @@ def _ok(value: dict[str, Any]) -> bool:
 @app.get('/owner/capabilities/health')
 async def capability_health(authorization: str|None=Header(None,alias='Authorization'), x_role: str|None=Header(None,alias='X-Role')):
     _owner(authorization,x_role)
-    crm,supplier,pricing,compliance,logistics,documents,profit,email,calendar = await __import__('asyncio').gather(
+    crm,supplier,pricing,compliance,logistics,documents,profit,email,calendar,telegram = await __import__('asyncio').gather(
         _safe(crm_data_health),_safe(supplier_health),_safe(pricing_health),_safe(compliance_health),_safe(logistics_health),
-        _safe(document_health),_safe(profit_machine_health),_safe(native_email_health),_safe(calendar_health),
+        _safe(document_health),_safe(profit_machine_health),_safe(native_email_health),_safe(calendar_health),_safe(telegram_health),
     )
     growth=growth_health()
     checks={
@@ -66,7 +67,7 @@ async def capability_health(authorization: str|None=Header(None,alias='Authoriza
         'pricing_margin': _ok(pricing) and pricing.get('cost_basis_private') is True and pricing.get('owner_approval_required') is True,
         'kyb_compliance': _ok(compliance),
         'logistics': _ok(logistics),
-        'executive_comms': _ok(email) and _ok(calendar),
+        'executive_comms': _ok(email) and _ok(calendar) and _ok(telegram) and telegram.get('bot_token_configured') is True and telegram.get('channel_configured') is True,
         'deal_room': _ok(documents),
         'production_health': all(str(x.get('status') or '').lower() not in {'error','failed'} for x in (crm,supplier,pricing,compliance,logistics,documents)),
         'business_intelligence': _ok(profit),
@@ -81,5 +82,5 @@ async def capability_health(authorization: str|None=Header(None,alias='Authoriza
         'score':round(passed/len(rows)*10,1),'target':10.0,'passed':passed,'total':len(rows),
         'capabilities':rows,'verified_collected_gross_profit_usd':collected,
         'truth_rules':{'research_is_not_revenue':True,'outreach_is_not_demand':True,'invoice_is_not_collected':True,'binding_actions_owner_gated':True},
-        'sources':{'crm':crm,'supplier':supplier,'pricing':pricing,'compliance':compliance,'logistics':logistics,'documents':documents,'profit':profit,'email':email,'calendar':calendar},
+        'sources':{'crm':crm,'supplier':supplier,'pricing':pricing,'compliance':compliance,'logistics':logistics,'documents':documents,'profit':profit,'email':email,'calendar':calendar,'telegram':telegram},
     }
