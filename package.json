@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "doctor": "node tools/deployment-guard.mjs",
+    "doctor": "node tools/ensure-global-language-runtime.mjs && node tools/deployment-guard.mjs",
     "doctor:locale": "node tools/locale-doctor.mjs",
     "doctor:trade-agent": "node tools/trade-agent-route-doctor.mjs",
     "doctor:sofia": "node tools/sofia-executive-policy-doctor.mjs",
