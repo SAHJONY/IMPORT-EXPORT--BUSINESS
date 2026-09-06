@@ -18,7 +18,7 @@ from telegram_api import telegram_health
 from sofia_crm_growth_engine import growth_health
 from travel_ops_api import app as travel_ops_app, health as travel_health
 
-app = FastAPI(title='SAHJONY Institutional Capability Control', version='10.1.0', docs_url=None, redoc_url=None)
+app = FastAPI(title='SAHJONY Institutional Capability Control', version='10.1.1', docs_url=None, redoc_url=None)
 
 # Travel is registered through this already-mounted institutional subrouter so the
 # unified runtime gains the new endpoints without widening its monolithic import surface.
@@ -35,7 +35,6 @@ CAPABILITIES = [
     ('deal_room','Deal room/document control','durable document storage + trade-document traceability'),
     ('production_health','Production health','fail-closed module health + reversible recovery'),
     ('business_intelligence','Business intelligence','qualified demand -> quote -> PO -> collected GP truth'),
-    ('travel_mobility','Viajes Globales','Spanish-first travel economics + provider readiness + compliance-gated ticketing'),
 ]
 
 
@@ -77,7 +76,6 @@ async def capability_health(authorization: str|None=Header(None,alias='Authoriza
         'deal_room': _ok(documents),
         'production_health': all(str(x.get('status') or '').lower() not in {'error','failed'} for x in (crm,supplier,pricing,compliance,logistics,documents,travel)),
         'business_intelligence': _ok(profit),
-        'travel_mobility': travel.get('booking_gate_fail_closed') is True and travel.get('primary_language') == 'es',
     }
     rows=[]
     for key,name,evidence in CAPABILITIES:
