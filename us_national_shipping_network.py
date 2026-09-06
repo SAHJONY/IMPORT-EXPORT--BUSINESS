@@ -4,10 +4,11 @@ from typing import Literal
 from fastapi import FastAPI
 from pydantic import BaseModel, Field
 
-app = FastAPI(title="SAHJONY US National Shipping Network", version="1.0.0", docs_url=None, redoc_url=None)
+app = FastAPI(title="SAHJONY US National Shipping Network", version="1.1.0", docs_url=None, redoc_url=None)
 
 Mode = Literal["AIR", "SEA", "MULTIMODAL"]
 CargoUnit = Literal["SINGLE_ITEM", "BOX", "MULTIPLE_BOXES", "PALLET", "LTL", "CONSOLIDATED_LCL", "FCL", "VEHICLE", "MOTORCYCLE", "OVERSIZED", "SPECIAL_REGULATED"]
+DeliveryType = Literal["DOOR_TO_DOOR", "DOOR_TO_BUSINESS", "TERMINAL_OPTIONAL"]
 
 US_ZONES = {
     "SOUTH_FLORIDA": ["FL"],
@@ -26,8 +27,11 @@ PRIMARY_HUBS = {
 class NationalIntake(BaseModel):
     origin_state: str = Field(min_length=2, max_length=2)
     origin_postal_code: str | None = Field(default=None, max_length=20)
+    origin_pickup_address: str | None = Field(default=None, max_length=400)
     destination_country: str = Field(min_length=2, max_length=3)
     destination_city_or_region: str | None = Field(default=None, max_length=160)
+    destination_address: str | None = Field(default=None, max_length=400)
+    recipient_type: Literal["HOME", "BUSINESS"] = "HOME"
     cargo_unit: CargoUnit
     description: str = Field(min_length=2, max_length=2000)
     pieces: int = Field(default=1, ge=1, le=10000)
@@ -36,6 +40,8 @@ class NationalIntake(BaseModel):
     urgent: bool = False
     temperature_controlled: bool = False
     dangerous_or_regulated: bool = False
+    delivery_type: DeliveryType = "DOOR_TO_DOOR"
+    customer_requests_terminal_delivery: bool = False
 
 
 def zone_for(state: str) -> str:
@@ -63,6 +69,20 @@ def recommend_hub(p: NationalIntake) -> str:
     return "MIAMI"
 
 
+def final_delivery_policy(p: NationalIntake) -> dict:
+    if p.customer_requests_terminal_delivery:
+        return {
+            "delivery_type": "TERMINAL_OPTIONAL",
+            "door_to_door_default_overridden": True,
+            "override_reason": "CUSTOMER_REQUEST",
+        }
+    return {
+        "delivery_type": "DOOR_TO_BUSINESS" if p.recipient_type == "BUSINESS" else "DOOR_TO_DOOR",
+        "door_to_door_default_overridden": False,
+        "override_reason": None,
+    }
+
+
 @app.get("/us-network/health")
 async def health():
     return {
@@ -73,6 +93,9 @@ async def health():
         "air_sea_separated": True,
         "universal_cargo_units": True,
         "customer_technical_knowledge_required": False,
+        "door_to_door_default": True,
+        "last_mile_included_in_route_design": True,
+        "pod_required_for_completion": True,
     }
 
 
@@ -80,12 +103,18 @@ async def health():
 async def route(p: NationalIntake):
     mode = recommend_mode(p)
     hub = recommend_hub(p)
+    final_delivery = final_delivery_policy(p)
     return {
         "origin_zone": zone_for(p.origin_state),
         "recommended_hub": hub,
         "recommended_mode": mode,
+        "origin_leg": "HOME_OR_BUSINESS_PICKUP_TO_COLLECTION_PARTNER_OR_HUB",
         "domestic_leg": "LOCAL_PICKUP_OR_PARCEL_LTL_LINEHAUL",
         "international_leg": mode,
+        "destination_leg": "CUSTOMS_TO_LAST_MILE_TO_FINAL_ADDRESS",
+        "final_delivery": final_delivery,
+        "pricing_rule": "Quote must include origin pickup/collection, domestic transfer, hub handling, international freight, customs/destination handling where applicable, last-mile delivery and POD unless explicitly disclosed otherwise.",
+        "completion_rule": "Shipment is not complete until delivered to the final home/business address and POD is recorded, unless a customer-selected or legally required terminal exception applies.",
         "booking_status": "COMPLIANCE_REVIEW" if p.dangerous_or_regulated else "RATE_AND_CAPACITY_REVIEW",
         "customer_message_rule": "Ask what, from where, to where, quantity/size and urgency. Do not require port, terminal, incoterm, HAWB or HBL from the customer at first contact.",
     }
