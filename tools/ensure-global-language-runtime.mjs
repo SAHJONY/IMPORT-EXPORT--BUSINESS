@@ -4,6 +4,7 @@ import path from 'node:path';
 const root = process.cwd();
 const targets = [
   'public/owner-cuba-mipymes.html',
+  'public/agency-command-center.html',
 ];
 const runtimePattern = /src=["']\/global-language\.js["']/i;
 const runtimeTag = '<script src="/global-language.js" defer></script>';
