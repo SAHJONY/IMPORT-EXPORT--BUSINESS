@@ -16,8 +16,13 @@ from gmail_transport_api import native_email_health
 from google_calendar_transport_api import calendar_health
 from telegram_api import telegram_health
 from sofia_crm_growth_engine import growth_health
+from travel_ops_api import app as travel_ops_app, health as travel_health
 
-app = FastAPI(title='SAHJONY Institutional Capability Control', version='10.0.0', docs_url=None, redoc_url=None)
+app = FastAPI(title='SAHJONY Institutional Capability Control', version='10.1.0', docs_url=None, redoc_url=None)
+
+# Travel is registered through this already-mounted institutional subrouter so the
+# unified runtime gains the new endpoints without widening its monolithic import surface.
+app.include_router(travel_ops_app.router)
 
 CAPABILITIES = [
     ('crm_sync','CRM synchronization','customer_accounts + trade intakes + verified engagement evidence'),
@@ -30,6 +35,7 @@ CAPABILITIES = [
     ('deal_room','Deal room/document control','durable document storage + trade-document traceability'),
     ('production_health','Production health','fail-closed module health + reversible recovery'),
     ('business_intelligence','Business intelligence','qualified demand -> quote -> PO -> collected GP truth'),
+    ('travel_mobility','Viajes Globales','Spanish-first travel economics + provider readiness + compliance-gated ticketing'),
 ]
 
 
@@ -55,9 +61,9 @@ def _ok(value: dict[str, Any]) -> bool:
 @app.get('/owner/capabilities/health')
 async def capability_health(authorization: str|None=Header(None,alias='Authorization'), x_role: str|None=Header(None,alias='X-Role')):
     _owner(authorization,x_role)
-    crm,supplier,pricing,compliance,logistics,documents,profit,email,calendar,telegram = await __import__('asyncio').gather(
+    crm,supplier,pricing,compliance,logistics,documents,profit,email,calendar,telegram,travel = await __import__('asyncio').gather(
         _safe(crm_data_health),_safe(supplier_health),_safe(pricing_health),_safe(compliance_health),_safe(logistics_health),
-        _safe(document_health),_safe(profit_machine_health),_safe(native_email_health),_safe(calendar_health),_safe(telegram_health),
+        _safe(document_health),_safe(profit_machine_health),_safe(native_email_health),_safe(calendar_health),_safe(telegram_health),_safe(travel_health),
     )
     growth=growth_health()
     checks={
@@ -69,8 +75,9 @@ async def capability_health(authorization: str|None=Header(None,alias='Authoriza
         'logistics': _ok(logistics),
         'executive_comms': _ok(email) and _ok(calendar) and _ok(telegram) and telegram.get('bot_token_configured') is True and telegram.get('channel_configured') is True,
         'deal_room': _ok(documents),
-        'production_health': all(str(x.get('status') or '').lower() not in {'error','failed'} for x in (crm,supplier,pricing,compliance,logistics,documents)),
+        'production_health': all(str(x.get('status') or '').lower() not in {'error','failed'} for x in (crm,supplier,pricing,compliance,logistics,documents,travel)),
         'business_intelligence': _ok(profit),
+        'travel_mobility': travel.get('booking_gate_fail_closed') is True and travel.get('primary_language') == 'es',
     }
     rows=[]
     for key,name,evidence in CAPABILITIES:
@@ -82,5 +89,5 @@ async def capability_health(authorization: str|None=Header(None,alias='Authoriza
         'score':round(passed/len(rows)*10,1),'target':10.0,'passed':passed,'total':len(rows),
         'capabilities':rows,'verified_collected_gross_profit_usd':collected,
         'truth_rules':{'research_is_not_revenue':True,'outreach_is_not_demand':True,'invoice_is_not_collected':True,'binding_actions_owner_gated':True},
-        'sources':{'crm':crm,'supplier':supplier,'pricing':pricing,'compliance':compliance,'logistics':logistics,'documents':documents,'profit':profit,'email':email,'calendar':calendar,'telegram':telegram},
+        'sources':{'crm':crm,'supplier':supplier,'pricing':pricing,'compliance':compliance,'logistics':logistics,'documents':documents,'profit':profit,'email':email,'calendar':calendar,'telegram':telegram,'travel':travel},
     }
