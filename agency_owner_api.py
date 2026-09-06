@@ -34,6 +34,37 @@ class ShipmentIn(BaseModel):
 class CarrierPreferenceIn(BaseModel):
     mode:str=Field(default="OPEN_CHOICE",max_length=80); preferred_provider:str|None=Field(default=None,max_length=240); use_sahjony_when_better:bool=True
 
+
+class PaymentProviderIn(BaseModel):
+    provider_name:str=Field(min_length=2,max_length=120)
+    provider_type:str=Field(default="EXTERNAL_POS",max_length=40)
+    terminal_id:str|None=Field(default=None,max_length=160)
+    location_id:str|None=Field(default=None,max_length=160)
+    currency:str=Field(default="USD",min_length=3,max_length=3)
+    integration_mode:str=Field(default="REFERENCE_ONLY",max_length=40)
+
+class AgencyPaymentIn(BaseModel):
+    amount:float=Field(gt=0)
+    currency:str=Field(default="USD",min_length=3,max_length=3)
+    method:str=Field(max_length=40)
+    provider_id:str|None=Field(default=None,max_length=160)
+    external_reference:str=Field(min_length=2,max_length=240)
+    agency_shipment_id:str|None=Field(default=None,max_length=180)
+    customer_reference:str|None=Field(default=None,max_length=180)
+    terminal_id:str|None=Field(default=None,max_length=160)
+    fee_amount:float=Field(default=0,ge=0)
+    card_brand:str|None=Field(default=None,max_length=40)
+    card_last4:str|None=Field(default=None,pattern=r"^\d{4}$")
+    status:str=Field(default="CAPTURED",max_length=40)
+    note:str|None=Field(default=None,max_length=1200)
+
+class SettlementIn(BaseModel):
+    payment_ids:list[str]=Field(min_length=1,max_length=500)
+    settlement_reference:str=Field(min_length=2,max_length=240)
+    settled_amount:float=Field(gt=0)
+    fee_amount:float=Field(default=0,ge=0)
+    currency:str=Field(default="USD",min_length=3,max_length=3)
+
 class PaperlessRecordIn(BaseModel):
     record_type:str=Field(min_length=2,max_length=80)
     title:str=Field(min_length=2,max_length=240)
@@ -52,7 +83,7 @@ class PaperlessStatusPatch(BaseModel):
 
 @app.get("/agency-os/health")
 async def health():
-    p=persistent_backend_status(); return {"status":"ok" if p.get("configured") else "configuration_required","service":"agency-owner-command-center","multi_tenant":True,"agency_data_isolation":True,"sahjony_internal_economics_hidden":True,"carrier_choice_open":True,"offline_pwa_ready":True,"paperless_by_default":True,"electronic_signatures":True,"paper_required_only_by_exception":True}
+    p=persistent_backend_status(); return {"status":"ok" if p.get("configured") else "configuration_required","service":"agency-owner-command-center","multi_tenant":True,"agency_data_isolation":True,"sahjony_internal_economics_hidden":True,"carrier_choice_open":True,"offline_pwa_ready":True,"paperless_by_default":True,"electronic_signatures":True,"paper_required_only_by_exception":True,"payment_agnostic":True,"any_pos_reference_supported":True,"sensitive_card_data_stored":False}
 
 @app.post("/agency-os/agencies")
 async def create_agency(p:AgencyIn, authorization:str|None=Header(None,alias="Authorization")):
@@ -146,3 +177,47 @@ async def printable_record(record_id:str,x_agency_id:str|None=Header(None,alias=
     for k in ("signature_value","signature_secret","raw_signature"):
         r.pop(k,None)
     return {"record":r,"print_authorized":True,"paperless_default":True,"printing_optional":True,"agency_id":a["agency_id"]}
+
+
+@app.post("/agency-os/payments/providers")
+async def add_payment_provider(p:PaymentProviderIn,x_agency_id:str|None=Header(None,alias="X-Agency-Id"),authorization:str|None=Header(None,alias="Authorization")):
+    a=await agency_actor(x_agency_id,authorization); ts=now(); pid="app_"+secrets.token_urlsafe(10)
+    row={"provider_id":pid,"agency_id":a["agency_id"],**p.model_dump(),"currency":p.currency.upper(),"status":"active","created_by_owner_id":a["owner_id"],"created_at":ts,"updated_at":ts}
+    await get_backend().insert("logistics_agency_payment_providers",row)
+    return {"provider":row,"provider_agnostic":True}
+
+@app.get("/agency-os/payments/providers")
+async def payment_providers(x_agency_id:str|None=Header(None,alias="X-Agency-Id"),authorization:str|None=Header(None,alias="Authorization")):
+    a=await agency_actor(x_agency_id,authorization); rows=await get_backend().select("logistics_agency_payment_providers",params={"agency_id":f"eq.{a['agency_id']}","order":"created_at.desc","limit":"200"}) or []
+    return {"providers":rows,"supported_modes":["REFERENCE_ONLY","API","WEBHOOK","QR","CASH","BANK_TRANSFER","EXTERNAL_POS"]}
+
+@app.post("/agency-os/payments")
+async def record_payment(p:AgencyPaymentIn,x_agency_id:str|None=Header(None,alias="X-Agency-Id"),authorization:str|None=Header(None,alias="Authorization")):
+    a=await agency_actor(x_agency_id,authorization)
+    if p.status not in {"PENDING","AUTHORIZED","CAPTURED","SETTLED","REFUNDED","VOIDED","DISPUTED","FAILED"}: raise HTTPException(422,"Invalid payment status")
+    if p.card_last4 and p.method.upper() not in {"CARD","CREDIT_CARD","DEBIT_CARD","EXTERNAL_POS"}: raise HTTPException(422,"card_last4 only applies to card/POS methods")
+    if p.provider_id:
+        prov=await get_backend().select("logistics_agency_payment_providers",params={"provider_id":f"eq.{p.provider_id}","agency_id":f"eq.{a['agency_id']}","status":"eq.active","limit":"1"}) or []
+        if not prov: raise HTTPException(404,"Payment provider not found in this agency")
+    ts=now(); payid="apy_"+secrets.token_urlsafe(12)
+    row={"payment_id":payid,"agency_id":a["agency_id"],**p.model_dump(),"currency":p.currency.upper(),"net_amount":round(p.amount-p.fee_amount,2),"recorded_by_owner_id":a["owner_id"],"created_at":ts,"updated_at":ts}
+    await get_backend().insert("logistics_agency_payments",row)
+    safe=dict(row); safe.pop("provider_payload",None)
+    return {"payment":safe,"pci_scope":"REFERENCE_ONLY","pan_stored":False,"cvv_stored":False}
+
+@app.get("/agency-os/payments")
+async def list_payments(x_agency_id:str|None=Header(None,alias="X-Agency-Id"),authorization:str|None=Header(None,alias="Authorization")):
+    a=await agency_actor(x_agency_id,authorization); rows=await get_backend().select("logistics_agency_payments",params={"agency_id":f"eq.{a['agency_id']}","order":"created_at.desc","limit":"1000"}) or []
+    return {"payments":rows}
+
+@app.post("/agency-os/payments/settlements")
+async def record_settlement(p:SettlementIn,x_agency_id:str|None=Header(None,alias="X-Agency-Id"),authorization:str|None=Header(None,alias="Authorization")):
+    a=await agency_actor(x_agency_id,authorization); rows=[]
+    for pid in p.payment_ids:
+        found=await get_backend().select("logistics_agency_payments",params={"payment_id":f"eq.{pid}","agency_id":f"eq.{a['agency_id']}","limit":"1"}) or []
+        if not found: raise HTTPException(404,f"Payment {pid} not found in this agency")
+        rows.append(found[0])
+    sid="ast_"+secrets.token_urlsafe(10); ts=now(); row={"settlement_id":sid,"agency_id":a["agency_id"],**p.model_dump(),"currency":p.currency.upper(),"net_settlement":round(p.settled_amount-p.fee_amount,2),"created_by_owner_id":a["owner_id"],"created_at":ts}
+    await get_backend().insert("logistics_agency_payment_settlements",row)
+    for pay in rows: await get_backend().patch("logistics_agency_payments",{"status":"SETTLED","settlement_id":sid,"updated_at":ts},params={"payment_id":f"eq.{pay['payment_id']}","agency_id":f"eq.{a['agency_id']}"})
+    return {"settlement":row,"payments_reconciled":len(rows)}

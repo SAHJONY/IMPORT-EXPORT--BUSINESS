@@ -8,6 +8,7 @@ class FakeBackend:
             'logistics_agency_owner_credentials':[{'agency_id':'agy_a','owner_id':'owner_a','token_hash':mod.digest('secret-a'),'status':'active'}],
             'logistics_agency_employees':[{'employee_id':'emp_a','agency_id':'agy_a','full_name':'Worker A','status':'active'}],
             'logistics_agency_shipments':[{'agency_shipment_id':'s1','agency_id':'agy_a','tracking_reference':'A-1','status':'CREATED','customer_price':10,'agency_cost':7}],
+            'logistics_agency_payment_providers':[], 'logistics_agency_payments':[], 'logistics_agency_payment_settlements':[],
         }
     async def select(self, table, params=None):
         rows=list(self.tables.get(table,[])); params=params or {}
@@ -55,3 +56,25 @@ def test_agency_owner_controls_paperless_release(monkeypatch):
     assert r.status_code==200
     assert b.tables['logistics_agency_paperless_records'][0]['status']=='RELEASED'
     assert b.tables['logistics_agency_paperless_records'][0]['updated_by_owner_id']=='owner_a'
+
+
+def test_payment_layer_is_provider_agnostic_and_tenant_scoped(monkeypatch):
+    b=FakeBackend(); monkeypatch.setattr(mod,'get_backend',lambda:b)
+    c=TestClient(mod.app); h={'Authorization':'Bearer secret-a','X-Agency-Id':'agy_a'}
+    pr=c.post('/agency-os/payments/providers',headers=h,json={'provider_name':'Any POS','provider_type':'EXTERNAL_POS','integration_mode':'REFERENCE_ONLY'})
+    assert pr.status_code==200
+    pid=pr.json()['provider']['provider_id']
+    r=c.post('/agency-os/payments',headers=h,json={'amount':125.50,'method':'CARD','provider_id':pid,'external_reference':'TXN-001','fee_amount':3.50,'card_brand':'VISA','card_last4':'4242'})
+    assert r.status_code==200
+    body=r.json(); assert body['pan_stored'] is False and body['cvv_stored'] is False
+    assert body['payment']['net_amount']==122.0
+    assert c.get('/agency-os/payments',headers={**h,'X-Agency-Id':'agy_b'}).status_code==403
+
+def test_settlement_only_accepts_same_agency_payments(monkeypatch):
+    b=FakeBackend(); monkeypatch.setattr(mod,'get_backend',lambda:b)
+    c=TestClient(mod.app); h={'Authorization':'Bearer secret-a','X-Agency-Id':'agy_a'}
+    r=c.post('/agency-os/payments',headers=h,json={'amount':50,'method':'CASH','external_reference':'CASH-001'})
+    pid=r.json()['payment']['payment_id']
+    s=c.post('/agency-os/payments/settlements',headers=h,json={'payment_ids':[pid],'settlement_reference':'SET-1','settled_amount':50})
+    assert s.status_code==200 and s.json()['payments_reconciled']==1
+    assert b.tables['logistics_agency_payments'][0]['status']=='SETTLED'
