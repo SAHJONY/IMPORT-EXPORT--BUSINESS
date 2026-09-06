@@ -83,6 +83,7 @@ from direct_voice_api import app as direct_voice_app
 from voice_autonomy_api import app as voice_autonomy_app
 from whatsapp_voice_orchestrator_api import app as whatsapp_voice_orchestrator_app
 from fastapi_server import app as core_app
+from institutional_capability_api import app as institutional_capability_app
 
 _RUNTIME_EMPLOYEE_BRIDGE_TOKEN = os.getenv("EMPLOYEE_TOKEN", "").strip() or secrets.token_urlsafe(48)
 os.environ.setdefault("EMPLOYEE_TOKEN", _RUNTIME_EMPLOYEE_BRIDGE_TOKEN)
@@ -373,6 +374,6 @@ for subapp in (
     energy_app, energy_origination_app, energy_intelligence_app, energy_provider_hub_app, energy_provider_ingestion_app, energy_provider_catalog_app, energy_ofac_screening_app, energy_eia_app, energy_deal_flow_app, energy_revenue_intelligence_app,
     communications_app, communication_os_security_app, communication_os_app, communication_agentic_app, communication_platform_app, direct_text_app, wifi_connectivity_app, cuba_communications_app, voice_inbound_app, voice_agent_app, direct_voice_app, voice_autonomy_app, whatsapp_voice_orchestrator_app, documents_app, document_storage_app, shipments_app, compliance_app, commercial_app, language_app, collaboration_app, finance_app,
     countries_app, cuba_current_app, cuba_transition_app, cuba_trade_desk_app, cuba_private_business_app, cuba_private_sector_lead_app, lead_scout_app, managed_trade_app, intermediary_app, global_sourcing_app, global_marketplace_app, business_readiness_app, us_import_app,
-    ai_brain_app, ai_trade_agent_app, agentic_trade_engine_app, trade_certification_app,
+    ai_brain_app, ai_trade_agent_app, agentic_trade_engine_app, trade_certification_app, institutional_capability_app,
 ):
     app.include_router(subapp.router)

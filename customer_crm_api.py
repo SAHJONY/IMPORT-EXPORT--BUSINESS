@@ -91,6 +91,14 @@ class SofiaPursuitIn(BaseModel):
     limit:int=Field(default=50,ge=1,le=250)
     execute_reversible_steps:bool=False
 
+class EngagementEvidenceIn(BaseModel):
+    channel:Literal['gmail','whatsapp','website','calendar','other']
+    interaction_at:str=Field(min_length=10,max_length=80)
+    evidence_ref:str=Field(min_length=3,max_length=512)
+    summary:str=Field(min_length=3,max_length=1200)
+    genuine_counterparty_reply:bool=True
+    transactional_context:bool=True
+
 class QualifyIn(BaseModel):
     status:Literal['QUALIFIED','NEEDS_INFO','DISQUALIFIED']
     assigned_employee_id:str|None=None
@@ -116,11 +124,46 @@ async def _sofia_growth_queue():
     backend=get_backend()
     accounts=await backend.select('customer_accounts',params={'limit':'5000'}) or []
     intakes=await backend.select('customer_trade_intakes',params={'limit':'5000'}) or []
+    audits=await backend.select('customer_crm_audit',params={'limit':'5000'}) or []
+    verified_replies={}
+    for event in audits:
+        if event.get('event_type')!='counterparty_reply_verified' or not event.get('customer_id'):
+            continue
+        payload=event.get('payload') or {}
+        if not payload.get('genuine_counterparty_reply') or not payload.get('transactional_context'):
+            continue
+        cid=str(event['customer_id'])
+        current=verified_replies.get(cid)
+        if current is None or str(event.get('created_at') or '')>str(current.get('created_at') or ''):
+            verified_replies[cid]=event
+    enriched=[]
+    for row in accounts:
+        item=dict(row)
+        event=verified_replies.get(str(item.get('customer_id') or ''))
+        if event:
+            payload=event.get('payload') or {}
+            item['sales_status']='REPLIED'
+            item['consent_status']='TRANSACTIONAL_ONLY'
+            item['last_reply_at']=payload.get('interaction_at') or event.get('created_at')
+            item['engagement_evidence']=payload.get('evidence_ref') or event.get('event_id')
+        enriched.append(item)
     try: external=await backend.select('external_trade_prospects',params={'organization_id':'eq.org_sahjony_global_trade','limit':'5000'}) or []
     except Exception: external=[]
     try: whatsapp=await backend.select('whatsapp_leads',params={'limit':'5000'}) or []
     except Exception: whatsapp=[]
-    return build_growth_queue(accounts,intakes,external,whatsapp)
+    return build_growth_queue(enriched,intakes,external,whatsapp)
+
+
+@app.post('/crm/prospects/{customer_id}/engagement-evidence')
+async def record_engagement_evidence(customer_id:str,p:EngagementEvidenceIn,x_role:str|None=Header(None,alias='X-Role'),authorization:str|None=Header(None,alias='Authorization'),x_employee_id:str|None=Header(None,alias='X-Employee-Id')):
+    actor=identity(x_role,authorization,x_employee_id)
+    if not p.genuine_counterparty_reply or not p.transactional_context:
+        raise HTTPException(400,'Only genuine counterparty replies in an existing transactional context qualify as engagement evidence')
+    rows=await get_backend().select('customer_accounts',params={'customer_id':f'eq.{customer_id}','limit':'1'}) or []
+    if not rows: raise HTTPException(404,'Prospect not found')
+    payload=p.model_dump()|{'contact_basis':'TRANSACTIONAL_ONLY','marketing_consent':False}
+    await audit(actor,'counterparty_reply_verified',p.summary,customer_id,payload=payload)
+    return {'status':'recorded','customer_id':customer_id,'sales_status':'REPLIED','contact_basis':'TRANSACTIONAL_ONLY','marketing_consent':False,'intake_created':False,'message_sent':False}
 
 @app.get('/crm/sofia/growth-queue')
 async def sofia_growth_queue(x_role:str|None=Header(None,alias='X-Role'),authorization:str|None=Header(None,alias='Authorization'),x_employee_id:str|None=Header(None,alias='X-Employee-Id')):
