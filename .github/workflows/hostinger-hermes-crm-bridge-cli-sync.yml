@@ -1,0 +1,44 @@
+name: Hostinger Hermes CRM Bridge CLI Sync
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/hostinger-hermes-crm-bridge-cli-sync.yml
+
+jobs:
+  sync:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    concurrency:
+      group: hostinger-vm-767852-mutation
+      cancel-in-progress: false
+    env:
+      HOST: 69.62.68.67
+      SSH_USER: root
+      PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare SSH
+        shell: bash
+        run: |
+          set -euo pipefail
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/key
+          chmod 600 ~/.ssh/key
+      - name: Sync CRM bridge CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/key openclaw/hostinger-24x7/sahjony-crm-bridge.py "$SSH_USER@$HOST:/tmp/sahjony-crm-bridge.new"
+          ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/key "$SSH_USER@$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          install -m 700 /tmp/sahjony-crm-bridge.new /usr/local/sbin/sahjony-crm-bridge
+          rm -f /tmp/sahjony-crm-bridge.new
+          python3 -m py_compile /usr/local/sbin/sahjony-crm-bridge
+          /usr/local/sbin/sahjony-crm-bridge --help | grep -q outreach-pilot
+          echo HERMES_CRM_BRIDGE_CLI=SYNCED
+          REMOTE
+      - name: Cleanup
+        if: always()
+        run: rm -f ~/.ssh/key
