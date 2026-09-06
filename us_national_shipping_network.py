@@ -4,7 +4,7 @@ from typing import Literal
 from fastapi import FastAPI
 from pydantic import BaseModel, Field
 
-app = FastAPI(title="SAHJONY US National Shipping Network", version="1.4.0", docs_url=None, redoc_url=None)
+app = FastAPI(title="SAHJONY US National Shipping Network", version="1.4.1", docs_url=None, redoc_url=None)
 
 Mode = Literal["AIR", "SEA", "MULTIMODAL"]
 CargoUnit = Literal["SINGLE_ITEM", "BOX", "MULTIPLE_BOXES", "PALLET", "LTL", "CONSOLIDATED_LCL", "FCL", "VEHICLE", "MOTORCYCLE", "OVERSIZED", "SPECIAL_REGULATED"]
@@ -77,6 +77,16 @@ def recommend_gateway(p: NationalIntake) -> str:
     if zone in {"TEXAS_GULF", "MIDWEST", "SOUTHEAST"}:
         return "HOUSTON"
     return "MIAMI"
+
+
+def recommend_hub(p: NationalIntake) -> str:
+    """Backward-compatible public name for the gateway recommendation.
+
+    Existing callers and tests historically imported ``recommend_hub``.  Keep
+    that contract stable while the richer collection-hub model is exposed via
+    ``recommend_collection_hub``.
+    """
+    return recommend_gateway(p)
 
 
 def recommend_collection_hub(p: NationalIntake) -> dict:
