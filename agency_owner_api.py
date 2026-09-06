@@ -135,3 +135,14 @@ async def update_paperless_status(record_id:str,p:PaperlessStatusPatch,x_agency_
     patch={"status":p.status,"status_note":p.note,"updated_at":now(),"updated_by_owner_id":a["owner_id"]}
     await get_backend().patch("logistics_agency_paperless_records",patch,params={"record_id":f"eq.{record_id}","agency_id":f"eq.{a['agency_id']}"})
     return {"record_id":record_id,"status":p.status,"authority":"AGENCY_OWNER"}
+
+
+@app.get("/agency-os/paperless/{record_id}/print")
+async def printable_record(record_id:str,x_agency_id:str|None=Header(None,alias="X-Agency-Id"),authorization:str|None=Header(None,alias="Authorization")):
+    a=await agency_actor(x_agency_id,authorization)
+    rows=await get_backend().select("logistics_agency_paperless_records",params={"record_id":f"eq.{record_id}","agency_id":f"eq.{a['agency_id']}","limit":"1"}) or []
+    if not rows: raise HTTPException(404,"Paperless record not found in this agency")
+    r=dict(rows[0])
+    for k in ("signature_value","signature_secret","raw_signature"):
+        r.pop(k,None)
+    return {"record":r,"print_authorized":True,"paperless_default":True,"printing_optional":True,"agency_id":a["agency_id"]}
