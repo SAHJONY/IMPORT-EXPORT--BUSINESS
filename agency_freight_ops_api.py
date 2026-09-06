@@ -9,7 +9,88 @@ from insforge_backend import get_backend
 
 app=FastAPI(title='SAHJONY Agency Freight Operations',version='1.0.0',docs_url=None,redoc_url=None)
 Mode=Literal['AIR','SEA','MULTIMODAL']
-DocType=Literal['HAWB','MAWB','HBL','MBL','MANIFEST']
+DocType=str
+
+
+DOCUMENT_CATALOG = {
+    # Commercial / customer
+    'PRO_FORMA_INVOICE': ('COMMERCIAL','CONDITIONAL'),
+    'COMMERCIAL_INVOICE': ('COMMERCIAL','CORE'),
+    'PACKING_LIST': ('COMMERCIAL','CORE'),
+    'PURCHASE_ORDER': ('COMMERCIAL','CONDITIONAL'),
+    'SALES_CONTRACT': ('COMMERCIAL','CONDITIONAL'),
+    'SHIPPER_LETTER_OF_INSTRUCTION': ('COMMERCIAL','CONDITIONAL'),
+    'LETTER_OF_CREDIT': ('FINANCIAL','CONDITIONAL'),
+    'PAYMENT_RECEIPT': ('FINANCIAL','OPERATIONAL'),
+    'AGENCY_INVOICE': ('FINANCIAL','OPERATIONAL'),
+    'TRANSITARIA_INVOICE': ('FINANCIAL','OPERATIONAL'),
+    'SETTLEMENT_REPORT': ('FINANCIAL','OPERATIONAL'),
+    # Transport / consolidation
+    'HAWB': ('TRANSPORT','CONDITIONAL'), 'MAWB': ('TRANSPORT','CONDITIONAL'),
+    'HBL': ('TRANSPORT','CONDITIONAL'), 'MBL': ('TRANSPORT','CONDITIONAL'),
+    'AIR_WAYBILL': ('TRANSPORT','CONDITIONAL'), 'BILL_OF_LADING': ('TRANSPORT','CONDITIONAL'),
+    'CARGO_MANIFEST': ('TRANSPORT','CORE'), 'CONSOLIDATION_MANIFEST': ('TRANSPORT','OPERATIONAL'),
+    'DECONSOLIDATION_MANIFEST': ('TRANSPORT','OPERATIONAL'), 'DELIVERY_MANIFEST': ('TRANSPORT','OPERATIONAL'),
+    'WAREHOUSE_RECEIPT': ('WAREHOUSE','OPERATIONAL'), 'CARGO_RECEIPT': ('WAREHOUSE','OPERATIONAL'),
+    'PALLET_LIST': ('WAREHOUSE','OPERATIONAL'), 'CONTAINER_PACKING_LIST': ('WAREHOUSE','OPERATIONAL'),
+    'CONTAINER_LOAD_PLAN': ('WAREHOUSE','OPERATIONAL'), 'SEAL_RECORD': ('WAREHOUSE','OPERATIONAL'),
+    'WEIGHT_VERIFICATION': ('WAREHOUSE','OPERATIONAL'),
+    # Export / customs / compliance
+    'EEI_AES_PROOF': ('CUSTOMS','ORIGIN_REQUIRED_USA_CONDITIONAL'),
+    'EEI_EXEMPTION_CITATION': ('CUSTOMS','ORIGIN_REQUIRED_USA_CONDITIONAL'),
+    'CERS_EXPORT_DECLARATION': ('CUSTOMS','ORIGIN_REQUIRED_CANADA_CONDITIONAL'),
+    'CERS_PROOF_OF_REPORT': ('CUSTOMS','ORIGIN_REQUIRED_CANADA_CONDITIONAL'),
+    'EXPORT_LICENSE': ('COMPLIANCE','CONDITIONAL'), 'IMPORT_LICENSE': ('COMPLIANCE','CONDITIONAL'),
+    'CERTIFICATE_OF_ORIGIN': ('COMPLIANCE','CONDITIONAL'), 'DESTINATION_CONTROL_STATEMENT': ('COMPLIANCE','CONDITIONAL'),
+    'END_USE_STATEMENT': ('COMPLIANCE','CONDITIONAL'), 'END_USER_CERTIFICATE': ('COMPLIANCE','CONDITIONAL'),
+    'SANCTIONS_KYB_KYC_RECORD': ('COMPLIANCE','OPERATIONAL'), 'HS_CLASSIFICATION_RECORD': ('COMPLIANCE','CORE'),
+    'CUSTOMS_DECLARATION_CUBA': ('CUSTOMS','DESTINATION_REQUIRED_CONDITIONAL'),
+    'CUSTOMS_RELEASE_CUBA': ('CUSTOMS','DESTINATION_REQUIRED_CONDITIONAL'),
+    'CUSTOMS_HOLD_NOTICE': ('CUSTOMS','CONDITIONAL'), 'CUSTOMS_DUTY_TAX_RECEIPT': ('CUSTOMS','CONDITIONAL'),
+    'VUCE_PERMIT_RECORD': ('CUSTOMS','CONDITIONAL'),
+    # Product-specific / dangerous goods
+    'SDS': ('SPECIAL_CARGO','CONDITIONAL'), 'DANGEROUS_GOODS_DECLARATION': ('SPECIAL_CARGO','CONDITIONAL'),
+    'IATA_DG_SHIPPERS_DECLARATION': ('SPECIAL_CARGO','CONDITIONAL'), 'IMDG_DG_DECLARATION': ('SPECIAL_CARGO','CONDITIONAL'),
+    'BATTERY_TEST_SUMMARY_UN38_3': ('SPECIAL_CARGO','CONDITIONAL'), 'PHYTOSANITARY_CERTIFICATE': ('SPECIAL_CARGO','CONDITIONAL'),
+    'HEALTH_CERTIFICATE': ('SPECIAL_CARGO','CONDITIONAL'), 'SANITARY_CERTIFICATE': ('SPECIAL_CARGO','CONDITIONAL'),
+    'FUMIGATION_CERTIFICATE': ('SPECIAL_CARGO','CONDITIONAL'), 'INSPECTION_CERTIFICATE': ('SPECIAL_CARGO','CONDITIONAL'),
+    'INSURANCE_CERTIFICATE': ('RISK','CONDITIONAL'),
+    # Custody / delivery / claims
+    'CHAIN_OF_CUSTODY_REPORT': ('CUSTODY','OPERATIONAL'), 'SCAN_EVENT_REPORT': ('CUSTODY','OPERATIONAL'),
+    'INCIDENT_REPORT': ('CLAIMS','CONDITIONAL'), 'CLAIM_FORM': ('CLAIMS','CONDITIONAL'),
+    'DAMAGE_REPORT': ('CLAIMS','CONDITIONAL'), 'SHORTAGE_REPORT': ('CLAIMS','CONDITIONAL'),
+    'PROOF_OF_DELIVERY': ('DELIVERY','CORE'), 'RECIPIENT_ACCEPTANCE': ('DELIVERY','CORE'),
+    'FINAL_DELIVERY_REPORT': ('DELIVERY','CORE'), 'RETURN_RECEIPT': ('DELIVERY','CONDITIONAL'),
+    'PHOTO_EVIDENCE_REPORT': ('DELIVERY','OPERATIONAL'),
+    # Agency / HR
+    'EMPLOYEE_ACKNOWLEDGEMENT': ('AGENCY','OPERATIONAL'), 'AGENCY_SERVICE_AGREEMENT': ('AGENCY','CONDITIONAL'),
+    'CUSTOMER_TERMS_ACCEPTANCE': ('AGENCY','OPERATIONAL'), 'PRIVACY_CONSENT': ('AGENCY','OPERATIONAL'),
+}
+
+class DocumentRequirementQuery(BaseModel):
+    origin_country:Literal['USA','CANADA']; mode:Mode; cargo_type:Literal['COMMERCIAL','NON_COMMERCIAL']='NON_COMMERCIAL'; dangerous_goods:bool=False; insured:bool=False; export_filing_required:bool=False; export_license_required:bool=False; cuba_customs_document_required:bool=True
+
+@app.get('/agency-freight/document-catalog')
+async def document_catalog(x_agency_id:str|None=Header(None,alias='X-Agency-Id'),authorization:str|None=Header(None,alias='Authorization')):
+    await agency_actor(x_agency_id,authorization)
+    return {'documents':[{'document_type':k,'category':v[0],'requirement_class':v[1]} for k,v in DOCUMENT_CATALOG.items()],'paperless_default':True,'printable':True,'rules_dynamic':True}
+
+@app.post('/agency-freight/document-requirements')
+async def document_requirements(p:DocumentRequirementQuery,x_agency_id:str|None=Header(None,alias='X-Agency-Id'),authorization:str|None=Header(None,alias='Authorization')):
+    await agency_actor(x_agency_id,authorization)
+    required={'COMMERCIAL_INVOICE','PACKING_LIST','CARGO_MANIFEST','HS_CLASSIFICATION_RECORD','PROOF_OF_DELIVERY','RECIPIENT_ACCEPTANCE','FINAL_DELIVERY_REPORT'}
+    conditional=set()
+    required.add('AIR_WAYBILL' if p.mode=='AIR' else 'BILL_OF_LADING' if p.mode=='SEA' else 'CARGO_MANIFEST')
+    if p.export_filing_required: required.add('EEI_AES_PROOF' if p.origin_country=='USA' else 'CERS_EXPORT_DECLARATION')
+    else: conditional.add('EEI_EXEMPTION_CITATION' if p.origin_country=='USA' else 'CERS_EXPORT_DECLARATION')
+    if p.export_license_required: required.add('EXPORT_LICENSE')
+    if p.cuba_customs_document_required: required.add('CUSTOMS_DECLARATION_CUBA')
+    if p.dangerous_goods:
+        required.update({'SDS','DANGEROUS_GOODS_DECLARATION'})
+        required.add('IATA_DG_SHIPPERS_DECLARATION' if p.mode=='AIR' else 'IMDG_DG_DECLARATION' if p.mode=='SEA' else 'DANGEROUS_GOODS_DECLARATION')
+    if p.insured: required.add('INSURANCE_CERTIFICATE')
+    if p.cargo_type=='COMMERCIAL': conditional.update({'PURCHASE_ORDER','SALES_CONTRACT','CERTIFICATE_OF_ORIGIN'})
+    return {'required':sorted(required),'conditional':sorted(conditional),'rule':'Shipment-specific requirements override generic catalog. Verify product, carrier, exporter, importer and customs requirements before release.'}
 
 class ConsolidationIn(BaseModel):
     name:str=Field(min_length=2,max_length=180); mode:Mode; origin:str=Field(min_length=2,max_length=180); destination:str=Field(min_length=2,max_length=180); provider:str|None=Field(default=None,max_length=180); parent_reference:str|None=Field(default=None,max_length=180)
@@ -55,7 +136,9 @@ async def add_item(cid:str,p:ConsolidationItemIn,x_agency_id:str|None=Header(Non
 async def create_document(p:DocumentIn,x_agency_id:str|None=Header(None,alias='X-Agency-Id'),authorization:str|None=Header(None,alias='Authorization')):
     a=await agency_actor(x_agency_id,authorization); aid=a['agency_id']; ts=now()
     if p.consolidation_id: await _exists('logistics_agency_consolidations',aid,'consolidation_id',p.consolidation_id)
-    row={'freight_document_id':'fdoc_'+secrets.token_urlsafe(10),'agency_id':aid,**p.model_dump(),'status':'ACTIVE','created_at':ts,'updated_at':ts}
+    dtype=p.document_type.upper().strip()
+    if dtype not in DOCUMENT_CATALOG: raise HTTPException(422,'Unsupported document type; use /agency-freight/document-catalog')
+    row={'freight_document_id':'fdoc_'+secrets.token_urlsafe(10),'agency_id':aid,**p.model_dump(),'document_type':dtype,'category':DOCUMENT_CATALOG[dtype][0],'requirement_class':DOCUMENT_CATALOG[dtype][1],'status':'ACTIVE','created_at':ts,'updated_at':ts}
     await get_backend().insert('logistics_agency_freight_documents',row); return {'document':row,'paperless':True,'printable':True}
 
 @app.post('/agency-freight/routes')

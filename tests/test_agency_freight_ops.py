@@ -50,3 +50,21 @@ def test_customs_links_are_contextual(monkeypatch):
     assert any('Aduana' in x['name'] for x in data['destination_customs'])
     us=c.get('/agency-freight/customs-links?origin_country=USA',headers=h())
     assert us.status_code==200 and any('AES' in x['name'] for x in us.json()['origin_customs'])
+
+def test_full_document_catalog_and_dynamic_requirements(monkeypatch):
+    b,c=setup(monkeypatch)
+    cat=c.get('/agency-freight/document-catalog',headers=h())
+    assert cat.status_code==200
+    types={x['document_type'] for x in cat.json()['documents']}
+    assert {'COMMERCIAL_INVOICE','PACKING_LIST','HAWB','MAWB','HBL','MBL','EEI_AES_PROOF','CERS_EXPORT_DECLARATION','CUSTOMS_DECLARATION_CUBA','PROOF_OF_DELIVERY','CLAIM_FORM','SDS'}.issubset(types)
+    r=c.post('/agency-freight/document-requirements',headers=h(),json={'origin_country':'CANADA','mode':'AIR','cargo_type':'COMMERCIAL','dangerous_goods':True,'insured':True,'export_filing_required':True,'cuba_customs_document_required':True})
+    assert r.status_code==200
+    req=set(r.json()['required'])
+    assert {'COMMERCIAL_INVOICE','PACKING_LIST','AIR_WAYBILL','CERS_EXPORT_DECLARATION','CUSTOMS_DECLARATION_CUBA','IATA_DG_SHIPPERS_DECLARATION','INSURANCE_CERTIFICATE','PROOF_OF_DELIVERY'}.issubset(req)
+
+def test_document_creation_accepts_catalog_but_rejects_unknown(monkeypatch):
+    b,c=setup(monkeypatch)
+    good=c.post('/agency-freight/documents',headers=h(),json={'document_type':'COMMERCIAL_INVOICE','number':'INV-1'})
+    assert good.status_code==200 and good.json()['document']['category']=='COMMERCIAL'
+    bad=c.post('/agency-freight/documents',headers=h(),json={'document_type':'MADE_UP_DOC','number':'X-1'})
+    assert bad.status_code==422
