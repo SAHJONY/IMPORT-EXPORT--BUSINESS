@@ -275,6 +275,7 @@
     { "src": "/document-storage(.*)", "dest": "unified_api.py" },
     { "src": "/documents(.*)", "dest": "unified_api.py" },
     { "src": "/shipments(.*)", "dest": "unified_api.py" },
+    { "src": "/agency-network(.*)", "dest": "unified_api.py" },
     { "src": "/agency-os(.*)", "dest": "unified_api.py" },
     { "src": "/compliance(.*)", "dest": "unified_api.py" },
     { "src": "/commercial(.*)", "dest": "unified_api.py" },

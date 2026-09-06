@@ -27,6 +27,7 @@ from cuba_communications_api import app as cuba_communications_app
 from document_api import app as documents_app
 from document_storage_api import app as document_storage_app
 from shipment_api import app as shipments_app
+from cuba_agency_network_api import app as cuba_agency_network_app
 from agency_owner_api import app as agency_owner_app
 from compliance_api import app as compliance_app
 from commercial_api import app as commercial_app
