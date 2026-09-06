@@ -4,7 +4,7 @@ from typing import Literal
 from fastapi import FastAPI
 from pydantic import BaseModel, Field
 
-app = FastAPI(title="SAHJONY US National Shipping Network", version="1.2.0", docs_url=None, redoc_url=None)
+app = FastAPI(title="SAHJONY US National Shipping Network", version="1.3.0", docs_url=None, redoc_url=None)
 
 Mode = Literal["AIR", "SEA", "MULTIMODAL"]
 CargoUnit = Literal["SINGLE_ITEM", "BOX", "MULTIPLE_BOXES", "PALLET", "LTL", "CONSOLIDATED_LCL", "FCL", "VEHICLE", "MOTORCYCLE", "OVERSIZED", "SPECIAL_REGULATED"]
@@ -21,14 +21,18 @@ US_ZONES = {
 
 PRIMARY_HUBS = {
     "HOUSTON": {
-        "state": "TX", "owner": "SAHJONY", "facility_type": "OWNED_WAREHOUSE",
-        "role": ["TEXAS_GULF", "CENTRAL_US", "SEA", "AIR", "LINEHAUL", "CONSOLIDATION", "VEHICLE_STAGING"],
-        "capabilities": ["RECEIVING", "WEIGHING", "DIMENSIONING", "PHOTO_EVIDENCE", "QR_INTAKE", "PALLETIZATION", "LCL", "FCL", "AIR_CONSOLIDATION", "VEHICLE_MOTORCYCLE_STAGING", "CUSTODY_HANDOFF"],
+        "state": "TX", "owner": "SAHJONY", "facility_type": "VIRTUAL_HUB",
+        "phase": "ACTIVE_NOW",
+        "role": ["TEXAS_GULF", "CENTRAL_US", "SEA", "AIR", "LINEHAUL", "CONSOLIDATION_COORDINATION", "VEHICLE_STAGING_COORDINATION"],
+        "execution": "AUTHORIZED_THIRD_PARTY_WAREHOUSES_AGENCIES_AND_CARRIERS",
+        "future_facility_type": "SAHJONY_OWNED_WAREHOUSE",
     },
     "MIAMI": {
-        "state": "FL", "owner": "SAHJONY", "facility_type": "OWNED_WAREHOUSE",
-        "role": ["SOUTH_FLORIDA", "CARIBBEAN_GATEWAY", "SEA", "AIR", "CONSOLIDATION", "VEHICLE_STAGING"],
-        "capabilities": ["RECEIVING", "WEIGHING", "DIMENSIONING", "PHOTO_EVIDENCE", "QR_INTAKE", "PALLETIZATION", "LCL", "FCL", "AIR_CONSOLIDATION", "VEHICLE_MOTORCYCLE_STAGING", "CUSTODY_HANDOFF"],
+        "state": "FL", "owner": "SAHJONY", "facility_type": "VIRTUAL_HUB",
+        "phase": "ACTIVE_NOW",
+        "role": ["SOUTH_FLORIDA", "CARIBBEAN_GATEWAY", "SEA", "AIR", "CONSOLIDATION_COORDINATION", "VEHICLE_STAGING_COORDINATION"],
+        "execution": "AUTHORIZED_THIRD_PARTY_WAREHOUSES_AGENCIES_AND_CARRIERS",
+        "future_facility_type": "SAHJONY_OWNED_WAREHOUSE",
     },
 }
 
@@ -92,9 +96,12 @@ async def health():
     return {
         "status": "ok",
         "national_coverage": True,
-        "operating_model": "HYBRID_OWNED_HUBS_PLUS_PARTNER_FEEDER_NETWORK",
-        "owned_warehouses": ["HOUSTON", "MIAMI"],
+        "operating_model": "VIRTUAL_HUBS_PLUS_PARTNER_FEEDER_NETWORK",
+        "active_virtual_hubs": ["HOUSTON", "MIAMI"],
+        "owned_warehouses_active": False,
+        "future_owned_warehouses": ["HOUSTON", "MIAMI"],
         "primary_hubs": PRIMARY_HUBS,
+        "asset_light_launch": True,
         "air_sea_separated": True,
         "universal_cargo_units": True,
         "customer_technical_knowledge_required": False,
@@ -113,16 +120,17 @@ async def route(p: NationalIntake):
         "origin_zone": zone_for(p.origin_state),
         "recommended_hub": hub,
         "hub_owner": "SAHJONY",
-        "hub_facility_type": "OWNED_WAREHOUSE",
+        "hub_facility_type": "VIRTUAL_HUB",
         "recommended_mode": mode,
-        "origin_leg": "HOME_OR_BUSINESS_PICKUP_TO_PARTNER_OR_DIRECT_TO_SAHJONY_WAREHOUSE",
-        "warehouse_leg": "SAHJONY_RECEIVE_WEIGH_DIMENSION_PHOTO_QR_STAGE_CONSOLIDATE",
-        "domestic_leg": "LOCAL_PICKUP_OR_PARCEL_LTL_LINEHAUL_TO_SAHJONY_HUB",
+        "origin_leg": "HOME_OR_BUSINESS_PICKUP_TO_AUTHORIZED_PARTNER_AGENCY_OR_THIRD_PARTY_WAREHOUSE",
+        "virtual_hub_leg": "SAHJONY_COORDINATES_RECEIVING_WEIGHING_PHOTOS_QR_STAGING_AND_CONSOLIDATION_THROUGH_AUTHORIZED_PROVIDERS",
+        "domestic_leg": "LOCAL_PICKUP_OR_PARCEL_LTL_LINEHAUL_TO_SELECTED_VIRTUAL_HUB_PROVIDER",
         "international_leg": mode,
         "destination_leg": "CUSTOMS_TO_LAST_MILE_TO_FINAL_ADDRESS",
         "final_delivery": final_delivery,
-        "pricing_rule": "Quote must include origin pickup/collection, domestic transfer, SAHJONY warehouse handling, international freight, customs/destination handling where applicable, last-mile delivery and POD unless explicitly disclosed otherwise.",
+        "pricing_rule": "Quote must include origin pickup/collection, domestic transfer, third-party warehouse or agency handling, international freight, customs/destination handling where applicable, last-mile delivery and POD unless explicitly disclosed otherwise.",
         "completion_rule": "Shipment is not complete until delivered to the final home/business address and POD is recorded, unless a customer-selected or legally required terminal exception applies.",
-        "booking_status": "COMPLIANCE_REVIEW" if p.dangerous_or_regulated else "RATE_AND_CAPACITY_REVIEW",
+        "booking_status": "COMPLIANCE_REVIEW" if p.dangerous_or_regulated else "RATE_CAPACITY_AND_PROVIDER_REVIEW",
+        "provider_rule": "No provider is represented as SAHJONY-owned unless a physical facility has actually been acquired or leased and activated.",
         "customer_message_rule": "Ask what, from where, to where, quantity/size and urgency. Do not require port, terminal, incoterm, HAWB or HBL from the customer at first contact.",
     }
