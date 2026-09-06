@@ -7,9 +7,11 @@ from pydantic import BaseModel, Field
 from agency_owner_api import agency_actor, now
 from insforge_backend import get_backend, persistent_backend_status
 
-app=FastAPI(title="SAHJONY Cuba Agency Network OS",version="2.0.0",docs_url=None,redoc_url=None)
+app=FastAPI(title="SAHJONY Cuba Agency Network OS",version="2.1.0",docs_url=None,redoc_url=None)
 Stage=Literal["CREATED","AGENCY_RECEIVED","WAREHOUSE_IN","CONSOLIDATED","CARRIER_HANDOFF","DEPARTED_US","ARRIVED_CUBA","CUSTOMS_HOLD","CUSTOMS_RELEASED","LAST_MILE","DELIVERED_OK","DELIVERED_WITH_EXCEPTION","CANCELLED"]
 Action=Literal["SCAN_IN","SCAN_OUT","HANDOFF","VERIFY","CONSOLIDATE","DECONSOLIDATE","DELIVER"]
+CargoForm=Literal["SINGLE_ITEM","MULTIPLE_BOXES","PALLET","LCL_CONSOLIDATED","FCL_CONTAINER","VEHICLE","MOTORCYCLE","OVERSIZED_SPECIAL"]
+
 
 def _secret(): return (os.getenv("AGENCY_TRACKING_SIGNING_SECRET") or os.getenv("OWNER_SESSION_SECRET") or "dev-agency-secret").encode()
 def make_token(a,p):
@@ -30,6 +32,40 @@ class ExceptionIn(BaseModel):
 class DeliveryIn(BaseModel):
     package_id:str=Field(min_length=4,max_length=180); recipient_name:str=Field(min_length=2,max_length=240); parcel_count:int=Field(default=1,ge=0,le=10000); condition:Literal["GOOD","DAMAGED","SHORTAGE","REFUSED","OTHER"]="GOOD"; recipient_confirmation:Literal["CONFIRMED_OK","CONFIRMED_PROBLEM","REFUSED","PENDING"]="PENDING"; signature_method:str|None=Field(default=None,max_length=40); signature_value:str|None=Field(default=None,max_length=4000); photo_refs:list[str]=Field(default_factory=list,max_length=20); offline_event_id:str=Field(min_length=8,max_length=180); comments:str|None=Field(default=None,max_length=2000)
 
+class UniversalCargoIntake(BaseModel):
+    description:str=Field(min_length=2,max_length=2000)
+    origin_country:str=Field(min_length=2,max_length=3)
+    destination_country:str=Field(min_length=2,max_length=3)
+    quantity:int=Field(default=1,ge=1,le=100000)
+    cargo_form:CargoForm|None=None
+    commercial:bool|None=None
+    new_or_used:Literal["NEW","USED","UNKNOWN"]="UNKNOWN"
+    battery_or_fuel:bool|None=None
+    refrigerated_or_frozen:bool=False
+    regulated_health_product:bool=False
+
+
+def classify_cargo(description:str, requested:CargoForm|None=None)->dict[str,Any]:
+    if requested:
+        form=requested
+    else:
+        t=description.lower()
+        if any(x in t for x in ("moto","motorcycle","scooter","atv","motorbike")): form="MOTORCYCLE"
+        elif any(x in t for x in ("carro","auto ","automovil","automóvil","vehicle","vehiculo","vehículo","truck","camioneta")): form="VEHICLE"
+        elif any(x in t for x in ("contenedor","container","fcl")): form="FCL_CONTAINER"
+        elif any(x in t for x in ("pallet","palé","pale ","tarima")): form="PALLET"
+        elif any(x in t for x in ("consolid","lcl")): form="LCL_CONSOLIDATED"
+        elif any(x in t for x in ("cajas","boxes","cartons")): form="MULTIPLE_BOXES"
+        else: form="SINGLE_ITEM"
+    t=description.lower()
+    flags=[]
+    if any(x in t for x in ("nevera","refrigerator","freezer","aire acondicionado","air conditioner")): flags += ["APPLIANCE_TECHNICAL_REVIEW","REFRIGERANT_REVIEW"]
+    if any(x in t for x in ("condon","condón","condones","condoms","medical device","dispositivo medico","dispositivo médico")): flags += ["HEALTH_REGULATORY_REVIEW"]
+    if form in {"VEHICLE","MOTORCYCLE"}: flags += ["TITLE_OWNERSHIP_REVIEW","VIN_OR_SERIAL_REQUIRED","ORIGIN_EXPORT_REVIEW","DESTINATION_IMPORT_REVIEW"]
+    if any(x in t for x in ("electric","eléctr","bateria","batería","lithium","litio","gasoline","gasolina","fuel","combustible")): flags += ["DG_BATTERY_FUEL_REVIEW"]
+    if any(x in t for x in ("food","comida","alimento","meat","carne","dairy","lacteo","lácteo","frozen","congelado")): flags += ["FOOD_AGRICULTURAL_REVIEW"]
+    return {"cargo_form":form,"review_flags":list(dict.fromkeys(flags))}
+
 async def pkg(a,pid):
     r=await get_backend().select("logistics_agency_packages",params={"agency_id":f"eq.{a['agency_id']}","package_id":f"eq.{pid}","limit":"1"}) or []
     if not r: raise HTTPException(404,"Package not found in this agency")
@@ -41,7 +77,30 @@ async def once(table,row,a,eid):
 
 @app.get("/agency-network/health")
 async def health():
-    p=persistent_backend_status(); return {"status":"ok" if p.get("configured") else "configuration_required","browser_pwa":True,"installation_required":False,"offline_idempotent":True,"immutable_custody":True,"dual_delivery_confirmation":True,"carrier_neutral":True,"payment_neutral":True,"paperless_printable":True,"exception_claims_engine":True}
+    p=persistent_backend_status(); return {"status":"ok" if p.get("configured") else "configuration_required","browser_pwa":True,"installation_required":False,"offline_idempotent":True,"immutable_custody":True,"dual_delivery_confirmation":True,"carrier_neutral":True,"payment_neutral":True,"paperless_printable":True,"exception_claims_engine":True,"universal_cargo_intake":True,"cargo_forms":["SINGLE_ITEM","MULTIPLE_BOXES","PALLET","LCL_CONSOLIDATED","FCL_CONTAINER","VEHICLE","MOTORCYCLE","OVERSIZED_SPECIAL"]}
+
+@app.post("/agency-network/intake/classify")
+async def universal_intake(p:UniversalCargoIntake):
+    c=classify_cargo(p.description,p.cargo_form)
+    flags=list(c["review_flags"])
+    if p.battery_or_fuel: flags.append("DG_BATTERY_FUEL_REVIEW")
+    if p.refrigerated_or_frozen: flags.append("TEMPERATURE_CONTROL_REVIEW")
+    if p.regulated_health_product: flags.append("HEALTH_REGULATORY_REVIEW")
+    flags=list(dict.fromkeys(flags))
+    return {
+        "status":"INTAKE_ACCEPTED_FOR_REVIEW",
+        "origin_country":p.origin_country.upper(),
+        "destination_country":p.destination_country.upper(),
+        "cargo_form":c["cargo_form"],
+        "quantity":p.quantity,
+        "review_flags":flags,
+        "can_be_consolidated":c["cargo_form"] in {"SINGLE_ITEM","MULTIPLE_BOXES","PALLET","LCL_CONSOLIDATED"},
+        "individual_tracking_required":True,
+        "qr_identity_required":True,
+        "booking_ready":False,
+        "booking_gate":"ORIGIN_EXPORT + DESTINATION_IMPORT + SANCTIONS + COMMODITY + CARRIER",
+        "customer_first_contact_policy":"Ask what it is, where it is, where it is going, quantity, condition and timing; SAHJONY determines port, carrier, documents and shipping structure.",
+    }
 
 @app.post("/agency-network/packages")
 async def create_package(p:PackageIn,x_agency_id:str|None=Header(None,alias="X-Agency-Id"),authorization:str|None=Header(None,alias="Authorization")):
@@ -82,7 +141,6 @@ async def public_tracking(token:str):
     aid,pid=read_token(token); rows=await get_backend().select("logistics_agency_packages",params={"agency_id":f"eq.{aid}","package_id":f"eq.{pid}","limit":"1"}) or []
     if not rows: raise HTTPException(404,"Tracking not found")
     r=rows[0]; return {"tracking_reference":r.get("tracking_reference"),"stage":r.get("stage"),"status":r.get("status"),"destination_province":r.get("destination_province"),"last_location":r.get("last_location"),"updated_at":r.get("updated_at")}
-
 
 class CanadaCorridorIn(BaseModel):
     origin_city:str=Field(min_length=2,max_length=120)
