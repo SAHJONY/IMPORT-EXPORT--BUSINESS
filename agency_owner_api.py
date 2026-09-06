@@ -47,6 +47,7 @@ class AgencyPaymentIn(BaseModel):
     amount:float=Field(gt=0)
     currency:str=Field(default="USD",min_length=3,max_length=3)
     method:str=Field(max_length=40)
+    sender_reference:str|None=Field(default=None,max_length=240)
     provider_id:str|None=Field(default=None,max_length=160)
     external_reference:str=Field(min_length=2,max_length=240)
     agency_shipment_id:str|None=Field(default=None,max_length=180)
@@ -195,6 +196,7 @@ async def payment_providers(x_agency_id:str|None=Header(None,alias="X-Agency-Id"
 async def record_payment(p:AgencyPaymentIn,x_agency_id:str|None=Header(None,alias="X-Agency-Id"),authorization:str|None=Header(None,alias="Authorization")):
     a=await agency_actor(x_agency_id,authorization)
     if p.status not in {"PENDING","AUTHORIZED","CAPTURED","SETTLED","REFUNDED","VOIDED","DISPUTED","FAILED"}: raise HTTPException(422,"Invalid payment status")
+    if p.method.upper() not in {"CARD","CREDIT_CARD","DEBIT_CARD","EXTERNAL_POS","CASH","BANK_TRANSFER","ACH","WIRE","QR","ZELLE","CASH_APP","PAYPAL","OTHER"}: raise HTTPException(422,"Unsupported payment method")
     if p.card_last4 and p.method.upper() not in {"CARD","CREDIT_CARD","DEBIT_CARD","EXTERNAL_POS"}: raise HTTPException(422,"card_last4 only applies to card/POS methods")
     if p.provider_id:
         prov=await get_backend().select("logistics_agency_payment_providers",params={"provider_id":f"eq.{p.provider_id}","agency_id":f"eq.{a['agency_id']}","status":"eq.active","limit":"1"}) or []

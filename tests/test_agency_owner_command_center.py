@@ -78,3 +78,27 @@ def test_settlement_only_accepts_same_agency_payments(monkeypatch):
     s=c.post('/agency-os/payments/settlements',headers=h,json={'payment_ids':[pid],'settlement_reference':'SET-1','settled_amount':50})
     assert s.status_code==200 and s.json()['payments_reconciled']==1
     assert b.tables['logistics_agency_payments'][0]['status']=='SETTLED'
+
+
+def test_zelle_and_cash_app_are_supported_payment_rails(monkeypatch):
+    b=FakeBackend(); monkeypatch.setattr(mod,'get_backend',lambda:b)
+    c=TestClient(mod.app); h={'Authorization':'Bearer secret-a','X-Agency-Id':'agy_a'}
+    z=c.post('/agency-os/payments',headers=h,json={'amount':75,'method':'ZELLE','external_reference':'ZELLE-001','sender_reference':'+12815550123'})
+    assert z.status_code==200 and z.json()['payment']['method']=='ZELLE'
+    ca=c.post('/agency-os/payments',headers=h,json={'amount':42,'method':'CASH_APP','external_reference':'CA-001','sender_reference':'$customer'})
+    assert ca.status_code==200 and ca.json()['payment']['method']=='CASH_APP'
+
+
+def test_paypal_is_supported_payment_rail(monkeypatch):
+    b=FakeBackend(); monkeypatch.setattr(mod,'get_backend',lambda:b)
+    c=TestClient(mod.app); h={'Authorization':'Bearer secret-a','X-Agency-Id':'agy_a'}
+    r=c.post('/agency-os/payments',headers=h,json={'amount':88.25,'method':'PAYPAL','external_reference':'PP-001','sender_reference':'payer@example.com'})
+    assert r.status_code==200 and r.json()['payment']['method']=='PAYPAL'
+
+
+def test_any_debit_card_via_external_processor_is_supported(monkeypatch):
+    b=FakeBackend(); monkeypatch.setattr(mod,'get_backend',lambda:b)
+    c=TestClient(mod.app); h={'Authorization':'Bearer secret-a','X-Agency-Id':'agy_a'}
+    r=c.post('/agency-os/payments',headers=h,json={'amount':19.99,'method':'DEBIT_CARD','external_reference':'POS-DEBIT-001','card_brand':'MASTERCARD','card_last4':'1234'})
+    assert r.status_code==200
+    body=r.json(); assert body['payment']['method']=='DEBIT_CARD' and body['pan_stored'] is False and body['cvv_stored'] is False
