@@ -1,14 +1,10 @@
+from datetime import date
 from decimal import Decimal
 
-from travel_ops_api import (
-    BookingGateIn,
-    DuffelSearchIn,
-    FareEconomicsIn,
-    booking_gate,
-    build_duffel_offer_request,
-    calculate_economics,
-    duffel_readiness,
-)
+import pytest
+
+from travel_duffel_sandbox import DuffelFlightSearchIn, build_offer_request, sandbox_ready, token_mode
+from travel_ops_api import BookingGateIn, FareEconomicsIn, booking_gate, calculate_economics, duffel_readiness
 
 
 def test_travel_economics_are_canonical_usd_and_profitable_math_is_explicit():
@@ -55,8 +51,8 @@ def test_booking_gate_allows_readiness_only_after_every_control_clears():
 
 
 def test_duffel_offer_request_supports_round_trip_and_multiple_adults():
-    payload = build_duffel_offer_request(DuffelSearchIn(
-        origin="mia", destination="mad", departure_date="2026-11-10", return_date="2026-11-20",
+    payload = build_offer_request(DuffelFlightSearchIn(
+        origin="mia", destination="mad", departure_date=date(2026, 11, 10), return_date=date(2026, 11, 20),
         adults=2, cabin_class="economy", max_connections=1,
     ))
     assert payload["data"]["slices"] == [
@@ -66,21 +62,37 @@ def test_duffel_offer_request_supports_round_trip_and_multiple_adults():
     assert payload["data"]["passengers"] == [{"type": "adult"}, {"type": "adult"}]
 
 
-def test_duffel_live_ticketing_is_not_enabled_by_token_alone(monkeypatch):
-    monkeypatch.setenv("DUFFEL_ACCESS_TOKEN", "test-token")
-    monkeypatch.setenv("DUFFEL_MODE", "live")
-    monkeypatch.delenv("TRAVEL_DUFFEL_CONTRACT_APPROVED", raising=False)
-    monkeypatch.delenv("TRAVEL_DUFFEL_LIVE_TICKETING_ENABLED", raising=False)
+def test_duffel_test_token_enables_search_but_never_live_ticketing(monkeypatch):
+    monkeypatch.setenv("DUFFEL_ACCESS_TOKEN", "duffel_test_example")
+    assert token_mode() == "test"
+    assert sandbox_ready()[0] is True
     status = duffel_readiness()
     assert status.configured is True
     assert status.fare_search_allowed is True
+    assert status.environment == "test"
     assert status.live_ticketing_allowed is False
 
 
-def test_duffel_ticketing_requires_all_explicit_live_controls(monkeypatch):
-    monkeypatch.setenv("DUFFEL_ACCESS_TOKEN", "live-token")
-    monkeypatch.setenv("DUFFEL_MODE", "live")
-    monkeypatch.setenv("TRAVEL_DUFFEL_CONTRACT_APPROVED", "true")
-    monkeypatch.setenv("TRAVEL_DUFFEL_LIVE_TICKETING_ENABLED", "true")
+def test_duffel_live_token_is_rejected_by_temporary_sandbox(monkeypatch):
+    monkeypatch.setenv("DUFFEL_ACCESS_TOKEN", "duffel_live_example")
+    assert token_mode() == "live"
+    ready, reason = sandbox_ready()
+    assert ready is False
+    assert "rechazado" in reason.lower()
     status = duffel_readiness()
-    assert status.live_ticketing_allowed is True
+    assert status.configured is True
+    assert status.fare_search_allowed is False
+    assert status.live_ticketing_allowed is False
+
+
+def test_duffel_unknown_token_format_fails_closed(monkeypatch):
+    monkeypatch.setenv("DUFFEL_ACCESS_TOKEN", "test-token")
+    assert token_mode() == "unknown"
+    assert sandbox_ready()[0] is False
+
+
+def test_invalid_round_trip_dates_are_rejected():
+    with pytest.raises(ValueError):
+        DuffelFlightSearchIn(
+            origin="MIA", destination="MAD", departure_date=date(2026, 11, 20), return_date=date(2026, 11, 10)
+        )
