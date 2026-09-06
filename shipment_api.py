@@ -1,18 +1,22 @@
 from __future__ import annotations
 
+import base64
+import hashlib
+import hmac
+import io
 import os
 import secrets
 from datetime import datetime, timezone
 from typing import Any, Literal
 
-from fastapi import FastAPI, Header, HTTPException, Query
+from fastapi import FastAPI, Header, HTTPException, Query, Response
 from pydantic import BaseModel, Field
 
 from auth import verify_customer_token, verify_owner_token
 from credentialed_providers import ProviderConfigurationError, maersk_provider
 from insforge_backend import InsForgeConfigurationError, get_backend, persistent_backend_status
 
-app = FastAPI(title="SAHJONY Global Trade Shipments", version="1.0.0", docs_url=None, redoc_url=None)
+app = FastAPI(title="SAHJONY Global Trade Shipments", version="1.1.0", docs_url=None, redoc_url=None)
 
 Role = Literal["owner", "employee", "customer"]
 Mode = Literal["ocean", "air", "ground", "lcl", "parcel", "multimodal"]
@@ -33,6 +37,60 @@ class ShipmentCreate(BaseModel):
     destination_name: str | None = Field(default=None, max_length=240)
     destination_code: str | None = Field(default=None, max_length=40)
     customer_visible: bool = True
+
+
+class PackageCreate(BaseModel):
+    customer_id: str | None = Field(default=None, max_length=160)
+    quantity: int = Field(default=1, ge=1, le=100)
+    origin_name: str | None = Field(default=None, max_length=240)
+    destination_name: str | None = Field(default=None, max_length=240)
+    customer_visible: bool = True
+
+
+class PackageScanIn(BaseModel):
+    stage: str = Field(min_length=2, max_length=100)
+    event_label: str = Field(min_length=2, max_length=300)
+    location_name: str | None = Field(default=None, max_length=240)
+    location_code: str | None = Field(default=None, max_length=80)
+    customer_visible: bool = True
+
+
+def _tracking_secret() -> bytes:
+    value = (os.getenv("TRACKING_SIGNING_SECRET") or os.getenv("OWNER_SESSION_SECRET") or "").strip()
+    if not value:
+        raise HTTPException(503, "Tracking signing secret is not configured")
+    return value.encode()
+
+
+def _b64(v: bytes) -> str:
+    return base64.urlsafe_b64encode(v).decode().rstrip("=")
+
+
+def public_tracking_token(shipment_id: str) -> str:
+    payload = shipment_id.encode()
+    sig = hmac.new(_tracking_secret(), payload, hashlib.sha256).digest()[:18]
+    return _b64(payload) + "." + _b64(sig)
+
+
+def shipment_id_from_token(token: str) -> str:
+    try:
+        encoded, signature = token.split(".", 1)
+        payload = base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4))
+        expected = hmac.new(_tracking_secret(), payload, hashlib.sha256).digest()[:18]
+        received = base64.urlsafe_b64decode(signature + "=" * (-len(signature) % 4))
+        if not hmac.compare_digest(expected, received):
+            raise ValueError("bad signature")
+        shipment_id = payload.decode()
+        if not shipment_id.startswith("shp_"):
+            raise ValueError("bad shipment id")
+        return shipment_id
+    except Exception as exc:
+        raise HTTPException(404, "Tracking code not found") from exc
+
+
+def tracking_url(token: str) -> str:
+    base = (os.getenv("PUBLIC_APP_URL") or "https://www.sahjony.com").rstrip("/")
+    return f"{base}/track/{token}"
 
 
 class MilestoneIn(BaseModel):
@@ -152,6 +210,9 @@ async def health() -> dict[str, Any]:
         "maersk_configured": maersk_provider.configured,
         "provider_path_configured": bool(os.getenv("MAERSK_TRACKING_PATH_TEMPLATE")),
         "modes": ["ocean", "air", "ground", "lcl", "parcel", "multimodal"],
+        "package_tracking_qr": True,
+        "public_tracking_tokens": True,
+        "chain_of_custody_scans": True,
     }
 
 
@@ -314,3 +375,83 @@ async def sync_shipment(shipment_id: str, x_role: str | None = Header(None, alia
     await get_backend().insert("shipment_sync_events", sync)
     await get_backend().patch("shipments", {"last_provider_sync_at": sync_time, "updated_at": sync_time}, params={"shipment_id": f"eq.{shipment_id}"})
     return {"shipment_id": shipment_id, "sync": sync, "provider_payload": payload}
+
+
+@app.post("/shipments/{shipment_id}/packages")
+async def create_packages(shipment_id: str, payload: PackageCreate, x_role: str | None = Header(None, alias="X-Role"), authorization: str | None = Header(None, alias="Authorization"), x_employee_id: str | None = Header(None, alias="X-Employee-Id")):
+    actor = identity(x_role, authorization, x_employee_id)
+    if actor["role"] == "customer":
+        raise HTTPException(403, "Customers cannot create package custody records")
+    parent = await get_shipment_or_404(shipment_id, actor)
+    ts = now()
+    packages = []
+    for index in range(1, payload.quantity + 1):
+        package_id = f"shp_{secrets.token_urlsafe(16)}"
+        ref = "SJ-" + secrets.token_hex(6).upper()
+        row = {
+            "shipment_id": package_id, "trade_case_id": parent["trade_case_id"],
+            "customer_id": payload.customer_id or parent.get("customer_id"),
+            "transport_mode": "parcel", "provider": "sahjony", "tracking_reference": ref,
+            "booking_reference": f"PARENT:{shipment_id}", "container_number": parent.get("container_number"),
+            "bill_of_lading": parent.get("bill_of_lading"), "air_waybill": parent.get("air_waybill"),
+            "origin_name": payload.origin_name or parent.get("origin_name"),
+            "origin_code": parent.get("origin_code"),
+            "destination_name": payload.destination_name or parent.get("destination_name"),
+            "destination_code": parent.get("destination_code"),
+            "current_stage": "package_created", "current_status": "pending", "delay_minutes": 0,
+            "customer_visible": payload.customer_visible, "created_by_role": actor["role"],
+            "created_by_id": actor["id"], "created_at": ts, "updated_at": ts,
+        }
+        await get_backend().insert("shipments", row)
+        token = public_tracking_token(package_id)
+        packages.append({
+            "package_no": index, "shipment_id": package_id, "tracking_reference": ref,
+            "tracking_token": token, "tracking_url": tracking_url(token),
+            "qr_url": f"/tracking/qr/{token}",
+        })
+    return {"parent_shipment_id": shipment_id, "package_count": len(packages), "packages": packages}
+
+
+@app.get("/tracking/public/{token}")
+async def public_tracking(token: str):
+    shipment_id = shipment_id_from_token(token)
+    rows = await get_backend().select("shipments", params={"shipment_id": f"eq.{shipment_id}", "customer_visible": "eq.true", "limit": "1"})
+    if not rows:
+        raise HTTPException(404, "Tracking code not found")
+    shipment = rows[0]
+    milestones = await get_backend().select("shipment_milestones", params={"shipment_id": f"eq.{shipment_id}", "customer_visible": "eq.true", "order": "event_time.asc,created_at.asc", "limit": "500"}) or []
+    safe = {k: shipment.get(k) for k in ("tracking_reference","transport_mode","origin_name","destination_name","current_stage","current_status","current_location","estimated_delivery_at","actual_delivery_at","last_event_at","updated_at")}
+    return {"shipment": safe, "milestones": milestones, "tracking_url": tracking_url(token)}
+
+
+@app.get("/tracking/qr/{token}")
+async def tracking_qr(token: str):
+    shipment_id_from_token(token)
+    import qrcode
+    import qrcode.image.svg
+    img = qrcode.make(tracking_url(token), image_factory=qrcode.image.svg.SvgPathImage, box_size=8, border=2)
+    buf = io.BytesIO()
+    img.save(buf)
+    return Response(content=buf.getvalue(), media_type="image/svg+xml", headers={"Cache-Control": "private, max-age=300"})
+
+
+@app.post("/tracking/scan/{token}")
+async def scan_package(token: str, payload: PackageScanIn, x_role: str | None = Header(None, alias="X-Role"), authorization: str | None = Header(None, alias="Authorization"), x_employee_id: str | None = Header(None, alias="X-Employee-Id")):
+    actor = identity(x_role, authorization, x_employee_id)
+    if actor["role"] == "customer":
+        raise HTTPException(403, "Customers cannot create custody scans")
+    shipment_id = shipment_id_from_token(token)
+    shipment = await get_shipment_or_404(shipment_id, actor)
+    ts = now()
+    milestone = {
+        "milestone_id": f"mls_{secrets.token_urlsafe(16)}", "shipment_id": shipment_id,
+        "stage": payload.stage, "event_code": "QR_SCAN", "event_label": payload.event_label,
+        "status": "confirmed", "location_name": payload.location_name, "location_code": payload.location_code,
+        "terminal": None, "transport_mode": shipment.get("transport_mode"), "event_time": ts,
+        "event_time_type": "actual", "source": f"qr_scan:{actor['role']}:{actor['id']}",
+        "customer_visible": payload.customer_visible, "created_at": ts,
+    }
+    await get_backend().insert("shipment_milestones", milestone)
+    patch = {"current_stage": payload.stage, "current_status": "in_transit", "current_location": payload.location_name, "last_event_at": ts, "updated_at": ts}
+    await get_backend().patch("shipments", patch, params={"shipment_id": f"eq.{shipment_id}"})
+    return {"status": "recorded", "tracking_reference": shipment.get("tracking_reference"), "milestone": milestone}
