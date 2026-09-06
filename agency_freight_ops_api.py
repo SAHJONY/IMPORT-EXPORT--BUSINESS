@@ -6,14 +6,15 @@ from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
 from agency_owner_api import agency_actor, now
 from insforge_backend import get_backend
+from logistics_a_to_z_api import app as logistics_a_to_z_app
+from logistics_go_to_business_api import app as logistics_go_to_business_app
 
-app=FastAPI(title='SAHJONY Agency Freight Operations',version='1.0.0',docs_url=None,redoc_url=None)
+app=FastAPI(title='SAHJONY Agency Freight Operations',version='1.1.0',docs_url=None,redoc_url=None)
 Mode=Literal['AIR','SEA','MULTIMODAL']
 DocType=str
 
 
 DOCUMENT_CATALOG = {
-    # Commercial / customer
     'PRO_FORMA_INVOICE': ('COMMERCIAL','CONDITIONAL'),
     'COMMERCIAL_INVOICE': ('COMMERCIAL','CORE'),
     'PACKING_LIST': ('COMMERCIAL','CORE'),
@@ -25,7 +26,6 @@ DOCUMENT_CATALOG = {
     'AGENCY_INVOICE': ('FINANCIAL','OPERATIONAL'),
     'TRANSITARIA_INVOICE': ('FINANCIAL','OPERATIONAL'),
     'SETTLEMENT_REPORT': ('FINANCIAL','OPERATIONAL'),
-    # Transport / consolidation
     'HAWB': ('TRANSPORT','CONDITIONAL'), 'MAWB': ('TRANSPORT','CONDITIONAL'),
     'HBL': ('TRANSPORT','CONDITIONAL'), 'MBL': ('TRANSPORT','CONDITIONAL'),
     'AIR_WAYBILL': ('TRANSPORT','CONDITIONAL'), 'BILL_OF_LADING': ('TRANSPORT','CONDITIONAL'),
@@ -35,7 +35,6 @@ DOCUMENT_CATALOG = {
     'PALLET_LIST': ('WAREHOUSE','OPERATIONAL'), 'CONTAINER_PACKING_LIST': ('WAREHOUSE','OPERATIONAL'),
     'CONTAINER_LOAD_PLAN': ('WAREHOUSE','OPERATIONAL'), 'SEAL_RECORD': ('WAREHOUSE','OPERATIONAL'),
     'WEIGHT_VERIFICATION': ('WAREHOUSE','OPERATIONAL'),
-    # Export / customs / compliance
     'EEI_AES_PROOF': ('CUSTOMS','ORIGIN_REQUIRED_USA_CONDITIONAL'),
     'EEI_EXEMPTION_CITATION': ('CUSTOMS','ORIGIN_REQUIRED_USA_CONDITIONAL'),
     'CERS_EXPORT_DECLARATION': ('CUSTOMS','ORIGIN_REQUIRED_CANADA_CONDITIONAL'),
@@ -48,21 +47,18 @@ DOCUMENT_CATALOG = {
     'CUSTOMS_RELEASE_CUBA': ('CUSTOMS','DESTINATION_REQUIRED_CONDITIONAL'),
     'CUSTOMS_HOLD_NOTICE': ('CUSTOMS','CONDITIONAL'), 'CUSTOMS_DUTY_TAX_RECEIPT': ('CUSTOMS','CONDITIONAL'),
     'VUCE_PERMIT_RECORD': ('CUSTOMS','CONDITIONAL'),
-    # Product-specific / dangerous goods
     'SDS': ('SPECIAL_CARGO','CONDITIONAL'), 'DANGEROUS_GOODS_DECLARATION': ('SPECIAL_CARGO','CONDITIONAL'),
     'IATA_DG_SHIPPERS_DECLARATION': ('SPECIAL_CARGO','CONDITIONAL'), 'IMDG_DG_DECLARATION': ('SPECIAL_CARGO','CONDITIONAL'),
     'BATTERY_TEST_SUMMARY_UN38_3': ('SPECIAL_CARGO','CONDITIONAL'), 'PHYTOSANITARY_CERTIFICATE': ('SPECIAL_CARGO','CONDITIONAL'),
     'HEALTH_CERTIFICATE': ('SPECIAL_CARGO','CONDITIONAL'), 'SANITARY_CERTIFICATE': ('SPECIAL_CARGO','CONDITIONAL'),
     'FUMIGATION_CERTIFICATE': ('SPECIAL_CARGO','CONDITIONAL'), 'INSPECTION_CERTIFICATE': ('SPECIAL_CARGO','CONDITIONAL'),
     'INSURANCE_CERTIFICATE': ('RISK','CONDITIONAL'),
-    # Custody / delivery / claims
     'CHAIN_OF_CUSTODY_REPORT': ('CUSTODY','OPERATIONAL'), 'SCAN_EVENT_REPORT': ('CUSTODY','OPERATIONAL'),
     'INCIDENT_REPORT': ('CLAIMS','CONDITIONAL'), 'CLAIM_FORM': ('CLAIMS','CONDITIONAL'),
     'DAMAGE_REPORT': ('CLAIMS','CONDITIONAL'), 'SHORTAGE_REPORT': ('CLAIMS','CONDITIONAL'),
     'PROOF_OF_DELIVERY': ('DELIVERY','CORE'), 'RECIPIENT_ACCEPTANCE': ('DELIVERY','CORE'),
     'FINAL_DELIVERY_REPORT': ('DELIVERY','CORE'), 'RETURN_RECEIPT': ('DELIVERY','CONDITIONAL'),
     'PHOTO_EVIDENCE_REPORT': ('DELIVERY','OPERATIONAL'),
-    # Agency / HR
     'EMPLOYEE_ACKNOWLEDGEMENT': ('AGENCY','OPERATIONAL'), 'AGENCY_SERVICE_AGREEMENT': ('AGENCY','CONDITIONAL'),
     'CUSTOMER_TERMS_ACCEPTANCE': ('AGENCY','OPERATIONAL'), 'PRIVACY_CONSENT': ('AGENCY','OPERATIONAL'),
 }
@@ -112,7 +108,7 @@ async def _exists(table:str, aid:str, key:str, value:str):
 
 @app.get('/agency-freight/health')
 async def health():
-    return {'status':'ok','consolidations':True,'master_house_documents':True,'delivery_routes':True,'tariff_engine':True,'transitaria_billing':True,'carrier_neutral':True,'tenant_isolated':True}
+    return {'status':'ok','consolidations':True,'master_house_documents':True,'delivery_routes':True,'tariff_engine':True,'transitaria_billing':True,'carrier_neutral':True,'tenant_isolated':True,'a_to_z_control':True,'go_to_business_engine':True,'zero_own_money_policy':True}
 
 @app.post('/agency-freight/consolidations')
 async def create_consolidation(p:ConsolidationIn,x_agency_id:str|None=Header(None,alias='X-Agency-Id'),authorization:str|None=Header(None,alias='Authorization')):
@@ -122,7 +118,7 @@ async def create_consolidation(p:ConsolidationIn,x_agency_id:str|None=Header(Non
 
 @app.post('/agency-freight/consolidations/{cid}/items')
 async def add_item(cid:str,p:ConsolidationItemIn,x_agency_id:str|None=Header(None,alias='X-Agency-Id'),authorization:str|None=Header(None,alias='Authorization')):
-    a=await agency_actor(x_agency_id,authorization); aid=a['agency_id']; c=await _exists('logistics_agency_consolidations',aid,'consolidation_id',cid); await _exists('logistics_agency_packages',aid,'package_id',p.package_id)
+    a=await agency_actor(x_agency_id,authorization); aid=a['agency_id']; await _exists('logistics_agency_consolidations',aid,'consolidation_id',cid); await _exists('logistics_agency_packages',aid,'package_id',p.package_id)
     existing=await get_backend().select('logistics_agency_consolidation_items',params={'agency_id':f'eq.{aid}','consolidation_id':f'eq.{cid}','package_id':f'eq.{p.package_id}','limit':'1'}) or []
     if existing: return {'item':existing[0],'created':False,'idempotent':True}
     row={'item_id':'coni_'+secrets.token_urlsafe(9),'agency_id':aid,'consolidation_id':cid,**p.model_dump(),'created_at':now()}; await get_backend().insert('logistics_agency_consolidation_items',row)
@@ -154,7 +150,7 @@ async def create_tariff(p:TariffIn,x_agency_id:str|None=Header(None,alias='X-Age
 
 @app.post('/agency-freight/agency-invoices')
 async def create_agency_invoice(p:AgencyInvoiceIn,x_agency_id:str|None=Header(None,alias='X-Agency-Id'),authorization:str|None=Header(None,alias='Authorization')):
-    a=await agency_actor(x_agency_id,authorization); aid=a['agency_id'];
+    a=await agency_actor(x_agency_id,authorization); aid=a['agency_id']
     if p.consolidation_id: await _exists('logistics_agency_consolidations',aid,'consolidation_id',p.consolidation_id)
     total=round(p.subtotal+p.fees,2); row={'agency_invoice_id':'ainv_'+secrets.token_urlsafe(10),'agency_id':aid,**p.model_dump(),'total':total,'balance_due':total,'status':'OPEN','created_at':now(),'updated_at':now()}; await get_backend().insert('logistics_agency_invoices',row); return {'invoice':row,'paperless':True,'printable':True}
 
@@ -181,3 +177,6 @@ async def customs_links(origin_country:str='USA',x_agency_id:str|None=Header(Non
     if origin in {'CA','CAN'}: origin='CANADA'
     if origin not in {'USA','CANADA'}: raise HTTPException(422,'Customs hub currently supports USA or Canada origins to Cuba')
     return {'origin_country':origin,'destination_country':'CUBA','origin_customs':CUSTOMS_LINKS[origin],'destination_customs':CUSTOMS_LINKS['CUBA'],'official_links_only':True}
+
+app.include_router(logistics_a_to_z_app.router)
+app.include_router(logistics_go_to_business_app.router)
