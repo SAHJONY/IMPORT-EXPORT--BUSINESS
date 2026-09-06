@@ -12,6 +12,9 @@ from pydantic import BaseModel, Field
 
 from auth import verify_owner_token
 
+CANONICAL_BOT_USERNAME = "@SahjonyGlobalTradeBot"
+from insforge_backend import PersistentBackendConfigurationError, get_backend
+
 
 app = FastAPI(
     title="SAHJONY Telegram Channel Gateway",
@@ -124,6 +127,7 @@ async def telegram_health() -> dict[str, Any]:
         os.getenv("TELEGRAM_WEBHOOK_SECRET", "").strip()
         or os.getenv("OWNER_SESSION_SECRET", "").strip()
     )
+    configured_username = os.getenv("TELEGRAM_BOT_USERNAME", "").strip() or CANONICAL_BOT_USERNAME
     return {
         "status": "ok",
         "service": "sahjony-telegram-channel-gateway",
@@ -133,7 +137,9 @@ async def telegram_health() -> dict[str, Any]:
         "webhook_secret_mode": "explicit" if os.getenv("TELEGRAM_WEBHOOK_SECRET", "").strip() else "derived_from_owner_session_secret",
         "webhook_url_configured": True,
         "webhook_url": _webhook_url(),
-        "bot_username": os.getenv("TELEGRAM_BOT_USERNAME", "").strip() or None,
+        "bot_username": configured_username,
+        "canonical_bot_username": CANONICAL_BOT_USERNAME,
+        "bot_identity_matches_canonical": configured_username.lower() == CANONICAL_BOT_USERNAME.lower(),
         "owner_only_management": True,
         "autonomous_external_commitments": False,
         "fail_closed": True,
@@ -279,6 +285,64 @@ async def telegram_webhook_info(
     }
 
 
+async def _capture_inbound(update: dict[str, Any]) -> int:
+    message = update.get("message") or update.get("channel_post") or update.get("edited_channel_post") or {}
+    if not isinstance(message, dict) or not message:
+        return 0
+    chat = message.get("chat") or {}
+    sender = message.get("from") or {}
+    chat_id = str(chat.get("id") or "unknown")[:200]
+    sender_id = str(sender.get("id") or chat_id)[:200]
+    text = str(message.get("text") or message.get("caption") or "")[:4000]
+    message_id = str(message.get("message_id") or "")[:200]
+    username = str(sender.get("username") or chat.get("username") or "")[:200]
+    source_kind = "telegram_channel" if "channel_post" in update or "edited_channel_post" in update else "telegram_bot"
+    event_id = f"telegram_{hashlib.sha256(f'{chat_id}:{message_id}:{update.get("update_id")}'.encode()).hexdigest()[:32]}"
+    try:
+        await get_backend().insert("business_events", {
+            "event_id": event_id,
+            "event_type": "telegram_inbound",
+            "source_type": source_kind,
+            "source_id": sender_id,
+            "trade_case_id": None,
+            "customer_id": None,
+            "lead_id": None,
+            "actor_role": "prospect",
+            "actor_id": sender_id,
+            "visibility": "business",
+            "title": (text or "Telegram inbound event")[:240],
+            "summary": (text or "Inbound Telegram event")[:4000],
+            "action_required": True,
+            "action_label": "Sofia Smith Telegram triage",
+            "priority": "normal",
+            "event_status": "open",
+            "payload": {
+                "channel": "telegram",
+                "canonical_agent_id": "sofia-smith",
+                "canonical_agent_name": "Sofia Smith",
+                "chat_id": chat_id,
+                "chat_type": str(chat.get("type") or "")[:80],
+                "chat_title": str(chat.get("title") or "")[:240],
+                "sender_id": sender_id,
+                "sender_username": username or None,
+                "sender_first_name": str(sender.get("first_name") or "")[:160],
+                "sender_last_name": str(sender.get("last_name") or "")[:160],
+                "message_id": message_id,
+                "message_text": text,
+                "update_id": update.get("update_id"),
+                "edited": "edited_channel_post" in update,
+                "binding_commitments_allowed": False,
+                "capital_at_risk_usd": 0,
+                "trade_intake_created": False,
+            },
+        })
+        return 1
+    except PersistentBackendConfigurationError:
+        raise
+    except Exception:
+        return 0
+
+
 @app.post("/telegram/webhook")
 async def telegram_webhook(
     update: dict[str, Any],
@@ -289,12 +353,13 @@ async def telegram_webhook(
     if not supplied or not secrets.compare_digest(supplied, expected):
         raise HTTPException(status_code=403, detail="Invalid Telegram webhook secret")
 
-    # Inbound Telegram updates are acknowledged as events only. They never inherit
-    # Owner authority and cannot release trades, move money or create commitments.
+    captured = await _capture_inbound(update)
     return {
         "accepted": True,
         "update_id": update.get("update_id"),
+        "captured_events": captured,
         "has_channel_post": "channel_post" in update or "edited_channel_post" in update,
+        "crm_truth_policy": "Inbound Telegram is engagement evidence only until a genuine trade requirement is verified.",
         "autonomous_commitment_executed": False,
         "owner_authority_granted": False,
     }

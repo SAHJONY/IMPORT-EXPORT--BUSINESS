@@ -17,6 +17,8 @@ type Rfq={
 
 
 type GrowthRow={lead_ref:string;source:string;company?:string;contact_name?:string;assessment:{score:number;blocked:boolean;autonomous_outreach_allowed:boolean;next_best_action?:string}};
+type CapabilityRow={key:string;name:string;passed:boolean;evidence_contract:string;fail_closed:boolean};
+type CapabilityHealth={status:string;score:number;target:number;passed:number;total:number;verified_collected_gross_profit_usd:number;capabilities:CapabilityRow[];truth_rules:Record<string,boolean>};
 
 function ownerAuthHeaders():Record<string,string>{
   const token=sessionStorage.getItem('sahjony.owner.token')||'';
@@ -60,6 +62,8 @@ export default function SofiaSalesPerformanceCenter(){
   const [growthQueue,setGrowthQueue]=useState<GrowthRow[]>([]);
   const [growthStatus,setGrowthStatus]=useState('');
   const [growthLoading,setGrowthLoading]=useState(false);
+  const [capabilityHealth,setCapabilityHealth]=useState<CapabilityHealth|null>(null);
+  const [capabilityStatus,setCapabilityStatus]=useState('');
 
   async function refresh(){
     setLoading(true);setStatus('');
@@ -71,7 +75,7 @@ export default function SofiaSalesPerformanceCenter(){
     else setRows((data||[]) as Rfq[]);
     setLoading(false);
   }
-  useEffect(()=>{void refresh();void loadGrowthQueue()},[]);
+  useEffect(()=>{void refresh();void loadGrowthQueue();void loadCapabilityHealth()},[]);
   async function loadGrowthQueue(){
     setGrowthLoading(true);setGrowthStatus('');
     try{
@@ -84,6 +88,20 @@ export default function SofiaSalesPerformanceCenter(){
       setGrowthStatus(`${queue.length} scored · ${eligible} eligible for governed pursuit · no messages sent by this action.`);
     }catch(err:any){setGrowthStatus(`Growth queue unavailable: ${err?.message||String(err)}`)}
     setGrowthLoading(false);
+  }
+
+
+  async function loadCapabilityHealth(){
+    setCapabilityStatus('');
+    try{
+      const r=await fetch('/owner/capabilities/health',{cache:'no-store',headers:ownerAuthHeaders()});
+      const body=await r.json().catch(()=>({detail:`HTTP ${r.status}`}));
+      if(!r.ok)throw new Error(body.detail||`HTTP ${r.status}`);
+      setCapabilityHealth(body as CapabilityHealth);
+    }catch(err:any){
+      setCapabilityHealth(null);
+      setCapabilityStatus(`Institutional capability health unavailable: ${err?.message||String(err)}`);
+    }
   }
 
   async function queueGovernedPursuit(){
@@ -157,6 +175,16 @@ export default function SofiaSalesPerformanceCenter(){
 
     <section style={s.metrics}>{cards.map(([label,value])=><article style={s.metric} key={label}><small>{label}</small><strong>{value}</strong></article>)}</section>
 
+    <section style={s.panel}>
+      <div style={s.kicker}>INSTITUTIONAL CAPABILITY CONTROL</div><h2 style={s.h2}>10/10 operating standard</h2>
+      <p style={s.muted}>The score is evidence-based and fail-closed. A capability only passes when its live subsystem and governance contract are healthy; research, outreach, invoices and expected profit never count as collected revenue.</p>
+      <div style={{display:'flex',gap:10,flexWrap:'wrap',margin:'14px 0'}}><button style={s.button} onClick={()=>void loadCapabilityHealth()}>Refresh capability score</button></div>
+      {capabilityHealth&&<>
+        <div style={s.funnel}><div>Institutional score <b>{capabilityHealth.score.toFixed(1)}/10</b></div><div>Capabilities passed <b>{capabilityHealth.passed}/{capabilityHealth.total}</b></div><div>Verified collected GP <b>${Number(capabilityHealth.verified_collected_gross_profit_usd||0).toLocaleString()}</b></div><div>Status <b>{capabilityHealth.status.toUpperCase()}</b></div></div>
+        <div style={s.tableWrap}><table style={s.table}><thead><tr><th>Capability</th><th>Gate</th><th>Evidence contract</th></tr></thead><tbody>{capabilityHealth.capabilities.map(row=><tr key={row.key}><td>{row.name}</td><td>{row.passed?'PASS':'ATTENTION'}</td><td>{row.evidence_contract}</td></tr>)}</tbody></table></div>
+      </>}
+      {capabilityStatus&&<p style={s.status}>{capabilityStatus}</p>}
+    </section>
 
     <section style={s.panel}>
       <div style={s.kicker}>GOVERNED OUTREACH PILOT</div><h2 style={s.h2}>Authenticated growth queue</h2>
