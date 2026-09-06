@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 
 from auth import verify_owner_token
 
-CANONICAL_BOT_USERNAME = "Sahjonywholesale_bot"
+CANONICAL_BOT_USERNAME = "@SahjonyGlobalTradeBot"
 from insforge_backend import PersistentBackendConfigurationError, get_backend
 
 
@@ -127,6 +127,7 @@ async def telegram_health() -> dict[str, Any]:
         os.getenv("TELEGRAM_WEBHOOK_SECRET", "").strip()
         or os.getenv("OWNER_SESSION_SECRET", "").strip()
     )
+    configured_username = os.getenv("TELEGRAM_BOT_USERNAME", "").strip() or CANONICAL_BOT_USERNAME
     return {
         "status": "ok",
         "service": "sahjony-telegram-channel-gateway",
@@ -136,7 +137,9 @@ async def telegram_health() -> dict[str, Any]:
         "webhook_secret_mode": "explicit" if os.getenv("TELEGRAM_WEBHOOK_SECRET", "").strip() else "derived_from_owner_session_secret",
         "webhook_url_configured": True,
         "webhook_url": _webhook_url(),
-        "bot_username": os.getenv("TELEGRAM_BOT_USERNAME", "").strip() or CANONICAL_BOT_USERNAME,
+        "bot_username": configured_username,
+        "canonical_bot_username": CANONICAL_BOT_USERNAME,
+        "bot_identity_matches_canonical": configured_username.lower() == CANONICAL_BOT_USERNAME.lower(),
         "owner_only_management": True,
         "autonomous_external_commitments": False,
         "fail_closed": True,

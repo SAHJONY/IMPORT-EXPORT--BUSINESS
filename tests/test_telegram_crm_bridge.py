@@ -51,5 +51,5 @@ def test_channel_post_is_captured_without_owner_authority(monkeypatch):
     assert backend.rows[0]["source_type"] == "telegram_channel"
 
 
-def test_canonical_bot_username_is_sahjony_wholesale():
-    assert telegram_api.CANONICAL_BOT_USERNAME == "Sahjonywholesale_bot"
+def test_canonical_bot_username_is_sahjony_global_trade():
+    assert telegram_api.CANONICAL_BOT_USERNAME == "@SahjonyGlobalTradeBot"
