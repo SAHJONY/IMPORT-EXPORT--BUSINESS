@@ -1,0 +1,50 @@
+name: Hostinger Hermes WhatsApp Transport Audit
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/hostinger-hermes-whatsapp-transport-audit.yml
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    concurrency:
+      group: hostinger-vm-767852-mutation
+      cancel-in-progress: false
+    env:
+      HOST: 69.62.68.67
+      SSH_USER: root
+      PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Prepare SSH
+        shell: bash
+        run: |
+          set -euo pipefail
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/key
+          chmod 600 ~/.ssh/key
+      - name: Audit live Hermes WhatsApp transport
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -i ~/.ssh/key "$SSH_USER@$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          echo "HERMES_GATEWAY=$(systemctl --user is-active hermes-gateway.service 2>/dev/null || true)"
+          echo "WHATSAPP_PROCESSES=$(pgrep -af '/whatsapp-bridge/bridge.js' | wc -l | tr -d ' ')"
+          BRIDGE=/root/.hermes/hermes-agent/scripts/whatsapp-bridge/bridge.js
+          if [ -f "$BRIDGE" ]; then
+            echo '=== bridge HTTP routes ==='
+            grep -nE "(app\.(post|get)|/send|/message|/health|/typing)" "$BRIDGE" | head -120 || true
+            echo '=== bridge send methods ==='
+            grep -nE "sendMessage|sendText|sock\.send|client\.send|messages\.send" "$BRIDGE" | head -120 || true
+          else
+            echo BRIDGE_SOURCE_MISSING=1
+          fi
+          echo '=== gateway env names only ==='
+          systemctl --user show hermes-gateway.service -p Environment --value | tr ' ' '\n' | sed 's/=.*$/=SET/' | grep -E 'WHATSAPP|SAHJONY|OPENCLAW|HERMES' | sort -u || true
+          REMOTE
+      - name: Cleanup
+        if: always()
+        run: rm -f ~/.ssh/key
