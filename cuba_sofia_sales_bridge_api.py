@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import secrets
+import unicodedata
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -12,7 +13,7 @@ from fastapi import FastAPI, Header, HTTPException, Query
 from auth import verify_owner_token
 from insforge_backend import get_backend, persistent_backend_status
 
-app = FastAPI(title='SAHJONY Cuba SOFIA Sales OS Bridge', version='1.0.0', docs_url=None, redoc_url=None)
+app = FastAPI(title='SAHJONY Cuba SOFIA Sales OS Bridge', version='1.1.0', docs_url=None, redoc_url=None)
 
 ORG = 'org_sahjony_global_trade'
 CATALOG_PATH = Path(__file__).resolve().parent / 'public' / 'cuba-catalog.json'
@@ -31,10 +32,68 @@ CATEGORY_RULES = {
     'hogar': ['hogar','mueble','decoracion','tienda','hostal','alojamiento'],
     'construccion': ['construccion','ferreter','electric','plomer','obra','mantenimiento'],
     'industrial': ['industrial','manufactur','taller','maquinaria','produccion'],
-    'automotriz': ['auto','vehiculo','taller','transporte','neumatic','mecanica'],
+    'automotriz': ['auto','vehiculo','carro','taller','transporte','neumatic','mecanica'],
     'solar': ['solar','energia','electric','refrigeracion','hotel','hostal','agric'],
     'salud': ['salud','farmac','clinica','medic','primeros auxilios'],
 }
+
+# Customer-facing intake is intentionally simple. SAHJONY resolves Incoterms,
+# exact terminals, container engineering and internal logistics detail later.
+INTAKE_RULES: list[dict[str, Any]] = [
+    {
+        'intent':'VEHICLE_PURCHASE',
+        'keywords':['carro','auto','automovil','vehiculo','camioneta','pickup','suv','motorcycle','moto'],
+        'ask':['vehiculo que busca o presupuesto aproximado','cantidad','provincia/ciudad de entrega en Cuba','cuando lo necesita'],
+    },
+    {
+        'intent':'FOOD_AGRI_PURCHASE',
+        'keywords':['comida','alimento','arroz','aceite','frijol','harina','pollo','carne','leche','agricola','agricultura','semilla'],
+        'ask':['producto','cantidad aproximada','presentacion preferida si la sabe','provincia/ciudad de entrega','cuando lo necesita'],
+    },
+    {
+        'intent':'PALLET_PURCHASE',
+        'keywords':['pale','pales','pallet','pallets','tarima','tarimas','por palet','por pallet'],
+        'ask':['producto que desea comprar','numero aproximado de pales','provincia/ciudad de entrega','cuando lo necesita'],
+    },
+    {
+        'intent':'CONSOLIDATED_CARGO_PURCHASE',
+        'keywords':['carga consolidada','consolidado','consolidada','consolidacion','lcl','carga compartida'],
+        'ask':['producto o mercancia','cantidad aproximada','origen si ya tiene proveedor','provincia/ciudad de entrega','cuando lo necesita'],
+    },
+    {
+        'intent':'SHIPPING_ONLY',
+        'keywords':['quiero enviar','necesito enviar','mandar mercancia','envio solamente','solo envio','shipping only','transportar'],
+        'ask':['que mercancia envia','cantidad aproximada','ciudad/pais de origen','provincia/ciudad de entrega en Cuba','cuando debe salir o llegar'],
+    },
+    {
+        'intent':'FULL_CONTAINER',
+        'keywords':['contenedor completo','full container','fcl','contenedor de 20','contenedor de 40','20 pies','40 pies'],
+        'ask':['producto o mercancia','cantidad o numero de contenedores','provincia/ciudad de entrega','cuando lo necesita'],
+    },
+]
+
+DEFAULT_INTAKE = {
+    'intent':'GENERAL_TRADE',
+    'ask':['que desea comprar o enviar','cantidad aproximada','provincia/ciudad de entrega','cuando lo necesita'],
+}
+
+FIRST_CONTACT_DO_NOT_REQUIRE = [
+    'incoterm',
+    'puerto exacto',
+    'terminal exacta',
+    'dimensiones internas del contenedor',
+    'codigo arancelario',
+    'naviera preferida',
+]
+
+SERVICE_MODES = [
+    'PURCHASE_BY_UNIT_OR_CASE',
+    'PURCHASE_BY_PALLET',
+    'CONSOLIDATED_CARGO',
+    'FULL_CONTAINER',
+    'SHIPPING_ONLY',
+    'VEHICLE_PURCHASE_AND_DELIVERY',
+]
 
 
 def now() -> str:
@@ -46,6 +105,27 @@ def owner(auth: str | None) -> None:
         raise HTTPException(401, 'Missing Authorization')
     if not verify_owner_token(auth.removeprefix('Bearer ').strip()):
         raise HTTPException(403, 'Invalid owner credential')
+
+
+def _plain(value: str) -> str:
+    raw = unicodedata.normalize('NFKD', str(value or '').lower())
+    return ''.join(ch for ch in raw if not unicodedata.combining(ch))
+
+
+def classify_customer_intent(message: str) -> dict[str, Any]:
+    blob = _plain(message)
+    for rule in INTAKE_RULES:
+        if any(_plain(keyword) in blob for keyword in rule['keywords']):
+            return {
+                'intent':rule['intent'],
+                'questions':rule['ask'],
+                'first_contact_do_not_require':FIRST_CONTACT_DO_NOT_REQUIRE,
+            }
+    return {
+        'intent':DEFAULT_INTAKE['intent'],
+        'questions':DEFAULT_INTAKE['ask'],
+        'first_contact_do_not_require':FIRST_CONTACT_DO_NOT_REQUIRE,
+    }
 
 
 def catalog() -> list[dict[str, Any]]:
@@ -126,6 +206,14 @@ async def health():
         'crm_connected':bool(p.get('configured')),
         'catalog_connected':CATALOG_PATH.exists(),
         'communication_os_connected':True,
+        'intent_aware_customer_intake':True,
+        'pallet_purchasing':True,
+        'consolidated_cargo':True,
+        'shipping_only_intake':True,
+        'full_container_intake':True,
+        'vehicle_intake':True,
+        'food_agri_intake':True,
+        'first_contact_minimum_questions':True,
         'autonomy_mode':'AUTONOMOUS_NONBINDING',
         'cold_marketing_autosend':False,
         'consent_gated_marketing':True,
@@ -133,6 +221,22 @@ async def health():
         'protected_counterparty_disclosure':False,
         'cash_collected_metric':True,
         'canonical_backend':'supabase',
+    }
+
+
+@app.get('/crm/cuba-sales-os/intake-policy')
+async def intake_policy(message: str = ''):
+    return {
+        'status':'ok',
+        'service_modes':SERVICE_MODES,
+        'classification':classify_customer_intent(message),
+        'customer_experience_policy':{
+            'ask_only_what_is_needed_now':True,
+            'resolve_trade_terms_internally_when_possible':True,
+            'do_not_force_container_when_pallet_or_consolidation_fits':True,
+            'do_not_force_purchase_when_customer_only_needs_shipping':True,
+            'do_not_require_on_first_contact':FIRST_CONTACT_DO_NOT_REQUIRE,
+        },
     }
 
 
@@ -251,12 +355,24 @@ async def activate_consented(
             prospect = rows[0] if rows else None
         recs = product_matches(prospect or c, 6)
         mission_id = 'cmis_sofia_' + secrets.token_urlsafe(10)
-        objective = 'Qualify current purchasing needs and offer relevant SAHJONY Cuba catalog products without making binding commitments.'
+        objective = (
+            'Qualify the customer naturally and determine whether they need product sourcing, purchase by pallet, '
+            'consolidated cargo, full container, vehicle purchase/delivery, or shipping-only service. '
+            'Ask only the minimum customer-friendly questions for the detected intent. Do not require Incoterm, exact port/terminal, '
+            'container engineering, tariff code or carrier preference on first contact when SAHJONY can resolve those internally. '
+            'Never force a full container when pallet or consolidated cargo is the better fit. '
+            'Offer relevant SAHJONY Cuba catalog products without making binding commitments.'
+        )
         if recs:
             objective += ' Suggested categories/products: ' + '; '.join(str(p.get('product')) for p in recs[:6])
         row = {
             'mission_id':mission_id,'contact_id':cid,'objective':objective,
-            'success_criteria':'Obtain product, quantity, specification, destination, timeline and payment preference; convert only evidence-backed demand into RFQ.',
+            'success_criteria':(
+                'Identify service mode and obtain only the minimum needed now: product/merchandise or vehicle need, approximate quantity '
+                '(including pallet count when relevant), origin only if the customer already has the goods/provider, Cuba destination city/province, '
+                'and required timing. Convert only evidence-backed demand into RFQ. Gather Incoterm, exact terminal, customs classification, '
+                'dimensions and carrier details later only when operationally necessary.'
+            ),
             'priority':'high','autonomy_mode':'AUTONOMOUS_NONBINDING',
             'allowed_channels':list(dict.fromkeys(str(e.get('channel')) for e in allowed)),
             'max_outbound_attempts':3,'status':'READY','binding_actions_allowed':False,
