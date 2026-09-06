@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 from auth import verify_owner_token
 from logistics_profit_optimizer import RouteCandidate, optimize_route, policy_snapshot, rank_routes
 
-app = FastAPI(title='SAHJONY Logistics Profit Optimizer', version='1.0.0', docs_url=None, redoc_url=None)
+app = FastAPI(title='SAHJONY Logistics Profit Optimizer', version='1.1.0', docs_url=None, redoc_url=None)
 
 
 def owner_required(authorization: str | None, x_role: str | None):
@@ -47,6 +47,7 @@ class OptimizeIn(BaseModel):
     routes: list[RouteIn] = Field(min_length=1, max_length=100)
     customer_type: Literal['RETAIL','AGENCY','BUSINESS']='RETAIL'
     competitor_effective_price: float | None = Field(default=None, gt=0)
+    competitor_door_to_door: bool = True
     agency_partner: bool = False
     home_collection_partner: bool = False
 
@@ -64,6 +65,10 @@ async def health():
         'status':'ok',
         'profit_floor_protected':True,
         'competitor_benchmarking':True,
+        'competitor_comparison_requires_door_to_door':True,
+        'door_to_door_default':True,
+        'pod_required_for_completion':True,
+        'last_mile_included_in_cost_basis':True,
         'air_sea_multimodal':True,
         'agency_revenue_share':True,
         'home_partner_revenue_share':True,
@@ -86,6 +91,7 @@ async def optimize(p: OptimizeIn, authorization: str | None = Header(None, alias
             to_route(route),
             customer_type=p.customer_type,
             competitor_effective_price=p.competitor_effective_price,
+            competitor_door_to_door=p.competitor_door_to_door,
             agency_partner=p.agency_partner,
             home_collection_partner=p.home_collection_partner,
         ) for route in p.routes
@@ -96,5 +102,6 @@ async def optimize(p: OptimizeIn, authorization: str | None = Header(None, alias
         'best_route': ranked[0],
         'alternatives': ranked[1:],
         'binding_quote':False,
-        'rule':'Firm quote requires confirmed capacity and compliance clearance. Internal cost and margin fields remain owner-only.',
+        'delivery_standard':'DOOR_TO_DOOR',
+        'rule':'Firm quote requires door delivery, POD, confirmed capacity and compliance clearance. Competitor prices are comparable only when they represent equivalent door-to-door service. Internal cost and margin fields remain owner-only.',
     }
