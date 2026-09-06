@@ -1,0 +1,133 @@
+name: Governed WhatsApp Outreach Pilot
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Pilot mode
+        required: true
+        default: dry_run
+        type: choice
+        options:
+          - dry_run
+          - execute
+      limit:
+        description: Maximum eligible contacts (hard cap 25)
+        required: true
+        default: '25'
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: governed-whatsapp-outreach-pilot
+  cancel-in-progress: false
+
+jobs:
+  pilot:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    env:
+      BRIDGE_SECRET: ${{ secrets.OPENCLAW_APP_BRIDGE_SECRET || secrets.SAHJONY_APP_BRIDGE_SECRET }}
+      APP_URL: https://www.sahjony.com
+      PILOT_MODE: ${{ inputs.mode }}
+      PILOT_LIMIT: ${{ inputs.limit }}
+    steps:
+      - name: Validate bounded governed pilot request
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ ${#BRIDGE_SECRET} -ge 24 ]] || { echo BRIDGE_SECRET_MISSING=1 >&2; exit 2; }
+          [[ "$PILOT_LIMIT" =~ ^[0-9]+$ ]] || { echo INVALID_LIMIT=1 >&2; exit 3; }
+          (( PILOT_LIMIT >= 1 && PILOT_LIMIT <= 25 )) || { echo LIMIT_EXCEEDS_GOVERNED_CAP=1 >&2; exit 4; }
+          [[ "$PILOT_MODE" == dry_run || "$PILOT_MODE" == execute ]] || { echo INVALID_MODE=1 >&2; exit 5; }
+
+      - name: Run governed pilot through production CRM bridge
+        id: run
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib, hmac, json, os, secrets, time, urllib.request
+
+          base=os.environ['APP_URL'].rstrip('/')
+          secret=os.environ['BRIDGE_SECRET']
+          limit=int(os.environ['PILOT_LIMIT'])
+          dry=os.environ['PILOT_MODE']=='dry_run'
+          operation_id=f"wa-pilot-{int(time.time())}-{secrets.token_hex(5)}"
+
+          def signed_post(path, payload):
+              raw=json.dumps(payload,separators=(',',':')).encode()
+              ts=str(int(time.time()))
+              nonce=secrets.token_hex(16)
+              material=f"crm-v1\n{ts}\n{nonce}\nPOST\n{path}\n{hashlib.sha256(raw).hexdigest()}".encode()
+              sig='sha256='+hmac.new(secret.encode(),material,hashlib.sha256).hexdigest()
+              req=urllib.request.Request(
+                  base+path,
+                  data=raw,
+                  method='POST',
+                  headers={
+                      'Accept':'application/json',
+                      'Content-Type':'application/json',
+                      'X-SAHJONY-Timestamp':ts,
+                      'X-SAHJONY-Nonce':nonce,
+                      'X-SAHJONY-CRM-Signature':sig,
+                      'User-Agent':'SAHJONY-Governed-Outreach-Pilot/1.0',
+                  },
+              )
+              with urllib.request.urlopen(req,timeout=30) as r:
+                  return json.load(r)
+
+          result=signed_post('/whatsapp/crm/outreach-pilot',{
+              'operation_id':operation_id,
+              'limit':limit,
+              'dry_run':dry,
+          })
+          public={k:result.get(k) for k in ('status','operation_id','eligible','selected','queued','messages_sent')}
+          print('PILOT_RESULT='+json.dumps(public,separators=(',',':')))
+          with open(os.environ['GITHUB_OUTPUT'],'a') as f:
+              f.write(f"operation_id={operation_id}\n")
+              f.write(f"dry_run={'true' if dry else 'false'}\n")
+          PY
+
+      - name: Confirm transport acknowledgements
+        if: steps.run.outputs.dry_run == 'false'
+        shell: bash
+        env:
+          OPERATION_ID: ${{ steps.run.outputs.operation_id }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib, hmac, json, os, secrets, time, urllib.request
+
+          base=os.environ['APP_URL'].rstrip('/')
+          secret=os.environ['BRIDGE_SECRET']
+          operation_id=os.environ['OPERATION_ID']
+          path='/whatsapp/crm/outreach-pilot/status'
+
+          def status():
+              raw=json.dumps({'operation_id':operation_id},separators=(',',':')).encode()
+              ts=str(int(time.time())); nonce=secrets.token_hex(16)
+              material=f"crm-v1\n{ts}\n{nonce}\nPOST\n{path}\n{hashlib.sha256(raw).hexdigest()}".encode()
+              sig='sha256='+hmac.new(secret.encode(),material,hashlib.sha256).hexdigest()
+              req=urllib.request.Request(base+path,data=raw,method='POST',headers={
+                  'Accept':'application/json','Content-Type':'application/json',
+                  'X-SAHJONY-Timestamp':ts,'X-SAHJONY-Nonce':nonce,'X-SAHJONY-CRM-Signature':sig,
+                  'User-Agent':'SAHJONY-Governed-Outreach-Pilot/1.0',
+              })
+              with urllib.request.urlopen(req,timeout=30) as r: return json.load(r)
+
+          last={}
+          for _ in range(13):
+              last=status()
+              delivery=last.get('delivery') or {}
+              queued=int(delivery.get('queued') or 0)
+              sending=int(delivery.get('sending') or 0)
+              leased=int(delivery.get('leased') or 0)
+              if queued==0 and sending==0 and leased==0:
+                  break
+              time.sleep(10)
+          safe={'status':last.get('status'),'operation_id':operation_id,'total':last.get('total'),'delivery':last.get('delivery') or {},'messages_sent':last.get('messages_sent',0)}
+          print('PILOT_DELIVERY='+json.dumps(safe,separators=(',',':')))
+          PY
