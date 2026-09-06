@@ -37,18 +37,13 @@ CATEGORY_RULES = {
     'salud': ['salud','farmac','clinica','medic','primeros auxilios'],
 }
 
-# Customer-facing intake is intentionally simple. SAHJONY resolves Incoterms,
-# exact terminals, container engineering and internal logistics detail later.
+# Customer-facing intake is intentionally simple. Explicit service mode and
+# purchase unit are more specific than product category, so they are matched first.
 INTAKE_RULES: list[dict[str, Any]] = [
     {
         'intent':'VEHICLE_PURCHASE',
         'keywords':['carro','auto','automovil','vehiculo','camioneta','pickup','suv','motorcycle','moto'],
         'ask':['vehiculo que busca o presupuesto aproximado','cantidad','provincia/ciudad de entrega en Cuba','cuando lo necesita'],
-    },
-    {
-        'intent':'FOOD_AGRI_PURCHASE',
-        'keywords':['comida','alimento','arroz','aceite','frijol','harina','pollo','carne','leche','agricola','agricultura','semilla'],
-        'ask':['producto','cantidad aproximada','presentacion preferida si la sabe','provincia/ciudad de entrega','cuando lo necesita'],
     },
     {
         'intent':'PALLET_PURCHASE',
@@ -69,6 +64,11 @@ INTAKE_RULES: list[dict[str, Any]] = [
         'intent':'FULL_CONTAINER',
         'keywords':['contenedor completo','full container','fcl','contenedor de 20','contenedor de 40','20 pies','40 pies'],
         'ask':['producto o mercancia','cantidad o numero de contenedores','provincia/ciudad de entrega','cuando lo necesita'],
+    },
+    {
+        'intent':'FOOD_AGRI_PURCHASE',
+        'keywords':['comida','alimento','arroz','aceite','frijol','harina','pollo','carne','leche','agricola','agricultura','semilla'],
+        'ask':['producto','cantidad aproximada','presentacion preferida si la sabe','provincia/ciudad de entrega','cuando lo necesita'],
     },
 ]
 
