@@ -1,0 +1,167 @@
+name: Hostinger Hermes Outbox Worker
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/hostinger-hermes-outbox-worker.yml
+
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    concurrency:
+      group: hostinger-vm-767852-mutation
+      cancel-in-progress: false
+    env:
+      HOST: 69.62.68.67
+      SSH_USER: root
+      PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+      BRIDGE_SECRET: ${{ secrets.OPENCLAW_APP_BRIDGE_SECRET || secrets.SAHJONY_APP_BRIDGE_SECRET }}
+    steps:
+      - name: Prepare SSH
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$PRIVATE_KEY"
+          test ${#BRIDGE_SECRET} -ge 24
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/key
+          chmod 600 ~/.ssh/key
+      - name: Install Hermes outbox transport worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          tmp_secret="$(mktemp)"
+          printf '%s' "$BRIDGE_SECRET" > "$tmp_secret"
+          scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/key "$tmp_secret" "$SSH_USER@$HOST:/tmp/sahjony-outbox-secret"
+          rm -f "$tmp_secret"
+          ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/key "$SSH_USER@$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          install -d -m 700 /opt/sahjony/hermes-outbox
+          install -m 600 /tmp/sahjony-outbox-secret /opt/sahjony/hermes-outbox/bridge.secret
+          rm -f /tmp/sahjony-outbox-secret
+          cat > /opt/sahjony/hermes-outbox/worker.py <<'PY'
+          #!/usr/bin/env python3
+          import hashlib, hmac, json, os, time, urllib.request, urllib.error
+          from datetime import datetime, timezone
+
+          BASE='https://www.sahjony.com'
+          SECRET=open('/opt/sahjony/hermes-outbox/bridge.secret').read().strip()
+          BRIDGE='http://127.0.0.1:3000'
+          GATEWAY='hostinger-vps'
+          ACCOUNT='default'
+
+          def signed_headers(raw=b''):
+              ts=str(int(time.time()))
+              sig='sha256='+hmac.new(SECRET.encode(), ts.encode()+b'.'+raw, hashlib.sha256).hexdigest()
+              return {'X-SAHJONY-Timestamp':ts,'X-SAHJONY-Signature':sig}
+
+          def json_request(url, method='GET', payload=None, headers=None, timeout=20):
+              raw=b'' if payload is None else json.dumps(payload,separators=(',',':')).encode()
+              h={'Accept':'application/json'}
+              if payload is not None: h['Content-Type']='application/json'
+              if headers: h.update(headers(raw) if callable(headers) else headers)
+              req=urllib.request.Request(url,data=(raw if payload is not None else None),headers=h,method=method)
+              with urllib.request.urlopen(req,timeout=timeout) as r:
+                  body=r.read().decode()
+                  return json.loads(body) if body else {}
+
+          def bridge_health():
+              try:
+                  d=json_request(BRIDGE+'/health',timeout=5)
+                  return bool(d)
+              except Exception:
+                  return False
+
+          def heartbeat():
+              payload={'gateway_id':GATEWAY,'account_id':ACCOUNT,'channel_connected':bridge_health(),'business_name':'SAHJONY LLC','model':'hermes-agent','gateway_version':'Hermes WhatsApp bridge'}
+              try: json_request(BASE+'/whatsapp/openclaw/heartbeat','POST',payload,signed_headers)
+              except Exception: pass
+
+          def poll():
+              try:
+                  d=json_request(BASE+'/whatsapp/openclaw/outbox?limit=5',headers=lambda raw:signed_headers(b''))
+                  return d.get('commands') or []
+              except Exception:
+                  return []
+
+          def send_local(cmd):
+              recipient=''.join(ch for ch in str(cmd.get('recipient') or '') if ch.isdigit())
+              if not recipient: raise RuntimeError('invalid recipient')
+              body=str(cmd.get('body') or '')[:4096]
+              candidates=[recipient+'@s.whatsapp.net',recipient]
+              last=None
+              for chat in candidates:
+                  try:
+                      out=json_request(BRIDGE+'/send','POST',{'chatId':chat,'message':body},timeout=25)
+                      return str(out.get('messageId') or out.get('id') or '') or None
+                  except Exception as e:
+                      last=e
+              raise last or RuntimeError('send failed')
+
+          def ack(cmd,status,message_id=None,error=None):
+              payload={'command_id':cmd['command_id'],'lease_token':cmd['lease_token'],'status':status,'provider_message_id':message_id,'error':(str(error)[:500] if error else None)}
+              json_request(BASE+'/whatsapp/openclaw/outbox/ack','POST',payload,signed_headers)
+
+          def main():
+              if len(SECRET)<24: raise SystemExit('bridge secret missing')
+              last_hb=0
+              while True:
+                  now=time.time()
+                  if now-last_hb>30:
+                      heartbeat(); last_hb=now
+                  for cmd in poll():
+                      try:
+                          mid=send_local(cmd); ack(cmd,'sent',mid)
+                      except Exception as e:
+                          try: ack(cmd,'failed',None,e)
+                          except Exception: pass
+                      time.sleep(2)
+                  time.sleep(5)
+
+          if __name__=='__main__': main()
+          PY
+          chmod 700 /opt/sahjony/hermes-outbox/worker.py
+          cat > /etc/systemd/system/sahjony-hermes-outbox.service <<'UNIT'
+          [Unit]
+          Description=SAHJONY Hermes WhatsApp CRM Outbox Worker
+          After=network-online.target
+          Wants=network-online.target
+
+          [Service]
+          Type=simple
+          ExecStart=/usr/bin/python3 /opt/sahjony/hermes-outbox/worker.py
+          Restart=always
+          RestartSec=5
+          NoNewPrivileges=true
+          PrivateTmp=true
+
+          [Install]
+          WantedBy=multi-user.target
+          UNIT
+          systemctl daemon-reload
+          systemctl enable --now sahjony-hermes-outbox.service
+          sleep 8
+          systemctl is-active --quiet sahjony-hermes-outbox.service
+          curl -fsS --max-time 5 http://127.0.0.1:3000/health >/dev/null
+          echo HERMES_OUTBOX_WORKER=ACTIVE
+          echo LOCAL_WHATSAPP_BRIDGE=HEALTHY
+          REMOTE
+      - name: Verify production heartbeat
+        shell: bash
+        run: |
+          set -euo pipefail
+          sleep 35
+          python3 - <<'PY'
+          import json, urllib.request
+          d=json.load(urllib.request.urlopen('https://www.sahjony.com/whatsapp/health',timeout=20))
+          h=d.get('hostinger_openclaw') or {}
+          assert h.get('heartbeat_fresh') is True, h
+          assert h.get('connected') is True, h
+          print('PRODUCTION_WHATSAPP_HEARTBEAT=FRESH')
+          print('PRODUCTION_WHATSAPP_CONNECTED=TRUE')
+          PY
+      - name: Cleanup
+        if: always()
+        run: rm -f ~/.ssh/key
