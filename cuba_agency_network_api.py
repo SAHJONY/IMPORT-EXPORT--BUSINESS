@@ -82,3 +82,35 @@ async def public_tracking(token:str):
     aid,pid=read_token(token); rows=await get_backend().select("logistics_agency_packages",params={"agency_id":f"eq.{aid}","package_id":f"eq.{pid}","limit":"1"}) or []
     if not rows: raise HTTPException(404,"Tracking not found")
     r=rows[0]; return {"tracking_reference":r.get("tracking_reference"),"stage":r.get("stage"),"status":r.get("status"),"destination_province":r.get("destination_province"),"last_location":r.get("last_location"),"updated_at":r.get("updated_at")}
+
+
+class CanadaCorridorIn(BaseModel):
+    origin_city:str=Field(min_length=2,max_length=120)
+    origin_province:str=Field(min_length=2,max_length=80)
+    destination_province_cuba:str=Field(min_length=2,max_length=120)
+    transport_mode:str=Field(default="AIR",max_length=20)
+    cargo_type:str=Field(default="NON_COMMERCIAL",max_length=40)
+    currency:str=Field(default="CAD",max_length=3)
+    declared_value:float|None=Field(default=None,ge=0)
+    country_of_origin:str|None=Field(default=None,max_length=3)
+    hs_code:str|None=Field(default=None,max_length=32)
+    export_reporting_status:str=Field(default="REVIEW_REQUIRED",max_length=40)
+    permit_status:str=Field(default="REVIEW_REQUIRED",max_length=40)
+    carrier_choice:str=Field(default="AGENCY_CHOICE",max_length=120)
+
+@app.post("/agency-network/canada-cuba/corridors")
+async def create_canada_corridor(p:CanadaCorridorIn,x_agency_id:str|None=Header(None,alias="X-Agency-Id"),authorization:str|None=Header(None,alias="Authorization")):
+    a=await agency_actor(x_agency_id,authorization); ts=now(); cid="ca_"+secrets.token_urlsafe(10)
+    mode=p.transport_mode.upper(); cargo=p.cargo_type.upper(); curr=p.currency.upper()
+    if mode not in {"AIR","SEA","MULTIMODAL"}: raise HTTPException(422,"Unsupported Canada-Cuba transport mode")
+    if cargo not in {"NON_COMMERCIAL","COMMERCIAL"}: raise HTTPException(422,"Unsupported cargo type")
+    if curr not in {"CAD","USD"}: raise HTTPException(422,"Canada-Cuba corridor supports CAD or USD")
+    ready=(p.export_reporting_status.upper()=="CLEARED" and p.permit_status.upper() in {"CLEARED","NOT_REQUIRED"} and bool(p.country_of_origin) and bool(p.hs_code))
+    row={"corridor_id":cid,"agency_id":a["agency_id"],**p.model_dump(),"transport_mode":mode,"cargo_type":cargo,"currency":curr,"booking_ready":ready,"status":"READY_TO_BOOK" if ready else "COMPLIANCE_REVIEW","created_at":ts,"updated_at":ts}
+    await get_backend().insert("logistics_canada_cuba_corridors",row)
+    return {"corridor":row,"booking_gate":{"country_of_origin_required":True,"hs_code_required":True,"export_reporting_required":True,"permit_review_required":True}}
+
+@app.get("/agency-network/canada-cuba/corridors")
+async def list_canada_corridors(x_agency_id:str|None=Header(None,alias="X-Agency-Id"),authorization:str|None=Header(None,alias="Authorization")):
+    a=await agency_actor(x_agency_id,authorization); rows=await get_backend().select("logistics_canada_cuba_corridors",params={"agency_id":f"eq.{a['agency_id']}","order":"created_at.desc","limit":"500"}) or []
+    return {"corridors":rows,"supported_origins":["Toronto","Montreal","Other Canada"],"currencies":["CAD","USD"],"carrier_neutral":True}

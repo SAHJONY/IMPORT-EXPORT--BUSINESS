@@ -42,3 +42,14 @@ def test_delivery_exception_opens_claim(monkeypatch):
     assert r.status_code==200 and r.json()['claim_opened'] is True
     assert r.json()['signature_value_persisted'] is False
     assert len(b.t['logistics_agency_exceptions'])==1
+
+
+def test_canada_cuba_corridor_gate(monkeypatch):
+    import agency_owner_api as ao
+    b=B(); monkeypatch.setattr(mod,"get_backend",lambda:b); monkeypatch.setattr(ao,"get_backend",lambda:b); c=TestClient(mod.app)
+    r=c.post('/agency-network/canada-cuba/corridors',headers=h(),json={"origin_city":"Toronto","origin_province":"ON","destination_province_cuba":"La Habana","transport_mode":"AIR","cargo_type":"COMMERCIAL","currency":"CAD","country_of_origin":"CA","hs_code":"8517","export_reporting_status":"CLEARED","permit_status":"NOT_REQUIRED"})
+    assert r.status_code==200
+    assert r.json()["corridor"]["booking_ready"] is True
+    r2=c.post('/agency-network/canada-cuba/corridors',headers=h(),json={"origin_city":"Montreal","origin_province":"QC","destination_province_cuba":"Holguin","transport_mode":"SEA","cargo_type":"NON_COMMERCIAL","currency":"CAD"})
+    assert r2.status_code==200
+    assert r2.json()["corridor"]["booking_ready"] is False
