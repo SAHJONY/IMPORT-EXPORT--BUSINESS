@@ -118,7 +118,6 @@
     { "src": "cuba_language_api.py", "use": "@vercel/python" },
     { "src": "cuba_energy_desk_api.py", "use": "@vercel/python" },
     { "src": "cuba_consumer_marketplace_api.py", "use": "@vercel/python" },
-    { "src": "cuba_logistics_network_api.py", "use": "@vercel/python" },
     { "src": "cuba_partner_api.py", "use": "@vercel/python" },
     { "src": "cuba_mipymes_api.py", "use": "@vercel/python" },
     { "src": "pricing_api.py", "use": "@vercel/python" },
@@ -217,7 +216,6 @@
     { "src": "/owner/cuba/fuels", "dest": "/owner-cuba-fuels.html" },
     { "src": "/owner/energy/cuba-fuels", "dest": "/owner-cuba-fuels.html" },
     { "src": "/owner/cuba-consumers", "dest": "/owner-cuba-consumers.html" },
-    { "src": "/owner/cuba-logistics", "dest": "/owner-cuba-logistics.html" },
     { "src": "/owner/cuba/consumers", "dest": "/owner-cuba-consumers.html" },
     {
       "src": "/owner/cuba-individual-consumers",
@@ -244,7 +242,6 @@
       "dest": "cuba_consumer_marketplace_api.py"
     },
     { "src": "/cuba-energy(.*)", "dest": "cuba_energy_desk_api.py" },
-    { "src": "/cuba-logistics(.*)", "dest": "cuba_logistics_network_api.py" },
     { "src": "/ui-language(.*)", "dest": "ui_language_api.py" },
     { "src": "/cuba-language(.*)", "dest": "cuba_language_api.py" },
     { "src": "/api/meta/messenger(.*)", "dest": "unified_api.py" },
