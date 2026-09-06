@@ -11,11 +11,13 @@ from pydantic import BaseModel, Field
 from auth import verify_owner_token
 from insforge_backend import get_backend
 
-app = FastAPI(title='SAHJONY Cuba Consumer Marketplace', version='1.0.2', docs_url=None, redoc_url=None)
+app = FastAPI(title='SAHJONY Cuba Consumer Marketplace', version='1.2.0', docs_url=None, redoc_url=None)
 
 Category = Literal['ENERGY_FUELS','SOLAR_BACKUP','HOME_APPLIANCES','HOUSEHOLD_GOODS','ELECTRONICS_COMMUNICATIONS','FOOD_AGRICULTURE','HEALTH_MEDICAL','OTHER']
 Status = Literal['RECEIVED','ELIGIBILITY_REVIEW','SOURCING','QUOTE_REVIEW','COMPLIANCE_REVIEW','PAYMENT_REVIEW','LOGISTICS_REVIEW','READY_FOR_CUSTOMER_DECISION','HOLD','CLOSED']
 Currency = Literal['USD']
+ShippingOption = Literal['SAHJONY_ARRANGED','CUSTOMER_ARRANGED','CONSOLIDATED']
+TransportMode = Literal['SEA','AIR','BEST_AVAILABLE']
 
 
 def now() -> str:
@@ -52,8 +54,27 @@ class ConsumerRequestIn(BaseModel):
     budget_amount: float | None = Field(default=None, ge=0)
     budget_currency: Currency = 'USD'
     notes: str | None = Field(default=None, max_length=2000)
+    shipping_option: ShippingOption = 'SAHJONY_ARRANGED'
+    transport_mode: TransportMode = 'SEA'
+    customer_pays_shipping: bool = True
+    consolidation_ok: bool = True
     website: str | None = None
 
+
+
+
+def request_notes(p: ConsumerRequestIn) -> str:
+    parts = [
+        p.notes.strip() if p.notes else '',
+        'ORDER_MODE=INDIVIDUAL',
+        f'SHIPPING_OPTION={p.shipping_option}',
+        f'TRANSPORT_MODE={p.transport_mode}',
+        'AIR_DG_REVIEW_REQUIRED=TRUE' if p.transport_mode in {'AIR','BEST_AVAILABLE'} else 'AIR_DG_REVIEW_REQUIRED=FALSE',
+        'SHIPPING_PAYER=CUSTOMER',
+        f'CONSOLIDATION_OK={str(bool(p.consolidation_ok)).upper()}',
+        'SHIPPING_QUOTED_SEPARATELY=TRUE',
+    ]
+    return '\n'.join(x for x in parts if x)[:2000]
 
 class OwnerReviewIn(BaseModel):
     status: Status
@@ -69,7 +90,7 @@ async def health():
     return {
         'status':'ok',
         'service':'sahjony-cuba-consumer-marketplace',
-        'version':'1.0.2',
+        'version':'1.2.0',
         'audience':'INDIVIDUAL_CONSUMER_ONLY',
         'transaction_currency':'USD',
         'public_intake':True,
@@ -78,6 +99,11 @@ async def health():
         'automatic_payment_authority':False,
         'automatic_shipment_release':False,
         'default_status':'RECEIVED',
+        'individual_orders_enabled':True, 'air_shipping_enabled':True, 'sea_shipping_enabled':True,
+        'customer_paid_shipping_enabled':True,
+        'shipping_quote_separate':True,
+        'shipping_options':['SAHJONY_ARRANGED','CUSTOMER_ARRANGED','CONSOLIDATED'],
+        'inventory_purchase_before_customer_funds':False,
         'fail_closed':True,
     }
 
@@ -90,6 +116,8 @@ async def create_request(p: ConsumerRequestIn):
         raise HTTPException(422, 'Phone or email is required')
     if not p.personal_or_family_use:
         raise HTTPException(409, 'This platform accepts only personal or immediate-family use requests.')
+    if not p.customer_pays_shipping:
+        raise HTTPException(409, 'Individual orders require the customer to accept the shipping cost separately from the product price.')
 
     rid = f'cir_{secrets.token_urlsafe(9)}'
     status_token = secrets.token_urlsafe(24)
@@ -113,7 +141,7 @@ async def create_request(p: ConsumerRequestIn):
         'personal_or_family_use':True,
         'budget_amount':p.budget_amount,
         'budget_currency':'USD',
-        'notes':p.notes,
+        'notes':request_notes(p),
         'status':'RECEIVED',
         'eligibility_route':'NOT_YET_CLASSIFIED',
         'release_allowed':False,
@@ -129,7 +157,13 @@ async def create_request(p: ConsumerRequestIn):
         'status_token':status_token,
         'status':'RECEIVED',
         'currency':'USD',
-        'message':'Solicitud recibida. Todas las cotizaciones y transacciones de SAHJONY se realizan en dólares estadounidenses (USD).'
+        'order_mode':'INDIVIDUAL',
+        'shipping_option':p.shipping_option,
+        'transport_mode':p.transport_mode,
+        'customer_pays_shipping':True,
+        'shipping_quote_separate':True,
+        'consolidation_ok':bool(p.consolidation_ok),
+        'message':'Solicitud recibida. El producto y el envío se cotizan por separado en USD; el cliente acepta el costo del transporte antes de la compra.'
     }
 
 
@@ -153,6 +187,9 @@ async def public_status(request_id: str, x_request_token: str | None = Header(No
         'updated_at':r.get('updated_at'),
         'payment_allowed':bool(r.get('payment_allowed')),
         'shipment_allowed':bool(r.get('shipment_allowed')),
+        'order_mode':'INDIVIDUAL',
+        'customer_pays_shipping':True,
+        'shipping_quote_separate':True,
     }
 
 
@@ -165,7 +202,7 @@ async def list_owner_requests(authorization: str | None = Header(None, alias='Au
         r['budget_currency'] = 'USD'
         if r.get('quote_amount') is not None:
             r['quote_currency'] = 'USD'
-    return {'requests':rows, 'transaction_currency':'USD'}
+    return {'requests':rows, 'transaction_currency':'USD', 'order_mode':'INDIVIDUAL', 'customer_pays_shipping':True, 'shipping_quote_separate':True}
 
 
 @app.patch('/consumer-marketplace/owner/requests/{request_id}')

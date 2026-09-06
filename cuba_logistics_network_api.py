@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import os
+import json
+from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, Header, HTTPException
@@ -9,7 +11,7 @@ from fastapi import FastAPI, Header, HTTPException
 from customer_crm_api import identity
 from insforge_backend import get_backend
 
-app = FastAPI(title="SAHJONY Cuba Logistics Network OS", version="1.0.0", docs_url=None, redoc_url=None)
+app = FastAPI(title="SAHJONY Cuba Logistics Network OS", version="2.0.0", docs_url=None, redoc_url=None)
 ORG_ID = "org_sahjony_global_trade"
 
 PROVINCES = [
@@ -18,6 +20,26 @@ PROVINCES = [
     "Camagüey", "Las Tunas", "Holguín", "Granma", "Santiago de Cuba",
     "Guantánamo", "Isla de la Juventud",
 ]
+
+
+REGISTRY_PATH = Path(__file__).with_name("data") / "cuba_logistics_partner_registry.json"
+
+def _registry_rows() -> list[dict[str, Any]]:
+    try:
+        payload = json.loads(REGISTRY_PATH.read_text())
+        return [dict(x) for x in payload.get("partners", [])]
+    except Exception:
+        return []
+
+def _partner_blob(row: dict[str, Any]) -> str:
+    return " ".join([str(row.get("name") or ""), str(row.get("layer") or ""), str(row.get("evidence_summary") or ""), " ".join(row.get("capabilities") or []), " ".join(row.get("modes") or [])]).lower()
+
+def _partner_projection(row: dict[str, Any]) -> dict[str, Any]:
+    commercial = str(row.get("commercial_status") or "VERIFY")
+    risk = str(row.get("risk_level") or "VERIFY").upper()
+    rate_ready = commercial in {"RATE_VERIFIED", "CONTRACTED"}
+    compliance_ready = risk in {"LOW", "MEDIUM"} and "HOLD" not in commercial
+    return {**row, "rate_ready": rate_ready, "compliance_ready": compliance_ready, "booking_allowed": False, "binding_quote_allowed": False}
 
 LOGISTICS_TERMS = (
     "logistic", "logística", "aduana", "aduanal", "transitari", "freight", "cargo",
@@ -152,6 +174,9 @@ async def health():
         "payment_authorization_allowed": False,
         "counterparty_disclosure_allowed": False,
         "province_count": 16,
+        "transport_modes": ["AIR", "SEA", "GROUND"],
+        "partner_registry_count": len(_registry_rows()),
+        "rate_cards_verified": False,
         "fail_closed": True,
     }
 
@@ -180,6 +205,44 @@ async def network(
     }
 
 
+@app.get("/cuba-logistics/partners")
+async def partners(
+    x_role: str | None = Header(None, alias="X-Role"),
+    authorization: str | None = Header(None, alias="Authorization"),
+    x_employee_id: str | None = Header(None, alias="X-Employee-Id"),
+):
+    _actor(x_role, authorization, x_employee_id)
+    items = [_partner_projection(x) for x in _registry_rows()]
+    return {
+        "status": "ok", "count": len(items),
+        "layers": sorted({str(x.get("layer")) for x in items}),
+        "modes": ["AIR", "SEA", "GROUND"],
+        "partners": items,
+        "policy": "No booking or binding customer rate until operator, compliance and written rate card are verified.",
+    }
+
+@app.get("/cuba-logistics/a-to-z")
+async def a_to_z(
+    x_role: str | None = Header(None, alias="X-Role"),
+    authorization: str | None = Header(None, alias="Authorization"),
+    x_employee_id: str | None = Header(None, alias="X-Employee-Id"),
+):
+    _actor(x_role, authorization, x_employee_id)
+    return {
+        "status": "ok",
+        "customer_segments": ["INDIVIDUAL", "MIPYME_PRIVATE_BUSINESS", "SHIPPING_AGENCY", "IMPORTER_DISTRIBUTOR"],
+        "transport_modes": ["AIR", "SEA"],
+        "workflow": [
+            "INTAKE", "KYB_KYC", "COMMODITY_CLASSIFICATION", "END_USE_REVIEW",
+            "CARRIER_FORWARDER_RATE_REQUEST", "CUBA_SIDE_ROUTE_SELECTION", "LANDED_QUOTE",
+            "CUSTOMER_ACCEPTANCE", "FUNDS_CLEARED", "BOOKING", "ORIGIN_RECEIPT",
+            "EXPORT_DOCUMENTS", "AIR_OR_OCEAN_MOVEMENT", "CUBA_ARRIVAL", "CUSTOMS_RELEASE",
+            "LAST_MILE", "PROOF_OF_DELIVERY", "FINANCIAL_RECONCILIATION"
+        ],
+        "pricing_components": ["MERCHANDISE", "SAHJONY_MARGIN_OR_SERVICE", "ORIGIN_HANDLING", "AIR_OR_OCEAN_FREIGHT", "FUEL_SECURITY_DG", "INSURANCE", "DESTINATION_HANDLING", "CUSTOMS_TAXES_IF_APPLICABLE", "LAST_MILE"],
+        "operating_policy": {"inventory_before_customer_funds": False, "shipping_quoted_separately": True, "booking_fail_closed": True, "rate_validity_required": True, "dangerous_goods_written_acceptance_required": True},
+    }
+
 @app.get("/cuba-logistics/route-blueprint")
 async def route_blueprint(
     x_role: str | None = Header(None, alias="X-Role"),
@@ -190,10 +253,10 @@ async def route_blueprint(
     rows = [_project(row) for row in await _all_external_rows()]
     return {
         "status": "ok",
-        "corridor": "Houston/New Orleans → Mariel/Havana → customs release → national distribution → buyer",
+        "corridor": "Worldwide origin → AIR or SEA → Cuba entry node → customs release → national distribution → buyer",
         "stages": [
             {"stage": 1, "name": "Origin supplier/exporter", "gate": "KYB + product/export eligibility + executable commercial terms"},
-            {"stage": 2, "name": "Ocean carrier", "gate": "Firm rate + booking only after owner-approved transaction"},
+            {"stage": 2, "name": "Airline / ocean carrier / forwarder", "gate": "Written rate + cargo acceptance + booking only after approved transaction"},
             {"stage": 3, "name": "Cuban importer/consignee", "gate": "Legal importer authority + end-user/ownership/compliance"},
             {"stage": 4, "name": "Customs/transitary node", "gate": "Authority + declaration + permits + duties/taxes + inspection as applicable"},
             {"stage": 5, "name": "Container release/extraction", "gate": "Released cargo + terminal charges + equipment-return plan"},
@@ -237,7 +300,7 @@ async def quote_requirements(
         "required_inputs": [
             "Legal importer/consignee and tax/registry identifiers",
             "Commodity, HS code, country of origin, gross/net weight and packaging",
-            "Container type, count, reefer requirements and dangerous-goods status",
+            "Transport mode AIR/SEA, package/pallet/container dimensions, chargeable weight/CBM and dangerous-goods status",
             "Port/terminal and bill-of-lading details",
             "Required sanitary, veterinary, phytosanitary or technical permits",
             "Customs agency/transitary scope and authorization",
@@ -248,6 +311,6 @@ async def quote_requirements(
             "Truck/reefer requirements, transit time, insurance and proof of delivery",
             "Quote validity, taxes, currency, payment terms and exclusions",
         ],
-        "economics_formula": "supplier + origin + ocean + destination/customs + inland distribution + compliance/inspection + protected SAHJONY economics = buyer landed price",
+        "economics_formula": "supplier + origin + air/ocean + destination/customs + inland distribution + compliance/inspection + protected SAHJONY economics = buyer landed price",
         "owner_approval_required_for": ["booking", "contract", "payment", "binding quote", "protected counterparty disclosure"],
     }
