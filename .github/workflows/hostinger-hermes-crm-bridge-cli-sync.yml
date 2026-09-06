@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 12
     concurrency:
-      group: hostinger-vm-767852-mutation
+      group: hostinger-hermes-crm-cli-sync
       cancel-in-progress: false
     env:
       HOST: 69.62.68.67
