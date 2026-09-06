@@ -4,7 +4,7 @@ from typing import Literal
 from fastapi import FastAPI
 from pydantic import BaseModel, Field
 
-app = FastAPI(title="SAHJONY US National Shipping Network", version="1.4.1", docs_url=None, redoc_url=None)
+app = FastAPI(title="SAHJONY US National Shipping Network", version="1.4.2", docs_url=None, redoc_url=None)
 
 Mode = Literal["AIR", "SEA", "MULTIMODAL"]
 CargoUnit = Literal["SINGLE_ITEM", "BOX", "MULTIPLE_BOXES", "PALLET", "LTL", "CONSOLIDATED_LCL", "FCL", "VEHICLE", "MOTORCYCLE", "OVERSIZED", "SPECIAL_REGULATED"]
@@ -65,7 +65,9 @@ def zone_for(state: str) -> str:
 def recommend_mode(p: NationalIntake) -> Mode:
     if p.cargo_unit in {"VEHICLE", "MOTORCYCLE", "FCL", "OVERSIZED"}:
         return "SEA"
-    if p.urgent and not p.dangerous_or_regulated and (p.weight_lb or 0) <= 300:
+    if p.dangerous_or_regulated:
+        return "SEA"
+    if p.urgent and (p.weight_lb or 0) <= 300:
         return "AIR"
     if p.cargo_unit in {"SINGLE_ITEM", "BOX", "MULTIPLE_BOXES"} and (p.weight_lb or 0) <= 150 and p.urgent:
         return "AIR"
@@ -80,12 +82,7 @@ def recommend_gateway(p: NationalIntake) -> str:
 
 
 def recommend_hub(p: NationalIntake) -> str:
-    """Backward-compatible public name for the gateway recommendation.
-
-    Existing callers and tests historically imported ``recommend_hub``.  Keep
-    that contract stable while the richer collection-hub model is exposed via
-    ``recommend_collection_hub``.
-    """
+    """Backward-compatible public name for the gateway recommendation."""
     return recommend_gateway(p)
 
 
