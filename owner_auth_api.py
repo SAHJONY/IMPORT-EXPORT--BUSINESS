@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
 import secrets
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import httpx
@@ -27,6 +28,15 @@ from insforge_backend import _matches, _safe_table, get_backend
 from governance_policy import AUDIT_RETENTION_DAYS
 
 app = FastAPI(title="SAHJONY Supabase Identity & Owner Authentication", version="2.1.0", docs_url=None, redoc_url=None)
+
+class OwnerMfaRecoveryRequest(BaseModel):
+    email: str = Field(min_length=3, max_length=320)
+
+
+class OwnerMfaRecoveryResetRequest(BaseModel):
+    state: str = Field(min_length=24, max_length=256, pattern=r"^[A-Za-z0-9_-]+$")
+    confirm: str = Field(pattern=r"^RESET_OLD_TOTP$")
+
 
 class OwnerLoginRequest(BaseModel):
     email: str = Field(min_length=3, max_length=320)
@@ -95,7 +105,44 @@ def _supabase_password_login(email: str, password: str) -> dict[str, Any]:
 def _owner_session_payload(authorization: str | None) -> dict[str, Any]:
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401,detail="Missing owner session")
-    payload=decode_owner_session(authorization.removeprefix("Bearer ").strip())
+    token=authorization.removeprefix("Bearer ").strip()
+
+    # Canonical Owner browser sessions are Supabase access tokens.  Verify the
+    # token, active owner membership, and AAL2 before authorizing Owner OS.
+    claims=decode_supabase_jwt(token)
+    if claims:
+        membership=_membership(str(claims.get("sub") or ""), {"owner"})
+        if not membership:
+            raise HTTPException(status_code=403,detail="This Supabase account is not authorized as owner")
+        configured_owner=owner_email()
+        email=str(claims.get("email") or "").strip().lower()
+        if configured_owner and email!=configured_owner:
+            raise HTTPException(status_code=403,detail="This Supabase account is not the configured owner")
+        # If JWKS verification fell back to /auth/v1/user, enrich only after
+        # that server-side verification.  These unverified fields are accepted
+        # solely because the same token has already been validated above.
+        if claims.get("aal") is None:
+            try:
+                import jwt as pyjwt
+                raw=pyjwt.decode(token, options={"verify_signature":False,"verify_exp":False,"verify_aud":False})
+                if str(raw.get("sub") or "")==str(claims.get("sub") or ""):
+                    claims={**raw, **claims}
+            except Exception:
+                pass
+        if str(claims.get("aal") or "aal1").lower()!="aal2":
+            raise HTTPException(status_code=403,detail="Owner MFA is not yet verified at AAL2")
+        return {
+            "email": email,
+            "scope": "owner:full",
+            "identity_provider": "supabase_auth",
+            "mfa_verified": True,
+            "exp": claims.get("exp"),
+            "sub": claims.get("sub"),
+        }
+
+    # Backward-compatible application session support for existing internal
+    # callers. This path is not used by the public Owner login page.
+    payload=decode_owner_session(token)
     if not payload:
         raise HTTPException(status_code=401,detail="Invalid or expired owner session")
     return payload
@@ -161,6 +208,146 @@ def identity_session_v2(x_role: str | None=Header(None,alias="X-Role"),authoriza
     membership=_membership(str(claims.get("sub") or ""),allowed)
     if not membership: raise HTTPException(status_code=403,detail="Inactive or insufficient application membership")
     return {"status":"authenticated","role":x_role,"app_role":membership.get("role"),"user_id":claims.get("sub"),"email":claims.get("email"),"identity_provider":"supabase_auth"}
+
+def _state_hash(state: str) -> str:
+    return hashlib.sha256(state.encode("utf-8")).hexdigest()
+
+
+def _recovery_amr(claims: dict[str, Any]) -> list[dict[str, Any]]:
+    value=claims.get("amr")
+    return [entry for entry in value if isinstance(entry,dict)] if isinstance(value,list) else []
+
+
+@app.post("/owner-auth/recovery/request")
+async def owner_mfa_recovery_request(payload: OwnerMfaRecoveryRequest):
+    normalized=payload.email.strip().lower()
+    configured_owner=owner_email()
+    # Keep the response non-enumerating while refusing to send for any other account.
+    if configured_owner and normalized!=configured_owner:
+        return {"status":"accepted","detail":"If this is the authorized Owner account, a recovery email will be sent."}
+    base,key=_supabase_url(),_supabase_key()
+    if not base or not key:
+        raise HTTPException(status_code=503,detail="Supabase Auth is not configured")
+    state=secrets.token_urlsafe(32)
+    now=datetime.now(timezone.utc)
+    grant={
+        "id": f"owner_mfa_recovery_{secrets.token_urlsafe(12)}",
+        "state_hash": _state_hash(state),
+        "owner_email": normalized,
+        "created_at": now.isoformat(),
+        "expires_at": (now+timedelta(minutes=15)).isoformat(),
+        "used_at": None,
+        "purpose": "replace_stale_totp",
+    }
+    await get_backend().insert("owner_mfa_recovery_grants", grant)
+    redirect_to=f"https://www.sahjony.com/owner-mfa-recovery.html?lang=en-US&state={state}"
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            response=await client.post(
+                f"{base}/auth/v1/recover",
+                headers={"apikey":key,"Authorization":f"Bearer {key}","Content-Type":"application/json"},
+                json={"email":normalized,"redirect_to":redirect_to},
+            )
+    except Exception as exc:
+        raise HTTPException(status_code=503,detail="Supabase recovery email is temporarily unavailable") from exc
+    if response.status_code==429:
+        raise HTTPException(status_code=429,detail="Recovery email rate limit exceeded. Wait for the Auth email window to refill, then request exactly one new email.")
+    if response.status_code not in {200,204}:
+        raise HTTPException(status_code=503,detail="Supabase could not start Owner recovery")
+    return {"status":"sent","detail":"Open only the newest Owner recovery email. The link contains a one-time server-bound recovery state."}
+
+
+@app.post("/owner-auth/recovery/reset-factor")
+async def owner_mfa_recovery_reset_factor(
+    payload: OwnerMfaRecoveryResetRequest,
+    authorization: str | None=Header(None,alias="Authorization"),
+):
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401,detail="Missing Supabase recovery session")
+    token=authorization.removeprefix("Bearer ").strip()
+    verified=decode_supabase_jwt(token)
+    if not verified:
+        raise HTTPException(status_code=401,detail="Invalid Supabase recovery session")
+    user_id=str(verified.get("sub") or "")
+    email=str(verified.get("email") or "").strip().lower()
+    configured_owner=owner_email()
+    if configured_owner and email!=configured_owner:
+        raise HTTPException(status_code=403,detail="Recovery session does not belong to the configured Owner")
+    if not _membership(user_id,{"owner"}):
+        raise HTTPException(status_code=403,detail="Recovery session is not authorized as Owner")
+
+    # Read AMR only after the exact bearer token has been verified by Supabase/JWKS.
+    raw=verified
+    if not _recovery_amr(raw):
+        try:
+            import jwt as pyjwt
+            candidate=pyjwt.decode(token, options={"verify_signature":False,"verify_exp":False,"verify_aud":False})
+            if str(candidate.get("sub") or "")==user_id:
+                raw={**candidate, **verified}
+        except Exception:
+            pass
+
+    state_hash=_state_hash(payload.state)
+    grants=await get_backend().select("owner_mfa_recovery_grants",params={"state_hash":f"eq.{state_hash}","used_at":"is.null","limit":"5"})
+    if not grants:
+        raise HTTPException(status_code=403,detail="Recovery state is invalid, expired, or already used")
+    grant=grants[0]
+    try:
+        created=datetime.fromisoformat(str(grant.get("created_at") or "").replace("Z","+00:00"))
+        expires=datetime.fromisoformat(str(grant.get("expires_at") or "").replace("Z","+00:00"))
+    except Exception as exc:
+        raise HTTPException(status_code=403,detail="Recovery state is invalid") from exc
+    now=datetime.now(timezone.utc)
+    if created.tzinfo is None: created=created.replace(tzinfo=timezone.utc)
+    if expires.tzinfo is None: expires=expires.replace(tzinfo=timezone.utc)
+    if now>expires or str(grant.get("owner_email") or "").lower()!=email:
+        raise HTTPException(status_code=403,detail="Recovery state is invalid or expired")
+
+    fresh_email_proof=False
+    for entry in _recovery_amr(raw):
+        method=str(entry.get("method") or "").lower()
+        try: ts=float(entry.get("timestamp") or 0)
+        except Exception: ts=0
+        if method in {"otp","magiclink"} and ts>=created.timestamp()-60 and ts<=now.timestamp()+60:
+            fresh_email_proof=True
+            break
+    if not fresh_email_proof:
+        raise HTTPException(status_code=403,detail="Open the newest recovery email link to prove recent mailbox control before replacing MFA")
+
+    # Consume first: replay attempts fail closed even if a downstream admin call fails.
+    used_at=now.isoformat()
+    await get_backend().patch("owner_mfa_recovery_grants",{"used_at":used_at},params={"state_hash":f"eq.{state_hash}"})
+
+    base,key=_supabase_url(),_supabase_key()
+    headers={"apikey":key,"Authorization":f"Bearer {key}","Content-Type":"application/json"}
+    async with httpx.AsyncClient(timeout=20) as client:
+        factors_response=await client.get(f"{base}/auth/v1/admin/users/{user_id}/factors",headers=headers)
+        if factors_response.status_code!=200:
+            raise HTTPException(status_code=502,detail="Supabase could not list Owner MFA factors")
+        factors_payload=factors_response.json() if factors_response.content else []
+        if isinstance(factors_payload,dict):
+            factors=factors_payload.get("factors") or factors_payload.get("data") or []
+        else:
+            factors=factors_payload
+        verified_totp=[f for f in factors if isinstance(f,dict) and str(f.get("factor_type") or f.get("type") or "").lower()=="totp" and str(f.get("status") or "").lower()=="verified"]
+        for factor in verified_totp:
+            factor_id=str(factor.get("id") or "")
+            if not factor_id: continue
+            deleted=await client.delete(f"{base}/auth/v1/admin/users/{user_id}/factors/{factor_id}",headers=headers)
+            if deleted.status_code not in {200,204}:
+                raise HTTPException(status_code=502,detail="Supabase could not remove the stale Owner TOTP factor")
+
+    await get_backend().insert("owner_mfa_recovery_audit",{
+        "id":f"owner_mfa_recovery_audit_{secrets.token_urlsafe(12)}",
+        "owner_email":email,
+        "user_id":user_id,
+        "verified_totp_removed":len(verified_totp),
+        "performed_at":used_at,
+        "method":"server_bound_recovery_email_state",
+        "secrets_exposed":False,
+    })
+    return {"status":"ready_to_reenroll","removed_factors":len(verified_totp),"secrets_exposed":False}
+
 
 @app.get("/owner-auth/health")
 def owner_auth_health():
