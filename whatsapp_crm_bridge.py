@@ -652,50 +652,101 @@ def _headers(
 
 
 async def owner_update_report() -> dict[str, Any]:
-    """Read-only executive snapshot for the authenticated SAHJONY owner."""
+    """Read-only executive snapshot for the authenticated SAHJONY owner.
+
+    Source failures remain UNKNOWN instead of being silently converted to factual zeroes.
+    """
     backend = get_backend()
 
-    async def safe_select(table: str, params: dict[str, str] | None = None) -> list[dict[str, Any]]:
+    async def source_select(
+        table: str,
+        params: dict[str, str] | None = None,
+    ) -> tuple[list[dict[str, Any]] | None, dict[str, Any]]:
         try:
-            return await backend.select(table, params=params or {"limit": "5000"}) or []
-        except Exception:
-            return []
+            rows = await backend.select(table, params=params or {"limit": "5000"}) or []
+            return rows, {
+                "state": "HEALTHY_CURRENT" if rows else "HEALTHY_EMPTY",
+                "rows": len(rows),
+                "error_class": None,
+            }
+        except Exception as exc:
+            return None, {
+                "state": "RUNTIME_ERROR",
+                "rows": None,
+                "error_class": type(exc).__name__,
+            }
 
-    accounts = await safe_select("customer_accounts", {"limit": "5000"})
-    intakes = await safe_select("customer_trade_intakes", {"limit": "5000"})
-    messages = await safe_select("whatsapp_messages", {"limit": "5000"})
-    operations = await safe_select("crm_bridge_operations", {"limit": "500"})
+    accounts, accounts_source = await source_select("customer_accounts", {"limit": "5000"})
+    intakes, intakes_source = await source_select("customer_trade_intakes", {"limit": "5000"})
+    messages, messages_source = await source_select("whatsapp_messages", {"limit": "5000"})
+    operations, operations_source = await source_select("crm_bridge_operations", {"limit": "500"})
 
     stage_counts: dict[str, int] = {}
-    for row in accounts:
-        stage = str(row.get("sales_status") or row.get("status") or "UNKNOWN").upper()
-        stage_counts[stage] = stage_counts.get(stage, 0) + 1
+    if accounts is not None:
+        for row in accounts:
+            stage = str(row.get("sales_status") or row.get("status") or "UNKNOWN").upper()
+            stage_counts[stage] = stage_counts.get(stage, 0) + 1
 
-    inbound = [r for r in messages if str(r.get("direction") or "").lower() == "inbound"]
-    inbound.sort(key=lambda r: str(r.get("received_at") or r.get("created_at") or r.get("updated_at") or ""), reverse=True)
-    recent_inbound = []
-    for row in inbound[:5]:
-        text = str(row.get("message") or row.get("body") or row.get("content") or row.get("text") or "").strip()
-        recent_inbound.append({
-            "phone": str(row.get("phone") or ""),
-            "received_at": row.get("received_at") or row.get("created_at") or row.get("updated_at"),
-            "message": text[:500],
-        })
+    inbound: list[dict[str, Any]] | None = None
+    recent_inbound: list[dict[str, Any]] = []
+    if messages is not None:
+        inbound = [r for r in messages if str(r.get("direction") or "").lower() == "inbound"]
+        inbound.sort(
+            key=lambda r: str(r.get("received_at") or r.get("created_at") or r.get("updated_at") or ""),
+            reverse=True,
+        )
+        for row in inbound[:5]:
+            text = str(row.get("message") or row.get("body") or row.get("content") or row.get("text") or "").strip()
+            recent_inbound.append({
+                "phone": str(row.get("phone") or ""),
+                "received_at": row.get("received_at") or row.get("created_at") or row.get("updated_at"),
+                "message": text[:500],
+            })
 
     destinations: dict[str, int] = {}
-    for row in intakes:
-        dest = str(row.get("destination_country") or row.get("destination") or "UNKNOWN").upper()
-        destinations[dest] = destinations.get(dest, 0) + 1
+    if intakes is not None:
+        for row in intakes:
+            dest = str(row.get("destination_country") or row.get("destination") or "UNKNOWN").upper()
+            destinations[dest] = destinations.get(dest, 0) + 1
+
+    source_states = {
+        "customer_accounts": accounts_source,
+        "customer_trade_intakes": intakes_source,
+        "whatsapp_messages": messages_source,
+        "crm_bridge_operations": operations_source,
+    }
+    degraded = any(source["state"] not in {"HEALTHY_CURRENT", "HEALTHY_EMPTY"} for source in source_states.values())
 
     return {
-        "status": "ok",
+        "status": "degraded" if degraded else "ok",
         "generated_at": _now(),
         "source_of_truth": "supabase_trade_persistence",
-        "customers": {"total": len(accounts), "stages": stage_counts},
-        "trade_intakes": {"total": len(intakes), "destinations": destinations},
-        "whatsapp": {"messages_total": len(messages), "inbound_total": len(inbound), "recent_inbound": recent_inbound},
-        "crm_bridge_operations": {"total_observed": len(operations)},
-        "financials": {"status": "not_computed_by_this_read_only_report", "verified_collected_profit_usd": None},
+        "coverage": "partial" if degraded else "complete_for_reported_crm_sources",
+        "source_states": source_states,
+        "customers": {
+            "status": "verified" if accounts is not None else "unknown",
+            "total": len(accounts) if accounts is not None else None,
+            "stages": stage_counts if accounts is not None else None,
+        },
+        "trade_intakes": {
+            "status": "verified" if intakes is not None else "unknown",
+            "total": len(intakes) if intakes is not None else None,
+            "destinations": destinations if intakes is not None else None,
+        },
+        "whatsapp": {
+            "status": "verified" if messages is not None else "unknown",
+            "messages_total": len(messages) if messages is not None else None,
+            "inbound_total": len(inbound) if inbound is not None else None,
+            "recent_inbound": recent_inbound if messages is not None else None,
+        },
+        "crm_bridge_operations": {
+            "status": "verified" if operations is not None else "unknown",
+            "total_observed": len(operations) if operations is not None else None,
+        },
+        "financials": {
+            "status": "not_computed_by_this_read_only_report",
+            "verified_collected_profit_usd": None,
+        },
         "binding_actions": 0,
     }
 

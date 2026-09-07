@@ -180,7 +180,7 @@ export default function SofiaSalesPerformanceCenter(){
       <p style={s.muted}>The score is evidence-based and fail-closed. A capability only passes when its live subsystem and governance contract are healthy; research, outreach, invoices and expected profit never count as collected revenue.</p>
       <div style={{display:'flex',gap:10,flexWrap:'wrap',margin:'14px 0'}}><button style={s.button} onClick={()=>void loadCapabilityHealth()}>Refresh capability score</button></div>
       {capabilityHealth&&<>
-        <div style={s.funnel}><div>Institutional score <b>{capabilityHealth.score.toFixed(1)}/10</b></div><div>Capabilities passed <b>{capabilityHealth.passed}/{capabilityHealth.total}</b></div><div>Verified collected GP <b>${Number(capabilityHealth.verified_collected_gross_profit_usd||0).toLocaleString()}</b></div><div>Status <b>{capabilityHealth.status.toUpperCase()}</b></div></div>
+        <div style={s.funnel}><div>Institutional score <b>{Number(capabilityHealth.score || 0).toFixed(1)}/10</b></div><div>Capabilities passed <b>{capabilityHealth.passed}/{capabilityHealth.total}</b></div><div>Verified collected GP <b>${Number(capabilityHealth.verified_collected_gross_profit_usd||0).toLocaleString()}</b></div><div>Status <b>{String(capabilityHealth.status || 'unknown').toUpperCase()}</b></div></div>
         <div style={s.tableWrap}><table style={s.table}><thead><tr><th>Capability</th><th>Gate</th><th>Evidence contract</th></tr></thead><tbody>{capabilityHealth.capabilities.map(row=><tr key={row.key}><td>{row.name}</td><td>{row.passed?'PASS':'ATTENTION'}</td><td>{row.evidence_contract}</td></tr>)}</tbody></table></div>
       </>}
       {capabilityStatus&&<p style={s.status}>{capabilityStatus}</p>}
