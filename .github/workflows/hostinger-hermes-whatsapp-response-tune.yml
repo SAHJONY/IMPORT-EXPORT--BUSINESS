@@ -1,0 +1,78 @@
+name: Hostinger Hermes WhatsApp Response Tune
+on:
+  push:
+    paths:
+      - '.github/workflows/hostinger-hermes-whatsapp-response-tune.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  tune:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      HOST: 69.62.68.67
+      SSH_USER: root
+      PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Configure SSH
+        run: |
+          set -euo pipefail
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/key
+          chmod 600 ~/.ssh/key
+      - name: Tune Hermes owner response path
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/key "$SSH_USER@$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          H=/root/.hermes
+          stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+          cp "$H/config.yaml" "$H/config.yaml.bak.response-tune.$stamp"
+          "$H/hermes-agent/venv/bin/python" - <<'PY'
+from pathlib import Path
+import yaml
+p=Path('/root/.hermes/config.yaml')
+data=yaml.safe_load(p.read_text()) or {}
+display=data.setdefault('display',{})
+display['busy_ack_enabled']=False
+display['busy_ack_detail']=False
+display['busy_input_mode']='interrupt'
+p.write_text(yaml.safe_dump(data,sort_keys=False,allow_unicode=True))
+PY
+          SOUL="$H/SOUL.md"
+          if ! grep -q '^## Owner fast-response path' "$SOUL"; then
+            cat >> "$SOUL" <<'EOF'
+
+## Owner fast-response path
+- For simple owner identity, company identity, Sofia identity/role, or business-description questions, answer immediately from this canonical SOUL and verified owner mapping. Do not launch research, tools, or long-running work first.
+- Keep these owner answers short and direct. Never emit internal queue, redirect, iteration, elapsed-time, model, gateway, or tool-status notices into WhatsApp.
+- For an owner request for an update report, use verified SAHJONY CRM/platform data when available. If a live source is temporarily unavailable, give the verified facts already available, clearly mark the unavailable live slice, and continue recovery internally; never tell the owner to supply CSV/SQL/link data that SAHJONY should already own.
+- When a newer owner message arrives while a non-binding task is still running, prioritize the newer owner message and interrupt stale work rather than making the owner wait behind it.
+EOF
+          fi
+          chmod 600 "$SOUL"
+          systemctl --user restart hermes-gateway.service
+          sleep 12
+          systemctl --user is-active --quiet hermes-gateway.service
+          pgrep -f '/whatsapp-bridge/bridge.js.*--mode bot' >/dev/null
+          "$H/hermes-agent/venv/bin/python" - <<'PY'
+import yaml
+p='/root/.hermes/config.yaml'
+d=yaml.safe_load(open(p)) or {}
+x=d.get('display',{})
+print('BUSY_ACK_ENABLED='+str(x.get('busy_ack_enabled')).lower())
+print('BUSY_ACK_DETAIL='+str(x.get('busy_ack_detail')).lower())
+print('BUSY_INPUT_MODE='+str(x.get('busy_input_mode')))
+assert x.get('busy_ack_enabled') is False
+assert x.get('busy_ack_detail') is False
+assert x.get('busy_input_mode')=='interrupt'
+PY
+          grep -q '^## Owner fast-response path' "$SOUL"
+          echo OWNER_FAST_RESPONSE_PATH=READY
+          echo HERMES_GATEWAY_ACTIVE=1
+          echo WHATSAPP_BOT_ACTIVE=1
+          REMOTE
+      - name: Cleanup
+        if: always()
+        run: rm -f ~/.ssh/key
