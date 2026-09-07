@@ -1,5 +1,8 @@
 name: Hostinger Hermes WhatsApp Latency Audit
 on:
+  push:
+    paths:
+      - '.github/workflows/hostinger-hermes-whatsapp-latency-audit.yml'
   workflow_dispatch:
 permissions:
   contents: read
