@@ -11,7 +11,7 @@ from auth import verify_owner_token
 from payment_engine import PaymentError, payment_plan, policy_snapshot, reconcile
 from physical_postgres import insert_row, select_rows, update_rows
 
-app = FastAPI(title='SAHJONY Owner Payment Control API', version='1.2.0', docs_url=None, redoc_url=None)
+app = FastAPI(title='SAHJONY Owner Payment Control API', version='1.3.0', docs_url=None, redoc_url=None)
 
 
 def now() -> str:
@@ -78,13 +78,14 @@ async def health():
     return {
         'status':'ok',
         'service':'sahjony-owner-payment-control',
-        'storage':'physical_neon_postgres',
+        'storage':'governed_postgres_supabase_first',
         'audit_events':'append_only',
         'currency':'USD',
         'automatic_supplier_payout':False,
         'automatic_shipment_release':False,
         'supplier_and_shipment_release_separated':True,
         'owner_release_required':True,
+        'accounting_basis':'posted_journals_only',
     }
 
 
@@ -134,6 +135,39 @@ async def list_cases(authorization: str | None = Header(None, alias='Authorizati
     require_owner(authorization, x_role)
     rows = await select_rows('trade_payment_ledger', order_by='created_at', descending=True, limit=300)
     return {'cases':rows}
+
+
+@app.get('/owner-payments/accounting/summary')
+async def accounting_summary(authorization: str | None = Header(None, alias='Authorization'), x_role: str | None = Header(None, alias='X-Role')):
+    require_owner(authorization, x_role)
+    rows = await select_rows('accounting_kpi_summary', limit=20)
+    return {
+        'basis':'ACTUAL_POSTED_JOURNALS_ONLY',
+        'estimated_included':False,
+        'committed_included':False,
+        'currency_rows':rows,
+    }
+
+
+@app.get('/owner-payments/accounting/monthly-pnl')
+async def accounting_monthly_pnl(authorization: str | None = Header(None, alias='Authorization'), x_role: str | None = Header(None, alias='X-Role')):
+    require_owner(authorization, x_role)
+    rows = await select_rows('accounting_pnl_by_month', order_by='period_month', descending=True, limit=120)
+    return {'basis':'ACTUAL_POSTED_JOURNALS_ONLY','periods':rows}
+
+
+@app.get('/owner-payments/accounting/deals')
+async def accounting_deals(authorization: str | None = Header(None, alias='Authorization'), x_role: str | None = Header(None, alias='X-Role')):
+    require_owner(authorization, x_role)
+    rows = await select_rows('accounting_deal_profitability', order_by='last_posted_at', descending=True, limit=300)
+    return {'basis':'ACTUAL_POSTED_JOURNALS_ONLY','deals':rows}
+
+
+@app.get('/owner-payments/accounting/receivables')
+async def accounting_receivables(authorization: str | None = Header(None, alias='Authorization'), x_role: str | None = Header(None, alias='X-Role')):
+    require_owner(authorization, x_role)
+    rows = await select_rows('accounting_accounts_receivable', order_by='updated_at', descending=True, limit=500)
+    return {'basis':'PAYMENT_LEDGER_OUTSTANDING','receivables':rows}
 
 
 @app.get('/owner-payments/cases/{case_id}/events')
