@@ -1,0 +1,68 @@
+name: Hostinger Hermes State Identity Audit
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure SSH
+        env:
+          PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/hostinger-state-audit
+          chmod 600 ~/.ssh/hostinger-state-audit
+      - name: Audit active Hermes SQLite identity state
+        env:
+          HOST: 69.62.68.67
+          USER: root
+        run: |
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/hostinger-state-audit "$USER@$HOST" 'python3 -' <<'PY'
+          import sqlite3, os, json
+          db='/root/.hermes/state.db'
+          needles=['fundador y CEO de PRIMO','protocolo de banca soberana','CEO de PRIMO']
+          print('DB_EXISTS=' + str(int(os.path.exists(db))))
+          print('DB_BYTES=' + str(os.path.getsize(db) if os.path.exists(db) else 0))
+          con=sqlite3.connect(f'file:{db}?mode=ro', uri=True)
+          cur=con.cursor()
+          tables=[r[0] for r in cur.execute("select name from sqlite_master where type='table' and name not like 'sqlite_%'")]
+          print('TABLE_COUNT=' + str(len(tables)))
+          hits=[]
+          for table in tables:
+              try:
+                  cols=cur.execute(f'pragma table_info("{table}")').fetchall()
+              except Exception:
+                  continue
+              text_cols=[c[1] for c in cols if str(c[2]).upper() in ('TEXT','JSON','VARCHAR','')]
+              if not text_cols:
+                  continue
+              for col in text_cols:
+                  for needle in needles:
+                      try:
+                          q=f'SELECT rowid, "{col}" FROM "{table}" WHERE lower(CAST("{col}" AS TEXT)) LIKE ? LIMIT 40'
+                          rows=cur.execute(q,('%'+needle.lower()+'%',)).fetchall()
+                      except Exception:
+                          rows=[]
+                      for rowid,val in rows:
+                          s=str(val)
+                          low=s.lower(); i=low.find(needle.lower())
+                          lo=max(0,i-90); hi=min(len(s),i+len(needle)+90)
+                          snippet=s[lo:hi].replace('\n',' ')
+                          hits.append((table,rowid,col,needle,snippet))
+          print('SQLITE_IDENTITY_HITS=' + str(len(hits)))
+          for table,rowid,col,needle,snippet in hits[:120]:
+              print('HIT=' + json.dumps({'table':table,'rowid':rowid,'column':col,'needle':needle,'snippet':snippet},ensure_ascii=False))
+          try:
+              print('JOURNAL_MODE=' + str(cur.execute('pragma journal_mode').fetchone()[0]))
+          except Exception as e:
+              print('JOURNAL_MODE_ERROR=' + type(e).__name__)
+          con.close()
+          PY
+      - name: Cleanup SSH
+        if: always()
+        run: rm -f ~/.ssh/hostinger-state-audit
