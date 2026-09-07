@@ -1,0 +1,41 @@
+name: Hostinger Hermes Owner Report Forensics
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      HOST: 69.62.68.67
+      SSH_USER: root
+      PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Configure SSH
+        run: |
+          set -euo pipefail
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/key
+          chmod 600 ~/.ssh/key
+      - name: Inspect recent owner report responses
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/key "$SSH_USER@$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          H=/root/.hermes
+          echo "FORENSICS_UTC=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          echo '--- active SOUL rules ---'
+          grep -nE 'Owner fast-response path|update report|CRM|CSV|SQL|link' "$H/SOUL.md" | tail -n 80 || true
+          echo '--- display config ---'
+          "$H/hermes-agent/venv/bin/python" -c "import yaml; d=yaml.safe_load(open('/root/.hermes/config.yaml')) or {}; print(d.get('display',{}))"
+          echo '--- recent sessions ---'
+          find "$H/sessions" -maxdepth 1 -type f -printf '%T@ %p\n' 2>/dev/null | sort -nr | head -n 20 || true
+          echo '--- matching session text ---'
+          grep -RInE 'data source|CRM export|SQL view|Update report|update report|Hello|Quien soy yo' "$H/sessions" 2>/dev/null | tail -n 120 || true
+          echo '--- journal window ---'
+          journalctl --user -u hermes-gateway.service --since '2026-09-07 10:20:00 UTC' --until '2026-09-07 10:26:30 UTC' --no-pager 2>/dev/null | tail -n 400 || true
+          REMOTE
+      - name: Cleanup
+        if: always()
+        run: rm -f ~/.ssh/key
