@@ -1,0 +1,2 @@
+Trigger production redeploy for Telegram read-only health and Sofia triage integration.
+Target commit includes PR #102 merged as 03c62130594d58aec23c6a31665b369c368e34ca.
