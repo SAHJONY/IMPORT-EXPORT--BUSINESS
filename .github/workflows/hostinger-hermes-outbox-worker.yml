@@ -147,7 +147,8 @@ jobs:
           WantedBy=multi-user.target
           UNIT
           systemctl daemon-reload
-          systemctl enable --now sahjony-hermes-outbox.service
+          systemctl enable sahjony-hermes-outbox.service >/dev/null
+          systemctl restart sahjony-hermes-outbox.service
           sleep 8
           systemctl is-active --quiet sahjony-hermes-outbox.service
           curl -fsS --max-time 5 http://127.0.0.1:3000/health >/dev/null
