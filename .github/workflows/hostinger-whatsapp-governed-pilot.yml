@@ -1,0 +1,90 @@
+name: Hostinger WhatsApp Governed Pilot
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hostinger-whatsapp-governed-pilot
+  cancel-in-progress: false
+
+jobs:
+  pilot:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    env:
+      HOST: '69.62.68.67'
+      USER: root
+      PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+      APP_URL: https://www.sahjony.com
+    steps:
+      - name: Prepare authenticated SSH
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "$PRIVATE_KEY" ]] || { echo HOSTINGER_SSH_PRIVATE_KEY_MISSING=1 >&2; exit 2; }
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/hostinger-pilot
+          chmod 600 ~/.ssh/hostinger-pilot
+          ssh-keygen -y -f ~/.ssh/hostinger-pilot >/dev/null
+      - name: Preflight governed transport
+        shell: bash
+        run: |
+          set -euo pipefail
+          health="$(curl -fsS --max-time 15 "$APP_URL/whatsapp/health")"
+          jq -e '.send_ready == true and .provider == "hostinger_openclaw"' >/dev/null <<<"$health"
+          SSH=(ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 -i ~/.ssh/hostinger-pilot)
+          "${SSH[@]}" "$USER@$HOST" 'test -x /usr/local/sbin/sahjony-crm-bridge && /usr/local/sbin/sahjony-crm-bridge doctor >/tmp/sahjony-crm-doctor.json && jq -e '\''(.status=="ok" or .status=="healthy")'\'' /tmp/sahjony-crm-doctor.json >/dev/null'
+
+      - name: Dry-run eligible cohort
+        id: dry
+        shell: bash
+        run: |
+          set -euo pipefail
+          SSH=(ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 -i ~/.ssh/hostinger-pilot)
+          op="ceo-wa-pilot-${GITHUB_RUN_ID}-dry"
+          payload="$(jq -cn --arg op "$op" '{operation_id:$op,limit:25,dry_run:true}')"
+          result="$("${SSH[@]}" "$USER@$HOST" "/usr/local/sbin/sahjony-crm-bridge outreach-pilot --json '$payload'")"
+          echo "$result" | jq .
+          jq -e '.status=="planned" and .selected<=25 and .queued==0 and .messages_sent==0' >/dev/null <<<"$result"
+          echo "selected=$(jq -r '.selected' <<<"$result")" >> "$GITHUB_OUTPUT"
+
+      - name: Execute governed pilot
+        id: execute
+        if: steps.dry.outputs.selected != '0'
+        shell: bash
+        run: |
+          set -euo pipefail
+          SSH=(ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 -i ~/.ssh/hostinger-pilot)
+          op="ceo-wa-pilot-${GITHUB_RUN_ID}"
+          payload="$(jq -cn --arg op "$op" '{operation_id:$op,limit:25,dry_run:false}')"
+          result="$("${SSH[@]}" "$USER@$HOST" "/usr/local/sbin/sahjony-crm-bridge outreach-pilot --json '$payload'")"
+          echo "$result" | jq .
+          jq -e '.status=="queued" and .selected<=25 and .queued==.selected and .messages_sent==0' >/dev/null <<<"$result"
+          echo "operation_id=$op" >> "$GITHUB_OUTPUT"
+          echo "queued=$(jq -r '.queued' <<<"$result")" >> "$GITHUB_OUTPUT"
+
+      - name: Verify transport acknowledgements
+        if: steps.dry.outputs.selected != '0'
+        shell: bash
+        run: |
+          set -euo pipefail
+          SSH=(ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 -i ~/.ssh/hostinger-pilot)
+          op='${{ steps.execute.outputs.operation_id }}'
+          for attempt in 1 2 3 4 5 6; do
+            payload="$(jq -cn --arg op "$op" '{operation_id:$op}')"
+            result="$("${SSH[@]}" "$USER@$HOST" "/usr/local/sbin/sahjony-crm-bridge outreach-status --json '$payload'")"
+            echo "$result" | jq .
+            total="$(jq -r '.total // 0' <<<"$result")"
+            sent="$(jq -r '.messages_sent // 0' <<<"$result")"
+            failed="$(jq -r '.delivery.failed // 0' <<<"$result")"
+            if [[ "$total" -gt 0 && $((sent + failed)) -ge "$total" ]]; then break; fi
+            sleep 15
+          done
+
+      - name: Cleanup local key
+        if: always()
+        shell: bash
+        run: rm -f ~/.ssh/hostinger-pilot
