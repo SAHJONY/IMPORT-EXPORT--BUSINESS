@@ -1,0 +1,57 @@
+name: Hostinger Hermes WhatsApp Latency Audit
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure SSH
+        env:
+          PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/hostinger-latency
+          chmod 600 ~/.ssh/hostinger-latency
+      - name: Inspect response latency and leaked runtime notices
+        env:
+          HOST: 69.62.68.67
+          USER: root
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/hostinger-latency "$USER@$HOST" 'bash -s' <<'REMOTE'
+          set -u
+          echo "AUDIT_UTC=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          echo '--- processes ---'
+          ps -eo pid,ppid,etime,%cpu,%mem,args | grep -E 'hermes_cli.main gateway|whatsapp-bridge|hermes-outbox' | grep -v grep || true
+          echo '--- 10:03-10:13 UTC journal ---'
+          journalctl -u hermes-gateway.service --since '2026-09-07 10:03:00 UTC' --until '2026-09-07 10:13:30 UTC' --no-pager 2>/dev/null \
+            | grep -Ei 'whatsapp|redirect|iteration|elapsed|run|message|reply|timeout|latency|warn|error|owner|sofia' \
+            | sed -E 's/(api[_-]?key|token|secret|password|authorization)[=:][^[:space:]]+/\1=[REDACTED]/Ig' \
+            | tail -n 500 || true
+          echo '--- session text hits for leaked operator notice ---'
+          python3 - <<'PY'
+from pathlib import Path
+roots=[Path('/root/.hermes/sessions'),Path('/root/.hermes')]
+needles=['Redirected current run','iteration 1/90','elapsed']
+seen=set()
+for root in roots:
+    if not root.exists(): continue
+    for p in root.rglob('*'):
+        if not p.is_file() or p.stat().st_size>8_000_000: continue
+        if any(x in p.parts for x in ('node_modules','.git')): continue
+        try: t=p.read_text(errors='ignore')
+        except: continue
+        if any(n.lower() in t.lower() for n in needles):
+            s=str(p)
+            if s not in seen:
+                seen.add(s); print('HIT_PATH='+s)
+print('LEAK_HIT_FILES='+str(len(seen)))
+PY
+          echo '--- bridge recent log candidates ---'
+          find /root/.hermes /opt/sahjony -maxdepth 5 -type f \( -iname '*bridge*.log' -o -iname '*gateway*.log' -o -iname '*whatsapp*.log' \) -mmin -180 -print 2>/dev/null | head -n 80 || true
+          REMOTE
+      - name: Cleanup SSH
+        if: always()
+        run: rm -f ~/.ssh/hostinger-latency
