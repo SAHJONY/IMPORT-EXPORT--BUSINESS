@@ -55,6 +55,10 @@ async function boot(){
    const {default:OwnerCommandCenter}=await import('./OwnerCommandCenter');
    createRoot(rootElement).render(withI18n(<StrictMode><AppBoundary><OwnerCommandCenter/></AppBoundary></StrictMode>));return
  }
+ if(path==='/owner/cuba-trade'||path.startsWith('/owner/cuba-trade/')){
+   const {default:OwnerCubaTradeCenter}=await import('./OwnerCubaTradeCenter');
+   createRoot(rootElement).render(withI18n(<StrictMode><AppBoundary><OwnerCubaTradeCenter/></AppBoundary></StrictMode>));return
+ }
  if(path==='/owner/travel'||path.startsWith('/owner/travel/')){await renderTravel();return}
  if(path==='/owner/exceptions'||path.startsWith('/owner/exceptions/')){
    const {default:ExecutiveExceptionEngine}=await import('./ExecutiveExceptionEngine');
