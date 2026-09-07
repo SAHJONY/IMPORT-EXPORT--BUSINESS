@@ -14,6 +14,8 @@ from pydantic import BaseModel, Field
 from auth import verify_owner_token
 from sofia_whatsapp_runtime import generate_sofia_reply
 
+OWNER_TELEGRAM_IDS = {x.strip() for x in os.getenv("TELEGRAM_OWNER_USER_IDS", "").split(",") if x.strip()}
+
 CANONICAL_BOT_USERNAME = "@SahjonyGlobalTradeBot"
 
 app = FastAPI(
@@ -388,8 +390,21 @@ async def _reply_with_sofia(update: dict[str, Any]) -> dict[str, Any]:
         part for part in [str(sender.get("first_name") or "").strip(), str(sender.get("last_name") or "").strip()] if part
     ) or str(sender.get("username") or "").strip() or None
 
+    # Telegram must preserve Sofía's executive identity and channel context.
+    # When the sender is a configured Owner Telegram ID, explicitly route the turn
+    # as an owner/executive conversation rather than a new sales prospect.
+    sender_id = str(sender.get("id") or "").strip()
+    owner_context = sender_id in OWNER_TELEGRAM_IDS if OWNER_TELEGRAM_IDS else False
+    telegram_text = text
+    if owner_context:
+        telegram_text = (
+            "[TELEGRAM OWNER CONTEXT: This message is from Juan Gonzalez, Owner of SAHJONY LLC. "
+            "Respond as Sofía Smith, Executive Manager and his executive assistant. Do not treat him as a new prospect, "
+            "do not ask generic sales-intake questions, and use available SAHJONY/CRM context before asking for information.]\n" + text
+        )
+
     try:
-        reply = await asyncio.wait_for(generate_sofia_reply(text, contact_name), timeout=35.0)
+        reply = await asyncio.wait_for(generate_sofia_reply(telegram_text, contact_name), timeout=35.0)
     except asyncio.TimeoutError:
         return {"attempted": True, "sent": False, "reason": "sofia_timeout"}
     except Exception as exc:
@@ -411,6 +426,8 @@ async def _reply_with_sofia(update: dict[str, Any]) -> dict[str, Any]:
         "sent": True,
         "message_id": sent.get("message_id"),
         "chat_id": chat_id,
+        "owner_context": owner_context,
+        "canonical_agent": "Sofía Smith — Executive Manager, SAHJONY LLC",
     }
 
 
