@@ -17,7 +17,7 @@ jobs:
       HOST: 69.62.68.67
       SSH_USER: root
       PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
-      BRIDGE_SECRET: ${{ secrets.OPENCLAW_APP_BRIDGE_SECRET || secrets.SAHJONY_APP_BRIDGE_SECRET }}
+      BRIDGE_SECRET: ${{ secrets.SAHJONY_APP_BRIDGE_SECRET || secrets.OPENCLAW_APP_BRIDGE_SECRET }}
     steps:
       - name: Prepare SSH
         shell: bash
@@ -49,7 +49,7 @@ jobs:
           BASE='https://www.sahjony.com'
           SECRET=open('/opt/sahjony/hermes-outbox/bridge.secret').read().strip()
           BRIDGE='http://127.0.0.1:3000'
-          GATEWAY='hostinger-vps'
+          GATEWAY='hermes-hostinger'
           ACCOUNT='default'
 
           def signed_headers(raw=b''):
@@ -76,12 +76,12 @@ jobs:
 
           def heartbeat():
               payload={'gateway_id':GATEWAY,'account_id':ACCOUNT,'channel_connected':bridge_health(),'business_name':'SAHJONY LLC','model':'hermes-agent','gateway_version':'Hermes WhatsApp bridge'}
-              try: json_request(BASE+'/whatsapp/openclaw/heartbeat','POST',payload,signed_headers)
+              try: json_request(BASE+'/whatsapp/hermes/heartbeat','POST',payload,signed_headers)
               except Exception: pass
 
           def poll():
               try:
-                  d=json_request(BASE+'/whatsapp/openclaw/outbox?limit=5',headers=lambda raw:signed_headers(b''))
+                  d=json_request(BASE+'/whatsapp/hermes/outbox?limit=5',headers=lambda raw:signed_headers(b''))
                   return d.get('commands') or []
               except Exception:
                   return []
@@ -102,7 +102,7 @@ jobs:
 
           def ack(cmd,status,message_id=None,error=None):
               payload={'command_id':cmd['command_id'],'lease_token':cmd['lease_token'],'status':status,'provider_message_id':message_id,'error':(str(error)[:500] if error else None)}
-              json_request(BASE+'/whatsapp/openclaw/outbox/ack','POST',payload,signed_headers)
+              json_request(BASE+'/whatsapp/hermes/outbox/ack','POST',payload,signed_headers)
 
           def main():
               if len(SECRET)<24: raise SystemExit('bridge secret missing')
@@ -156,7 +156,7 @@ jobs:
           python3 - <<'PY'
           import json, urllib.request
           d=json.load(urllib.request.urlopen('https://www.sahjony.com/whatsapp/health',timeout=20))
-          h=d.get('hostinger_openclaw') or {}
+          h=d.get('hermes_agent') or {}
           assert h.get('heartbeat_fresh') is True, h
           assert h.get('connected') is True, h
           print('PRODUCTION_WHATSAPP_HEARTBEAT=FRESH')

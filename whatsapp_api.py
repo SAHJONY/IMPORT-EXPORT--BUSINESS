@@ -61,7 +61,7 @@ class ManualWhatsAppConfig(BaseModel):
     graph_api_version: str = Field(min_length=2, max_length=32)
 
 
-class OpenClawBridgeEvent(BaseModel):
+class HermesBridgeEvent(BaseModel):
     event_id: str = Field(min_length=3, max_length=256)
     direction: Literal["inbound", "outbound"]
     message_id: str | None = Field(default=None, max_length=512)
@@ -77,7 +77,7 @@ class OpenClawBridgeEvent(BaseModel):
     media: list[dict[str, Any]] = Field(default_factory=list, max_length=20)
 
 
-class OpenClawHeartbeat(BaseModel):
+class HermesHeartbeat(BaseModel):
     gateway_id: str = Field(default="default", min_length=1, max_length=160)
     account_id: str = Field(default="default", min_length=1, max_length=160)
     channel_connected: bool
@@ -87,7 +87,7 @@ class OpenClawHeartbeat(BaseModel):
     gateway_version: str | None = Field(default=None, max_length=80)
 
 
-class OpenClawAck(BaseModel):
+class HermesAck(BaseModel):
     command_id: str = Field(min_length=3, max_length=256)
     lease_token: str = Field(min_length=12, max_length=256)
     status: Literal["sent", "failed"]
@@ -103,31 +103,31 @@ def _provider() -> str:
     return os.getenv("WHATSAPP_PROVIDER", PROVIDER).strip().lower() or "meta_cloud"
 
 
-def _openclaw_bridge_secret() -> str:
-    return os.getenv("OPENCLAW_APP_BRIDGE_SECRET", "").strip()
+def _hermes_bridge_secret() -> str:
+    return (os.getenv("SAHJONY_APP_BRIDGE_SECRET", "").strip() or os.getenv("OPENCLAW_APP_BRIDGE_SECRET", "").strip())
 
 
-def _openclaw_bridge_configured() -> bool:
-    return len(_openclaw_bridge_secret()) >= 24
+def _hermes_bridge_configured() -> bool:
+    return len(_hermes_bridge_secret()) >= 24
 
 
-def _verify_openclaw_signature(raw: bytes, timestamp: str | None, signature: str | None) -> None:
-    secret = _openclaw_bridge_secret()
+def _verify_hermes_signature(raw: bytes, timestamp: str | None, signature: str | None) -> None:
+    secret = _hermes_bridge_secret()
     if len(secret) < 24:
-        raise HTTPException(status_code=503, detail="OpenClaw application bridge is not configured")
+        raise HTTPException(status_code=503, detail="Hermes application bridge is not configured")
     try:
         request_time = int(timestamp or "")
     except ValueError as exc:
-        raise HTTPException(status_code=401, detail="Invalid OpenClaw bridge timestamp") from exc
+        raise HTTPException(status_code=401, detail="Invalid Hermes bridge timestamp") from exc
     if abs(int(datetime.now(timezone.utc).timestamp()) - request_time) > 300:
-        raise HTTPException(status_code=401, detail="Expired OpenClaw bridge request")
+        raise HTTPException(status_code=401, detail="Expired Hermes bridge request")
     expected = "sha256=" + hmac.new(
         secret.encode("utf-8"),
         (str(request_time) + ".").encode("utf-8") + raw,
         hashlib.sha256,
     ).hexdigest()
     if not signature or not hmac.compare_digest(expected, signature):
-        raise HTTPException(status_code=401, detail="Invalid OpenClaw bridge signature")
+        raise HTTPException(status_code=401, detail="Invalid Hermes bridge signature")
 
 
 def _owner(authorization: str | None) -> None:
@@ -136,6 +136,11 @@ def _owner(authorization: str | None) -> None:
     if not verify_owner_token(authorization.removeprefix("Bearer ").strip()):
         raise HTTPException(status_code=403, detail="Invalid owner credential")
 
+
+
+# Legacy symbol aliases retained for tests/import compatibility only.
+# Production routes and runtime authority are Hermes-native.
+_verify_openclaw_signature = _verify_hermes_signature
 
 def _normalize_phone(value: str) -> str:
     digits = "".join(ch for ch in value if ch.isdigit())
@@ -528,7 +533,7 @@ async def _record_inbound_event(
         pass
 
 
-async def _openclaw_gateway_state() -> dict[str, Any]:
+async def _hermes_gateway_state() -> dict[str, Any]:
     try:
         rows = await get_backend().select(
             "whatsapp_openclaw_gateways",
@@ -547,7 +552,7 @@ async def _openclaw_gateway_state() -> dict[str, Any]:
             fresh = False
     connected = bool(row.get("channel_connected")) and fresh
     return {
-        "configured": _openclaw_bridge_configured(),
+        "configured": _hermes_bridge_configured(),
         "connected": connected,
         "heartbeat_fresh": fresh,
         "last_seen_at": last_seen or None,
@@ -558,9 +563,9 @@ async def _openclaw_gateway_state() -> dict[str, Any]:
     }
 
 
-async def _enqueue_openclaw_message(payload: WhatsAppSend) -> dict[str, Any]:
-    if not _openclaw_bridge_configured():
-        raise HTTPException(status_code=503, detail="OpenClaw application bridge is not configured")
+async def _enqueue_hermes_message(payload: WhatsAppSend) -> dict[str, Any]:
+    if not _hermes_bridge_configured():
+        raise HTTPException(status_code=503, detail="Hermes application bridge is not configured")
     recipient = _normalize_phone(payload.to)
     command_id = f"waq_{secrets.token_urlsafe(18)}"
     row = {
@@ -590,13 +595,13 @@ async def _enqueue_openclaw_message(payload: WhatsAppSend) -> dict[str, Any]:
         lead_id=payload.lead_id,
         customer_id=payload.customer_id,
         source_url=payload.source_url,
-        provider="openclaw_whatsapp",
+        provider="hermes_whatsapp",
         delivery_status="queued",
         notification_id=command_id,
     )
     return {
         "status": "queued",
-        "provider": "openclaw_whatsapp",
+        "provider": "hermes_whatsapp",
         "command_id": command_id,
         "recipient": recipient,
     }
@@ -674,7 +679,7 @@ async def whatsapp_health() -> dict[str, Any]:
     cfg = await _config()
     persistence = persistent_backend_status()
     provider = _provider()
-    openclaw = await _openclaw_gateway_state()
+    openclaw = await _hermes_gateway_state()
     if provider == "openclaw":
         return {
             "status": "ok" if openclaw["connected"] else "configuration_required",
@@ -860,7 +865,7 @@ async def whatsapp_setup_test(authorization: str | None = Header(None, alias="Au
 async def whatsapp_send(payload: WhatsAppSend, authorization: str | None = Header(None, alias="Authorization")) -> dict[str, Any]:
     _owner(authorization)
     if _provider() == "openclaw":
-        return await _enqueue_openclaw_message(payload)
+        return await _enqueue_hermes_message(payload)
     cfg = await _config()
     return await _send_text(
         cfg,
@@ -874,18 +879,18 @@ async def whatsapp_send(payload: WhatsAppSend, authorization: str | None = Heade
     )
 
 
-@app.post("/whatsapp/openclaw/heartbeat")
-async def openclaw_heartbeat(
+@app.post("/whatsapp/hermes/heartbeat")
+async def hermes_heartbeat(
     request: Request,
     x_sahjony_timestamp: str | None = Header(None, alias="X-SAHJONY-Timestamp"),
     x_sahjony_signature: str | None = Header(None, alias="X-SAHJONY-Signature"),
 ) -> dict[str, Any]:
     raw = await request.body()
-    _verify_openclaw_signature(raw, x_sahjony_timestamp, x_sahjony_signature)
+    _verify_hermes_signature(raw, x_sahjony_timestamp, x_sahjony_signature)
     try:
-        heartbeat = OpenClawHeartbeat.model_validate_json(raw)
+        heartbeat = HermesHeartbeat.model_validate_json(raw)
     except Exception as exc:
-        raise HTTPException(status_code=400, detail="Invalid OpenClaw heartbeat") from exc
+        raise HTTPException(status_code=400, detail="Invalid Hermes heartbeat") from exc
     await get_backend().insert("whatsapp_openclaw_gateways", {
         "gateway_id": heartbeat.gateway_id,
         "account_id": heartbeat.account_id,
@@ -900,18 +905,18 @@ async def openclaw_heartbeat(
     return {"status": "accepted", "gateway_id": heartbeat.gateway_id, "secrets_exposed": False}
 
 
-@app.post("/whatsapp/openclaw/events")
-async def openclaw_event(
+@app.post("/whatsapp/hermes/events")
+async def hermes_event(
     request: Request,
     x_sahjony_timestamp: str | None = Header(None, alias="X-SAHJONY-Timestamp"),
     x_sahjony_signature: str | None = Header(None, alias="X-SAHJONY-Signature"),
 ) -> dict[str, Any]:
     raw = await request.body()
-    _verify_openclaw_signature(raw, x_sahjony_timestamp, x_sahjony_signature)
+    _verify_hermes_signature(raw, x_sahjony_timestamp, x_sahjony_signature)
     try:
-        event = OpenClawBridgeEvent.model_validate_json(raw)
+        event = HermesBridgeEvent.model_validate_json(raw)
     except Exception as exc:
-        raise HTTPException(status_code=400, detail="Invalid OpenClaw bridge event") from exc
+        raise HTTPException(status_code=400, detail="Invalid Hermes bridge event") from exc
     message_id = event.message_id or event.event_id
     if await _message_seen(message_id):
         return {"status": "duplicate", "event_id": event.event_id}
@@ -938,7 +943,7 @@ async def openclaw_event(
         message_type=event.message_type,
         text=event.content,
         contact_name=event.contact_name,
-        provider="openclaw_whatsapp",
+        provider="hermes_whatsapp",
         direction=event.direction,
     )
     if event.direction == "inbound":
@@ -954,18 +959,18 @@ async def openclaw_event(
             event.content,
             event.message_type,
             lead_id,
-            provider="openclaw_whatsapp",
+            provider="hermes_whatsapp",
         )
     return {"status": "accepted", "event_id": event.event_id, "message_id": message_id}
 
 
-@app.get("/whatsapp/openclaw/outbox")
-async def openclaw_outbox(
+@app.get("/whatsapp/hermes/outbox")
+async def hermes_outbox(
     limit: int = Query(10, ge=1, le=25),
     x_sahjony_timestamp: str | None = Header(None, alias="X-SAHJONY-Timestamp"),
     x_sahjony_signature: str | None = Header(None, alias="X-SAHJONY-Signature"),
 ) -> dict[str, Any]:
-    _verify_openclaw_signature(b"", x_sahjony_timestamp, x_sahjony_signature)
+    _verify_hermes_signature(b"", x_sahjony_timestamp, x_sahjony_signature)
     rows = await get_backend().select(
         "whatsapp_openclaw_outbox",
         params={"limit": "100", "order": "created_at.asc"},
@@ -1007,27 +1012,27 @@ async def openclaw_outbox(
     return {"status": "ok", "commands": commands, "count": len(commands)}
 
 
-@app.post("/whatsapp/openclaw/outbox/ack")
-async def openclaw_outbox_ack(
+@app.post("/whatsapp/hermes/outbox/ack")
+async def hermes_outbox_ack(
     request: Request,
     x_sahjony_timestamp: str | None = Header(None, alias="X-SAHJONY-Timestamp"),
     x_sahjony_signature: str | None = Header(None, alias="X-SAHJONY-Signature"),
 ) -> dict[str, Any]:
     raw = await request.body()
-    _verify_openclaw_signature(raw, x_sahjony_timestamp, x_sahjony_signature)
+    _verify_hermes_signature(raw, x_sahjony_timestamp, x_sahjony_signature)
     try:
-        ack = OpenClawAck.model_validate_json(raw)
+        ack = HermesAck.model_validate_json(raw)
     except Exception as exc:
-        raise HTTPException(status_code=400, detail="Invalid OpenClaw outbox acknowledgement") from exc
+        raise HTTPException(status_code=400, detail="Invalid Hermes outbox acknowledgement") from exc
     rows = await get_backend().select(
         "whatsapp_openclaw_outbox",
         params={"command_id": f"eq.{ack.command_id}", "limit": "1"},
     ) or []
     if not rows:
-        raise HTTPException(status_code=404, detail="OpenClaw command not found")
+        raise HTTPException(status_code=404, detail="Hermes command not found")
     row = rows[0]
     if not hmac.compare_digest(str(row.get("lease_token") or ""), ack.lease_token):
-        raise HTTPException(status_code=409, detail="OpenClaw command lease mismatch")
+        raise HTTPException(status_code=409, detail="Hermes command lease mismatch")
     await get_backend().insert("whatsapp_openclaw_outbox", {
         **row,
         "status": ack.status,

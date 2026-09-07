@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from insforge_backend import get_backend, persistent_backend_status
-from whatsapp_api import _config, _openai_ready, _openclaw_gateway_state, _send_ready, _webhook_ready
+from whatsapp_api import _config, _openai_ready, _send_ready, _webhook_ready
 
 
 def _now() -> str:
@@ -45,15 +45,13 @@ async def _gateway_state(gateway_id: str) -> dict[str, Any]:
 
 async def diagnose() -> dict[str, Any]:
     cfg = await _config()
-    hostinger = await _gateway_state("hostinger-vps")
-    fallback = await _openclaw_gateway_state()
+    hostinger = await _gateway_state("hermes-hostinger")
     persistence = persistent_backend_status()
 
     hostinger_ready = bool(hostinger.get("connected"))
     cloud_send = _send_ready(cfg)
     cloud_webhook = _webhook_ready(cfg)
     meta_ready = bool(cloud_send and cloud_webhook)
-    fallback_ready = bool(fallback.get("connected"))
     ai_ready = _openai_ready()
     durable = bool(persistence.get("configured"))
 
@@ -62,32 +60,25 @@ async def diagnose() -> dict[str, Any]:
 
     # Only conditions that can impair the sole production authority belong in issues.
     if not hostinger_ready:
-        issues.append("hostinger_openclaw_not_ready")
+        issues.append("hermes_agent_not_ready")
     if not ai_ready:
         issues.append("ai_not_ready")
     if not durable:
         issues.append("durable_backend_not_ready")
 
-    # Meta Cloud and the default/Mac OpenClaw gateway are intentionally
-    # non-authoritative diagnostics/fallbacks. Their absence must not degrade
-    # production health while Hostinger is healthy.
+    # Meta Cloud is diagnostic-only. Hermes Agent is the sole production WhatsApp authority.
     if not cloud_send:
         warnings.append("meta_send_not_ready_diagnostic_only")
     if not cloud_webhook:
         warnings.append("meta_webhook_not_ready_diagnostic_only")
-    if not fallback_ready:
-        warnings.append("openclaw_fallback_offline_non_authoritative")
 
     production_ready = bool(hostinger_ready and ai_ready and durable)
     return {
         "status": "ok" if production_ready else "degraded",
         "production_ready": production_ready,
-        "active_provider": "hostinger_openclaw" if hostinger_ready else "none",
+        "active_provider": "hermes_agent" if hostinger_ready else "none",
         "hostinger_ready": hostinger_ready,
-        # Backward-compatible key: production OpenClaw readiness now means the
-        # authoritative Hostinger gateway, not the optional default/Mac gateway.
-        "openclaw_ready": hostinger_ready,
-        "openclaw_fallback_ready": fallback_ready,
+        "hermes_ready": hostinger_ready,
         "meta_cloud_ready": meta_ready,
         "ai_ready": ai_ready,
         "durable_backend_ready": durable,
@@ -106,14 +97,14 @@ async def diagnose() -> dict[str, Any]:
 async def repair_plan() -> dict[str, Any]:
     d = await diagnose()
     actions: list[dict[str, str]] = []
-    if "hostinger_openclaw_not_ready" in d["issues"]:
-        actions.append({"action": "restore_hostinger_openclaw", "mode": "automatic_runtime_recovery"})
+    if "hermes_agent_not_ready" in d["issues"]:
+        actions.append({"action": "restore_hermes_agent", "mode": "automatic_runtime_recovery"})
     if "ai_not_ready" in d["issues"]:
         actions.append({"action": "restore_ai_provider", "mode": "environment_or_provider_recovery_required"})
     if "durable_backend_not_ready" in d["issues"]:
         actions.append({"action": "restore_durable_backend", "mode": "database_configuration_required"})
     if d["production_ready"]:
-        actions.append({"action": "continue_hostinger_openclaw", "mode": "automatic"})
+        actions.append({"action": "continue_hermes_agent", "mode": "automatic"})
     else:
         actions.append({"action": "enter_safe_mode", "mode": "automatic"})
     return {
