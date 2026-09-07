@@ -1,0 +1,71 @@
+name: Hostinger Hermes State Identity Sanitize
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sanitize:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure SSH
+        env:
+          PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/hostinger-state-sanitize
+          chmod 600 ~/.ssh/hostinger-state-sanitize
+      - name: Sanitize retired identity text in Hermes state
+        env:
+          HOST: 69.62.68.67
+          USER: root
+        run: |
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/hostinger-state-sanitize "$USER@$HOST" 'python3 -' <<'PY'
+          import sqlite3, shutil, os, datetime
+          db='/root/.hermes/state.db'
+          stamp=datetime.datetime.utcnow().strftime('%Y%m%dT%H%M%SZ')
+          backup=f'/root/.hermes/maintenance-backups/state-before-identity-sanitize-{stamp}.db'
+          os.makedirs(os.path.dirname(backup),exist_ok=True)
+          shutil.copy2(db,backup)
+          replacements={
+            'fundador y CEO de PRIMO':'propietario de SAHJONY LLC',
+            'protocolo de banca soberana':'SAHJONY LLC',
+            'CEO de PRIMO':'propietario de SAHJONY LLC'
+          }
+          con=sqlite3.connect(db,timeout=30)
+          con.execute('PRAGMA busy_timeout=30000')
+          cur=con.cursor()
+          changed=0
+          for table,cols in [('messages',['content','reasoning','reasoning_content']),('delivery_obligations',['content'])]:
+              for col in cols:
+                  for old,new in replacements.items():
+                      q=f'UPDATE "{table}" SET "{col}"=replace("{col}", ?, ?) WHERE instr(lower(CAST("{col}" AS TEXT)), lower(?))>0'
+                      cur.execute(q,(old,new,old))
+                      changed += max(cur.rowcount,0)
+          con.commit()
+          try:
+              cur.execute("INSERT INTO messages_fts(messages_fts) VALUES('rebuild')")
+              con.commit()
+          except Exception:
+              pass
+          try:
+              cur.execute("INSERT INTO messages_fts_trigram(messages_fts_trigram) VALUES('rebuild')")
+              con.commit()
+          except Exception:
+              pass
+          cur.execute('PRAGMA wal_checkpoint(TRUNCATE)')
+          print('STATE_TEXT_ROWS_UPDATED='+str(changed))
+          print('BACKUP_CREATED=1')
+          left=0
+          for table,cols in [('messages',['content','reasoning','reasoning_content']),('delivery_obligations',['content'])]:
+              for col in cols:
+                  for old in replacements:
+                      left += cur.execute(f'SELECT count(*) FROM "{table}" WHERE instr(lower(CAST("{col}" AS TEXT)), lower(?))>0',(old,)).fetchone()[0]
+          print('STALE_BASE_TABLE_HITS_AFTER='+str(left))
+          con.close()
+          PY
+      - name: Cleanup SSH
+        if: always()
+        run: rm -f ~/.ssh/hostinger-state-sanitize
