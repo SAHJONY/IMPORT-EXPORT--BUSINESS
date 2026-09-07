@@ -27,6 +27,7 @@
 <script>
   const SUPABASE_URL = "https://qprlbmcoksrpuvodxjtt.supabase.co";
   const SUPABASE_KEY = "sb_publishable_-I-dlfNYk4byxK5WQKuqlQ_WIAGkuA-";
+  const MAX_RECOVERY_AGE_SECONDS = 30 * 60;
   const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
     auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true }
   });
@@ -34,14 +35,47 @@
   const reset = document.getElementById("reset");
   const setStatus = (text, type="") => { status.textContent=text; status.className="status"+(type?" "+type:""); };
 
+  function decodeClaims(token){
+    try {
+      const part = token.split(".")[1];
+      const normalized = part.replace(/-/g,"+").replace(/_/g,"/");
+      const padded = normalized + "=".repeat((4-normalized.length%4)%4);
+      return JSON.parse(atob(padded));
+    } catch { return null; }
+  }
+
+  function hasFreshRecoveryAmr(token){
+    const claims = decodeClaims(token);
+    const amr = Array.isArray(claims?.amr) ? claims.amr : [];
+    const recovery = amr.find(entry => String(entry?.method || "").toLowerCase() === "recovery");
+    const ts = Number(recovery?.timestamp || 0);
+    const now = Math.floor(Date.now()/1000);
+    return Boolean(recovery && Number.isFinite(ts) && ts > 0 && now-ts <= MAX_RECOVERY_AGE_SECONDS && ts <= now+60);
+  }
+
   async function initialize(){
     const { data, error } = await sb.auth.getSession();
-    if (error || !data.session?.access_token) {
-      setStatus("No valid Supabase recovery session is present. Request a fresh password recovery link from Owner Sign In, open it, then return here.", "bad");
+    const token = data.session?.access_token || "";
+    if (error || !token) {
+      setStatus("No valid Supabase session is present. From Owner Sign In, request a fresh password setup/reset email and open that recovery link in this same browser.", "bad");
       return;
     }
-    setStatus("Recovery session detected. The server will independently verify that it is fresh, belongs to the active Owner account, and carries Supabase recovery authentication before any MFA factor can be removed.", "ok");
+    if (!hasFreshRecoveryAmr(token)) {
+      setStatus("A Supabase session exists, but it is not a fresh password-recovery session. Request a new password setup/reset email from Owner Sign In, open the newest recovery link in this same browser, then return here.", "bad");
+      return;
+    }
+    setStatus("Fresh Supabase recovery session verified locally. The server will independently verify Owner identity and membership before removing the stale TOTP factor.", "ok");
     reset.disabled = false;
+  }
+
+  async function edgeErrorDetail(error){
+    try {
+      if (error?.context && typeof error.context.json === "function") {
+        const body = await error.context.json();
+        if (body?.detail) return body.detail;
+      }
+    } catch {}
+    return error?.message || "Secure MFA recovery failed.";
   }
 
   reset.addEventListener("click", async () => {
@@ -55,7 +89,7 @@
       setStatus("Old Authenticator factor cleared securely. Returning to Owner Sign In so a new TOTP QR can be enrolled and verified at AAL2.", "ok");
       setTimeout(() => location.replace("/owner-login?lang=en-US"), 1200);
     } catch (err) {
-      setStatus(err?.message || "Secure MFA recovery failed. Request a fresh recovery link and try again.", "bad");
+      setStatus(await edgeErrorDetail(err), "bad");
       reset.disabled = false;
     }
   });
