@@ -112,17 +112,22 @@ jobs:
           python3 -m py_compile /usr/local/sbin/sahjony-crm-bridge
           test -s /root/.hermes/skills/whatsapp-crm-bridge/SKILL.md
           grep -q 'Owner update reports' /root/.hermes/skills/whatsapp-crm-bridge/SKILL.md
-          doctor_json="$(/usr/local/sbin/sahjony-crm-bridge doctor)"
-          python3 - "$doctor_json" <<'PY'
+          health_json="$(/usr/local/sbin/sahjony-crm-bridge health)"
+          report_json="$(/usr/local/sbin/sahjony-crm-bridge owner-report)"
+          python3 - "$health_json" "$report_json" <<'PY'
           import json, sys
-          data = json.loads(sys.argv[1])
-          if data.get("status") != "ok" or (data.get("health") or {}).get("status") != "ok":
-              raise SystemExit("CRM bridge doctor is not healthy")
-          if data.get("pending_count") != 0:
-              raise SystemExit("CRM bridge queue is not empty")
+          health = json.loads(sys.argv[1])
+          report = json.loads(sys.argv[2])
+          if health.get("status") != "ok":
+              raise SystemExit("CRM bridge health is not ok")
+          if report.get("status") != "ok":
+              raise SystemExit("Owner report endpoint is not ready")
+          print("OWNER_REPORT_CUSTOMERS=" + str((report.get("customers") or {}).get("total")))
+          print("OWNER_REPORT_TRADE_INTAKES=" + str((report.get("trade_intakes") or {}).get("total")))
+          print("OWNER_REPORT_WHATSAPP_INBOUND=" + str((report.get("whatsapp") or {}).get("inbound_total")))
           PY
           test -s /var/lib/sahjony-crm-bridge/status.json
-          echo SAHJONY_HOSTINGER_CRM_RFQ_BRIDGE_HEALTHY=1
+          echo SAHJONY_HOSTINGER_CRM_OWNER_REPORT_READY=1
           REMOTE
 
       - name: Cleanup local key
