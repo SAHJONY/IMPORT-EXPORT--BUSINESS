@@ -110,8 +110,8 @@ jobs:
           systemctl is-enabled --quiet sahjony-crm-bridge.timer
           systemctl is-active --quiet sahjony-crm-bridge.timer
           python3 -m py_compile /usr/local/sbin/sahjony-crm-bridge
-          test -s /home/node/.openclaw/skills/whatsapp-crm-bridge/SKILL.md
-          grep -q 'Machine-readable RFQ metadata' /home/node/.openclaw/skills/whatsapp-crm-bridge/SKILL.md
+          test -s /root/.hermes/skills/whatsapp-crm-bridge/SKILL.md
+          grep -q 'Owner update reports' /root/.hermes/skills/whatsapp-crm-bridge/SKILL.md
           doctor_json="$(/usr/local/sbin/sahjony-crm-bridge doctor)"
           python3 - "$doctor_json" <<'PY'
           import json, sys

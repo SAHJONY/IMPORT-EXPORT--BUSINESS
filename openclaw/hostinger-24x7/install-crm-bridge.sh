@@ -27,21 +27,21 @@ install -m 700 "$TOOL_SOURCE" "$TOOL_DEST"
 
 install_native_skill(){
   local installed=0 dest
-  for dest in \
-    "$OPENCLAW_HOME/skills/whatsapp-crm-bridge" \
-    "$OPENCLAW_STATE_DIR/skills/whatsapp-crm-bridge" \
-    "/root/.hermes/skills/whatsapp-crm-bridge"
+  # Hermes is the authoritative production runtime. Legacy OpenClaw paths
+  # are optional and may be files/symlinks on migrated hosts.
+  for dest in     "/root/.hermes/skills/whatsapp-crm-bridge"     "$OPENCLAW_STATE_DIR/skills/whatsapp-crm-bridge"     "$OPENCLAW_HOME/skills/whatsapp-crm-bridge"
   do
+    parent="$(dirname "$(dirname "$dest")")"
+    if [[ "$dest" == "$OPENCLAW_HOME"/* && -e "$OPENCLAW_HOME" && ! -d "$OPENCLAW_HOME" ]]; then
+      log "Skipping legacy OpenClaw skill path because $OPENCLAW_HOME is not a directory"
+      continue
+    fi
     install -d -m 700 "$dest"
     install -m 600 "$SKILL_SOURCE" "$dest/SKILL.md"
     installed=$((installed+1))
   done
-  if id node >/dev/null 2>&1; then
-    chown -R node:node "$OPENCLAW_HOME/skills/whatsapp-crm-bridge" 2>/dev/null || true
-  fi
-  log "Installed WhatsApp CRM/RFQ skill into $installed native OpenClaw skill paths"
+  log "Installed CRM/RFQ skill into $installed runtime skill paths"
 }
-
 find_running_container(){
   command -v docker >/dev/null 2>&1 || return 0
   docker ps --filter status=running --format '{{.ID}}|{{.Names}}|{{.Image}}' 2>/dev/null \
