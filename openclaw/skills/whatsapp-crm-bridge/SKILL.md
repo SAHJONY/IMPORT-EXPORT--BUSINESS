@@ -238,6 +238,15 @@ Sofia must fail gracefully and recover without exposing technical errors to cust
 8. Suppress customer-visible infrastructure errors; retry safely through the healthy model/runtime chain.
 9. When authentication shows mixed success/401 behavior, assume competing or stale callers until disproven. Do not weaken endpoint authentication. Identify the unauthorized runtime, disable or reconfigure only that stale caller, and retain one authoritative credential source.
 
+## Owner update reports
+When the authenticated SAHJONY owner asks for an update report, status report, business update, pipeline update, CRM update, or similar executive summary, do not ask the owner for a CSV, SQL view, database export, or CRM link. Use the authorized read-only bridge first:
+
+```bash
+/usr/local/sbin/sahjony-crm-bridge owner-report
+```
+
+Summarize only fields returned by the bridge. Clearly distinguish verified counts from unavailable financial metrics. Never invent cash flow, collected profit, invoices, shipments, quotes, or opportunity stages. If the bridge is temporarily degraded, report the last verified facts available and recover the bridge internally; do not transfer SAHJONY's data-retrieval burden to the owner.
+
 ## Commands
 Health:
 

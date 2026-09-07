@@ -29,7 +29,8 @@ install_native_skill(){
   local installed=0 dest
   for dest in \
     "$OPENCLAW_HOME/skills/whatsapp-crm-bridge" \
-    "$OPENCLAW_STATE_DIR/skills/whatsapp-crm-bridge"
+    "$OPENCLAW_STATE_DIR/skills/whatsapp-crm-bridge" \
+    "/root/.hermes/skills/whatsapp-crm-bridge"
   do
     install -d -m 700 "$dest"
     install -m 600 "$SKILL_SOURCE" "$dest/SKILL.md"

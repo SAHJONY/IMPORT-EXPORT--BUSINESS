@@ -223,6 +223,7 @@ def pending_count() -> int:
 def endpoint(action: str) -> tuple[str, str]:
     mapping = {
         "health": ("GET", "/whatsapp/crm/health"),
+        "owner-report": ("GET", "/whatsapp/crm/owner-report"),
         "contact": ("POST", "/whatsapp/crm/contact"),
         "sync": ("POST", "/whatsapp/crm/sync"),
         "note": ("POST", "/whatsapp/crm/note"),
@@ -346,6 +347,7 @@ def parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="Authorized SAHJONY OpenClaw CRM bridge")
     sub = p.add_subparsers(dest="action", required=True)
     sub.add_parser("health")
+    sub.add_parser("owner-report")
     contact = sub.add_parser("contact")
     contact.add_argument("phone")
     for action in ("sync", "note", "intake", "outreach-pilot", "outreach-status"):
@@ -365,7 +367,7 @@ def main() -> int:
             result = doctor()
         else:
             payload = payload_from_args(args)
-            result = perform(args.action, payload if args.action != "health" else None)
+            result = perform(args.action, payload if args.action not in {"health", "owner-report"} else None)
         print(json.dumps(result, separators=(",", ":"), ensure_ascii=False))
         return 0 if result.get("status") != "error" else 1
     except Exception as exc:

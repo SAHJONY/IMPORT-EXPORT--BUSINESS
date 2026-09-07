@@ -651,6 +651,55 @@ def _headers(
     return timestamp, nonce, signature
 
 
+async def owner_update_report() -> dict[str, Any]:
+    """Read-only executive snapshot for the authenticated SAHJONY owner."""
+    backend = get_backend()
+
+    async def safe_select(table: str, params: dict[str, str] | None = None) -> list[dict[str, Any]]:
+        try:
+            return await backend.select(table, params=params or {"limit": "5000"}) or []
+        except Exception:
+            return []
+
+    accounts = await safe_select("customer_accounts", {"limit": "5000"})
+    intakes = await safe_select("customer_trade_intakes", {"limit": "5000"})
+    messages = await safe_select("whatsapp_messages", {"limit": "5000"})
+    operations = await safe_select("crm_bridge_operations", {"limit": "500"})
+
+    stage_counts: dict[str, int] = {}
+    for row in accounts:
+        stage = str(row.get("sales_status") or row.get("status") or "UNKNOWN").upper()
+        stage_counts[stage] = stage_counts.get(stage, 0) + 1
+
+    inbound = [r for r in messages if str(r.get("direction") or "").lower() == "inbound"]
+    inbound.sort(key=lambda r: str(r.get("received_at") or r.get("created_at") or r.get("updated_at") or ""), reverse=True)
+    recent_inbound = []
+    for row in inbound[:5]:
+        text = str(row.get("message") or row.get("body") or row.get("content") or row.get("text") or "").strip()
+        recent_inbound.append({
+            "phone": str(row.get("phone") or ""),
+            "received_at": row.get("received_at") or row.get("created_at") or row.get("updated_at"),
+            "message": text[:500],
+        })
+
+    destinations: dict[str, int] = {}
+    for row in intakes:
+        dest = str(row.get("destination_country") or row.get("destination") or "UNKNOWN").upper()
+        destinations[dest] = destinations.get(dest, 0) + 1
+
+    return {
+        "status": "ok",
+        "generated_at": _now(),
+        "source_of_truth": "supabase_trade_persistence",
+        "customers": {"total": len(accounts), "stages": stage_counts},
+        "trade_intakes": {"total": len(intakes), "destinations": destinations},
+        "whatsapp": {"messages_total": len(messages), "inbound_total": len(inbound), "recent_inbound": recent_inbound},
+        "crm_bridge_operations": {"total_observed": len(operations)},
+        "financials": {"status": "not_computed_by_this_read_only_report", "verified_collected_profit_usd": None},
+        "binding_actions": 0,
+    }
+
+
 @router.get("/whatsapp/crm/health")
 async def crm_health(
     request: Request,
@@ -660,6 +709,17 @@ async def crm_health(
 ) -> dict[str, Any]:
     _verify_bridge_request(request, b"", *_headers(x_sahjony_timestamp, x_sahjony_nonce, x_sahjony_crm_signature))
     return await crm_bridge_status()
+
+
+@router.get("/whatsapp/crm/owner-report")
+async def crm_owner_report(
+    request: Request,
+    x_sahjony_timestamp: str | None = Header(None, alias="X-SAHJONY-Timestamp"),
+    x_sahjony_nonce: str | None = Header(None, alias="X-SAHJONY-Nonce"),
+    x_sahjony_crm_signature: str | None = Header(None, alias="X-SAHJONY-CRM-Signature"),
+) -> dict[str, Any]:
+    _verify_bridge_request(request, b"", *_headers(x_sahjony_timestamp, x_sahjony_nonce, x_sahjony_crm_signature))
+    return await owner_update_report()
 
 
 @router.post("/whatsapp/crm/contact")
