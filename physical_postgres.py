@@ -25,6 +25,14 @@ _ALLOWED_TABLES = {
     "beneficiary_change_requests",
 }
 
+_READ_ONLY_RELATIONS = {
+    "accounting_trial_balance",
+    "accounting_pnl_by_month",
+    "accounting_deal_profitability",
+    "accounting_accounts_receivable",
+    "accounting_kpi_summary",
+}
+
 
 _SUPABASE_ENV_NAMES = (
     "SUPABASE_POSTGRES_URL",
@@ -114,16 +122,22 @@ def _json_value(value: Any) -> Any:
     return value
 
 
-def _rest_url(table: str) -> str:
+def _rest_url(relation: str) -> str:
     base, _key = _rest_config()
-    if table not in _ALLOWED_TABLES:
-        raise ValueError(f"Physical table is not allow-listed: {table}")
-    return f"{base}/rest/v1/{table}"
+    if relation not in (_ALLOWED_TABLES | _READ_ONLY_RELATIONS):
+        raise ValueError(f"Physical relation is not allow-listed: {relation}")
+    return f"{base}/rest/v1/{relation}"
 
 
 def _table(name: str) -> sql.Identifier:
     if name not in _ALLOWED_TABLES:
         raise ValueError(f"Physical table is not allow-listed: {name}")
+    return sql.Identifier(name)
+
+
+def _relation(name: str) -> sql.Identifier:
+    if name not in (_ALLOWED_TABLES | _READ_ONLY_RELATIONS):
+        raise ValueError(f"Physical relation is not allow-listed: {name}")
     return sql.Identifier(name)
 
 
@@ -211,7 +225,7 @@ async def select_rows(
     descending: bool = False,
     limit: int = 300,
 ) -> list[dict[str, Any]]:
-    table_id = _table(table)
+    table_id = _relation(table)
     filters = filters or {}
     limit = max(1, min(int(limit), 1000))
 
