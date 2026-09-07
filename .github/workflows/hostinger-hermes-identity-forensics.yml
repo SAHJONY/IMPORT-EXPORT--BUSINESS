@@ -1,0 +1,79 @@
+name: Hostinger Hermes Identity Forensics
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure SSH
+        env:
+          PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/hostinger-identity
+          chmod 600 ~/.ssh/hostinger-identity
+      - name: Inspect Hermes identity sources
+        env:
+          HOST: 69.62.68.67
+          USER: root
+        run: |
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/hostinger-identity "$USER@$HOST" 'bash -s' <<'REMOTE'
+          set -u
+          H=/root/.hermes
+          echo "IDENTITY_FORENSICS_UTC=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          echo "HERMES_ROOT_EXISTS=$([[ -d $H ]] && echo 1 || echo 0)"
+          echo "GATEWAY_ACTIVE=$(systemctl is-active hermes-gateway.service 2>/dev/null || true)"
+          echo "--- canonical files ---"
+          for f in SOUL.md config.yaml; do
+            p="$H/$f"
+            if [[ -f "$p" ]]; then
+              echo "FILE=$p sha256=$(sha256sum "$p" | awk '{print $1}') lines=$(wc -l < "$p")"
+            else
+              echo "FILE=$p MISSING"
+            fi
+          done
+          echo "--- exact stale identity path scan ---"
+          python3 - <<'PY'
+          from pathlib import Path
+          roots=[Path('/root/.hermes'),Path('/opt/sahjony-hermes')]
+          needles=['fundador y CEO de PRIMO','protocolo de banca soberana','CEO de PRIMO']
+          skip={'node','node_modules','.git','maintenance-backups'}
+          hits=[]
+          for root in roots:
+              if not root.exists():
+                  continue
+              for p in root.rglob('*'):
+                  if not p.is_file() or any(part in skip for part in p.parts):
+                      continue
+                  try:
+                      if p.stat().st_size > 8000000:
+                          continue
+                      text=p.read_text(errors='ignore')
+                  except Exception:
+                      continue
+                  low=text.lower()
+                  if any(n.lower() in low for n in needles):
+                      hits.append(str(p))
+          print('STALE_IDENTITY_FILES=' + str(len(hits)))
+          for p in hits[:80]:
+              print('STALE_PATH=' + p)
+          PY
+          echo "--- memory/session candidates ---"
+          find "$H" -maxdepth 3 -type f \( -iname '*memory*' -o -iname '*session*' -o -iname '*history*' -o -iname '*.db' \) -printf '%p %s bytes\n' 2>/dev/null | head -n 160
+          echo "--- recent hermes journal identity window ---"
+          journalctl -u hermes-gateway.service --since '2026-09-07 09:38:00 UTC' --until '2026-09-07 09:53:30 UTC' --no-pager 2>/dev/null \
+            | grep -Ei 'whatsapp|owner|identity|memory|session|sofia|error|warn' \
+            | sed -E 's/(token|secret|password|authorization|api[_-]?key)[=:][^[:space:]]+/\1=[REDACTED]/Ig' \
+            | tail -n 220 || true
+          echo "--- process snapshot ---"
+          ps -eo pid,ppid,etime,args | grep -E 'hermes|whatsapp' | grep -v grep | head -n 80 || true
+          REMOTE
+      - name: Cleanup SSH
+        if: always()
+        run: rm -f ~/.ssh/hostinger-identity
