@@ -1,0 +1,1 @@
+Gate: CI green; preview /telegram/health returns read_only_health=true, persistence_accessed=false; /telegram/sofia/inbox remains owner-only and read-only.
