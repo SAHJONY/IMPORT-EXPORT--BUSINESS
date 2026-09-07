@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac
 import os
@@ -11,6 +12,7 @@ from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
 
 from auth import verify_owner_token
+from sofia_whatsapp_runtime import generate_sofia_reply
 
 CANONICAL_BOT_USERNAME = "@SahjonyGlobalTradeBot"
 
@@ -363,6 +365,55 @@ async def telegram_sofia_inbox(
     }
 
 
+async def _reply_with_sofia(update: dict[str, Any]) -> dict[str, Any]:
+    """Generate and send one governed Sofía reply for ordinary Telegram messages.
+
+    Channel posts are captured for triage but never auto-replied to, avoiding
+    public-channel loops. Private/group bot messages may receive a reply.
+    """
+    message = update.get("message") or {}
+    if not isinstance(message, dict) or not message:
+        return {"attempted": False, "sent": False, "reason": "not_direct_message"}
+
+    chat = message.get("chat") or {}
+    sender = message.get("from") or {}
+    chat_id = str(chat.get("id") or "").strip()
+    text = str(message.get("text") or message.get("caption") or "").strip()
+    if not chat_id or not text:
+        return {"attempted": False, "sent": False, "reason": "missing_chat_or_text"}
+    if bool(sender.get("is_bot")):
+        return {"attempted": False, "sent": False, "reason": "bot_sender"}
+
+    contact_name = " ".join(
+        part for part in [str(sender.get("first_name") or "").strip(), str(sender.get("last_name") or "").strip()] if part
+    ) or str(sender.get("username") or "").strip() or None
+
+    try:
+        reply = await asyncio.wait_for(generate_sofia_reply(text, contact_name), timeout=35.0)
+    except asyncio.TimeoutError:
+        return {"attempted": True, "sent": False, "reason": "sofia_timeout"}
+    except Exception as exc:
+        return {"attempted": True, "sent": False, "reason": f"sofia_{type(exc).__name__}"}
+
+    reply = str(reply or "").strip()[:4096]
+    if not reply:
+        return {"attempted": True, "sent": False, "reason": "empty_reply"}
+
+    result = await _telegram_call("sendMessage", {
+        "chat_id": chat_id,
+        "text": reply,
+        "reply_to_message_id": message.get("message_id"),
+        "allow_sending_without_reply": True,
+    })
+    sent = result.get("result") or {}
+    return {
+        "attempted": True,
+        "sent": True,
+        "message_id": sent.get("message_id"),
+        "chat_id": chat_id,
+    }
+
+
 @app.post("/telegram/webhook")
 async def telegram_webhook(
     update: dict[str, Any],
@@ -373,11 +424,13 @@ async def telegram_webhook(
     if not supplied or not secrets.compare_digest(supplied, expected):
         raise HTTPException(status_code=403, detail="Invalid Telegram webhook secret")
     captured = await _capture_inbound(update)
+    sofia_reply = await _reply_with_sofia(update)
     return {
         "accepted": True,
         "update_id": update.get("update_id"),
         "captured_events": captured,
         "has_channel_post": "channel_post" in update or "edited_channel_post" in update,
+        "sofia_reply": sofia_reply,
         "crm_truth_policy": "Inbound Telegram is engagement evidence only until a genuine trade requirement is verified.",
         "autonomous_commitment_executed": False,
         "owner_authority_granted": False,
