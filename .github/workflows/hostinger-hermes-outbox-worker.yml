@@ -77,8 +77,13 @@ jobs:
 
           def heartbeat():
               payload={'gateway_id':GATEWAY,'account_id':ACCOUNT,'channel_connected':bridge_health(),'business_name':'SAHJONY LLC','model':'hermes-agent','gateway_version':'Hermes WhatsApp bridge'}
-              try: json_request(BASE+'/whatsapp/hermes/heartbeat','POST',payload,signed_headers)
-              except Exception: pass
+              try:
+                  json_request(BASE+'/whatsapp/hermes/heartbeat','POST',payload,signed_headers)
+                  print('HERMES_HEARTBEAT_POST=OK', flush=True)
+              except urllib.error.HTTPError as e:
+                  print(f'HERMES_HEARTBEAT_POST=HTTP_{e.code}', flush=True)
+              except Exception as e:
+                  print(f'HERMES_HEARTBEAT_POST={type(e).__name__}', flush=True)
 
           def poll():
               try:
@@ -163,6 +168,11 @@ jobs:
           print('PRODUCTION_WHATSAPP_HEARTBEAT=FRESH')
           print('PRODUCTION_WHATSAPP_CONNECTED=TRUE')
           PY
+      - name: Show Hermes worker diagnostics on failure
+        if: failure()
+        shell: bash
+        run: |
+          ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/key "$SSH_USER@$HOST" 'journalctl -u sahjony-hermes-outbox.service -n 40 --no-pager | grep -E "HERMES_HEARTBEAT_POST|Started|Stopped|Main process exited" || true'
       - name: Cleanup
         if: always()
         run: rm -f ~/.ssh/key
