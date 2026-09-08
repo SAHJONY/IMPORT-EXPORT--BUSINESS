@@ -21,6 +21,7 @@ from communication_os_security_api import app as communication_os_security_app
 from communication_os_api import app as communication_os_app
 from communication_agentic_api import app as communication_agentic_app
 from communication_platform_api import app as communication_platform_app
+from sofia_unified_comms_api import app as sofia_unified_comms_app
 from direct_text_api import app as direct_text_app
 from wifi_connectivity_api import app as wifi_connectivity_app
 from cuba_communications_api import app as cuba_communications_app
@@ -376,7 +377,7 @@ for subapp in (
     google_contacts_app,
     activation_app, telegram_app, business_email_app, email_agent_app, gmail_transport_app, owner_auth_app, higgsfield_cloud_app, core_app, customer_crm_app, crm_quality_10x_app, external_trade_prospects_app, profit_machine_app, record_registry_app, latam_trade_research_app, outreach_marketing_app, social_media_management_app, country_crm_app, global_lead_search_app, cloudflare_crawler_app, worldwide_connect_app, cuba_private_fuels_app, cuba_mipymes_app, cuba_sofia_sales_bridge_app, competition_intelligence_app, sofia_deal_match_app, world_clock_trade_app,
     energy_app, energy_origination_app, energy_intelligence_app, energy_provider_hub_app, energy_provider_ingestion_app, energy_provider_catalog_app, energy_ofac_screening_app, energy_eia_app, energy_deal_flow_app, energy_revenue_intelligence_app,
-    communications_app, communication_os_security_app, communication_os_app, communication_agentic_app, communication_platform_app, direct_text_app, wifi_connectivity_app, cuba_communications_app, voice_inbound_app, voice_agent_app, direct_voice_app, voice_autonomy_app, whatsapp_voice_orchestrator_app, documents_app, document_storage_app, shipments_app, agency_owner_app, agency_freight_ops_app, compliance_app, commercial_app, language_app, collaboration_app, finance_app,
+    communications_app, communication_os_security_app, communication_os_app, communication_agentic_app, communication_platform_app, sofia_unified_comms_app, direct_text_app, wifi_connectivity_app, cuba_communications_app, voice_inbound_app, voice_agent_app, direct_voice_app, voice_autonomy_app, whatsapp_voice_orchestrator_app, documents_app, document_storage_app, shipments_app, agency_owner_app, agency_freight_ops_app, compliance_app, commercial_app, language_app, collaboration_app, finance_app,
     countries_app, cuba_current_app, cuba_transition_app, cuba_trade_desk_app, cuba_private_business_app, cuba_private_sector_lead_app, cuba_logistics_network_app, lead_scout_app, managed_trade_app, intermediary_app, global_sourcing_app, global_marketplace_app, business_readiness_app, us_import_app,
     ai_brain_app, ai_trade_agent_app, agentic_trade_engine_app, trade_certification_app, institutional_capability_app,
 ):
