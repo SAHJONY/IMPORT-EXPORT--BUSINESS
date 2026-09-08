@@ -230,7 +230,7 @@ async def telegram_publish(payload: TelegramPublish, authorization: str | None =
 @app.post("/telegram/test")
 async def telegram_test(authorization: str | None = Header(None, alias="Authorization")) -> dict[str, Any]:
     _require_owner(authorization)
-    result = await _telegram_call("sendMessage", {"chat_id": _channel_id(), "text": "SAHJONY Global Trade · Telegram integration verified.\nTrade OS communications channel is online.", "disable_notification": True})
+    result = await _telegram_call("sendMessage", {"chat_id": _channel_id(), "text": "SAHJONY GLOBAL TRADING · Telegram integration verified.\nTrade OS communications channel is online.", "disable_notification": True})
     message = result.get("result") or {}
     return {"verified": True, "message_id": message.get("message_id")}
 
@@ -398,7 +398,7 @@ async def _reply_with_sofia(update: dict[str, Any]) -> dict[str, Any]:
     telegram_text = text
     if owner_context:
         telegram_text = (
-            "[TELEGRAM OWNER CONTEXT: This message is from Juan Gonzalez, Owner of SAHJONY LLC. "
+            "[TELEGRAM OWNER CONTEXT: This message is from Juan Gonzalez, Owner of SAHJONY GLOBAL TRADING. "
             "Respond as Sofía Smith, Executive Manager and his executive assistant. Do not treat him as a new prospect, "
             "do not ask generic sales-intake questions, and use available SAHJONY/CRM context before asking for information.]\n" + text
         )
@@ -427,7 +427,7 @@ async def _reply_with_sofia(update: dict[str, Any]) -> dict[str, Any]:
         "message_id": sent.get("message_id"),
         "chat_id": chat_id,
         "owner_context": owner_context,
-        "canonical_agent": "Sofía Smith — Executive Manager, SAHJONY LLC",
+        "canonical_agent": "Sofía Smith — Executive Manager, SAHJONY GLOBAL TRADING",
     }
 
 
