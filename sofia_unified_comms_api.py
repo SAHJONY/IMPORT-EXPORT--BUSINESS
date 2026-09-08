@@ -11,15 +11,22 @@ SOFIA_IDENTITY = "Sofía Smith"
 
 BUSINESS_ROUTES = {
     "global_trade": {"name": "SAHJONY Global Trade", "app": "import-export-business"},
-    "wholesale_real_estate": {"name": "SAHJONY Wholesale Ops", "app": "wholesale-ops-app"},
+    "wholesale_real_estate": {"name": "Wholesale Real Estate", "app": "wholesale-ops-app"},
     "ecommerce": {"name": "SAHJONY E-Commerce", "app": "sahjony-e-commerce"},
     "marketing_agency": {"name": "SAHJONY Marketing Agency", "app": "sahjony-marketing-agency"},
     "frontdesk": {"name": "FrontDesk Agents", "app": "frontdesk-agents"},
     "energy": {"name": "SAHJONY Energy", "app": "sahjony-energy"},
-    "real_estate": {"name": "CIMA Real Estate", "app": "cima-real-estate"},
 }
 
-app = FastAPI(title="Sofía Unified Communications", version="1.0.0")
+LEGACY_BUSINESS_ALIASES = {
+    "cima": "wholesale_real_estate",
+    "cima_real_estate": "wholesale_real_estate",
+    "cima real estate": "wholesale_real_estate",
+    "cima real estate llc": "wholesale_real_estate",
+    "sahjony-real-estate-platform": "wholesale_real_estate",
+}
+
+app = FastAPI(title="Sofía Unified Communications", version="2.0.0")
 
 
 def channel_registry() -> dict[str, Any]:
@@ -42,6 +49,9 @@ def channel_registry() -> dict[str, Any]:
             "owner_approval_for_binding_actions": True,
         },
         "business_routes": BUSINESS_ROUTES,
+        "legacy_business_aliases": LEGACY_BUSINESS_ALIASES,
+        "real_estate_canonical_business": "wholesale_real_estate",
+        "real_estate_canonical_application": "SAHJONY/Wholesale--ops-app",
     }
 
 
