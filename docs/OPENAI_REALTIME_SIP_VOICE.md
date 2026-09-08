@@ -1,50 +1,80 @@
 # SAHJONY Native OpenAI Realtime SIP Voice
 
 ## Objective
-Run Sofía as a native OpenAI speech-to-speech phone agent, removing the external TTS layer that can introduce robotic cadence and echo.
+Run Sofía as a native OpenAI speech-to-speech phone agent, removing the external TTS layer that can contribute to robotic cadence and echo.
 
-## Architecture
+## Production architecture
 
-Phone carrier / SIP trunk -> OpenAI Realtime SIP -> GPT Realtime 2.1 native audio -> caller
+Phone carrier / SIP trunk -> OpenAI Realtime SIP -> GPT-Realtime-2.1 native audio -> caller
 
-The SAHJONY gateway is only the control plane. It receives the verified `realtime.call.incoming` webhook and accepts/configures the call. Audio stays on the native SIP/Reatime media path; the gateway does not transcode or synthesize audio.
+Control plane:
+OpenAI `realtime.call.incoming` webhook -> dedicated Vercel gateway -> verified call accept/configuration
 
-## Supabase Edge Function
-Production function slug:
+The audio media path stays native to OpenAI Realtime. The SAHJONY gateway does not transcode, synthesize, or add ambient audio.
 
-`openai-realtime-sip-gateway`
+## Active production gateway
 
-Required server-side secrets:
+Vercel project: `sahjony-sofia-realtime-voice`
+
+Stable webhook endpoint:
+
+`https://sahjony-sofia-realtime-voice.vercel.app/api/realtime-sip`
+
+OpenAI project SIP destination:
+
+`sip:proj_wo5NVFLZGfkoDpPyGghDAzuw@sip.api.openai.com;transport=tls`
+
+Required server-side environment variables:
 
 - `OPENAI_API_KEY`
 - `OPENAI_WEBHOOK_SECRET`
 - `OPENAI_REALTIME_MODEL=gpt-realtime-2.1`
-- `OPENAI_REALTIME_VOICE=marin` (or another supported native OpenAI Realtime voice)
+- `OPENAI_REALTIME_VOICE=marin`
 
-The function rejects unverified webhook events. Do not expose either secret to browser code.
+Do not expose secrets to browser code or commit them to Git.
 
-## OpenAI setup
+## Webhook reliability behavior
 
-1. Create/configure an OpenAI API project with Realtime access.
-2. Add an OpenAI webhook pointing to the production Edge Function endpoint.
-3. Store the webhook signing secret in `OPENAI_WEBHOOK_SECRET`.
-4. Route the test SIP DID/trunk to the OpenAI Realtime SIP destination shown for that project.
-5. Place a real inbound test call.
-6. Confirm the function accepts `realtime.call.incoming` and OpenAI returns a successful call accept.
-7. Only after the test passes should production inbound traffic be migrated.
+The gateway uses the official OpenAI SDK to verify the raw webhook body.
+
+- invalid signature -> HTTP 401
+- valid non-call event -> HTTP 200 ignored
+- valid OpenAI test event without a live `call_id` -> HTTP 200 acknowledged
+- real `realtime.call.incoming` with `call_id` -> accept/configure the call through OpenAI Realtime
+- OpenAI call-accept failure -> HTTP 502 with sanitized diagnostics
+
+The OpenAI dashboard `Send test event` flow has been validated successfully with HTTP 200.
 
 ## Audio policy
 
 - Native speech-to-speech only.
-- No ElevenLabs or Cartesia in this path.
-- No artificial ambient sound.
-- Server VAD enables natural turn taking and interruption.
-- The voice prompt asks for a warm Caribbean/Latina business cadence without caricature.
+- GPT-Realtime-2.1 for the live audio conversation.
+- OpenAI native voice `marin` unless deliberately changed after testing.
+- No ElevenLabs/Cartesia on this native route.
+- No artificial ambient/background audio.
+- Server VAD supports natural turn-taking and interruption.
+- Sofía speaks concise Spanish-first business language and switches naturally to English.
 
-## Migration safety
+## Telephony status
 
-The existing Autocalls inbound line must remain untouched until native SIP E2E testing passes. Use a separate test DID or a temporary SIP route first. Rollback is simply restoring the carrier route to the existing inbound path.
+The webhook/control plane is ready. A real SIP-capable DID or trunk is still required for end-to-end phone testing.
+
+Current Autocalls account has no BYO SIP trunk configured. The existing production line must remain untouched until native OpenAI SIP passes a real inbound test.
+
+Safe cutover sequence:
+
+1. Provision or connect a separate test SIP DID/trunk.
+2. Route inbound calls to the OpenAI project SIP destination.
+3. Place a real inbound call.
+4. Verify OpenAI emits `realtime.call.incoming` with a real `call_id`.
+5. Confirm gateway accepts the call and native two-way audio works.
+6. Validate interruptions, echo, latency, Spanish/English behavior, and call termination.
+7. Only then migrate or forward the production number.
+
+## Import-Export integration
+
+The gateway is a dedicated voice microservice of the SAHJONY Import-Export platform. The next application-layer phase is a sideband controller that gives Sofía governed access to CRM/customer recognition, RFQs, supplier intelligence, quotations, logistics context, and post-call logging without exposing privileged secrets to the live audio model.
 
 ## Commercial governance
 
-Sofía must not invent or bind SAHJONY to prices, inventory, capacity, certifications, purchases, payments, contracts, banking instructions, or verified counterparty status. A voice call is not automatically a qualified RFQ, deal, revenue, or collected revenue.
+Sofía must not invent or bind SAHJONY to prices, inventory, capacity, certifications, credit, purchases, payments, contracts, refunds, banking instructions, legal conclusions, or verified counterparty status. A voice call is not automatically a qualified RFQ, deal, revenue, or collected revenue.
