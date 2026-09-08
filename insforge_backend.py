@@ -65,7 +65,7 @@ def _record_key(row: dict[str, Any]) -> str:
         "shipment_id", "document_id", "message_id", "payment_id", "supplier_id",
         "candidate_id", "authorization_id", "employee_id", "business_id", "country_id",
         "translation_id", "share_id", "engagement_id", "dossier_id", "incident_id",
-        "gateway_id", "account_id", "journal_id", "beneficiary_id", "sourcing_request_id",
+        "command_id", "notification_id", "gateway_id", "account_id", "journal_id", "beneficiary_id", "sourcing_request_id",
     )
     for key in preferred:
         value = row.get(key)
