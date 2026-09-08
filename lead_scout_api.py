@@ -101,24 +101,10 @@ def fingerprint(p: LeadScoutIn) -> str:
     return hashlib.sha256(basis.encode()).hexdigest()[:32]
 
 
-@app.on_event('startup')
-async def bootstrap_governed_cuba_research_prospects() -> None:
-    """Load approved Cuba research/outreach cohorts into the durable CRM.
-
-    Both seed routines are idempotent. They create prospect/research records only and
-    never promote demand, authorize outreach, create a contract, or earn commission.
-    Startup remains available even if a seed dependency is temporarily unavailable.
-    """
-    try:
-        from crm_campaign_bootstrap import bootstrap_cuba_mipyme_outreach
-        await bootstrap_cuba_mipyme_outreach()
-    except Exception:
-        pass
-    try:
-        from cuba_mipyme_expansion_seed import ensure_cuba_mipyme_expansion_seed
-        await ensure_cuba_mipyme_expansion_seed()
-    except Exception:
-        pass
+# IMPORTANT: no CRM/research seed writes at process startup.
+# unified_api imports this sub-app for unrelated routes; Vercel cold starts must
+# not mutate CRM state for health checks, Telegram webhooks, or other channels.
+# Seed/bootstrap operations must run only from explicit lead-scout/CRM actions.
 
 
 @app.get('/lead-scout/health')

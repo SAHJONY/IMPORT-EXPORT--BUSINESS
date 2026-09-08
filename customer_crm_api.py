@@ -41,9 +41,12 @@ async def ensure_campaign_bootstrap():
         _BOOTSTRAP_STATUS={'campaign':CAMPAIGN,'seed_count':len(load_seed()),'status':'WAITING_FOR_DURABLE_BACKEND','result':{'error_type':type(exc).__name__}}
     return _BOOTSTRAP_STATUS
 
-@app.on_event('startup')
-async def bootstrap_campaign_leads():
-    await ensure_campaign_bootstrap()
+# IMPORTANT: Do not bootstrap CRM campaigns on process startup.
+# In Vercel's unified serverless runtime, every unrelated route (including
+# /telegram/health and /telegram/webhook) can cold-start this sub-application.
+# Startup writes therefore violate the read-only contract of health checks and
+# create unrelated CRM mutations. Campaign bootstrap is intentionally explicit
+# and must be invoked only by CRM-specific routes that need it.
 
 class IntakeIn(BaseModel):
     legal_name:str=Field(min_length=2,max_length=240)
