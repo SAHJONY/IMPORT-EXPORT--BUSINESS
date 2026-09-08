@@ -655,7 +655,7 @@ async def _process_inbound(
             await _send_text(
                 cfg,
                 to=clean_phone,
-                body="Your WhatsApp opt-out request has been recorded. SAHJONY Global Trade will not send automated follow-ups to this number.",
+                body="Your WhatsApp opt-out request has been recorded. SAHJONY GLOBAL TRADING will not send automated follow-ups to this number.",
                 lead_id=lead_id,
                 autonomous=True,
             )

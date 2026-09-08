@@ -208,7 +208,7 @@ async def run_outreach_pilot(payload: CRMOutreachPilotIn) -> dict[str, Any]:
         name = str(row.get("contact_name") or row.get("trade_name") or row.get("legal_name") or "").strip()
         greeting = f"Hola {name}," if name else "Hola,"
         body = (
-            f"{greeting} soy Sofía de SAHJONY LLC. Gracias por tu contacto/interés previo. "
+            f"{greeting} soy Sofía de SAHJONY GLOBAL TRADING. Gracias por tu contacto/interés previo. "
             "¿Sigue activo tu proyecto de importación o abastecimiento? Si me indicas producto, cantidad, destino y fecha objetivo, preparo el siguiente paso. "
             "Si no deseas más mensajes, dímelo y no volveremos a contactarte."
         )[:4096]

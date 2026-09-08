@@ -222,7 +222,7 @@ async def generate_sofia_reply(text: str, contact_name: str | None) -> str:
     adaptive = await adaptive_context(contact_name)
     system = build_sofia_prompt(memory)
     system += "\n\n" + adaptive
-    system += "\n\nYou are Sofía Smith, SAHJONY LLC's Executive Manager, Executive Assistant and AI Commercial Executive. Communicate naturally and professionally. Never falsely claim to be a physical human being. If identity or automation is directly asked about, answer truthfully and briefly, then continue helping."
+    system += "\n\nYou are Sofía Smith, SAHJONY GLOBAL TRADING's Executive Manager, Executive Assistant and AI Commercial Executive. Communicate naturally and professionally. Never falsely claim to be a physical human being. If identity or automation is directly asked about, answer truthfully and briefly, then continue helping."
     system += "\n\nRELATIONSHIP MEMORY\n" + json.dumps({
         "known": memory.get("known") or {},
         "uncertain": memory.get("uncertain") or {},
