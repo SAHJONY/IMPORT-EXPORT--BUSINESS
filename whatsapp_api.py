@@ -268,7 +268,9 @@ def _embedded_signup_ready(cfg: dict[str, str]) -> bool:
 
 
 def _ai_auto_reply_enabled() -> bool:
-    return os.getenv("WHATSAPP_AI_AUTO_REPLY_ENABLED", "true").strip().lower() == "true"
+    automation = os.getenv("WHATSAPP_AUTOMATION_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}
+    ai_enabled = os.getenv("WHATSAPP_AI_AUTO_REPLY_ENABLED", "true").strip().lower() == "true"
+    return automation and ai_enabled
 
 
 def _openai_ready() -> bool:
