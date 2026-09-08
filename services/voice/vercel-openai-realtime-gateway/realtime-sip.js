@@ -2,6 +2,7 @@ import OpenAI from 'openai';
 
 const MODEL = process.env.OPENAI_REALTIME_MODEL || 'gpt-realtime-2.1';
 const VOICE = process.env.OPENAI_REALTIME_VOICE || 'marin';
+const OPENAI_PROJECT_ID = process.env.OPENAI_PROJECT_ID || 'proj_wo5NVFLZGfkoDpPyGghDAzuw';
 
 const SOFIA_INSTRUCTIONS = `You are Sofía Smith, Executive Manager for SAHJONY LLC on a live inbound business call.
 Speak naturally, warmly, confidently, and briefly. Spanish is primary; switch naturally to English when the caller does.
@@ -21,6 +22,13 @@ function send(res, status, body) {
   res.end(JSON.stringify(body));
 }
 
+function sendXml(res, xml) {
+  res.statusCode = 200;
+  res.setHeader('content-type', 'application/xml; charset=utf-8');
+  res.setHeader('cache-control', 'no-store');
+  res.end(xml);
+}
+
 async function readRaw(req) {
   const chunks = [];
   for await (const chunk of req) chunks.push(Buffer.from(chunk));
@@ -32,6 +40,17 @@ export default async function handler(req, res) {
   const secret = process.env.OPENAI_WEBHOOK_SECRET;
 
   if (req.method === 'GET') {
+    const url = new URL(req.url, 'https://localhost');
+    if (url.searchParams.get('texml') === '1') {
+      console.info('Telnyx TeXML fetched', {
+        from: url.searchParams.get('From') || null,
+        to: url.searchParams.get('To') || null,
+        callSid: url.searchParams.get('CallSid') || null,
+      });
+      const sipUri = `sip:${OPENAI_PROJECT_ID}@sip.api.openai.com;transport=tls`;
+      return sendXml(res, `<?xml version="1.0" encoding="UTF-8"?>\n<Response>\n  <Dial>\n    <Sip>${sipUri}</Sip>\n  </Dial>\n</Response>`);
+    }
+
     return send(res, apiKey && secret ? 200 : 503, {
       ok: Boolean(apiKey && secret),
       service: 'sahjony-sofia-native-openai-realtime-sip',
@@ -110,6 +129,7 @@ export default async function handler(req, res) {
     return send(res, 502, { error: 'openai_accept_failed', status: response.status });
   }
 
+  console.info('OpenAI Realtime SIP call accepted', { callId, model: MODEL, voice: VOICE });
   return send(res, 200, {
     ok: true,
     accepted: true,
