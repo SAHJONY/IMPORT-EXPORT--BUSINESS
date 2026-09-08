@@ -1,0 +1,66 @@
+{
+  "version": 1,
+  "market": "US-Cuba logistics and trade services",
+  "supplierPolicy": {
+    "onlyFirstHandWholesale": true,
+    "excludeRetailResellers": true,
+    "excludeUnverifiedMiddlemen": true,
+    "excludeDirectCompetitorsFromSupplierPool": [
+      "Beach Cargo LLC",
+      "America Cargo Services"
+    ],
+    "acceptedSupplierTypes": [
+      "ocean_carrier",
+      "air_carrier",
+      "nvocc",
+      "licensed_freight_forwarder",
+      "port_terminal_operator",
+      "customs_broker",
+      "warehouse_operator",
+      "ground_carrier",
+      "direct_import_export_operator",
+      "manufacturer",
+      "master_distributor",
+      "authorized_wholesale_distributor"
+    ],
+    "requiredEvidenceBeforeApproved": [
+      "legal_entity",
+      "operating_authority_or_license_when_applicable",
+      "first_hand_or_master_wholesale_role",
+      "service_or_product_coverage",
+      "direct_rate_or_wholesale_rate",
+      "route_or_capacity_evidence",
+      "insurance_when_applicable",
+      "commercial_terms",
+      "kyb_and_compliance_review"
+    ],
+    "vehicleRule": {
+      "shippingMode": "MARITIME_ONLY",
+      "preferCubaFinalMile": true
+    },
+    "classification": [
+      "APPROVED_FIRST_HAND",
+      "QUALIFYING_FIRST_HAND",
+      "UNVERIFIED_MIDDLEMAN",
+      "RETAIL_ONLY",
+      "COMPETITOR_ONLY",
+      "REJECTED"
+    ]
+  },
+  "rankingWeights": {
+    "firstHandEvidence": 30,
+    "wholesaleRateAdvantage": 20,
+    "routeCoverage": 15,
+    "cubaFinalMile": 10,
+    "complianceAndAuthority": 10,
+    "capacityAndReliability": 10,
+    "paymentAndCommercialTerms": 5
+  },
+  "rules": {
+    "neverApproveFromMarketingClaimsAlone": true,
+    "neverInventPricingOrCapacity": true,
+    "doNotContactCompetitors": true,
+    "doNotUseRetailPriceAsWholesaleCost": true,
+    "preserveSourceEvidence": true
+  }
+}
