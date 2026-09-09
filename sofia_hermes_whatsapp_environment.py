@@ -16,7 +16,8 @@ from sofia_whatsapp_runtime import generate_sofia_reply
 HERMES_BASELINE = os.getenv("SOFIA_HERMES_VERSION", "0.21.0").strip() or "0.21.0"
 HERMES_AGENT_ID = "sofia-smith"
 HERMES_CHANNEL = "whatsapp"
-HERMES_TRANSPORT = "hostinger_hermes_native_whatsapp"
+HERMES_TRANSPORT = os.getenv("WHATSAPP_HERMES_TRANSPORT", "vercel_hermes_native_whatsapp").strip() or "vercel_hermes_native_whatsapp"
+HERMES_RUNTIME = os.getenv("WHATSAPP_HERMES_RUNTIME", "vercel-sandbox").strip() or "vercel-sandbox"
 CUBA_CRM_HEALTH_URL = os.getenv("SOFIA_CUBA_CRM_HEALTH_URL", "https://www.sahjony.com/crm/cuba-mipymes/health").strip()
 
 
@@ -265,7 +266,9 @@ def health() -> dict[str, Any]:
         "channel": HERMES_CHANNEL,
         "transport": HERMES_TRANSPORT,
         "cognition_runtime": "hermes",
-        "hostinger_native_transport": True,
+        "runtime": HERMES_RUNTIME,
+        "vercel_native_transport": HERMES_RUNTIME.startswith("vercel"),
+        "hostinger_native_transport": HERMES_RUNTIME == "hostinger-vps",
         "openclaw_dependency": False,
         "primary_inference": {
             "provider": brain.get("provider"),
