@@ -47,3 +47,29 @@ def test_enqueue_suppresses_recent_duplicate(monkeypatch):
     ))
     assert result["status"] == "duplicate_suppressed"
     assert not backend.inserted
+
+
+def test_expired_dispatch_lease_fails_closed(monkeypatch):
+    expired = {
+        "command_id": "waq_expired",
+        "recipient": "5351055349",
+        "body": "Hola",
+        "status": "dispatching",
+        "attempts": 1,
+        "lease_token": "stale-lease",
+        "lease_expires_at": "2020-01-01T00:00:00+00:00",
+    }
+    backend = FakeBackend([expired])
+    monkeypatch.setattr(whatsapp_api, "get_backend", lambda: backend)
+    monkeypatch.setattr(whatsapp_api, "_verify_hermes_signature", lambda *args, **kwargs: None)
+
+    result = asyncio.run(whatsapp_api.hermes_outbox(limit=10))
+
+    assert result["commands"] == []
+    assert result["count"] == 0
+    assert len(backend.inserted) == 1
+    _, quarantined = backend.inserted[0]
+    assert quarantined["status"] == "needs_review"
+    assert quarantined["last_error"] == "dispatch_lease_expired_fail_closed"
+    assert quarantined["lease_token"] is None
+    assert quarantined["lease_expires_at"] is None
