@@ -4,6 +4,9 @@ const token = String(process.env.TELEGRAM_BOT_TOKEN || '').trim();
 const channelId = String(process.env.TELEGRAM_CHANNEL_ID || '').trim();
 const botUsername = String(process.env.TELEGRAM_BOT_USERNAME || 'Sahjonywholesale_bot').replace(/^@/, '');
 const publicUrl = `https://t.me/${botUsername}`;
+const businessPhoneDisplay = String(process.env.SAHJONY_BUSINESS_PHONE_DISPLAY || '+1 346-534-6545').trim();
+const businessPhoneE164 = String(process.env.SAHJONY_BUSINESS_PHONE_E164 || '+13465346545').trim();
+const whatsappUrl = `https://wa.me/${businessPhoneE164.replace(/\D/g, '')}`;
 
 if (!token) throw new Error('TELEGRAM_BOT_TOKEN is required');
 
@@ -27,17 +30,18 @@ const commands = [
   { command: 'vehiculo', description: 'Envío marítimo de vehículos a Cuba' },
   { command: 'mipyme', description: 'Compras/importación/exportación para MIPYMES' },
   { command: 'proveedor', description: 'Registro y evaluación de proveedores' },
+  { command: 'whatsapp', description: `WhatsApp oficial ${businessPhoneDisplay}` },
   { command: 'estado', description: 'Estado de una operación existente' },
   { command: 'ayuda', description: 'Opciones y contacto' },
 ];
 
 await call('setMyCommands', { commands, language_code: 'es' });
 await call('setMyShortDescription', {
-  short_description: 'Sofía de SAHJONY: compras, sourcing, carga, vehículos, MIPYMES y comercio internacional.',
+  short_description: `Sofía de SAHJONY: compras, carga, vehículos y MIPYMES. WhatsApp ${businessPhoneDisplay}.`,
   language_code: 'es',
 });
 await call('setMyDescription', {
-  description: 'Canal comercial oficial de SAHJONY GLOBAL TRADING. Sofía atiende 24/7 consultas de compras, importación/exportación, carga consolidada, vehículos, proveedores y MIPYMES. Las cotizaciones formales dependen de verificación de costos, ruta, compliance y disponibilidad.',
+  description: `Canal comercial oficial de SAHJONY GLOBAL TRADING. Sofía atiende 24/7 compras, importación/exportación, carga consolidada, vehículos, proveedores y MIPYMES. WhatsApp oficial: ${businessPhoneDisplay}. Telegram opera en paralelo y no sustituye ni desconecta la cuenta de WhatsApp. Las cotizaciones formales dependen de verificación de costos, ruta, compliance y disponibilidad.`,
   language_code: 'es',
 });
 await call('setChatMenuButton', {
@@ -59,6 +63,9 @@ if (channelId) {
     '• Proveedores mayoristas y oportunidades comerciales',
     '• Importación, exportación y logística',
     '',
+    `📱 WhatsApp oficial SAHJONY: ${businessPhoneDisplay}`,
+    'Telegram y WhatsApp funcionan como canales paralelos. Este enlace no modifica ni desconecta la cuenta de WhatsApp.',
+    '',
     '📩 Inicia una conversación con Sofía para solicitar cotización o presentar una necesidad comercial.',
     '',
     'Las tarifas, rutas, disponibilidad y condiciones comerciales se confirman antes de cualquier cotización formal.',
@@ -74,6 +81,7 @@ if (channelId) {
     reply_markup: {
       inline_keyboard: [
         [{ text: '💬 Hablar con Sofía', url: `${publicUrl}?start=trade` }],
+        [{ text: '📱 WhatsApp oficial', url: whatsappUrl }],
         [{ text: '🌐 SAHJONY', url: 'https://www.sahjony.com/' }],
       ],
     },
@@ -91,6 +99,11 @@ console.log(JSON.stringify({
   ok: true,
   bot: me.username,
   publicUrl,
+  whatsapp: {
+    phone: businessPhoneDisplay,
+    url: whatsappUrl,
+    connectionTouched: false,
+  },
   channelConfigured: Boolean(channelId),
   launchMessageId,
   commandsConfigured: commands.length,
