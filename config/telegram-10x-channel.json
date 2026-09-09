@@ -1,30 +1,128 @@
 {
-  "version": 4,
+  "version": 5,
   "channel": "telegram",
   "brand": "SAHJONY GLOBAL TRADING",
   "botUsername": "SahjonyGlobalTradeBot",
   "publicEntryUrl": "https://t.me/SahjonyGlobalTradeBot",
   "primaryLanguage": "es",
   "secondaryLanguage": "en",
-  "role": "WhatsApp-parallel commercial channel and continuity fallback",
+  "role": "Autonomous Sales OS and WhatsApp-parallel commercial channel",
   "crossChannelIdentity": {
-    "officialBusinessPhoneE164": "+12816628581",
-    "officialBusinessPhoneDisplay": "+1 281-662-8581",
+    "officialWhatsappPhoneE164": "+12816628581",
+    "officialWhatsappPhoneDisplay": "+1 281-662-8581",
     "whatsappContactUrl": "https://wa.me/12816628581",
+    "sofiaVoicePhoneE164": "+13465346545",
+    "sofiaVoicePhoneDisplay": "+1 346-534-6545",
     "telegramBotUrl": "https://t.me/SahjonyGlobalTradeBot",
-    "policy": "Use the same SAHJONY business contact identity across Telegram and WhatsApp without altering, disconnecting, relinking, or replacing the existing WhatsApp account/session.",
+    "policy": "Telegram, WhatsApp, voice and email reconcile to one CRM customer truth without altering or disconnecting the independent provider sessions.",
     "whatsappCredentialsMayBeChangedByTelegramAutomation": false,
     "whatsappSessionMayBeDisconnectedByTelegramAutomation": false,
-    "telegramIsParallelNotReplacementAtCredentialLevel": true
+    "telegramIsParallelNotReplacementAtCredentialLevel": true,
+    "crossChannelCRMReconciliationRequired": true,
+    "duplicateConversationSuppressionRequired": true
   },
-  "objectives": [
-    "24/7 inbound commercial response by Sofia Smith",
-    "capture buyer, supplier, logistics, vehicle, cargo and Cuba private-sector demand",
-    "preserve CRM truth and evidence",
-    "publish verified commercial updates and calls-to-action",
-    "continue business communications when WhatsApp is unavailable",
-    "present the same official SAHJONY phone identity on Telegram while preserving the independent WhatsApp connection"
-  ],
+  "salesOS": {
+    "enabled": true,
+    "operatingMode": "autonomous_with_governed_commitment_gates",
+    "agent": "Sofia Smith",
+    "coverage": "24/7",
+    "northStar": "verified collected gross profit",
+    "objectives": [
+      "respond immediately to inbound commercial conversations",
+      "identify buyer, supplier, logistics, vehicle, cargo and Cuba private-sector intent",
+      "capture structured requirements progressively without interrogating the customer",
+      "score commercial readiness and evidence quality",
+      "reconcile the contact and conversation with CRM truth",
+      "request only missing information needed for the next commercial step",
+      "prepare non-binding quote inputs when evidence is sufficient",
+      "route opportunities to sourcing, logistics, pricing, KYB and compliance engines",
+      "follow up only with inbound or consented contacts",
+      "escalate only material commercial, compliance, payment or binding decisions",
+      "measure conversion from conversation to verified RFQ, firm quote, contracted transaction and collected gross profit"
+    ],
+    "pipeline": [
+      "INBOUND_ENGAGEMENT",
+      "NEED_DISCOVERY",
+      "REQUIREMENTS_CAPTURED",
+      "QUALIFICATION_REVIEW",
+      "QUALIFIED_DEMAND",
+      "SOURCING_AND_LOGISTICS",
+      "QUOTE_INPUTS_COMPLETE",
+      "FIRM_QUOTE_READY",
+      "NEGOTIATION",
+      "CONTRACT_OR_PO",
+      "FULFILLMENT",
+      "INVOICED",
+      "COLLECTED"
+    ],
+    "autonomousActions": [
+      "answer routine inbound questions",
+      "detect language and respond in the customer language",
+      "classify commercial intent",
+      "capture product, quantity, destination, timing, packaging and commercial terms",
+      "ask for missing non-sensitive requirements",
+      "create or update engagement evidence in CRM",
+      "deduplicate cross-channel customer identity when evidence supports a match",
+      "assign sales stage and evidence confidence",
+      "route verified needs to sourcing, pricing, logistics, KYB and compliance workflows",
+      "prepare draft non-binding quote structures from verified inputs",
+      "schedule governed follow-up for inbound or opted-in contacts",
+      "surface stalled qualified opportunities",
+      "publish verified offers, routes and service announcements to the public Telegram channel",
+      "handoff material exceptions to the Chairman"
+    ],
+    "neverAutonomous": [
+      "invent demand, price, capacity, certification or authority",
+      "mark a lead as qualified demand without evidence",
+      "send bulk unsolicited outreach",
+      "make binding pricing commitments from unverified costs",
+      "sign contracts or purchase orders",
+      "move money or change banking instructions",
+      "deploy SAHJONY capital",
+      "override sanctions, export-control, KYB or customs gates",
+      "disclose protected supplier or buyer economics prematurely"
+    ],
+    "qualificationEvidence": {
+      "minimumForQualifiedDemand": [
+        "real counterparty or reachable business contact",
+        "specific product or service requirement",
+        "quantity or shipment size",
+        "destination or delivery point",
+        "commercial intent"
+      ],
+      "preferredForFirmQuote": [
+        "required date or urgency",
+        "specification or acceptable substitute",
+        "packaging or container requirement",
+        "payment preference",
+        "buyer KYB when transaction risk requires it",
+        "verified supplier or carrier cost",
+        "landed-cost inputs",
+        "compliance basis"
+      ]
+    },
+    "followUpPolicy": {
+      "inboundOrConsentedOnly": true,
+      "noBulkColdMessaging": true,
+      "stopOnOptOut": true,
+      "suppressDuplicateCrossChannelFollowups": true,
+      "prioritizeBy": ["expected gross profit", "conversion probability", "speed to revenue", "evidence quality", "capital exposure"]
+    },
+    "commercialMetrics": [
+      "inbound conversations",
+      "requirements captured",
+      "qualified RFQs",
+      "firm quotes",
+      "quote-to-order conversion",
+      "contracted transactions",
+      "invoiced revenue",
+      "collected revenue",
+      "collected gross profit",
+      "median response time",
+      "sales cycle time",
+      "follow-up recovery rate"
+    ]
+  },
   "commands": [
     {"command":"start","description":"Abrir SAHJONY y hablar con Sofía"},
     {"command":"cotizar","description":"Solicitar una cotización"},
@@ -35,19 +133,9 @@
     {"command":"mipyme","description":"Compras, importación o exportación para MIPYMES"},
     {"command":"proveedor","description":"Registro y evaluación de proveedores"},
     {"command":"whatsapp","description":"Contacto oficial SAHJONY por WhatsApp"},
+    {"command":"llamar","description":"Hablar por teléfono con SAHJONY"},
     {"command":"estado","description":"Estado de una operación existente"},
     {"command":"ayuda","description":"Opciones y contacto"}
-  ],
-  "quickActions": [
-    "Solicitar cotización",
-    "Carga consolidada",
-    "Enviar vehículo",
-    "Comprar para Cuba",
-    "Vender desde Cuba",
-    "MIPYME / negocio privado",
-    "Proveedor mayorista",
-    "Hablar con Sofía",
-    "Abrir WhatsApp"
   ],
   "routing": {
     "buyer": "SOFIA_COMMERCIAL",
@@ -56,6 +144,9 @@
     "consolidatedCargo": "CUBA_PRIVATE_SECTOR_CARGO",
     "mipyme": "CUBA_PRIVATE_SECTOR_NETWORK",
     "customs": "CUBA_CUSTOMS_RELEASE",
+    "pricing": "PRICING_AND_MARGIN_ENGINE",
+    "kyb": "KYB_COMPLIANCE_WORKFLOW",
+    "logistics": "LOGISTICS_INTELLIGENCE",
     "owner": "SOFIA_EXECUTIVE_ASSISTANT"
   },
   "truthPolicy": {
@@ -69,21 +160,20 @@
   },
   "continuityPolicy": {
     "whatsappUnavailable": "Telegram becomes primary digital messaging channel alongside phone and email",
-    "whatsappAvailable": "Telegram remains a full parallel channel",
-    "crossChannelCRMReconciliationRequired": true,
-    "duplicateConversationSuppressionRequired": true,
+    "whatsappAvailable": "Telegram remains a full parallel Sales OS channel",
     "doNotTouchWhatsappSessionOrCredentials": true,
-    "sameBusinessPhoneMayBeDisplayedOnTelegram": true
+    "sameBusinessIdentityAcrossChannels": true
   },
   "publicationPolicy": {
-    "publicChannelUse": ["verified offers","verified routes","commercial updates","buyer calls","supplier calls","service announcements"],
-    "neverPublish": ["bank credentials","private customer data","unverified pricing","unverified demand","confidential supplier economics"],
-    "defaultCallToAction": "Escríbele a Sofía por Telegram @SahjonyGlobalTradeBot o usa el WhatsApp oficial +1 281-662-8581 para cotización o calificación comercial."
+    "publicChannelUse": ["verified offers","verified routes","commercial updates","buyer calls","supplier calls","service announcements","educational trade content"],
+    "neverPublish": ["bank credentials","private customer data","unverified pricing","unverified demand","confidential supplier economics","unverified certifications"],
+    "defaultCallToAction": "Escríbele a Sofía por Telegram @SahjonyGlobalTradeBot o usa WhatsApp +1 281-662-8581. Para llamadas: +1 346-534-6545."
   },
   "serviceLevel": {
     "inbound": "24/7",
     "languageDetection": true,
     "spanishFirst": true,
-    "humanEscalation": "material risk, compliance ambiguity, binding terms, payment or Chairman decision"
+    "targetFirstResponse": "immediate when the bot runtime is healthy",
+    "humanEscalation": "material risk, compliance ambiguity, binding terms, payment, capital deployment or Chairman decision"
   }
 }
