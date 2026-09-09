@@ -8,7 +8,7 @@ const OUT_DIR = path.join(ROOT, 'public', 'data', 'cuba-customs-release');
 const LATEST = path.join(OUT_DIR, 'latest.json');
 const HISTORY = path.join(OUT_DIR, 'history.json');
 const MAX_HISTORY = 500;
-const USER_AGENT = 'SAHJONY-Cuba-Customs-Scanner/1.0 (+https://www.sahjony.com)';
+const USER_AGENT = 'SAHJONY-Cuba-Customs-Scanner/2.0 (+https://www.sahjony.com)';
 
 function normalizeText(html) {
   return String(html || '')
@@ -46,9 +46,13 @@ function extractSignals(text) {
   const capabilities = {
     customs: /aduana|customs/.test(lower),
     customsClearance: /despacho aduan|customs clearance|clearance service/.test(lower),
-    cargoRelease: /liberaci[oó]n|release|levante|retiro de carga/.test(lower),
+    customsAgency: /agencia (?:de )?aduana|agencia aduanal|customs agenc/.test(lower),
+    customsAgent: /agente de aduana|customs agent/.test(lower),
+    freightForwarder: /transitari|freight forward/.test(lower),
+    authorizedLanguage: /autorizad[oa]|authorized|licencia|license|resoluci[oó]n/.test(lower),
+    cargoRelease: /liberaci[oó]n|release|levante|retiro de carga|desaduanamiento/.test(lower),
     port: /puerto|port|mariel|havana|habana|santiago de cuba|cienfuegos|nuevitas/.test(lower),
-    airport: /aeropuerto|airport|jos[eé] mart[ií]|frank pa[ií]s|abel santamar[ií]a|antonio maceo/.test(lower),
+    airport: /aeropuerto|airport|jos[eé] mart[ií]|frank pa[ií]s|abel santamar[ií]a|antonio maceo|varadero/.test(lower),
     warehouse: /almac[eé]n|warehouse|dep[oó]sito/.test(lower),
     terminalHandling: /terminal|handling|manipulaci[oó]n/.test(lower),
     documents: /document|manifiesto|bill of lading|conocimiento de embarque|air waybill|awb|factura|invoice/.test(lower),
@@ -64,7 +68,12 @@ function extractSignals(text) {
     ...text.matchAll(/\b(?:Mariel|La Habana|Habana|Havana|Santiago de Cuba|Cienfuegos|Nuevitas|Jos[eé] Mart[ií]|Frank Pa[ií]s|Abel Santamar[ií]a|Antonio Maceo|Varadero)\b/gi)
   ].map(m => m[0].trim())).slice(0, 30);
 
-  return { prices, transit, capabilities, locations };
+  const authorityReferences = uniq([
+    ...text.matchAll(/(?:resoluci[oó]n|resolution)\s*(?:no\.?\s*)?\d+(?:\s*(?:de|\/|-)\s*\d{4})?/gi),
+    ...text.matchAll(/(?:licencia|license)\s*(?:no\.?\s*)?[a-z0-9-]+/gi)
+  ].map(m => m[0].trim())).slice(0, 20);
+
+  return { prices, transit, capabilities, locations, authorityReferences };
 }
 
 async function readJson(file, fallback) {
@@ -92,7 +101,7 @@ async function fetchPage(entry) {
       ok: response.ok,
       contentHash: sha256(text),
       signals: extractSignals(text),
-      textSample: text.slice(0, 3000),
+      textSample: text.slice(0, 3500),
       evidenceNote: entry.evidenceNote || null,
       error: null
     };
@@ -107,7 +116,7 @@ async function fetchPage(entry) {
       httpStatus: null,
       ok: false,
       contentHash: null,
-      signals: { prices: [], transit: [], capabilities: {}, locations: [] },
+      signals: { prices: [], transit: [], capabilities: {}, locations: [], authorityReferences: [] },
       textSample: '',
       evidenceNote: entry.evidenceNote || null,
       error: String(error?.message || error)
@@ -115,13 +124,20 @@ async function fetchPage(entry) {
   }
 }
 
-function classify(entry) {
+function classify(entry, config) {
   if (entry.type === 'REGULATORY_SOURCE_ONLY') return 'REGULATORY_SOURCE_ONLY';
-  const c = entry.signals?.capabilities || {};
-  const hasReleaseFunction = c.customsClearance || c.cargoRelease || c.terminalHandling;
-  const hasEntryPoint = c.port || c.airport;
-  if (entry.ok && hasReleaseFunction && hasEntryPoint) return 'QUALIFYING_AUTHORIZED_FIRST_HAND';
-  return entry.configuredStatus || 'UNVERIFIED_MIDDLEMAN';
+  if (entry.type === 'PORT_TERMINAL_OPERATOR') return entry.configuredStatus || 'TERMINAL_OPERATOR_ONLY';
+
+  // Safety rule: website keywords alone can never prove current customs authority.
+  // Automatic scans may support qualification, but APPROVED requires separately persisted/current authority evidence.
+  const currentAuthorityEvidence = entry.currentAuthorityEvidence === true;
+  const hasDirectRateEvidence = entry.directRateEvidence === true;
+  const hasCurrentKyb = entry.currentKybEvidence === true;
+  if (currentAuthorityEvidence && hasDirectRateEvidence && hasCurrentKyb) {
+    return 'APPROVED_AUTHORIZED_FIRST_HAND';
+  }
+
+  return entry.configuredStatus || 'HISTORICAL_AUTHORITY_REVERIFY_CURRENT';
 }
 
 function delta(previous, current) {
@@ -129,6 +145,7 @@ function delta(previous, current) {
   const reasons = [];
   if (JSON.stringify(previous.signals?.prices || []) !== JSON.stringify(current.signals?.prices || [])) reasons.push('PRICE_OR_FEE_CHANGE');
   if (JSON.stringify(previous.signals?.locations || []) !== JSON.stringify(current.signals?.locations || [])) reasons.push('ENTRY_POINT_COVERAGE_CHANGE');
+  if (JSON.stringify(previous.signals?.authorityReferences || []) !== JSON.stringify(current.signals?.authorityReferences || [])) reasons.push('AUTHORITY_REFERENCE_CHANGE');
   if (JSON.stringify(previous.signals?.capabilities || {}) !== JSON.stringify(current.signals?.capabilities || {})) reasons.push('SERVICE_CAPABILITY_CHANGE');
   if (previous.contentHash !== current.contentHash && reasons.length === 0) reasons.push('CONTENT_CHANGE_NON_MATERIAL');
   return { material: reasons.some(r => r !== 'CONTENT_CHANGE_NON_MATERIAL'), reasons };
@@ -144,7 +161,15 @@ const sources = [];
 const events = [];
 for (const seed of seeds) {
   const current = await fetchPage(seed);
-  current.classification = classify(current);
+  current.currentAuthorityEvidence = seed.currentAuthorityEvidence === true;
+  current.directRateEvidence = seed.directRateEvidence === true;
+  current.currentKybEvidence = seed.currentKybEvidence === true;
+  current.classification = classify(current, config);
+  current.approvalBlockedReasons = current.classification === 'APPROVED_AUTHORIZED_FIRST_HAND' ? [] : [
+    ...(current.currentAuthorityEvidence ? [] : ['CURRENT_ADUANA_AUTHORITY_OR_ROLE_NOT_VERIFIED']),
+    ...(current.directRateEvidence ? [] : ['DIRECT_OR_WHOLESALE_RATE_NOT_VERIFIED']),
+    ...(current.currentKybEvidence ? [] : ['CURRENT_KYB_NOT_VERIFIED'])
+  ];
   current.delta = delta(previousMap.get(seed.id), current);
   sources.push(current);
   if (current.delta.reasons.length) {
@@ -158,13 +183,16 @@ for (const seed of seeds) {
       classification: current.classification,
       prices: current.signals.prices,
       entryPoints: current.signals.locations,
+      authorityReferences: current.signals.authorityReferences,
       capabilities: current.signals.capabilities,
+      approvalBlockedReasons: current.approvalBlockedReasons,
       url: seed.url
     });
   }
 }
 
-const qualifyingProviders = sources.filter(x => x.classification === 'QUALIFYING_AUTHORIZED_FIRST_HAND' || x.classification === 'APPROVED_AUTHORIZED_FIRST_HAND');
+const approvedProviders = sources.filter(x => x.classification === 'APPROVED_AUTHORIZED_FIRST_HAND');
+const qualificationPipeline = sources.filter(x => !['REGULATORY_SOURCE_ONLY', 'TERMINAL_OPERATOR_ONLY'].includes(x.classification));
 const latest = {
   engine: config.engine,
   version: config.version,
@@ -172,17 +200,20 @@ const latest = {
   scannedAt: new Date().toISOString(),
   market: config.market,
   scope: config.scope,
+  legalFramework: config.legalFramework,
   supplierPolicy: config.supplierPolicy,
   rules: config.rules,
   summary: {
     monitoredSources: sources.length,
     successful: sources.filter(x => x.ok).length,
     failed: sources.filter(x => !x.ok).length,
-    qualifyingProviders: qualifyingProviders.length,
+    approvedProviders: approvedProviders.length,
+    qualificationPipeline: qualificationPipeline.length,
     materialChanges: events.filter(x => x.material).length
   },
   sources,
-  qualifyingProviders,
+  approvedProviders,
+  qualificationPipeline,
   materialEvents: events.filter(x => x.material)
 };
 
@@ -200,6 +231,7 @@ console.log(JSON.stringify({
   scannedAt: latest.scannedAt,
   monitoredSources: latest.summary.monitoredSources,
   successful: latest.summary.successful,
-  qualifyingProviders: latest.summary.qualifyingProviders,
+  approvedProviders: latest.summary.approvedProviders,
+  qualificationPipeline: latest.summary.qualificationPipeline,
   materialChanges: latest.summary.materialChanges
 }));
