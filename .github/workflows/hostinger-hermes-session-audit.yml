@@ -30,8 +30,10 @@ jobs:
         run: |
           set -euo pipefail
           ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 -i ~/.ssh/key "$SSH_USER@$HOST" 'python3 -' <<'PY'
-          import glob, hashlib, json, os, re, subprocess, tarfile, urllib.request
+          import glob, json, os, re, subprocess, tarfile, urllib.request
           from datetime import datetime, timezone
+
+          NEED={'noiseKey','signedIdentityKey','signedPreKey','registrationId','advSecretKey','me','account','signalIdentities','platform'}
 
           def health():
               try:
@@ -41,10 +43,23 @@ jobs:
               except Exception as e:
                   return {'reachable':False,'error_type':type(e).__name__}
 
+          def shape_dict(d, size=None):
+              keys=set(d) if isinstance(d,dict) else set()
+              return {
+                  'present':True,
+                  'size':size,
+                  'keys':sorted(keys),
+                  'registered':bool(d.get('registered')) if isinstance(d,dict) else None,
+                  'platform':str(d.get('platform') or '')[:30] if isinstance(d,dict) else '',
+                  'has_me':bool(d.get('me')) if isinstance(d,dict) else False,
+                  'has_account':bool(d.get('account')) if isinstance(d,dict) else False,
+                  'baileys_key_matches':len(keys & NEED),
+                  'baileys_compatible':len(keys & NEED)>=5,
+              }
+
           def file_shape(path):
               try:
-                  d=json.load(open(path))
-                  return {'present':True,'size':os.path.getsize(path),'keys':sorted(d) if isinstance(d,dict) else [],'registered':bool(d.get('registered')) if isinstance(d,dict) else None,'platform':str(d.get('platform') or '')[:30] if isinstance(d,dict) else ''}
+                  return shape_dict(json.load(open(path)),os.path.getsize(path))
               except Exception as e:
                   return {'present':os.path.exists(path),'error_type':type(e).__name__}
 
@@ -70,14 +85,29 @@ jobs:
           archives=sorted(glob.glob('/root/sahjony-cutover-backups/*.tgz'))
           print('ARCHIVE_COUNT='+str(len(archives)))
           for path in archives:
-              info={'name':os.path.basename(path),'size':os.path.getsize(path),'whatsapp_creds_members':0,'hermes_session_members':0,'openclaw_whatsapp_members':0}
+              info={'name':os.path.basename(path),'size':os.path.getsize(path),'whatsapp_creds_members':0,'hermes_session_members':0,'openclaw_whatsapp_members':0,'credential_records':[]}
               try:
                   with tarfile.open(path,'r:gz') as t:
-                      names=t.getnames()
+                      members=t.getmembers()
+                      names=[m.name for m in members]
                       info['whatsapp_creds_members']=sum(1 for n in names if n.endswith('/creds.json') and 'whatsapp' in n.lower())
                       info['hermes_session_members']=sum(1 for n in names if '.hermes/platforms/whatsapp/session' in n)
                       info['openclaw_whatsapp_members']=sum(1 for n in names if 'openclaw' in n.lower() and 'whatsapp' in n.lower())
                       info['contains_creds_json']=any(n.endswith('/creds.json') for n in names)
+                      for m in members:
+                          n=m.name.lower()
+                          if not m.isfile() or not n.endswith('/creds.json') or 'whatsapp' not in n:
+                              continue
+                          f=t.extractfile(m)
+                          if not f:
+                              continue
+                          try:
+                              raw=f.read()
+                              rec=shape_dict(json.loads(raw.decode()),len(raw))
+                              rec['member_basename']=os.path.basename(m.name)
+                              info['credential_records'].append(rec)
+                          except Exception as e:
+                              info['credential_records'].append({'member_basename':os.path.basename(m.name),'error_type':type(e).__name__})
               except Exception as e:
                   info['error_type']=type(e).__name__
               print('ARCHIVE='+json.dumps(info,sort_keys=True))
