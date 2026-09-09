@@ -268,7 +268,9 @@ def _embedded_signup_ready(cfg: dict[str, str]) -> bool:
 
 
 def _ai_auto_reply_enabled() -> bool:
-    return os.getenv("WHATSAPP_AI_AUTO_REPLY_ENABLED", "true").strip().lower() == "true"
+    automation = os.getenv("WHATSAPP_AUTOMATION_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}
+    ai_enabled = os.getenv("WHATSAPP_AI_AUTO_REPLY_ENABLED", "true").strip().lower() == "true"
+    return automation and ai_enabled
 
 
 def _openai_ready() -> bool:
@@ -390,6 +392,15 @@ async def _send_text(
 async def _message_seen(message_id: str | None) -> bool:
     if not message_id:
         return False
+    try:
+        rows = await get_backend().select(
+            "whatsapp_messages",
+            params={"message_id": f"eq.{message_id}", "limit": "1"},
+        ) or []
+        return bool(rows)
+    except Exception:
+        # Fail closed for duplicate protection: transport errors must not create reply storms.
+        return True
 
 
 def _same_phone(left: str | None, right: str | None) -> bool:
@@ -566,14 +577,33 @@ async def _hermes_gateway_state() -> dict[str, Any]:
 async def _enqueue_hermes_message(payload: WhatsAppSend) -> dict[str, Any]:
     if not _hermes_bridge_configured():
         raise HTTPException(status_code=503, detail="Hermes application bridge is not configured")
+    if os.getenv("WHATSAPP_AUTOMATION_ENABLED", "false").strip().lower() not in {"1", "true", "yes", "on"}:
+        raise HTTPException(status_code=503, detail="WhatsApp automation is paused by safety control")
     recipient = _normalize_phone(payload.to)
+    body = payload.body[:4096]
+    fingerprint = hashlib.sha256(f"{recipient}|{body}".encode("utf-8")).hexdigest()
+    recent = await get_backend().select(
+        "whatsapp_openclaw_outbox",
+        params={"recipient": f"eq.{recipient}", "limit": "100", "order": "created_at.desc"},
+    ) or []
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=10)
+    for existing in recent:
+        if str(existing.get("dedupe_fingerprint") or "") != fingerprint:
+            continue
+        try:
+            created = datetime.fromisoformat(str(existing.get("created_at") or "").replace("Z", "+00:00"))
+        except ValueError:
+            created = datetime.now(timezone.utc)
+        if created.astimezone(timezone.utc) >= cutoff and str(existing.get("status") or "") in {"queued", "dispatching", "sent"}:
+            return {"status": "duplicate_suppressed", "provider": "hermes_whatsapp", "command_id": existing.get("command_id"), "recipient": recipient}
     command_id = f"waq_{secrets.token_urlsafe(18)}"
     row = {
         "command_id": command_id,
         "channel": "whatsapp",
         "account_id": "default",
         "recipient": recipient,
-        "body": payload.body[:4096],
+        "body": body,
+        "dedupe_fingerprint": fingerprint,
         "preview_url": payload.preview_url,
         "lead_id": payload.lead_id,
         "customer_id": payload.customer_id,
@@ -590,7 +620,7 @@ async def _enqueue_hermes_message(payload: WhatsAppSend) -> dict[str, Any]:
     await get_backend().insert("whatsapp_openclaw_outbox", row)
     await _record_outbound(
         to=recipient,
-        body=payload.body[:4096],
+        body=body,
         provider_message_id=None,
         lead_id=payload.lead_id,
         customer_id=payload.customer_id,
@@ -986,7 +1016,29 @@ async def hermes_outbox(
                 expired = lease_until.astimezone(timezone.utc) <= now
             except ValueError:
                 expired = True
-        if status != "queued" and not expired:
+        if status == "dispatching":
+            if expired:
+                await get_backend().insert("whatsapp_openclaw_outbox", {
+                    **row,
+                    "status": "needs_review",
+                    "last_error": "dispatch_lease_expired_fail_closed",
+                    "lease_token": None,
+                    "lease_expires_at": None,
+                    "updated_at": _now(),
+                })
+            continue
+        if status != "queued":
+            continue
+        attempts = int(row.get("attempts") or 0)
+        if attempts >= 3:
+            await get_backend().insert("whatsapp_openclaw_outbox", {
+                **row,
+                "status": "failed",
+                "last_error": "retry_limit_exceeded",
+                "lease_token": None,
+                "lease_expires_at": None,
+                "updated_at": _now(),
+            })
             continue
         lease_token = secrets.token_urlsafe(24)
         lease_expires_at = (now + timedelta(minutes=2)).isoformat()
