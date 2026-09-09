@@ -93,6 +93,8 @@ jobs:
                   return []
 
           def send_local(cmd):
+              if str(cmd.get('release_mode') or '') != 'customer_service_window':
+                  raise RuntimeError('compliance_release_missing')
               recipient=''.join(ch for ch in str(cmd.get('recipient') or '') if ch.isdigit())
               if not recipient: raise RuntimeError('invalid recipient')
               body=str(cmd.get('body') or '')[:4096]
