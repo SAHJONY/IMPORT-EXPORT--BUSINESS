@@ -1,0 +1,47 @@
+{
+  "version": 1,
+  "engine": "SAHJONY Cuba Vehicle Business A-to-Z",
+  "objective": "Qualify and execute lawful, evidence-backed vehicle sourcing/shipping/import-support opportunities from the United States to Cuba without inventing eligibility, rates, licenses, customs authority or margins.",
+  "operatingModel": ["customer_owned_vehicle_shipping", "vehicle_sourcing_plus_shipping", "commercial_vehicle_trade_only_when_legally_authorized"],
+  "hardRules": {
+    "vehicleTransport": "MARITIME_ONLY",
+    "preferCubaFinalDelivery": true,
+    "zeroSahjonyInventoryCapitalByDefault": true,
+    "noCustomerQuoteUntilComplianceAndLandedCostVerified": true,
+    "noVehiclePurchaseWithoutChairmanApproval": true,
+    "noBindingCommitmentWithoutChairmanApproval": true,
+    "onlyFirstHandWholesaleSuppliers": true,
+    "excludeRetailResellersAsCostSource": true,
+    "excludeDirectCompetitorsFromSupplierPool": ["Beach Cargo LLC", "America Cargo Services"]
+  },
+  "gates": [
+    {"id":"CUSTOMER_KYB_KYC","required":["legal_name","contact","payer_identity","Cuba_consignee_identity","end_use","sanctions_screening"]},
+    {"id":"VEHICLE_IDENTITY","required":["VIN","year","make","model","body_type","fuel_or_powertrain","operational_status","dimensions_if_required","photos"]},
+    {"id":"TITLE_OWNERSHIP","required":["original_or_acceptable_title","title_state","owner_name","lien_status","signed_owner_authorization_if_exporter_not_owner","bill_of_sale_if_applicable"]},
+    {"id":"US_EXPORT","required":["ECCN_or_EAR99_analysis","Cuba_license_or_license_exception_analysis","OFAC_CACR_transaction_analysis","restricted_party_screening","AES_EEI","ITN","CBP_used_vehicle_72_hour_process","port_specific_CBP_vehicle_export_requirements"]},
+    {"id":"OCEAN_ROUTE","required":["verified_bookable_US_origin_port","verified_Cuba_destination_port","carrier_or_FMC_authorized_OTI","vehicle_acceptance","RORO_or_container_mode","firm_direct_or_wholesale_rate","sailing_date","transit_time","BOL_terms","insurance_options"]},
+    {"id":"CUBA_IMPORT","required":["eligible_importer_or_recipient","vehicle_category_eligibility","current_Decree_163_and_complementary_rule_analysis","current_customs_reference_value","applicable_duties_taxes_and_customs_service_fees","required_Cuba_documents"]},
+    {"id":"CUBA_RELEASE","required":["authorized_release_role","port_terminal","customs_clearance_process","inspection_requirements","terminal_fees","storage_or_demurrage_rules","release_fee","pickup_authorization"]},
+    {"id":"FINAL_MILE","required":["delivery_address","authorized_ground_provider","vehicle_condition_at_handoff","final_mile_rate","proof_of_delivery"]},
+    {"id":"ECONOMICS","required":["vehicle_cost_if_sourced","US_pickup","US_port_charges","export_filing","ocean_freight","insurance","Cuba_government_charges","Cuba_terminal_charges","release_provider","storage_contingency","Cuba_final_mile","payment_processing","FX_buffer","SAHJONY_gross_profit","customer_total"]}
+  ],
+  "workflowStages": ["LEAD","INTAKE_COMPLETE","COMPLIANCE_REVIEW","VEHICLE_ELIGIBLE","TITLE_VERIFIED","ROUTE_VERIFIED","CUBA_IMPORT_VERIFIED","LANDED_COST_VERIFIED","FORMAL_QUOTE","CUSTOMER_ACCEPTED","BOOKED","US_PICKUP","PORT_RECEIVED","AES_ITN_CONFIRMED","CBP_EXPORT_CLEARED","SAILED","ARRIVED_CUBA","CUSTOMS_PROCESSING","RELEASED","FINAL_MILE","DELIVERED","CLOSED_COLLECTED"],
+  "exceptionStages": ["INPUTS_REQUIRED","BLOCKED_TITLE","BLOCKED_US_EXPORT","BLOCKED_CUBA_IMPORT","BLOCKED_ROUTE","BLOCKED_SANCTIONS","BLOCKED_CUSTOMS","RATE_EXPIRED","CUSTOMER_CANCELLED"],
+  "primaryUSAuthorities": [
+    {"name":"CBP","purpose":"used self-propelled vehicle export/title/port process","url":"https://www.cbp.gov/"},
+    {"name":"Census AES","purpose":"EEI/AES/ITN filing","url":"https://www.census.gov/foreign-trade/aes/"},
+    {"name":"BIS","purpose":"EAR Cuba export controls/license exceptions","url":"https://www.bis.gov/licensing/country-guidance/cuba-export-controls"},
+    {"name":"OFAC","purpose":"CACR and Cuba sanctions transaction analysis","url":"https://ofac.treasury.gov/"},
+    {"name":"FMC","purpose":"verify ocean freight forwarder/NVOCC authority","url":"https://www2.fmc.gov/oti/"}
+  ],
+  "primaryCubaFramework": [
+    "Decreto-Ley 108 de 2025 - De Aduanas",
+    "Decreto 134 de 2025 - Reglamento del Decreto-Ley 108",
+    "Decreto 163 de 2026 - vehiculos: propiedad, comercializacion e importacion",
+    "Resolucion 52 de 2026 MITRANS - regulaciones complementarias de vehiculos",
+    "Resolucion 174 de 2026 MFP - determinadas importaciones no comerciales",
+    "Resolucion 175 de 2026 MFP - tarifas maximas de servicios tecnico-productivos de Aduana para vehiculos",
+    "Resolucion 312 de 2026 AGR - valores/reglas de referencia para vehiculos"
+  ],
+  "dataToCapturePerVehicle": ["lead_id","customer_id","consignee_id","VIN","year","make","model","title_state","title_owner","lien_status","purchase_price","pickup_address","origin_port","destination_port","mode","carrier","OTI","sailing","transit","US_export_status","AES_ITN","BIS_basis","OFAC_basis","Cuba_importer_basis","Cuba_customs_value","duties","taxes","customs_service_fees","terminal_fees","release_provider","final_delivery_address","final_mile_provider","total_landed_cost","customer_price","gross_profit","gross_margin_pct","payment_status","delivery_status","evidence_refs"]
+}
