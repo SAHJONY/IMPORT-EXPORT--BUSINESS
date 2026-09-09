@@ -72,18 +72,36 @@ jobs:
           archives = glob.glob('/root/sahjony-cutover-backups/openclaw-state-*.tgz')
           print('ROLLBACK_ARCHIVE_COUNT=' + str(len(archives)), flush=True)
           print('ROLLBACK_ARCHIVE_RESTORABILITY=unverified', flush=True)
-          if not before:
-              if not session_present:
-                  print('RECOVERY_BLOCKED=session_link_required', flush=True)
-                  raise SystemExit(2)
-              if state.returncode != 0:
-                  print('RECOVERY_BLOCKED=gateway_not_active_requires_diagnosis', flush=True)
-                  raise SystemExit(3)
-              subprocess.run(['systemctl', '--user', 'restart', 'hermes-gateway.service'], check=True, timeout=45)
-              print('GATEWAY_RESTARTS=1', flush=True)
-              time.sleep(20)
-          else:
-              print('GATEWAY_RESTARTS=0', flush=True)
+          print('GATEWAY_RESTARTS=0', flush=True)
+          import re
+          logs = subprocess.run(
+              ['journalctl', '--user', '-u', 'hermes-gateway.service', '--since', '-10 minutes', '--no-pager'],
+              capture_output=True, text=True, timeout=20).stdout
+          markers = ['whatsapp', 'bridge', 'disabled', 'not configured', 'logged out', 'logout',
+                     '401', '403', '515', 'connection closed', 'connection failure',
+                     'Traceback', 'ModuleNotFoundError', 'ImportError', 'SyntaxError',
+                     'PermissionError', 'ENOENT', 'EADDRINUSE', 'Cannot find module',
+                     'QR', 'pairing', 'session', 'restart', 'failed', 'error']
+          print('JOURNAL_MARKER_COUNTS=' + json.dumps({m: logs.lower().count(m.lower()) for m in markers}), flush=True)
+          missing = re.findall(r"(?:No module named|Cannot find module) ['\"]([A-Za-z0-9_./@-]+)['\"]", logs)
+          print('MISSING_MODULES=' + json.dumps(sorted(set(missing))), flush=True)
+          locations = re.findall(r'File "([^"]+)", line ([0-9]+)', logs)
+          print('TRACEBACK_LOCATIONS=' + json.dumps([(os.path.basename(p), n) for p, n in locations][-25:]), flush=True)
+          exceptions = re.findall(r'\\b([A-Za-z]+(?:Error|Exception)):', logs)
+          print('EXCEPTION_TYPES=' + json.dumps(sorted(set(exceptions))), flush=True)
+          runtime = '/root/.hermes/hermes-agent'
+          module = runtime + '/gateway/platforms/whatsapp.py'
+          if os.path.isfile(module):
+              source = open(module).read()
+              env_names = re.findall(r'(?:getenv|environ.get)\\(["\']([A-Z0-9_]+)', source)
+              print('WHATSAPP_CODE_ENV_NAMES=' + json.dumps(sorted(set(env_names))), flush=True)
+          try:
+              cfg_path = '/root/.hermes/config.yaml'
+              cfg_code = "import json,yaml; d=yaml.safe_load(open('/root/.hermes/config.yaml')) or {}; p=d.get('platforms') or {}; w=p.get('whatsapp') or {}; print(json.dumps({'root_keys':sorted(d),'platform_keys':sorted(p) if isinstance(p,dict) else [],'whatsapp_keys':sorted(w) if isinstance(w,dict) else [],'whatsapp_enabled':w.get('enabled') if isinstance(w,dict) else None}))"
+              cfg = subprocess.run([runtime + '/venv/bin/python', '-c', cfg_code],capture_output=True,text=True,timeout=10)
+              print('CONFIG_SHAPE=' + (cfg.stdout.strip() if cfg.returncode == 0 else 'unavailable'), flush=True)
+          except Exception as exc:
+              print('CONFIG_SHAPE_ERROR=' + type(exc).__name__, flush=True)
           after = bridge_processes()
           status = health()
           print('WHATSAPP_PROCESS_COUNT_AFTER=' + str(len(after)), flush=True)
