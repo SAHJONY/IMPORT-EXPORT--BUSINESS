@@ -1,0 +1,114 @@
+{
+  "version": 1,
+  "engine": "SAHJONY Cuba Customs Release Provider Scanner",
+  "market": "Cuba customs clearance, port release, airport cargo release and final-mile handoff",
+  "scanIntervalHours": 6,
+  "scope": {
+    "country": "CU",
+    "entryPoints": {
+      "seaports": ["Mariel", "Havana", "Santiago de Cuba", "Cienfuegos", "Nuevitas"],
+      "airports": ["Jose Marti HAV", "Frank Pais HOG", "Abel Santamaria SNU", "Antonio Maceo SCU", "Juan Gualberto Gomez VRA"]
+    },
+    "services": [
+      "customs_clearance",
+      "customs_brokerage_or_authorized_representation",
+      "cargo_release",
+      "port_release",
+      "airport_cargo_release",
+      "terminal_handling",
+      "document_processing",
+      "inspection_coordination",
+      "duties_and_fees_administration",
+      "warehouse_release",
+      "bonded_or_customs_warehouse",
+      "port_or_airport_pickup",
+      "final_mile_handoff",
+      "door_delivery_cuba"
+    ]
+  },
+  "supplierPolicy": {
+    "onlyFirstHandOrAuthorized": true,
+    "excludeRetailResellers": true,
+    "excludeUnverifiedMiddlemen": true,
+    "neverTreatMarketingClaimAsAuthorization": true,
+    "neverInventClearanceAuthority": true,
+    "requiredEvidenceBeforeApproved": [
+      "legal_entity",
+      "authorization_or_role_to_act_in_customs_release_process",
+      "entry_point_coverage",
+      "cargo_type_coverage",
+      "direct_or_wholesale_rate",
+      "release_process_and_required_documents",
+      "commercial_terms",
+      "kyb_and_compliance_review"
+    ],
+    "classification": [
+      "APPROVED_AUTHORIZED_FIRST_HAND",
+      "QUALIFYING_AUTHORIZED_FIRST_HAND",
+      "AUTHORIZED_ROLE_UNVERIFIED_RATE",
+      "UNVERIFIED_MIDDLEMAN",
+      "RETAIL_ONLY",
+      "REGULATORY_SOURCE_ONLY",
+      "REJECTED"
+    ]
+  },
+  "watchDimensions": [
+    "customs",
+    "aduana",
+    "despacho",
+    "liberacion",
+    "release",
+    "puerto",
+    "airport",
+    "aeropuerto",
+    "terminal",
+    "warehouse",
+    "almacen",
+    "fees",
+    "tariff",
+    "rate",
+    "documents",
+    "inspection",
+    "delivery",
+    "door_to_door",
+    "vehicle",
+    "container",
+    "lcl",
+    "air_cargo"
+  ],
+  "regulatorySources": [
+    {
+      "id": "aduana_cuba",
+      "name": "Aduana General de la Republica de Cuba",
+      "type": "REGULATORY_SOURCE_ONLY",
+      "url": "https://www.aduana.gob.cu/"
+    }
+  ],
+  "providerSeeds": [
+    {
+      "id": "aerovaradero",
+      "name": "Aerovaradero S.A.",
+      "type": "AIRPORT_CARGO_OPERATOR",
+      "status": "QUALIFYING_AUTHORIZED_FIRST_HAND",
+      "url": "https://www.aerovaradero.com.cu/",
+      "evidenceNote": "Known Cuban airport cargo operator; customs-release authority, wholesale rate, entry-point coverage and commercial terms must be independently verified before approval."
+    },
+    {
+      "id": "cubanacan_express",
+      "name": "Cubanacan Express",
+      "type": "CUSTOMS_FORWARDING_COURIER",
+      "status": "QUALIFYING_AUTHORIZED_FIRST_HAND",
+      "url": "https://www.servisa.co.cu/",
+      "evidenceNote": "Public Cuba tourism source describes customs and forwarding services; verify current legal entity, authorization, cargo scope, rates and entry-point coverage."
+    }
+  ],
+  "rules": {
+    "doNotContactCompetitors": true,
+    "preserveSourceEvidence": true,
+    "doNotQuoteCustomerUntilReleaseCostVerified": true,
+    "doNotRepresentProviderAsCustomsBrokerWithoutEvidence": true,
+    "vehicleReleaseRequiresVehicleSpecificDocumentationCheck": true,
+    "finalMilePriceMustBeSeparatedFromCustomsAndTerminalCharges": true,
+    "captureAllGovernmentAndTerminalFeesSeparately": true
+  }
+}
