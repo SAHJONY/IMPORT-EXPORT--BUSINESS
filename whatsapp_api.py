@@ -362,7 +362,8 @@ async def _send_text(
 ) -> dict[str, Any]:
     if not _send_ready(cfg):
         raise HTTPException(status_code=503, detail="WhatsApp Cloud API is not configured for sending")
-    recipient = _normalize_phone(to)
+    eligibility = await _assert_compliant_session_outbound(to)
+    recipient = eligibility["recipient"]
     result = await _meta_json(
         _graph_url(cfg, f"{cfg['phone_number_id']}/messages"),
         access_token=cfg["access_token"],
@@ -408,6 +409,97 @@ def _same_phone(left: str | None, right: str | None) -> bool:
         return bool(left and right and _normalize_phone(left) == _normalize_phone(right))
     except HTTPException:
         return False
+
+
+def _as_utc(value: Any) -> datetime | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+async def _assert_compliant_session_outbound(to: str) -> dict[str, Any]:
+    """Fail-closed release gate for one-to-one WhatsApp session replies.
+
+    Business-initiated messaging outside the 24-hour customer-service window is
+    intentionally blocked here until the Hermes transport supports approved
+    WhatsApp templates end-to-end.
+    """
+    recipient = _normalize_phone(to)
+    backend = get_backend()
+    now = datetime.now(timezone.utc)
+    active_statuses = {"queued", "dispatching", "submitted", "sent"}
+
+    try:
+        leads = await backend.select("whatsapp_leads", params={"phone": f"eq.{recipient}", "limit": "5"}) or []
+        inbound = await backend.select(
+            "whatsapp_messages",
+            params={"phone": f"eq.{recipient}", "direction": "eq.inbound", "limit": "100", "order": "received_at.desc"},
+        ) or []
+        recipient_outbound = await backend.select(
+            "outbound_notifications",
+            params={"destination": f"eq.{recipient}", "channel": "eq.whatsapp", "limit": "100", "order": "created_at.desc"},
+        ) or []
+        recent_outbound = await backend.select(
+            "outbound_notifications",
+            params={"channel": "eq.whatsapp", "limit": "250", "order": "created_at.desc"},
+        ) or []
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="WhatsApp compliance state unavailable; outbound held") from exc
+
+    for lead in leads:
+        status = str(lead.get("status") or "").upper()
+        if status in {"OPTED_OUT", "DO_NOT_CONTACT", "DNC", "BLOCKED"}:
+            raise HTTPException(status_code=403, detail="WhatsApp recipient has opted out")
+        if lead.get("ai_followup_allowed") is False or lead.get("do_not_contact") is True:
+            raise HTTPException(status_code=403, detail="WhatsApp recipient is suppressed")
+
+    valid_inbound: list[tuple[datetime, dict[str, Any]]] = []
+    for row in inbound:
+        seen = _as_utc(row.get("received_at") or row.get("created_at") or row.get("timestamp"))
+        if seen is not None:
+            valid_inbound.append((seen, row))
+    if not valid_inbound:
+        raise HTTPException(status_code=409, detail="No verified inbound WhatsApp session; approved template required")
+    last_inbound_at, last_inbound = max(valid_inbound, key=lambda item: item[0])
+    if now - last_inbound_at > timedelta(hours=24):
+        raise HTTPException(status_code=409, detail="Outside WhatsApp 24-hour service window; approved template required")
+    if _opt_out(str(last_inbound.get("text") or last_inbound.get("content") or "")):
+        raise HTTPException(status_code=403, detail="Latest WhatsApp message is an opt-out request")
+
+    half_hour = now - timedelta(minutes=30)
+    day = now - timedelta(hours=24)
+    active_recipient_rows = [
+        row for row in recipient_outbound
+        if str(row.get("delivery_status") or row.get("status") or "").lower() in active_statuses
+    ]
+    count_30m = sum(1 for row in active_recipient_rows if (_as_utc(row.get("created_at")) or datetime.min.replace(tzinfo=timezone.utc)) >= half_hour)
+    count_24h = sum(1 for row in active_recipient_rows if (_as_utc(row.get("created_at")) or datetime.min.replace(tzinfo=timezone.utc)) >= day)
+    if count_30m >= 6 or count_24h >= 20:
+        raise HTTPException(status_code=429, detail="WhatsApp recipient rate limit reached; outbound held")
+
+    blast_cutoff = now - timedelta(minutes=10)
+    destinations = {
+        str(row.get("destination") or "")
+        for row in recent_outbound
+        if str(row.get("delivery_status") or row.get("status") or "").lower() in active_statuses
+        and (_as_utc(row.get("created_at")) or datetime.min.replace(tzinfo=timezone.utc)) >= blast_cutoff
+        and row.get("destination")
+    }
+    if recipient not in destinations and len(destinations) >= 20:
+        raise HTTPException(status_code=429, detail="WhatsApp anti-blast safety limit reached; outbound held")
+
+    return {
+        "recipient": recipient,
+        "session_open": True,
+        "last_inbound_at": last_inbound_at.isoformat(),
+        "mode": "customer_service_window",
+    }
 
 
 async def _is_owner_whatsapp(phone: str | None) -> bool:
@@ -579,7 +671,8 @@ async def _enqueue_hermes_message(payload: WhatsAppSend) -> dict[str, Any]:
         raise HTTPException(status_code=503, detail="Hermes application bridge is not configured")
     if os.getenv("WHATSAPP_AUTOMATION_ENABLED", "false").strip().lower() not in {"1", "true", "yes", "on"}:
         raise HTTPException(status_code=503, detail="WhatsApp automation is paused by safety control")
-    recipient = _normalize_phone(payload.to)
+    eligibility = await _assert_compliant_session_outbound(payload.to)
+    recipient = eligibility["recipient"]
     body = payload.body[:4096]
     fingerprint = hashlib.sha256(f"{recipient}|{body}".encode("utf-8")).hexdigest()
     recent = await get_backend().select(
