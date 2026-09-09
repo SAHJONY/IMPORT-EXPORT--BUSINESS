@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "channel": "telegram",
   "brand": "SAHJONY GLOBAL TRADING",
   "botUsername": "Sahjonywholesale_bot",
@@ -7,12 +7,23 @@
   "primaryLanguage": "es",
   "secondaryLanguage": "en",
   "role": "WhatsApp-parallel commercial channel and continuity fallback",
+  "crossChannelIdentity": {
+    "officialBusinessPhoneE164": "+13465346545",
+    "officialBusinessPhoneDisplay": "+1 346-534-6545",
+    "whatsappContactUrl": "https://wa.me/13465346545",
+    "telegramBotUrl": "https://t.me/Sahjonywholesale_bot",
+    "policy": "Use the same SAHJONY business contact identity across Telegram and WhatsApp without altering, disconnecting, relinking, or replacing the existing WhatsApp account/session.",
+    "whatsappCredentialsMayBeChangedByTelegramAutomation": false,
+    "whatsappSessionMayBeDisconnectedByTelegramAutomation": false,
+    "telegramIsParallelNotReplacementAtCredentialLevel": true
+  },
   "objectives": [
     "24/7 inbound commercial response by Sofia Smith",
     "capture buyer, supplier, logistics, vehicle, cargo and Cuba private-sector demand",
     "preserve CRM truth and evidence",
     "publish verified commercial updates and calls-to-action",
-    "continue business communications when WhatsApp is unavailable"
+    "continue business communications when WhatsApp is unavailable",
+    "present the same official SAHJONY phone identity on Telegram while preserving the independent WhatsApp connection"
   ],
   "commands": [
     {"command":"start","description":"Abrir SAHJONY y hablar con Sofía"},
@@ -23,6 +34,7 @@
     {"command":"vehiculo","description":"Envío marítimo de vehículos a Cuba"},
     {"command":"mipyme","description":"Compras, importación o exportación para MIPYMES"},
     {"command":"proveedor","description":"Registro y evaluación de proveedores"},
+    {"command":"whatsapp","description":"Contacto oficial SAHJONY por WhatsApp"},
     {"command":"estado","description":"Estado de una operación existente"},
     {"command":"ayuda","description":"Opciones y contacto"}
   ],
@@ -34,7 +46,8 @@
     "Vender desde Cuba",
     "MIPYME / negocio privado",
     "Proveedor mayorista",
-    "Hablar con Sofía"
+    "Hablar con Sofía",
+    "Abrir WhatsApp"
   ],
   "routing": {
     "buyer": "SOFIA_COMMERCIAL",
@@ -58,12 +71,14 @@
     "whatsappUnavailable": "Telegram becomes primary digital messaging channel alongside phone and email",
     "whatsappAvailable": "Telegram remains a full parallel channel",
     "crossChannelCRMReconciliationRequired": true,
-    "duplicateConversationSuppressionRequired": true
+    "duplicateConversationSuppressionRequired": true,
+    "doNotTouchWhatsappSessionOrCredentials": true,
+    "sameBusinessPhoneMayBeDisplayedOnTelegram": true
   },
   "publicationPolicy": {
     "publicChannelUse": ["verified offers","verified routes","commercial updates","buyer calls","supplier calls","service announcements"],
     "neverPublish": ["bank credentials","private customer data","unverified pricing","unverified demand","confidential supplier economics"],
-    "defaultCallToAction": "Escríbele a Sofía por Telegram para cotización o calificación comercial."
+    "defaultCallToAction": "Escríbele a Sofía por Telegram o usa el WhatsApp oficial +1 346-534-6545 para cotización o calificación comercial."
   },
   "serviceLevel": {
     "inbound": "24/7",
