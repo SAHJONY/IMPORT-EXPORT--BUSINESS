@@ -22,7 +22,7 @@ from sofia_hermes_nim_brain import configured as hermes_configured, model_name a
 
 app = FastAPI(title="SAHJONY WhatsApp Transport", version="3.1.0", docs_url=None, redoc_url=None)
 
-PROVIDER = os.getenv("WHATSAPP_PROVIDER", "meta_cloud").strip().lower() or "meta_cloud"
+PROVIDER = os.getenv("WHATSAPP_PROVIDER", "hermes").strip().lower() or "hermes"
 CONFIG_TABLE = "system_integrations"
 CONFIG_ID = "whatsapp_meta_cloud"
 
@@ -100,7 +100,7 @@ def _now() -> str:
 
 
 def _provider() -> str:
-    return os.getenv("WHATSAPP_PROVIDER", PROVIDER).strip().lower() or "meta_cloud"
+    return os.getenv("WHATSAPP_PROVIDER", PROVIDER).strip().lower() or "hermes"
 
 
 def _hermes_bridge_secret() -> str:
@@ -702,6 +702,8 @@ async def _enqueue_hermes_message(payload: WhatsAppSend) -> dict[str, Any]:
         "customer_id": payload.customer_id,
         "source_url": payload.source_url,
         "status": "queued",
+        "release_mode": eligibility["mode"],
+        "compliance_released_at": _now(),
         "attempts": 0,
         "lease_token": None,
         "lease_expires_at": None,
@@ -803,12 +805,12 @@ async def whatsapp_health() -> dict[str, Any]:
     persistence = persistent_backend_status()
     provider = _provider()
     openclaw = await _hermes_gateway_state()
-    if provider == "openclaw":
+    if provider in {"hermes", "openclaw"}:
         return {
             "status": "ok" if openclaw["connected"] else "configuration_required",
             "service": "whatsapp-transport",
             "version": "3.1.0",
-            "provider": "openclaw",
+            "provider": "hermes",
             "send_ready": openclaw["connected"],
             "webhook_ready": openclaw["configured"],
             "bridge_configured": openclaw["configured"],
@@ -987,8 +989,11 @@ async def whatsapp_setup_test(authorization: str | None = Header(None, alias="Au
 @app.post("/whatsapp/send")
 async def whatsapp_send(payload: WhatsAppSend, authorization: str | None = Header(None, alias="Authorization")) -> dict[str, Any]:
     _owner(authorization)
-    if _provider() == "openclaw":
+    provider = _provider()
+    if provider in {"hermes", "openclaw"}:
         return await _enqueue_hermes_message(payload)
+    raise HTTPException(status_code=503, detail="Meta Cloud transport is disabled by owner policy")
+
     cfg = await _config()
     return await _send_text(
         cfg,
@@ -1122,6 +1127,16 @@ async def hermes_outbox(
             continue
         if status != "queued":
             continue
+        if str(row.get("release_mode") or "") != "customer_service_window":
+            await get_backend().insert("whatsapp_openclaw_outbox", {
+                **row,
+                "status": "needs_review",
+                "last_error": "missing_compliance_release",
+                "lease_token": None,
+                "lease_expires_at": None,
+                "updated_at": _now(),
+            })
+            continue
         attempts = int(row.get("attempts") or 0)
         if attempts >= 3:
             await get_backend().insert("whatsapp_openclaw_outbox", {
@@ -1151,6 +1166,7 @@ async def hermes_outbox(
             "body": claimed["body"],
             "lease_token": lease_token,
             "lease_expires_at": lease_expires_at,
+            "release_mode": claimed.get("release_mode"),
         })
         if len(commands) >= limit:
             break
