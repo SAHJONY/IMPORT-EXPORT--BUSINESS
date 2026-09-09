@@ -1,0 +1,90 @@
+name: Hostinger Hermes Session Audit
+on:
+  push:
+    branches: [ops/hostinger-native-bridge-recovery-20260909]
+    paths: [.github/workflows/hostinger-hermes-session-audit.yml]
+permissions:
+  contents: read
+concurrency:
+  group: hostinger-vm-767852-audit
+  cancel-in-progress: false
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      HOST: 69.62.68.67
+      SSH_USER: root
+      PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Prepare SSH
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$PRIVATE_KEY"
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/key
+          chmod 600 ~/.ssh/key
+      - name: Read-only session and rollback audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 -i ~/.ssh/key "$SSH_USER@$HOST" 'python3 -' <<'PY'
+          import glob, hashlib, json, os, re, subprocess, tarfile, urllib.request
+          from datetime import datetime, timezone
+
+          def health():
+              try:
+                  with urllib.request.urlopen('http://127.0.0.1:3000/health', timeout=4) as r:
+                      d=json.load(r)
+                  return {'reachable':True,'status':d.get('status'),'queueLength':d.get('queueLength'),'uptime':d.get('uptime'),'scriptHash':d.get('scriptHash')}
+              except Exception as e:
+                  return {'reachable':False,'error_type':type(e).__name__}
+
+          def file_shape(path):
+              try:
+                  d=json.load(open(path))
+                  return {'present':True,'size':os.path.getsize(path),'keys':sorted(d) if isinstance(d,dict) else [],'registered':bool(d.get('registered')) if isinstance(d,dict) else None,'platform':str(d.get('platform') or '')[:30] if isinstance(d,dict) else ''}
+              except Exception as e:
+                  return {'present':os.path.exists(path),'error_type':type(e).__name__}
+
+          print('AUDIT_UTC='+datetime.now(timezone.utc).isoformat())
+          print('HERMES_GATEWAY='+subprocess.run(['systemctl','--user','is-active','hermes-gateway.service'],capture_output=True,text=True).stdout.strip())
+          print('BRIDGE_HEALTH='+json.dumps(health(),sort_keys=True))
+          current='/root/.hermes/platforms/whatsapp/session/creds.json'
+          backup=current+'.bak'
+          print('CURRENT_CREDS='+json.dumps(file_shape(current),sort_keys=True))
+          print('CURRENT_CREDS_BAK='+json.dumps(file_shape(backup),sort_keys=True))
+
+          log='/root/.hermes/platforms/whatsapp/bridge.log'
+          recent=''
+          if os.path.isfile(log):
+              with open(log,'rb') as f:
+                  f.seek(max(0,os.fstat(f.fileno()).st_size-120000))
+                  recent=f.read().decode(errors='replace')
+          reasons=re.findall(r'Connection closed \(reason: ([0-9]+)\)',recent,re.I)
+          print('RECENT_CLOSE_REASONS='+json.dumps({r:reasons.count(r) for r in sorted(set(reasons))}))
+          print('RECENT_LOGGED_OUT_COUNT='+str(len(re.findall(r'logged out',recent,re.I))))
+          print('RECENT_CONNECTED_COUNT='+str(len(re.findall(r'WhatsApp connected!',recent,re.I))))
+
+          archives=sorted(glob.glob('/root/sahjony-cutover-backups/*.tgz'))
+          print('ARCHIVE_COUNT='+str(len(archives)))
+          for path in archives:
+              info={'name':os.path.basename(path),'size':os.path.getsize(path),'whatsapp_creds_members':0,'hermes_session_members':0,'openclaw_whatsapp_members':0}
+              try:
+                  with tarfile.open(path,'r:gz') as t:
+                      names=t.getnames()
+                      info['whatsapp_creds_members']=sum(1 for n in names if n.endswith('/creds.json') and 'whatsapp' in n.lower())
+                      info['hermes_session_members']=sum(1 for n in names if '.hermes/platforms/whatsapp/session' in n)
+                      info['openclaw_whatsapp_members']=sum(1 for n in names if 'openclaw' in n.lower() and 'whatsapp' in n.lower())
+                      info['contains_creds_json']=any(n.endswith('/creds.json') for n in names)
+              except Exception as e:
+                  info['error_type']=type(e).__name__
+              print('ARCHIVE='+json.dumps(info,sort_keys=True))
+          print('SESSION_RESET=false')
+          print('FILES_MODIFIED=false')
+          print('MESSAGES_SENT=0')
+          PY
+      - name: Cleanup SSH
+        if: always()
+        run: rm -f ~/.ssh/key
