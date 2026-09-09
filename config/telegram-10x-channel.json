@@ -1,0 +1,74 @@
+{
+  "version": 1,
+  "channel": "telegram",
+  "brand": "SAHJONY GLOBAL TRADING",
+  "botUsername": "Sahjonywholesale_bot",
+  "publicEntryUrl": "https://t.me/Sahjonywholesale_bot",
+  "primaryLanguage": "es",
+  "secondaryLanguage": "en",
+  "role": "WhatsApp-parallel commercial channel and continuity fallback",
+  "objectives": [
+    "24/7 inbound commercial response by Sofia Smith",
+    "capture buyer, supplier, logistics, vehicle, cargo and Cuba private-sector demand",
+    "preserve CRM truth and evidence",
+    "publish verified commercial updates and calls-to-action",
+    "continue business communications when WhatsApp is unavailable"
+  ],
+  "commands": [
+    {"command":"start","description":"Abrir SAHJONY y hablar con Sofía"},
+    {"command":"cotizar","description":"Solicitar una cotización"},
+    {"command":"comprar","description":"Necesito comprar o importar"},
+    {"command":"vender","description":"Quiero ofrecer productos o capacidad"},
+    {"command":"carga","description":"Carga consolidada y envíos"},
+    {"command":"vehiculo","description":"Envío marítimo de vehículos a Cuba"},
+    {"command":"mipyme","description":"Compras, importación o exportación para MIPYMES"},
+    {"command":"proveedor","description":"Registro y evaluación de proveedores"},
+    {"command":"estado","description":"Estado de una operación existente"},
+    {"command":"ayuda","description":"Opciones y contacto"}
+  ],
+  "quickActions": [
+    "Solicitar cotización",
+    "Carga consolidada",
+    "Enviar vehículo",
+    "Comprar para Cuba",
+    "Vender desde Cuba",
+    "MIPYME / negocio privado",
+    "Proveedor mayorista",
+    "Hablar con Sofía"
+  ],
+  "routing": {
+    "buyer": "SOFIA_COMMERCIAL",
+    "supplier": "SOFIA_SUPPLIER_INTELLIGENCE",
+    "vehicle": "VEHICLE_A_TO_Z_ENGINE",
+    "consolidatedCargo": "CUBA_PRIVATE_SECTOR_CARGO",
+    "mipyme": "CUBA_PRIVATE_SECTOR_NETWORK",
+    "customs": "CUBA_CUSTOMS_RELEASE",
+    "owner": "SOFIA_EXECUTIVE_ASSISTANT"
+  },
+  "truthPolicy": {
+    "telegramMessageIsNotQualifiedDemandByItself": true,
+    "noInventedRates": true,
+    "noInventedCapacity": true,
+    "noAutomaticBindingCommitment": true,
+    "noMoneyMovement": true,
+    "noContractSignature": true,
+    "verifyBeforeFormalQuote": true
+  },
+  "continuityPolicy": {
+    "whatsappUnavailable": "Telegram becomes primary digital messaging channel alongside phone and email",
+    "whatsappAvailable": "Telegram remains a full parallel channel",
+    "crossChannelCRMReconciliationRequired": true,
+    "duplicateConversationSuppressionRequired": true
+  },
+  "publicationPolicy": {
+    "publicChannelUse": ["verified offers","verified routes","commercial updates","buyer calls","supplier calls","service announcements"],
+    "neverPublish": ["bank credentials","private customer data","unverified pricing","unverified demand","confidential supplier economics"],
+    "defaultCallToAction": "Escríbele a Sofía por Telegram para cotización o calificación comercial."
+  },
+  "serviceLevel": {
+    "inbound": "24/7",
+    "languageDetection": true,
+    "spanishFirst": true,
+    "humanEscalation": "material risk, compliance ambiguity, binding terms, payment or Chairman decision"
+  }
+}
