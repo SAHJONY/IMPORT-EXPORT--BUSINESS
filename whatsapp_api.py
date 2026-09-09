@@ -1016,7 +1016,18 @@ async def hermes_outbox(
                 expired = lease_until.astimezone(timezone.utc) <= now
             except ValueError:
                 expired = True
-        if status != "queued" and not expired:
+        if status == "dispatching":
+            if expired:
+                await get_backend().insert("whatsapp_openclaw_outbox", {
+                    **row,
+                    "status": "needs_review",
+                    "last_error": "dispatch_lease_expired_fail_closed",
+                    "lease_token": None,
+                    "lease_expires_at": None,
+                    "updated_at": _now(),
+                })
+            continue
+        if status != "queued":
             continue
         attempts = int(row.get("attempts") or 0)
         if attempts >= 3:
