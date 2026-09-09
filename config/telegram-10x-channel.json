@@ -1,5 +1,5 @@
 {
-  "version": 2,
+  "version": 3,
   "channel": "telegram",
   "brand": "SAHJONY GLOBAL TRADING",
   "botUsername": "Sahjonywholesale_bot",
@@ -8,9 +8,9 @@
   "secondaryLanguage": "en",
   "role": "WhatsApp-parallel commercial channel and continuity fallback",
   "crossChannelIdentity": {
-    "officialBusinessPhoneE164": "+13465346545",
-    "officialBusinessPhoneDisplay": "+1 346-534-6545",
-    "whatsappContactUrl": "https://wa.me/13465346545",
+    "officialBusinessPhoneE164": "+12816628581",
+    "officialBusinessPhoneDisplay": "+1 281-662-8581",
+    "whatsappContactUrl": "https://wa.me/12816628581",
     "telegramBotUrl": "https://t.me/Sahjonywholesale_bot",
     "policy": "Use the same SAHJONY business contact identity across Telegram and WhatsApp without altering, disconnecting, relinking, or replacing the existing WhatsApp account/session.",
     "whatsappCredentialsMayBeChangedByTelegramAutomation": false,
@@ -78,7 +78,7 @@
   "publicationPolicy": {
     "publicChannelUse": ["verified offers","verified routes","commercial updates","buyer calls","supplier calls","service announcements"],
     "neverPublish": ["bank credentials","private customer data","unverified pricing","unverified demand","confidential supplier economics"],
-    "defaultCallToAction": "Escríbele a Sofía por Telegram o usa el WhatsApp oficial +1 346-534-6545 para cotización o calificación comercial."
+    "defaultCallToAction": "Escríbele a Sofía por Telegram o usa el WhatsApp oficial +1 281-662-8581 para cotización o calificación comercial."
   },
   "serviceLevel": {
     "inbound": "24/7",
