@@ -1,0 +1,98 @@
+{
+  "version": 1,
+  "engine": "SAHJONY Cuba Consolidated Cargo, Shipping & Purchase Fulfillment A-to-Z",
+  "objective": "Operate compliant, evidence-backed consolidated cargo, parcel shipping and purchase-fulfillment services for Cuba while separating personal/noncommercial shipments from commercial imports and never inventing customs eligibility, provider authority, rates or delivery promises.",
+  "businessModels": [
+    "customer_owned_goods_shipping",
+    "consolidated_parcel_shipping",
+    "purchase_on_behalf_then_ship_to_cuba",
+    "merchant_checkout_to_cuba_fulfillment",
+    "commercial_mipyme_import_support_only_when_legally_authorized"
+  ],
+  "hardRules": {
+    "separateNoncommercialVsCommercial": true,
+    "classifyGoodsBeforeAcceptingPayment": true,
+    "neverPromiseDutyFreeWithoutCurrentLegalBasis": true,
+    "neverTreatRetailFreightRateAsWholesaleCost": true,
+    "onlyFirstHandWholesaleSuppliers": true,
+    "noBindingImportOrCustomsRepresentationWithoutVerifiedAuthority": true,
+    "noSahjonyInventoryCapitalByDefault": true,
+    "noRestrictedOrProhibitedGoods": true,
+    "preserveEvidenceAndTimestamp": true,
+    "excludeDirectCompetitorsFromSupplierPool": ["Beach Cargo LLC", "America Cargo Services"]
+  },
+  "serviceLanes": {
+    "AIR_PARCEL": {"eligible": true, "requiresDangerousGoodsScreen": true},
+    "OCEAN_CONSOLIDATED": {"eligible": true, "modes": ["LCL", "FCL20", "FCL40"]},
+    "DOOR_TO_DOOR": {"eligible": true, "requiresVerifiedCubaFinalMile": true},
+    "PURCHASE_AND_SHIP": {"eligible": true, "requiresMerchantInvoice": true, "requiresGoodsEligibilityBeforePurchase": true}
+  },
+  "gates": [
+    {"id":"CUSTOMER","required":["customer_name","contact","payer_identity","recipient_name","recipient_phone","recipient_address","municipality","province"]},
+    {"id":"SHIPMENT_CLASSIFICATION","required":["commercial_or_noncommercial","goods_list","quantities","declared_values","invoice_or_receipts","intended_use"]},
+    {"id":"PRODUCT_COMPLIANCE","required":["prohibited_restricted_screen","food_medicine_hygiene_rule_check_if_applicable","battery_or_dangerous_goods_check","telecom_or_radio_check_if_applicable","appliance_or_power_equipment_check_if_applicable","current_customs_limit_and_duty_basis"]},
+    {"id":"PURCHASING","required":["merchant","sku_or_product_link","unit_price","tax","domestic_shipping","purchase_authorization","return_policy","purchase_invoice"]},
+    {"id":"US_ORIGIN","required":["warehouse_or_acceptance_point","receiving_SLA","inspection_policy","consolidation_policy","repack_policy","dimensional_weight_policy","loss_damage_process"]},
+    {"id":"INTERNATIONAL_TRANSPORT","required":["mode","first_hand_operator","direct_or_wholesale_rate","minimum_charge","frequency","transit","included_services","excluded_charges","tracking_method"]},
+    {"id":"CUBA_ENTRY","required":["entry_point","authorized_operator_or_correspondent","customs_process","recipient_requirements","government_duties_and_fees_basis","storage_rules","release_process"]},
+    {"id":"FINAL_MILE","required":["coverage_province","delivery_method","final_mile_rate","delivery_SLA","recipient_notification","proof_of_delivery","undeliverable_process"]},
+    {"id":"ECONOMICS","required":["goods_cost_if_purchased","US_receiving","US_domestic_shipping","consolidation_cost","international_freight","insurance_if_used","Cuba_government_charges","Cuba_operator_charges","final_mile","payment_processing","FX_buffer","Sahjony_gross_profit","customer_total"]}
+  ],
+  "requiredProviderRolesInCuba": [
+    "customs_authority_information_source",
+    "authorized_customs_agency_or_transitaria",
+    "airport_cargo_operator",
+    "seaport_or_terminal_operator",
+    "parcel_or_messaging_operator",
+    "warehouse_or_temporary_deposit_operator",
+    "national_ground_distribution_operator"
+  ],
+  "cargoCategories": [
+    "food",
+    "hygiene",
+    "medicine_and_medical_supplies",
+    "clothing_and_shoes",
+    "household_goods",
+    "electronics",
+    "appliances",
+    "auto_parts",
+    "power_stations_and_batteries",
+    "tools",
+    "commercial_merchandise",
+    "other_review_required"
+  ],
+  "workflowStages": [
+    "LEAD",
+    "INTAKE_COMPLETE",
+    "GOODS_ELIGIBILITY_REVIEW",
+    "PURCHASE_APPROVED",
+    "PURCHASED",
+    "RECEIVED_US",
+    "CONSOLIDATED",
+    "BOOKED",
+    "EXPORTED",
+    "ARRIVED_CUBA",
+    "CUSTOMS_PROCESSING",
+    "RELEASED",
+    "FINAL_MILE",
+    "DELIVERED",
+    "CLOSED_COLLECTED"
+  ],
+  "exceptionStages": [
+    "INPUTS_REQUIRED",
+    "BLOCKED_PRODUCT",
+    "BLOCKED_CUSTOMS",
+    "BLOCKED_COMMERCIAL_IMPORT_AUTHORITY",
+    "BLOCKED_DANGEROUS_GOODS",
+    "RATE_EXPIRED",
+    "MERCHANT_ORDER_FAILED",
+    "CUSTOMS_HOLD",
+    "DELIVERY_EXCEPTION",
+    "CUSTOMER_CANCELLED"
+  ],
+  "readinessTarget": {
+    "minimumVerifiedOptionsPerCriticalFunction": 2,
+    "criticalFunctions": ["international_transport", "customs_release", "Cuba_final_mile"],
+    "quoteRule": "Do not issue firm quote until material logistics costs, customs basis and delivery scope are verified."
+  }
+}
