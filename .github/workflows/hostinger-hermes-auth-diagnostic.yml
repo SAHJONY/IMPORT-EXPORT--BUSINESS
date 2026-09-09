@@ -1,0 +1,48 @@
+name: Hostinger Hermes Auth Diagnostic
+
+on:
+  push:
+    branches: [ops/hermes-auth-diagnostic-20260909]
+    paths: [.github/workflows/hostinger-hermes-auth-diagnostic.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    env:
+      HOST: 69.62.68.67
+      SSH_USER: root
+      PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Prepare SSH
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$PRIVATE_KEY"
+          install -d -m 700 ~/.ssh
+          printf "%s\n" "$PRIVATE_KEY" > ~/.ssh/key
+          chmod 600 ~/.ssh/key
+      - name: Read-only Hermes auth/queue diagnostic
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=12 -i ~/.ssh/key "$SSH_USER@$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          echo "AUDIT_UTC=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          echo "OUTBOX_ACTIVE=$(systemctl is-active sahjony-hermes-outbox.service 2>/dev/null || true)"
+          echo "OUTBOX_ENABLED=$(systemctl is-enabled sahjony-hermes-outbox.service 2>/dev/null || true)"
+          echo "HERMES_GATEWAY=$(systemctl --user is-active hermes-gateway.service 2>/dev/null || true)"
+          echo "BRIDGE_HEALTH=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 3 http://127.0.0.1:3000/health || true)"
+          echo "--- worker env names ---"
+          systemctl show sahjony-hermes-outbox.service -p Environment --value 2>/dev/null | tr " " "\n" | sed "s/=.*$/=SET/" | sort -u || true
+          echo "--- worker source security-relevant lines ---"
+          grep -nE "BASE=|outbox|heartbeat|send_local|OUTBOUND|SEND_ENABLED|bridge.secret|openclaw|hermes" /opt/sahjony/hermes-outbox/worker.py 2>/dev/null | sed -E "s/(secret|token|password)[^[:space:]]*/[REDACTED]/Ig" | head -160 || true
+          echo "--- recent worker journal ---"
+          journalctl -u sahjony-hermes-outbox.service --since "-15 min" --no-pager 2>/dev/null | sed -E "s/(secret|token|password|authorization)[=:][^[:space:]]+/\1=[REDACTED]/Ig" | tail -120 || true
+          REMOTE
+      - name: Cleanup
+        if: always()
+        run: rm -f ~/.ssh/key
