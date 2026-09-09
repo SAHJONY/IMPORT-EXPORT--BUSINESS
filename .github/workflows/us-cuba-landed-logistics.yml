@@ -1,0 +1,43 @@
+name: SAHJONY USA-Cuba Landed Logistics Engine
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '47 */6 * * *'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sahjony-us-cuba-landed-logistics
+  cancel-in-progress: false
+
+jobs:
+  landed-logistics:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Run landed logistics decision engine
+        run: node tools/us-cuba-landed-logistics-engine.mjs
+
+      - name: Commit intelligence outputs when changed
+        shell: bash
+        run: |
+          git config user.name "SAHJONY Landed Logistics Engine"
+          git config user.email "logistics@sahjony.com"
+          git add public/data/us-cuba-landed-logistics/latest.json public/data/us-cuba-landed-logistics/history.json
+          if git diff --cached --quiet; then
+            echo "No landed-logistics changes to commit."
+            exit 0
+          fi
+          git commit -m "Update USA-Cuba landed logistics intelligence"
+          git push
