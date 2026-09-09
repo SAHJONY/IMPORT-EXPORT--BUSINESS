@@ -1,0 +1,54 @@
+{
+  "version": 1,
+  "engine": "SAHJONY Cuba Private-Sector Cargo & Commerce A-to-Z",
+  "objective": "Build a compliant private-sector network for consolidated cargo, purchasing, sourcing, fulfillment, delivery and lawful import/export support involving Cuban MIPYMEs, cooperatives and independent private entrepreneurs, without inventing authorization, demand, rates or legal eligibility.",
+  "operatingModels": [
+    "US_to_Cuba_private_business_supply",
+    "Cuba_local_purchase_and_fulfillment",
+    "Cuba_private_supplier_sourcing",
+    "Cuba_to_third_country_or_US_export_only_when_authorized",
+    "consolidated_cargo_for_private_businesses",
+    "marketplace_and_RFQ_matching_between_verified_private_actors"
+  ],
+  "hardRules": {
+    "privateSectorFocus": true,
+    "screenStateOwnershipAndRestrictedParties": true,
+    "verifyEntityAndBeneficialOwnershipBeforeCommercialCommitment": true,
+    "separateCommercialFromNoncommercialCargo": true,
+    "verifyImportExportAuthorityPerTransaction": true,
+    "noSanctionsEvasion": true,
+    "noRestrictedPartyTransactions": true,
+    "noSahjonyInventoryCapitalByDefault": true,
+    "onlyEvidenceBackedDemand": true,
+    "onlyFirstHandWholesaleSuppliers": true,
+    "noBindingCommitmentWithoutChairmanApproval": true
+  },
+  "privateActorTypes": [
+    "private_mipyme",
+    "cooperative",
+    "self_employed_private_entrepreneur",
+    "private_producer",
+    "private_wholesaler",
+    "private_retailer",
+    "private_logistics_or_delivery_operator",
+    "private_service_business"
+  ],
+  "gates": [
+    {"id":"ENTITY_KYB","required":["legal_name","entity_type","registration","tax_id_if_applicable","address","owners_or_controllers","contact","private_sector_status","restricted_party_screening"]},
+    {"id":"BUSINESS_CAPABILITY","required":["business_activity","products_or_services","capacity","territory","commercial_license_or_scope","invoice_capability","banking_or_payment_method"]},
+    {"id":"TRADE_ROLE","required":["buyer_supplier_or_both","import_need_or_export_offer","commercial_or_noncommercial","frequency","volume","incoterm_or_delivery_scope"]},
+    {"id":"PRODUCT","required":["sku_or_description","specification","quantity","unit","packaging","price_or_target","origin","destination","restricted_goods_screen"]},
+    {"id":"LOGISTICS","required":["pickup_or_acceptance_point","consolidation_need","mode","entry_or_exit_point","customs_responsibility","warehouse_need","final_mile_need","proof_of_delivery"]},
+    {"id":"COMPLIANCE","required":["US_OFAC_basis_if_US_nexus","US_BIS_basis_if_goods_subject_to_EAR","Cuba_import_export_basis","sanctions_screening","recordkeeping"]},
+    {"id":"ECONOMICS","required":["supplier_cost","inland_cost","consolidation_cost","international_freight","customs_and_government_charges","local_delivery","payment_cost","FX_buffer","SAHJONY_gross_profit","customer_total"]}
+  ],
+  "relationshipTracks": {
+    "BUYER_TRACK":"Private Cuban business needs goods/equipment/inputs; SAHJONY sources, verifies, quotes and coordinates delivery.",
+    "SUPPLIER_TRACK":"Private Cuban producer/business offers legitimate goods or services; SAHJONY evaluates first-hand supply, quality, capacity, pricing and lawful exportability.",
+    "LOGISTICS_TRACK":"Private Cuban actor provides pickup, warehousing, consolidation, distribution or other lawful local service; authority and commercial terms must be verified.",
+    "MARKETPLACE_TRACK":"Verified private buyers and suppliers may be matched through structured RFQs without exposing protected SAHJONY economics prematurely."
+  },
+  "workflowStages":["DISCOVERED","CONTACTED","KYB_PENDING","KYB_VERIFIED","CAPABILITY_VERIFIED","RFQ_IDENTIFIED","TRADE_COMPLIANCE_REVIEW","FIRM_QUOTE_READY","NEGOTIATION","CONTRACT_OR_PO","IN_TRANSIT_OR_FULFILLMENT","DELIVERED","INVOICED","COLLECTED"],
+  "blockedStages":["BLOCKED_KYB","BLOCKED_STATE_OR_RESTRICTED_PARTY","BLOCKED_IMPORT_EXPORT_AUTHORITY","BLOCKED_PRODUCT","BLOCKED_PAYMENT","BLOCKED_LOGISTICS","NO_VERIFIED_DEMAND"],
+  "readinessTarget":{"minimumVerifiedPrivatePartnersByFunction":3,"functions":["buyer","supplier","local_fulfillment","local_delivery","commercial_import_support"]}
+}
