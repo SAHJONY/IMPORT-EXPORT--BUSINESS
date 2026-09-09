@@ -1,0 +1,64 @@
+name: Hostinger WhatsApp Backup Credential Audit
+on:
+  push:
+    branches: [ops/hostinger-native-bridge-recovery-20260909]
+    paths: [.github/workflows/hostinger-whatsapp-backup-creds-audit.yml]
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      HOST: 69.62.68.67
+      SSH_USER: root
+      PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Prepare SSH
+        run: |
+          set -euo pipefail
+          test -n "$PRIVATE_KEY"
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/key
+          chmod 600 ~/.ssh/key
+      - name: Inspect archived WhatsApp creds in memory only
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 -i ~/.ssh/key "$SSH_USER@$HOST" 'python3 -' <<'PY'
+          import glob,json,os,tarfile
+          need={'noiseKey','signedIdentityKey','signedPreKey','registrationId','advSecretKey','me','account','signalIdentities','platform'}
+          for path in sorted(glob.glob('/root/sahjony-cutover-backups/openclaw-state-*.tgz')):
+              rows=[]
+              try:
+                  with tarfile.open(path,'r:gz') as t:
+                      for m in t.getmembers():
+                          n=m.name.lower()
+                          if not m.isfile() or not n.endswith('/creds.json') or 'whatsapp' not in n:
+                              continue
+                          f=t.extractfile(m)
+                          if not f: continue
+                          try:
+                              d=json.loads(f.read().decode())
+                              keys=set(d) if isinstance(d,dict) else set()
+                              rows.append({
+                                  'member_basename':os.path.basename(m.name),
+                                  'registered':bool(d.get('registered')) if isinstance(d,dict) else None,
+                                  'platform':str(d.get('platform') or '')[:30] if isinstance(d,dict) else '',
+                                  'baileys_key_matches':len(keys & need),
+                                  'baileys_compatible':len(keys & need)>=5,
+                                  'has_me':bool(d.get('me')) if isinstance(d,dict) else False,
+                                  'has_account':bool(d.get('account')) if isinstance(d,dict) else False,
+                                  'top_key_count':len(keys),
+                              })
+                          except Exception as e:
+                              rows.append({'parse_error':type(e).__name__})
+              except Exception as e:
+                  rows=[{'archive_error':type(e).__name__}]
+              print('ARCHIVE_CREDS='+json.dumps({'archive':os.path.basename(path),'records':rows},sort_keys=True))
+          print('FILES_MODIFIED=false')
+          print('SESSION_RESTORED=false')
+          print('MESSAGES_SENT=0')
+          PY
+      - name: Cleanup SSH
+        if: always()
+        run: rm -f ~/.ssh/key
