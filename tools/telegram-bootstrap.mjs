@@ -6,7 +6,10 @@ const botUsername = String(process.env.TELEGRAM_BOT_USERNAME || 'SahjonyGlobalTr
 const publicUrl = `https://t.me/${botUsername}`;
 const businessPhoneDisplay = String(process.env.SAHJONY_BUSINESS_PHONE_DISPLAY || '+1 281-662-8581').trim();
 const businessPhoneE164 = String(process.env.SAHJONY_BUSINESS_PHONE_E164 || '+12816628581').trim();
+const voicePhoneDisplay = String(process.env.SAHJONY_VOICE_PHONE_DISPLAY || '+1 346-534-6545').trim();
+const voicePhoneE164 = String(process.env.SAHJONY_VOICE_PHONE_E164 || '+13465346545').trim();
 const whatsappUrl = `https://wa.me/${businessPhoneE164.replace(/\D/g, '')}`;
+const callUrl = `tel:${voicePhoneE164}`;
 
 if (!token) throw new Error('TELEGRAM_BOT_TOKEN is required');
 
@@ -22,7 +25,7 @@ async function call(method, payload = {}) {
 }
 
 const commands = [
-  { command: 'start', description: 'Abrir SAHJONY y hablar con Sofía' },
+  { command: 'start', description: 'Abrir SAHJONY Sales OS y hablar con Sofía' },
   { command: 'cotizar', description: 'Solicitar una cotización' },
   { command: 'comprar', description: 'Necesito comprar o importar' },
   { command: 'vender', description: 'Quiero ofrecer productos o capacidad' },
@@ -31,17 +34,18 @@ const commands = [
   { command: 'mipyme', description: 'Compras/importación/exportación para MIPYMES' },
   { command: 'proveedor', description: 'Registro y evaluación de proveedores' },
   { command: 'whatsapp', description: `WhatsApp oficial ${businessPhoneDisplay}` },
+  { command: 'llamar', description: `Llamar a SAHJONY ${voicePhoneDisplay}` },
   { command: 'estado', description: 'Estado de una operación existente' },
   { command: 'ayuda', description: 'Opciones y contacto' },
 ];
 
 await call('setMyCommands', { commands, language_code: 'es' });
 await call('setMyShortDescription', {
-  short_description: `Sofía de SAHJONY: compras, carga, vehículos y MIPYMES. WhatsApp ${businessPhoneDisplay}.`,
+  short_description: `Sofía Sales OS 24/7: cotizaciones, compras, carga, vehículos, MIPYMES y proveedores.`,
   language_code: 'es',
 });
 await call('setMyDescription', {
-  description: `Canal comercial oficial de SAHJONY GLOBAL TRADING. Sofía atiende 24/7 compras, importación/exportación, carga consolidada, vehículos, proveedores y MIPYMES. Telegram oficial: @${botUsername}. WhatsApp oficial: ${businessPhoneDisplay}. Telegram opera en paralelo y no sustituye ni desconecta la cuenta de WhatsApp. Las cotizaciones formales dependen de verificación de costos, ruta, compliance y disponibilidad.`,
+  description: `SAHJONY GLOBAL TRADING Autonomous Sales OS. Sofía atiende 24/7, captura requisitos, califica oportunidades con evidencia, coordina sourcing/logística/KYB/pricing y prepara el siguiente paso comercial. Telegram oficial: @${botUsername}. WhatsApp: ${businessPhoneDisplay}. Llamadas: ${voicePhoneDisplay}. Las cotizaciones formales requieren costos, ruta, compliance y disponibilidad verificados.`,
   language_code: 'es',
 });
 await call('setChatMenuButton', {
@@ -53,23 +57,28 @@ await call('setChatMenuButton', {
 let launchMessageId = null;
 if (channelId) {
   const launchText = [
-    '🚀 SAHJONY GLOBAL TRADING — CANAL OFICIAL',
+    '🚀 SAHJONY GLOBAL TRADING — AUTONOMOUS SALES OS',
     '',
     `Telegram oficial: @${botUsername}`,
-    'Sofía Smith atiende este canal 24/7 para:',
-    '• Carga consolidada y envíos a Cuba',
-    '• Envío marítimo de vehículos',
-    '• Compras y sourcing internacional',
-    '• MIPYMES y emprendedores privados cubanos',
-    '• Proveedores mayoristas y oportunidades comerciales',
-    '• Importación, exportación y logística',
+    'Sofía Smith opera este canal 24/7 para convertir necesidades comerciales reales en operaciones verificadas:',
     '',
-    `📱 WhatsApp oficial SAHJONY: ${businessPhoneDisplay}`,
-    'Telegram y WhatsApp funcionan como canales paralelos. Este enlace no modifica ni desconecta la cuenta de WhatsApp.',
+    '• Cotizaciones y compras internacionales',
+    '• Sourcing con proveedores mayoristas',
+    '• Carga consolidada y logística',
+    '• Vehículos por vía marítima',
+    '• MIPYMES y sector privado cubano',
+    '• Importación / exportación',
+    '• Calificación de RFQs y seguimiento comercial',
     '',
-    '📩 Inicia una conversación con Sofía para solicitar cotización o presentar una necesidad comercial.',
+    'Sofía captura requisitos, identifica datos faltantes y coordina pricing, logística, KYB y compliance antes de una propuesta formal.',
     '',
-    'Las tarifas, rutas, disponibilidad y condiciones comerciales se confirman antes de cualquier cotización formal.',
+    `📱 WhatsApp: ${businessPhoneDisplay}`,
+    `☎️ Llamadas: ${voicePhoneDisplay}`,
+    'Telegram, WhatsApp, teléfono y email se tratan como una sola relación comercial en CRM, sin desconectar las sesiones independientes de cada canal.',
+    '',
+    '📩 Escribe lo que necesitas comprar, vender, enviar o cotizar. Incluye producto, cantidad y destino si ya los conoces.',
+    '',
+    'SAHJONY no inventa precios, demanda, capacidad ni certificaciones. Los compromisos vinculantes, pagos y contratos permanecen bajo sus gates de aprobación.',
     '',
     publicUrl,
     'www.sahjony.com',
@@ -81,8 +90,9 @@ if (channelId) {
     disable_web_page_preview: false,
     reply_markup: {
       inline_keyboard: [
-        [{ text: '💬 Hablar con Sofía', url: `${publicUrl}?start=trade` }],
+        [{ text: '💬 Hablar con Sofía', url: `${publicUrl}?start=sales` }],
         [{ text: '📱 WhatsApp oficial', url: whatsappUrl }],
+        [{ text: '☎️ Llamar a SAHJONY', url: callUrl }],
         [{ text: '🌐 SAHJONY', url: 'https://www.sahjony.com/' }],
       ],
     },
@@ -98,6 +108,7 @@ if (channelId) {
 const me = await call('getMe');
 console.log(JSON.stringify({
   ok: true,
+  mode: 'autonomous_sales_os',
   expectedBot: botUsername,
   bot: me.username,
   identityMatches: String(me.username || '').toLowerCase() === botUsername.toLowerCase(),
@@ -106,6 +117,10 @@ console.log(JSON.stringify({
     phone: businessPhoneDisplay,
     url: whatsappUrl,
     connectionTouched: false,
+  },
+  voice: {
+    phone: voicePhoneDisplay,
+    url: callUrl,
   },
   channelConfigured: Boolean(channelId),
   launchMessageId,
