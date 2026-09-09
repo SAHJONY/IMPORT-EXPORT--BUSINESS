@@ -1,0 +1,87 @@
+{
+  "version": 1,
+  "engine": "SAHJONY USA-Cuba Landed Logistics Decision Engine",
+  "objective": "Join route, first-hand supplier, Cuba customs intelligence, customs-release provider and final-mile evidence into a single transaction-readiness and landed-logistics decision layer without inventing missing costs, legal status, capacity or bookability.",
+  "inputs": {
+    "routeConfig": "config/us-cuba-route-scanner.json",
+    "routeLatest": "public/data/us-cuba-routes/latest.json",
+    "supplierLatest": "public/data/suppliers/first-hand-latest.json",
+    "customsIntelligenceLatest": "public/data/cuba-customs-intelligence/latest.json",
+    "customsRecords": "public/data/cuba-customs-intelligence/records.json",
+    "customsReleaseLatest": "public/data/cuba-customs-release/latest.json"
+  },
+  "costComponents": [
+    "us_inland_pickup",
+    "us_origin_terminal",
+    "us_export_documentation",
+    "ocean_or_air_freight",
+    "transshipment",
+    "cuba_terminal_handling",
+    "government_customs_duties_and_fees",
+    "customs_broker_or_authorized_release_service",
+    "inspection",
+    "storage_or_demurrage",
+    "warehouse_release",
+    "port_or_airport_pickup",
+    "cuba_final_mile_delivery"
+  ],
+  "mandatoryEvidenceForVerifiedLandedCost": [
+    "bookable_route",
+    "first_hand_supplier_or_direct_contract_rate",
+    "cargo_acceptance",
+    "current_cuba_customs_rule_set",
+    "applicable_customs_regime",
+    "required_documents",
+    "government_fees_or_explicit_not_applicable",
+    "authorized_release_operator_or_explicit_self_clearance_rule",
+    "release_service_rate_or_explicit_no_commercial_fee",
+    "terminal_fees_or_explicit_inclusion",
+    "final_mile_rate_or_explicit_port_release_only_scope",
+    "commercial_terms"
+  ],
+  "status": [
+    "VERIFIED_LANDED_COST",
+    "PARTIALLY_VERIFIED",
+    "INPUTS_REQUIRED",
+    "BLOCKED_COMPLIANCE",
+    "NOT_BOOKABLE",
+    "UNVERIFIED"
+  ],
+  "ranking": {
+    "complianceAndBookability": 30,
+    "verifiedTotalCost": 25,
+    "firstHandEconomics": 15,
+    "speed": 10,
+    "cubaReleaseConfidence": 10,
+    "finalMileCoverage": 5,
+    "minimalSahjonyCapitalExposure": 5
+  },
+  "decisionLabels": [
+    "CHEAPEST_VERIFIED",
+    "FASTEST_VERIFIED",
+    "BEST_VALUE_VERIFIED",
+    "BEST_CUBA_RELEASE_PATH",
+    "VEHICLE_ELIGIBLE",
+    "FINAL_DELIVERY_IN_CUBA",
+    "DO_NOT_QUOTE_YET",
+    "BLOCKED"
+  ],
+  "vehiclePolicy": {
+    "shippingMode": "MARITIME_ONLY",
+    "airForbidden": true,
+    "compareRoroAndContainerOnlyWhenVerifiedBookable": true,
+    "requireVehicleSpecificCubaCustomsRules": true,
+    "requireOwnershipAndAuthorizationReview": true,
+    "preferDoorDeliveryInCuba": true
+  },
+  "commercialPolicy": {
+    "neverUseRetailBenchmarkAsSahjonyCost": true,
+    "neverInventMissingFee": true,
+    "neverAssumeZeroFee": true,
+    "neverQuoteCustomerFromIndicativeMarketplaceRate": true,
+    "neverTreatHistoricalCustomsRuleAsCurrent": true,
+    "neverMarkProviderAuthorizedFromMarketingClaims": true,
+    "preferZeroSahjonyCapitalExposure": true,
+    "noBindingCommitment": true
+  }
+}
