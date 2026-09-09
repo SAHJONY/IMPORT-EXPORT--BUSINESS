@@ -1,0 +1,54 @@
+name: Global Lead Engagement Autopilot
+
+on:
+  schedule:
+    - cron: '42 * * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: global-lead-engagement-autopilot
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  engage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      LEAD_ENGAGEMENT_AUTONOMY_ENABLED: 'true'
+      LEAD_ENGAGEMENT_MAX_PER_CYCLE: '2'
+      LEAD_ENGAGEMENT_MIN_SCORE: '70'
+      OPERATIONAL_MAILBOX: ${{ secrets.OPERATIONAL_MAILBOX }}
+      GMAIL_CLIENT_ID: ${{ secrets.GMAIL_CLIENT_ID }}
+      GMAIL_CLIENT_SECRET: ${{ secrets.GMAIL_CLIENT_SECRET }}
+      GMAIL_REFRESH_TOKEN: ${{ secrets.GMAIL_REFRESH_TOKEN }}
+      GMAIL_SMTP_APP_PASSWORD: ${{ secrets.GMAIL_SMTP_APP_PASSWORD }}
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install runtime dependencies
+        run: pip install -r requirements.txt
+      - name: Verify persistence configuration
+        run: |
+          python - <<'PY'
+          import os, sys
+          missing=[]
+          if not os.getenv('SUPABASE_URL','').strip(): missing.append('SUPABASE_URL')
+          if not (os.getenv('SUPABASE_SERVICE_ROLE_KEY','').strip() or os.getenv('SUPABASE_SECRET_KEY','').strip()):
+              missing.append('SUPABASE_SERVICE_ROLE_KEY or SUPABASE_SECRET_KEY')
+          if missing:
+              print('Missing required secrets:', ', '.join(missing))
+              sys.exit(2)
+          gmail_oauth=all(os.getenv(k,'').strip() for k in ('GMAIL_CLIENT_ID','GMAIL_CLIENT_SECRET','GMAIL_REFRESH_TOKEN'))
+          gmail_smtp=bool(os.getenv('GMAIL_SMTP_APP_PASSWORD','').strip())
+          print('Persistence configured. Gmail transport configured:', gmail_oauth or gmail_smtp)
+          PY
+      - name: Run governed engagement cycle
+        run: python tools/global-lead-engagement-autopilot.py
