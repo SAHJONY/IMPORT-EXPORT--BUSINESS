@@ -52,7 +52,7 @@ jobs:
                       return {'reachable': True, 'connected': False, 'schema': 'non_object'}
                   return {
                       'reachable': True,
-                      'connected': data.get('connected') is True,
+                      'connected': data.get('status') == 'connected',
                       'ready': data.get('ready') is True,
                       'status': str(data.get('status') or '')[:40],
                       'keys': sorted(data),
@@ -102,6 +102,32 @@ jobs:
               print('CONFIG_SHAPE=' + (cfg.stdout.strip() if cfg.returncode == 0 else 'unavailable'), flush=True)
           except Exception as exc:
               print('CONFIG_SHAPE_ERROR=' + type(exc).__name__, flush=True)
+          bridge_log = '/root/.hermes/platforms/whatsapp/bridge.log'
+          if os.path.isfile(bridge_log):
+              with open(bridge_log, 'rb') as stream:
+                  stream.seek(max(0, os.fstat(stream.fileno()).st_size - 40000))
+                  recent = stream.read().decode(errors='replace')
+              events = ['logged out', 'loggedOut', 'badSession', 'restartRequired', 'connectionLost',
+                        'connection closed', 'connection failure', 'QR', 'pairing', '401', '403',
+                        '408', '428', '440', '500', '503', '515', 'ECONNREFUSED', 'ENOTFOUND',
+                        'ETIMEDOUT', 'connected', 'disconnected']
+              print('BRIDGE_LOG_MARKER_COUNTS=' + json.dumps({m:recent.lower().count(m.lower()) for m in events}), flush=True)
+          # Print only infrastructure-related journal lines, never message/session payloads.
+          safe_lines = []
+          for line in logs.splitlines():
+              if not re.search(r'whatsapp.*(?:failed|error|connect|bridge)|(?:failed|error).*whatsapp', line, re.I):
+                  continue
+              if re.search(r'payload|body|received message|incoming message|token|secret|password|authorization|qr code',line,re.I):
+                  continue
+              line = re.sub(r'\\b\\d{6,}\\b', '[NUMBER]', line)
+              line = re.sub(r'(?i)https?://\\S+', '[URL]', line)
+              safe_lines.append(line[:350])
+          print('WHATSAPP_STARTUP_DIAGNOSTICS=' + json.dumps(safe_lines[-12:]), flush=True)
+          bridge_source = '/root/.hermes/hermes-agent/scripts/whatsapp-bridge/bridge.js'
+          if os.path.isfile(bridge_source):
+              source = open(bridge_source).read()
+              begin = source.find("app.get('/health'")
+              print('HEALTH_HANDLER_SOURCE=' + json.dumps(source[begin:begin+900] if begin >= 0 else 'not_found'), flush=True)
           after = bridge_processes()
           status = health()
           print('WHATSAPP_PROCESS_COUNT_AFTER=' + str(len(after)), flush=True)
