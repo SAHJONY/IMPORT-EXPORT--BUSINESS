@@ -4,8 +4,8 @@ const token = String(process.env.TELEGRAM_BOT_TOKEN || '').trim();
 const channelId = String(process.env.TELEGRAM_CHANNEL_ID || '').trim();
 const botUsername = String(process.env.TELEGRAM_BOT_USERNAME || 'Sahjonywholesale_bot').replace(/^@/, '');
 const publicUrl = `https://t.me/${botUsername}`;
-const businessPhoneDisplay = String(process.env.SAHJONY_BUSINESS_PHONE_DISPLAY || '+1 346-534-6545').trim();
-const businessPhoneE164 = String(process.env.SAHJONY_BUSINESS_PHONE_E164 || '+13465346545').trim();
+const businessPhoneDisplay = String(process.env.SAHJONY_BUSINESS_PHONE_DISPLAY || '+1 281-662-8581').trim();
+const businessPhoneE164 = String(process.env.SAHJONY_BUSINESS_PHONE_E164 || '+12816628581').trim();
 const whatsappUrl = `https://wa.me/${businessPhoneE164.replace(/\D/g, '')}`;
 
 if (!token) throw new Error('TELEGRAM_BOT_TOKEN is required');
