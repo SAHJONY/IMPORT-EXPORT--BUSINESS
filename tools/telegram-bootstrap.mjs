@@ -2,7 +2,7 @@ import process from 'node:process';
 
 const token = String(process.env.TELEGRAM_BOT_TOKEN || '').trim();
 const channelId = String(process.env.TELEGRAM_CHANNEL_ID || '').trim();
-const botUsername = String(process.env.TELEGRAM_BOT_USERNAME || 'Sahjonywholesale_bot').replace(/^@/, '');
+const botUsername = String(process.env.TELEGRAM_BOT_USERNAME || 'SahjonyGlobalTradeBot').replace(/^@/, '');
 const publicUrl = `https://t.me/${botUsername}`;
 const businessPhoneDisplay = String(process.env.SAHJONY_BUSINESS_PHONE_DISPLAY || '+1 281-662-8581').trim();
 const businessPhoneE164 = String(process.env.SAHJONY_BUSINESS_PHONE_E164 || '+12816628581').trim();
@@ -41,7 +41,7 @@ await call('setMyShortDescription', {
   language_code: 'es',
 });
 await call('setMyDescription', {
-  description: `Canal comercial oficial de SAHJONY GLOBAL TRADING. Sofía atiende 24/7 compras, importación/exportación, carga consolidada, vehículos, proveedores y MIPYMES. WhatsApp oficial: ${businessPhoneDisplay}. Telegram opera en paralelo y no sustituye ni desconecta la cuenta de WhatsApp. Las cotizaciones formales dependen de verificación de costos, ruta, compliance y disponibilidad.`,
+  description: `Canal comercial oficial de SAHJONY GLOBAL TRADING. Sofía atiende 24/7 compras, importación/exportación, carga consolidada, vehículos, proveedores y MIPYMES. Telegram oficial: @${botUsername}. WhatsApp oficial: ${businessPhoneDisplay}. Telegram opera en paralelo y no sustituye ni desconecta la cuenta de WhatsApp. Las cotizaciones formales dependen de verificación de costos, ruta, compliance y disponibilidad.`,
   language_code: 'es',
 });
 await call('setChatMenuButton', {
@@ -55,6 +55,7 @@ if (channelId) {
   const launchText = [
     '🚀 SAHJONY GLOBAL TRADING — CANAL OFICIAL',
     '',
+    `Telegram oficial: @${botUsername}`,
     'Sofía Smith atiende este canal 24/7 para:',
     '• Carga consolidada y envíos a Cuba',
     '• Envío marítimo de vehículos',
@@ -97,7 +98,9 @@ if (channelId) {
 const me = await call('getMe');
 console.log(JSON.stringify({
   ok: true,
+  expectedBot: botUsername,
   bot: me.username,
+  identityMatches: String(me.username || '').toLowerCase() === botUsername.toLowerCase(),
   publicUrl,
   whatsapp: {
     phone: businessPhoneDisplay,
