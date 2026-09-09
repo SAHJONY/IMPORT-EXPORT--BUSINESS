@@ -1,0 +1,130 @@
+{
+  "version": 1,
+  "engine": "SAHJONY Cuba Customs Intelligence & Records Scanner",
+  "scanIntervalHours": 6,
+  "scope": {
+    "country": "CU",
+    "domains": [
+      "customs_law",
+      "customs_regulations",
+      "customs_clearance",
+      "customs_control",
+      "customs_regimes",
+      "temporary_deposit",
+      "warehousing",
+      "cargo_release",
+      "customs_brokers_and_agents",
+      "freight_forwarders",
+      "authorized_operators",
+      "economic_operator_authorization",
+      "tariffs_and_service_fees",
+      "duties_and_tax_rules",
+      "valuation_rules",
+      "vehicle_imports",
+      "noncommercial_imports",
+      "commercial_imports",
+      "air_cargo",
+      "ocean_cargo",
+      "postal_and_parcel_shipments",
+      "ports",
+      "airports",
+      "inspection",
+      "seizure_retention_abandonment",
+      "sanctions_and_enforcement",
+      "required_documents",
+      "restricted_or_prohibited_goods",
+      "final_release_and_delivery"
+    ]
+  },
+  "rules": {
+    "preferOfficialPrimarySources": true,
+    "preserveSourceEvidence": true,
+    "neverInventLegalStatus": true,
+    "neverInferAuthorizationFromMarketingLanguage": true,
+    "markHistoricalRulesAsHistorical": true,
+    "legalDecisionRequiresCurrentSource": true,
+    "recordSupersededAndRepealedRules": true,
+    "separateGovernmentFeesFromCommercialProviderFees": true
+  },
+  "sources": [
+    {
+      "id": "agr_official",
+      "name": "Aduana General de la Republica de Cuba",
+      "type": "OFFICIAL_REGULATOR",
+      "authority": "PRIMARY",
+      "url": "https://www.aduana.gob.cu/",
+      "watch": ["resolucion", "aduana", "tarifa", "desaduanamiento", "mercancias", "vehiculos", "envios", "agencia", "transitaria", "operador economico autorizado"]
+    },
+    {
+      "id": "gaceta_2026_o7",
+      "name": "Gaceta Oficial No. 7 Ordinaria de 2026",
+      "type": "LEGAL_CODE_SET",
+      "authority": "PRIMARY_LEGAL_TEXT_MIRROR",
+      "url": "https://www.directoriocubano.com/servicios/gaceta-oficial/2026/ordinaria/7/",
+      "records": [
+        "Decreto-Ley 108 de 2025 - De Aduanas",
+        "Decreto 134 de 2025 - Reglamento del Decreto-Ley 108",
+        "Resolucion 529 de 2025 - control aduanero a las mercancias",
+        "Resolucion 530 de 2025 - aprovisionamiento a buques y aeronaves",
+        "Resolucion 531 de 2025 - deposito temporal de mercancias",
+        "Resolucion 532 de 2025 - regimenes aduaneros",
+        "Resolucion 533 de 2025 - desaduanamiento de mercancias",
+        "Resolucion 534 de 2025 - abandono de mercancias, bienes y valores",
+        "Resolucion 535 de 2025 - operador economico autorizado",
+        "Resolucion 536 de 2025 - autoridades facultadas para sanciones",
+        "Resolucion 537 de 2025 - control de buques y aeronaves"
+      ]
+    },
+    {
+      "id": "gaceta_2026_o65",
+      "name": "Gaceta Oficial No. 65 Ordinaria de 2026",
+      "type": "VEHICLE_IMPORT_AND_CUSTOMS_FEES",
+      "authority": "PRIMARY_LEGAL_TEXT_MIRROR",
+      "url": "https://www.directoriocubano.com/servicios/gaceta-oficial/2026/ordinaria/65/",
+      "records": [
+        "Resolucion 174 de 2026 MFP - importacion no comercial de determinados vehiculos",
+        "Resolucion 175 de 2026 MFP - tarifas maximas USD de servicios tecnico-productivos de Aduana para vehiculos",
+        "Resolucion 52 de 2026 MITRANS - regulaciones complementarias sobre vehiculos",
+        "Resolucion 312 de 2026 AGR - modifica valores de referencia de vehiculos"
+      ]
+    },
+    {
+      "id": "granma_customs_framework_2026",
+      "name": "Granma - actualizacion marco legal aduanero 2026",
+      "type": "OFFICIAL_STATE_SUMMARY",
+      "authority": "SECONDARY_OFFICIAL",
+      "url": "https://www.granma.cu/cuba/2026-01-21/aduana-general-de-la-republica-actualiza-marco-legal-para-reforzar-el-control-en-frontera-y-facilitar-el-comercio-21-01-2026-22-01-08"
+    },
+    {
+      "id": "granma_noncommercial_relief_2026",
+      "name": "Granma - beneficios arancelarios importacion no comercial 2026",
+      "type": "OFFICIAL_STATE_SUMMARY",
+      "authority": "SECONDARY_OFFICIAL",
+      "url": "https://www.granma.cu/cuba/2026-01-17/se-otorgan-excepcionalmente-beneficios-arancelarios-a-la-importacion-sin-caracter-comercial-17-01-2026-13-01-51"
+    }
+  ],
+  "recordSchema": {
+    "requiredFields": [
+      "recordId",
+      "sourceId",
+      "sourceUrl",
+      "capturedAt",
+      "recordType",
+      "title",
+      "status",
+      "effectiveDate",
+      "subjects",
+      "entryPoints",
+      "cargoTypes",
+      "fees",
+      "documents",
+      "restrictions",
+      "authorizationRules",
+      "supersedes",
+      "repeals",
+      "confidence"
+    ],
+    "statusValues": ["CURRENT", "HISTORICAL", "SUPERSEDED", "REPEALED", "UNVERIFIED_CURRENT_STATUS"],
+    "confidenceValues": ["VERIFIED", "HIGH", "MEDIUM", "LOW", "UNVERIFIED"]
+  }
+}
