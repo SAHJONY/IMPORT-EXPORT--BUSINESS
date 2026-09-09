@@ -30,8 +30,8 @@ def test_message_seen_false_for_new_message(monkeypatch):
 
 
 def test_enqueue_suppresses_recent_duplicate(monkeypatch):
-    os.environ["WHATSAPP_AUTOMATION_ENABLED"] = "true"
-    os.environ["SAHJONY_APP_BRIDGE_SECRET"] = "x" * 32
+    monkeypatch.setenv("WHATSAPP_AUTOMATION_ENABLED", "true")
+    monkeypatch.setenv("SAHJONY_APP_BRIDGE_SECRET", "x" * 32)
     existing = {
         "command_id": "waq_existing",
         "recipient": "5351055349",
