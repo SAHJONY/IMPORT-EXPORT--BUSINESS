@@ -1,12 +1,12 @@
 {
-  "version": 5,
+  "version": 6,
   "channel": "telegram",
   "brand": "SAHJONY GLOBAL TRADING",
   "botUsername": "SahjonyGlobalTradeBot",
   "publicEntryUrl": "https://t.me/SahjonyGlobalTradeBot",
   "primaryLanguage": "es",
   "secondaryLanguage": "en",
-  "role": "Autonomous Sales OS and WhatsApp-parallel commercial channel",
+  "role": "Proactive Autonomous Sales OS and WhatsApp-parallel commercial channel",
   "crossChannelIdentity": {
     "officialWhatsappPhoneE164": "+12816628581",
     "officialWhatsappPhoneDisplay": "+1 281-662-8581",
@@ -23,7 +23,8 @@
   },
   "salesOS": {
     "enabled": true,
-    "operatingMode": "autonomous_with_governed_commitment_gates",
+    "proactive": true,
+    "operatingMode": "proactive_autonomous_with_governed_commitment_gates",
     "agent": "Sofia Smith",
     "coverage": "24/7",
     "northStar": "verified collected gross profit",
@@ -36,7 +37,9 @@
       "request only missing information needed for the next commercial step",
       "prepare non-binding quote inputs when evidence is sufficient",
       "route opportunities to sourcing, logistics, pricing, KYB and compliance engines",
-      "follow up only with inbound or consented contacts",
+      "proactively recover stalled inbound or consented opportunities",
+      "surface the next-best-action before a qualified opportunity goes cold",
+      "publish verified commercial calls-to-action when useful",
       "escalate only material commercial, compliance, payment or binding decisions",
       "measure conversion from conversation to verified RFQ, firm quote, contracted transaction and collected gross profit"
     ],
@@ -67,10 +70,42 @@
       "route verified needs to sourcing, pricing, logistics, KYB and compliance workflows",
       "prepare draft non-binding quote structures from verified inputs",
       "schedule governed follow-up for inbound or opted-in contacts",
+      "send concise Telegram follow-ups when a previously engaged contact goes quiet and no opt-out exists",
+      "prioritize stalled opportunities by expected gross profit, conversion probability, evidence quality and time-to-revenue",
+      "suppress repeated follow-ups when a newer inbound message or prior proactive touch exists",
       "surface stalled qualified opportunities",
       "publish verified offers, routes and service announcements to the public Telegram channel",
       "handoff material exceptions to the Chairman"
     ],
+    "proactiveLoop": {
+      "enabled": true,
+      "eligibleContacts": ["telegram_inbound", "explicitly_consented"],
+      "neverColdProspect": true,
+      "defaultQuietHours": "21:00-08:00 contact-local time when known",
+      "cadence": {
+        "firstFollowUpAfterHours": 6,
+        "secondFollowUpAfterHours": 24,
+        "finalFollowUpAfterHours": 72,
+        "maxAutomatedFollowUpsPerConversation": 3
+      },
+      "nextBestActionPriority": [
+        "missing requirement blocking quote",
+        "verified buyer waiting for supplier or carrier input",
+        "firm quote awaiting response",
+        "negotiation with clear unresolved term",
+        "high-value stalled qualified opportunity",
+        "routine incomplete inquiry"
+      ],
+      "messageRules": [
+        "be concise and useful",
+        "reference the known requirement instead of sending a generic sales nudge",
+        "ask for at most the smallest missing information needed for the next step",
+        "never manufacture urgency, scarcity, pricing or availability",
+        "stop immediately on opt-out or negative intent",
+        "do not follow up if a newer customer message exists",
+        "do not duplicate a follow-up already sent through another reconciled channel"
+      ]
+    },
     "neverAutonomous": [
       "invent demand, price, capacity, certification or authority",
       "mark a lead as qualified demand without evidence",
@@ -106,6 +141,7 @@
       "noBulkColdMessaging": true,
       "stopOnOptOut": true,
       "suppressDuplicateCrossChannelFollowups": true,
+      "maxAutomatedFollowUpsPerConversation": 3,
       "prioritizeBy": ["expected gross profit", "conversion probability", "speed to revenue", "evidence quality", "capital exposure"]
     },
     "commercialMetrics": [
@@ -120,7 +156,10 @@
       "collected gross profit",
       "median response time",
       "sales cycle time",
-      "follow-up recovery rate"
+      "follow-up recovery rate",
+      "proactive touches sent",
+      "proactive reply rate",
+      "stalled-opportunity recovery rate"
     ]
   },
   "commands": [
@@ -174,6 +213,7 @@
     "languageDetection": true,
     "spanishFirst": true,
     "targetFirstResponse": "immediate when the bot runtime is healthy",
+    "proactiveRecovery": true,
     "humanEscalation": "material risk, compliance ambiguity, binding terms, payment, capital deployment or Chairman decision"
   }
 }
