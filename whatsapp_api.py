@@ -406,7 +406,7 @@ async def _is_owner_whatsapp(phone: str | None) -> bool:
     try:
         gateways = await get_backend().select(
             "whatsapp_openclaw_gateways",
-            params={"gateway_id": "eq.hostinger-vps", "limit": "1"},
+            params={"gateway_id": f"eq.{os.getenv('WHATSAPP_HERMES_GATEWAY_ID', 'hermes-vercel').strip() or 'hermes-vercel'}", "limit": "1"},
         ) or []
         if gateways:
             candidates.append(str(gateways[0].get("business_number") or ""))

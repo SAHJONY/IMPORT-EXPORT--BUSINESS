@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -10,6 +11,12 @@ from whatsapp_api import _config, _openai_ready, _send_ready, _webhook_ready
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+def _active_hermes_gateway_id() -> str:
+    return os.getenv("WHATSAPP_HERMES_GATEWAY_ID", "hermes-vercel").strip() or "hermes-vercel"
+
+def _active_hermes_runtime() -> str:
+    return os.getenv("WHATSAPP_HERMES_RUNTIME", "vercel-sandbox").strip() or "vercel-sandbox"
 
 
 async def _gateway_state(gateway_id: str) -> dict[str, Any]:
@@ -45,10 +52,12 @@ async def _gateway_state(gateway_id: str) -> dict[str, Any]:
 
 async def diagnose() -> dict[str, Any]:
     cfg = await _config()
-    hostinger = await _gateway_state("hermes-hostinger")
+    gateway_id = _active_hermes_gateway_id()
+    runtime = _active_hermes_runtime()
+    gateway = await _gateway_state(gateway_id)
     persistence = persistent_backend_status()
 
-    hostinger_ready = bool(hostinger.get("connected"))
+    gateway_ready = bool(gateway.get("connected"))
     cloud_send = _send_ready(cfg)
     cloud_webhook = _webhook_ready(cfg)
     meta_ready = bool(cloud_send and cloud_webhook)
@@ -59,7 +68,7 @@ async def diagnose() -> dict[str, Any]:
     warnings: list[str] = []
 
     # Only conditions that can impair the sole production authority belong in issues.
-    if not hostinger_ready:
+    if not gateway_ready:
         issues.append("hermes_agent_not_ready")
     if not ai_ready:
         issues.append("ai_not_ready")
@@ -72,13 +81,16 @@ async def diagnose() -> dict[str, Any]:
     if not cloud_webhook:
         warnings.append("meta_webhook_not_ready_diagnostic_only")
 
-    production_ready = bool(hostinger_ready and ai_ready and durable)
+    production_ready = bool(gateway_ready and ai_ready and durable)
     return {
         "status": "ok" if production_ready else "degraded",
         "production_ready": production_ready,
-        "active_provider": "hermes_agent" if hostinger_ready else "none",
-        "hostinger_ready": hostinger_ready,
-        "hermes_ready": hostinger_ready,
+        "active_provider": "hermes_agent" if gateway_ready else "none",
+        "gateway_id": gateway_id,
+        "runtime": runtime,
+        "vercel_ready": bool(runtime.startswith("vercel") and gateway_ready),
+        "hostinger_ready": bool(runtime == "hostinger-vps" and gateway_ready),
+        "hermes_ready": gateway_ready,
         "meta_cloud_ready": meta_ready,
         "ai_ready": ai_ready,
         "durable_backend_ready": durable,
@@ -86,7 +98,8 @@ async def diagnose() -> dict[str, Any]:
         "warnings": warnings,
         "safe_mode": not production_ready,
         "authority": {
-            "runtime": "hostinger-vps",
+            "runtime": runtime,
+            "gateway_id": gateway_id,
             "sole_production_authority": True,
             "fallback_authority_allowed": False,
         },

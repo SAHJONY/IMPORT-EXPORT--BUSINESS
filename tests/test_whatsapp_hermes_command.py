@@ -17,7 +17,11 @@ def test_generate_ai_reply_fails_closed_if_hermes_errors(monkeypatch):
     assert asyncio.run(wa._generate_ai_reply('hola', 'Cliente')) == ''
 
 
-def test_health_contract_declares_hermes_cognition_and_openclaw_transport():
-    source = inspect.getsource(__import__('whatsapp_cloud_primary_api').whatsapp_health_hostinger_authority)
-    assert 'hostinger_openclaw' in source
+def test_health_contract_declares_vercel_hermes_authority():
+    mod = __import__('whatsapp_cloud_primary_api')
+    source = inspect.getsource(mod.whatsapp_health_hermes_authority)
+    assert 'gateway_id' in source
+    assert 'runtime' in source
     assert 'hermes' in source.lower()
+    assert mod._active_hermes_gateway_id() == 'hermes-vercel'
+    assert mod._active_hermes_runtime() == 'vercel-sandbox'

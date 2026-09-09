@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -96,15 +97,23 @@ async def _named_hermes_gateway_state(gateway_id: str) -> dict[str, Any]:
 _named_openclaw_gateway_state = _named_hermes_gateway_state
 _openclaw_gateway_state = _hermes_gateway_state
 
+def _active_hermes_gateway_id() -> str:
+    return os.getenv("WHATSAPP_HERMES_GATEWAY_ID", "hermes-vercel").strip() or "hermes-vercel"
+
+def _active_hermes_runtime() -> str:
+    return os.getenv("WHATSAPP_HERMES_RUNTIME", "vercel-sandbox").strip() or "vercel-sandbox"
+
 
 @app.get("/whatsapp/health")
-async def whatsapp_health_hostinger_authority() -> dict[str, Any]:
+async def whatsapp_health_hermes_authority() -> dict[str, Any]:
     cfg = await _config()
     persistence = persistent_backend_status()
 
-    hostinger = await _named_hermes_gateway_state("hermes-hostinger")
-    hostinger_ready = bool(hostinger.get("connected"))
-    hostinger_configured = bool(hostinger.get("configured"))
+    gateway_id = _active_hermes_gateway_id()
+    runtime = _active_hermes_runtime()
+    gateway = await _named_hermes_gateway_state(gateway_id)
+    gateway_ready = bool(gateway.get("connected"))
+    gateway_configured = bool(gateway.get("configured"))
 
     cloud_send = _send_ready(cfg)
     cloud_webhook = _webhook_ready(cfg)
@@ -126,15 +135,15 @@ async def whatsapp_health_hostinger_authority() -> dict[str, Any]:
     hermes = hermes_whatsapp_health()
 
     return {
-        "status": "ok" if hostinger_ready else ("degraded" if hostinger_configured else "configuration_required"),
+        "status": "ok" if gateway_ready else ("degraded" if gateway_configured else "configuration_required"),
         "service": "whatsapp-transport",
         "version": "5.7.0",
         "provider": "hermes_agent",
         "primary_provider": "hermes_agent",
         "authority": {
-            "runtime": "hostinger-vps",
+            "runtime": runtime,
             "transport": "hermes_native_whatsapp",
-            "gateway_id": "hermes-hostinger",
+            "gateway_id": gateway_id,
             "sole_production_authority": True,
             "fallback_authority_allowed": False,
         },
@@ -152,9 +161,11 @@ async def whatsapp_health_hostinger_authority() -> dict[str, Any]:
             "binding_commitments": "owner_approval_required",
         },
         "business_suite_connection": True,
-        "hostinger_independent_runtime": hostinger_ready,
-        "send_ready": hostinger_ready,
-        "webhook_ready": hostinger_ready,
+        "hermes_runtime_ready": gateway_ready,
+        "vercel_independent_runtime": bool(runtime.startswith("vercel") and gateway_ready),
+        "hostinger_independent_runtime": bool(runtime == "hostinger-vps" and gateway_ready),
+        "send_ready": gateway_ready,
+        "webhook_ready": gateway_ready,
         "meta_cloud_required": False,
         "meta_cloud_controlled": False,
         "cross_provider_failover": False,
@@ -188,7 +199,7 @@ async def whatsapp_health_hostinger_authority() -> dict[str, Any]:
         "self_healing": True,
         "self_repair": True,
         "automatic_failover": True,
-        "automatic_failover_scope": "hostinger_local_runtime_only",
+        "automatic_failover_scope": f"{runtime}_runtime_only",
         "adaptive_sofia": sofia,
         "self_marketing": marketing,
         "self_selling": selling,
@@ -222,7 +233,7 @@ async def whatsapp_recovery_health() -> dict[str, Any]:
         "version": "1.2.0",
         "diagnosis": result,
         "automatic_failover": True,
-        "automatic_failover_scope": "hostinger_local_runtime_only",
+        "automatic_failover_scope": f"{_active_hermes_runtime()}_runtime_only",
         "retry_strategy": "bounded_exponential_backoff",
         "idempotent_replay": True,
         "circuit_breaker": True,
@@ -273,7 +284,7 @@ async def sofia_sales_os_health() -> dict[str, Any]:
 
 
 @app.post("/whatsapp/send")
-async def whatsapp_send_hostinger_primary(
+async def whatsapp_send_hermes_primary(
     payload: WhatsAppSend,
     authorization: str | None = Header(None, alias="Authorization"),
 ) -> dict[str, Any]:
@@ -282,6 +293,6 @@ async def whatsapp_send_hostinger_primary(
     result = await _enqueue_hermes_message(payload)
     await record_recovery_event(
         "hermes_authoritative_enqueue",
-        {"status": "ok", "provider": "hermes_agent", "gateway_id": "hermes-hostinger"},
+        {"status": "ok", "provider": "hermes_agent", "gateway_id": _active_hermes_gateway_id()},
     )
     return result
