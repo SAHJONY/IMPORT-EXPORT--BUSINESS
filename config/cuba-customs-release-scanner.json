@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "engine": "SAHJONY Cuba Customs Release Provider Scanner",
   "market": "Cuba customs clearance, port release, airport cargo release and final-mile handoff",
   "scanIntervalHours": 6,
@@ -26,6 +26,16 @@
       "door_delivery_cuba"
     ]
   },
+  "legalFramework": {
+    "currentReference": "Cuba Decreto-Ley 108 de Aduanas and Decreto 134, effective framework published 2026",
+    "rules": [
+      "A customs agency must be authorized by the head of the Aduana General de la Republica.",
+      "A freight forwarder/transitario may act as a customs agency only when separately authorized by the Aduana General de la Republica.",
+      "Ship agents and accredited aircraft representatives participate in customs formalities for vessels and aircraft.",
+      "Registration before Aduana is required for customs agencies, freight forwarders, regular shipping lines, port/airport operators and other covered actors."
+    ],
+    "approvalGate": "No provider may be marked APPROVED_AUTHORIZED_FIRST_HAND without current authorization/role evidence applicable to the requested cargo and entry point."
+  },
   "supplierPolicy": {
     "onlyFirstHandOrAuthorized": true,
     "excludeRetailResellers": true,
@@ -34,7 +44,7 @@
     "neverInventClearanceAuthority": true,
     "requiredEvidenceBeforeApproved": [
       "legal_entity",
-      "authorization_or_role_to_act_in_customs_release_process",
+      "current_aduana_authorization_or_legally_defined_operational_role",
       "entry_point_coverage",
       "cargo_type_coverage",
       "direct_or_wholesale_rate",
@@ -45,36 +55,22 @@
     "classification": [
       "APPROVED_AUTHORIZED_FIRST_HAND",
       "QUALIFYING_AUTHORIZED_FIRST_HAND",
+      "HISTORICAL_AUTHORITY_REVERIFY_CURRENT",
       "AUTHORIZED_ROLE_UNVERIFIED_RATE",
       "UNVERIFIED_MIDDLEMAN",
       "RETAIL_ONLY",
       "REGULATORY_SOURCE_ONLY",
+      "TERMINAL_OPERATOR_ONLY",
       "REJECTED"
     ]
   },
   "watchDimensions": [
-    "customs",
-    "aduana",
-    "despacho",
-    "liberacion",
-    "release",
-    "puerto",
-    "airport",
-    "aeropuerto",
-    "terminal",
-    "warehouse",
-    "almacen",
-    "fees",
-    "tariff",
-    "rate",
-    "documents",
-    "inspection",
-    "delivery",
-    "door_to_door",
-    "vehicle",
-    "container",
-    "lcl",
-    "air_cargo"
+    "customs", "aduana", "despacho", "liberacion", "release", "levante",
+    "puerto", "airport", "aeropuerto", "terminal", "warehouse", "almacen",
+    "fees", "tariff", "rate", "documents", "inspection", "delivery",
+    "door_to_door", "vehicle", "container", "lcl", "air_cargo",
+    "resolution", "resolucion", "license", "licencia", "authorized", "autorizada",
+    "agente de aduana", "agencia de aduana", "transitario", "consignatario"
   ],
   "regulatorySources": [
     {
@@ -86,20 +82,60 @@
   ],
   "providerSeeds": [
     {
+      "id": "transcargo",
+      "name": "Empresa Transitaria de Cargas TRANSCARGO",
+      "type": "FREIGHT_FORWARDER_CUSTOMS_CANDIDATE",
+      "status": "HISTORICAL_AUTHORITY_REVERIFY_CURRENT",
+      "url": "https://transcargo.transnet.cu/",
+      "evidenceNote": "Official/state reporting historically identifies Transcargo as one of Cuba's principal freight-forwarding entities. Current customs-agency authorization, territory, cargo scope, wholesale rates and service levels must be reverified under the 2026 customs framework."
+    },
+    {
+      "id": "palco",
+      "name": "Agencia Aduanal y Transitaria PALCO",
+      "type": "CUSTOMS_AGENCY_FORWARDER_CANDIDATE",
+      "status": "HISTORICAL_AUTHORITY_REVERIFY_CURRENT",
+      "url": "https://www.paqueteriapalco.com/",
+      "evidenceNote": "Cuban commercial directories identify PALCO as an Agencia Aduanal y Transitaria. Reverify current Aduana authorization, coverage, cargo categories, rates and commercial terms before approval."
+    },
+    {
       "id": "aerovaradero",
       "name": "Aerovaradero S.A.",
-      "type": "AIRPORT_CARGO_OPERATOR",
-      "status": "QUALIFYING_AUTHORIZED_FIRST_HAND",
+      "type": "AIRPORT_CARGO_OPERATOR_FORWARDER_CANDIDATE",
+      "status": "HISTORICAL_AUTHORITY_REVERIFY_CURRENT",
       "url": "https://www.aerovaradero.com.cu/",
-      "evidenceNote": "Known Cuban airport cargo operator; customs-release authority, wholesale rate, entry-point coverage and commercial terms must be independently verified before approval."
+      "evidenceNote": "Historically identified as a major Cuban freight/cargo operator with airport facilities. Current customs representation authority, airport coverage, wholesale rates and commercial terms require verification."
+    },
+    {
+      "id": "cubapack",
+      "name": "Cubapack",
+      "type": "FREIGHT_FORWARDER_CUSTOMS_CANDIDATE",
+      "status": "HISTORICAL_AUTHORITY_REVERIFY_CURRENT",
+      "url": "https://www.cimex.cu/",
+      "evidenceNote": "Historically identified as a Cuban freight-forwarding entity associated with CIMEX. Current legal entity, active service, Aduana authorization and wholesale terms require re-verification."
+    },
+    {
+      "id": "correos_mensajeria",
+      "name": "Empresa de Mensajeria y Cambio Internacional / Correos de Cuba",
+      "type": "POSTAL_FORWARDER_CUSTOMS_CANDIDATE",
+      "status": "HISTORICAL_AUTHORITY_REVERIFY_CURRENT",
+      "url": "https://www.correos.cu/",
+      "evidenceNote": "Historically identified among Cuba's major freight/parcel transit entities and postal logistics actors. Verify present customs role, cargo scope, B2B suitability and rates."
     },
     {
       "id": "cubanacan_express",
       "name": "Cubanacan Express",
-      "type": "CUSTOMS_FORWARDING_COURIER",
-      "status": "QUALIFYING_AUTHORIZED_FIRST_HAND",
+      "type": "CUSTOMS_FORWARDING_COURIER_CANDIDATE",
+      "status": "HISTORICAL_AUTHORITY_REVERIFY_CURRENT",
       "url": "https://www.servisa.co.cu/",
-      "evidenceNote": "Public Cuba tourism source describes customs and forwarding services; verify current legal entity, authorization, cargo scope, rates and entry-point coverage."
+      "evidenceNote": "Cuban public sources have described customs and forwarding services. Verify current legal entity, Aduana authorization, cargo scope, rates and entry-point coverage."
+    },
+    {
+      "id": "tc_mariel",
+      "name": "Terminal de Contenedores del Mariel",
+      "type": "PORT_TERMINAL_OPERATOR",
+      "status": "TERMINAL_OPERATOR_ONLY",
+      "url": "https://webserver.tcmariel.cu/",
+      "evidenceNote": "Port terminal operator at Mariel. Historical public evidence shows OEA certification; current status and any customs-release role beyond terminal operations must be reverified. Do not treat as customs broker without explicit authority evidence."
     }
   ],
   "rules": {
@@ -107,8 +143,11 @@
     "preserveSourceEvidence": true,
     "doNotQuoteCustomerUntilReleaseCostVerified": true,
     "doNotRepresentProviderAsCustomsBrokerWithoutEvidence": true,
+    "doNotAutoPromoteFromWebsiteKeywords": true,
     "vehicleReleaseRequiresVehicleSpecificDocumentationCheck": true,
     "finalMilePriceMustBeSeparatedFromCustomsAndTerminalCharges": true,
-    "captureAllGovernmentAndTerminalFeesSeparately": true
+    "captureAllGovernmentAndTerminalFeesSeparately": true,
+    "captureCustomsAgencyResolutionOrAuthorizationReferenceWhenAvailable": true,
+    "capturePortAirportAndCargoScopeSeparately": true
   }
 }
