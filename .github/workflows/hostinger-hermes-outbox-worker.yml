@@ -52,6 +52,7 @@ jobs:
           BRIDGE='http://127.0.0.1:3000'
           GATEWAY='hermes-hostinger'
           ACCOUNT='default'
+          OUTBOUND_ENABLED=False  # Chairman fail-closed: heartbeat only
 
           def signed_headers(raw=b''):
               ts=str(int(time.time()))
@@ -86,6 +87,8 @@ jobs:
                   print(f'HERMES_HEARTBEAT_POST={type(e).__name__}', flush=True)
 
           def poll():
+              if not OUTBOUND_ENABLED:
+                  return []
               try:
                   d=json_request(BASE+'/whatsapp/hermes/outbox?limit=5',headers=lambda raw:signed_headers(b''))
                   return d.get('commands') or []
@@ -93,6 +96,8 @@ jobs:
                   return []
 
           def send_local(cmd):
+              if not OUTBOUND_ENABLED:
+                  raise RuntimeError('outbound_disabled_by_chairman_policy')
               recipient=''.join(ch for ch in str(cmd.get('recipient') or '') if ch.isdigit())
               if not recipient: raise RuntimeError('invalid recipient')
               body=str(cmd.get('body') or '')[:4096]
@@ -165,9 +170,9 @@ jobs:
           d=json.load(urllib.request.urlopen('https://www.sahjony.com/whatsapp/health',timeout=20))
           h=d.get('hermes_agent') or {}
           assert h.get('heartbeat_fresh') is True, h
-          assert h.get('connected') is True, h
+          # Transport remains deliberately disconnected during fail-closed repair.
           print('PRODUCTION_WHATSAPP_HEARTBEAT=FRESH')
-          print('PRODUCTION_WHATSAPP_CONNECTED=TRUE')
+          print('PRODUCTION_HERMES_AUTH=RECOVERED_FAIL_CLOSED')
           PY
       - name: Show Hermes worker diagnostics on failure
         if: failure()
