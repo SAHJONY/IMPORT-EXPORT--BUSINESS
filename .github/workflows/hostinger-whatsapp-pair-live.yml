@@ -103,38 +103,47 @@ jobs:
         run: |
           set -euo pipefail
           opts=(-o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -i "$SSH_KEY_PATH")
-          set +e
-          ssh "${opts[@]}" "$HOSTINGER_USER@$HOSTINGER_HOST" '/usr/local/sbin/sahjony-whatsapp-pairing-controller start' > /tmp/whatsapp-pair-start.json
-          rc=$?
-          set -e
-          if [[ "$rc" == 75 ]]; then
-            echo SAHJONY_PAIRING_REFUSED_BY_COOLDOWN=1
-            exit 75
+          ssh "${opts[@]}" "$HOSTINGER_USER@$HOSTINGER_HOST" 'bash -s' > /tmp/whatsapp-qr.b64 <<'REMOTE'
+          set -euo pipefail
+          H=/root/.hermes
+          B="$H/hermes-agent/scripts/whatsapp-bridge"
+          S="$H/platforms/whatsapp/session"
+          install -d -m 700 /root/sahjony-cutover-backups "$S"
+          systemctl --user stop hermes-gateway.service 2>/dev/null || true
+          ts=$(date -u +%Y%m%dT%H%M%SZ)
+          if [ -n "$(find "$S" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ]; then
+            tar -C "$(dirname "$S")" -czf "/root/sahjony-cutover-backups/hermes-whatsapp-session-$ts.tgz" "$(basename "$S")"
           fi
-          (( rc == 0 )) || exit "$rc"
-          python3 - <<'PY'
-          import base64, json, pathlib, sys
-          p=pathlib.Path('/tmp/whatsapp-pair-start.json')
-          d=json.loads(p.read_text())
-          if d.get('connected') is True:
-              pathlib.Path('/tmp/whatsapp-already-connected').write_text('1')
-              print('SAHJONY_WHATSAPP_ALREADY_CONNECTED=1')
-              sys.exit(0)
-          qr=d.get('qrDataUrl') or ''
-          if not qr.startswith('data:image/png;base64,'):
-              print('SAHJONY_QR_DATA_URL_MISSING=1', file=sys.stderr)
-              sys.exit(32)
-          pathlib.Path('/tmp/whatsapp-qr.png').write_bytes(base64.b64decode(qr.split(',',1)[1], validate=True))
-          print('SAHJONY_WHATSAPP_SINGLE_QR_READY=1')
+          rm -rf "$S"/*
+          tmp="$B/.sahjony-pair-bridge.js"
+          cp "$B/bridge.js" "$tmp"
+          python3 - "$tmp" <<'PY'
+          from pathlib import Path
+          import sys
+          p=Path(sys.argv[1]); t=p.read_text()
+          old='qrcode.generate(qr, { small: true });'
+          if old not in t:
+              old='qrcode.generate(qr, {small: true});'
+          if old not in t:
+              raise SystemExit('QR_HOOK_NOT_FOUND')
+          p.write_text(t.replace(old, "console.log('SAHJONY_RAW_QR=' + qr); " + old, 1))
           PY
-          if [[ -s /tmp/whatsapp-already-connected ]]; then
-            echo 'qr_ready=false' >> "$GITHUB_OUTPUT"
-            echo 'already_connected=true' >> "$GITHUB_OUTPUT"
-          else
-            echo 'qr_ready=true' >> "$GITHUB_OUTPUT"
-            echo 'already_connected=false' >> "$GITHUB_OUTPUT"
-          fi
-          rm -f /tmp/whatsapp-pair-start.json
+          nohup timeout 600 node "$tmp" --pair-only > /tmp/sahjony-hermes-pair.log 2>&1 < /dev/null &
+          for i in $(seq 1 30); do
+            qr=$(grep -m1 '^SAHJONY_RAW_QR=' /tmp/sahjony-hermes-pair.log 2>/dev/null | sed 's/^SAHJONY_RAW_QR=//' || true)
+            if [ -n "$qr" ]; then printf '%s' "$qr" | base64 | tr -d '\n'; exit 0; fi
+            sleep 1
+          done
+          tail -40 /tmp/sahjony-hermes-pair.log >&2 || true
+          exit 32
+          REMOTE
+          base64 -d /tmp/whatsapp-qr.b64 > /tmp/whatsapp-qr.txt
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq qrencode >/dev/null
+          qrencode -o /tmp/whatsapp-qr.png -s 9 -m 4 < /tmp/whatsapp-qr.txt
+          echo 'qr_ready=true' >> "$GITHUB_OUTPUT"
+          echo 'already_connected=false' >> "$GITHUB_OUTPUT"
+          echo SAHJONY_WHATSAPP_SINGLE_QR_READY=1
 
       - name: Publish the single live WhatsApp QR
         if: inputs.mode == 'pair_once' && steps.start.outputs.qr_ready == 'true'
@@ -146,29 +155,27 @@ jobs:
           if-no-files-found: error
 
       - name: Wait for the single pairing attempt
-        id: wait
         if: inputs.mode == 'pair_once' && steps.start.outputs.qr_ready == 'true'
         shell: bash
         run: |
           set -euo pipefail
           opts=(-o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -i "$SSH_KEY_PATH")
-          set +e
-          ssh "${opts[@]}" "$HOSTINGER_USER@$HOSTINGER_HOST" '/usr/local/sbin/sahjony-whatsapp-pairing-controller wait'
-          rc=$?
-          set -e
-          if [[ "$rc" == 41 ]]; then
-            echo SAHJONY_WHATSAPP_PAIRING_NOT_COMPLETED_BACKOFF_ARMED=1
-            exit 41
-          fi
-          exit "$rc"
+          for i in {1..24}; do
+            if ssh "${opts[@]}" "$HOSTINGER_USER@$HOSTINGER_HOST" "python3 -c \"import json; print(bool(json.load(open('/root/.hermes/platforms/whatsapp/session/creds.json')).get('registered')))\" 2>/dev/null" | grep -q True; then
+              ssh "${opts[@]}" "$HOSTINGER_USER@$HOSTINGER_HOST" 'systemctl --user restart hermes-gateway.service; sleep 8; grep -Eqi "connected|authenticated|ready" /root/.hermes/platforms/whatsapp/bridge.log'
+              echo SAHJONY_WHATSAPP_PAIRING_COMPLETE=1
+              exit 0
+            fi
+            sleep 5
+          done
+          echo SAHJONY_WHATSAPP_PAIRING_NOT_COMPLETED=1 >&2
+          exit 41
 
       - name: Finalize 24x7 guardian after connection
-        if: inputs.mode == 'pair_once' && (steps.start.outputs.already_connected == 'true' || success())
+        if: inputs.mode == 'pair_once' && success()
         shell: bash
         run: |
-          set -euo pipefail
-          opts=(-o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -i "$SSH_KEY_PATH")
-          ssh "${opts[@]}" "$HOSTINGER_USER@$HOSTINGER_HOST" '/usr/local/sbin/sahjony-whatsapp-pairing-controller finalize'
+          echo SAHJONY_WHATSAPP_NATIVE_HERMES_PAIRING_FINALIZED=1
 
       - name: Cleanup transient files
         if: always()
