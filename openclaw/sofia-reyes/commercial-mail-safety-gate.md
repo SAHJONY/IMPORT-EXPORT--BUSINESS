@@ -14,6 +14,11 @@ Every ALLOW approval expires after **10 minutes (600 seconds)**. A stale approva
 
 The sender may not bypass this gate because a message appears commercially useful or because another workflow previously contacted the recipient.
 
+## Global email suppression
+The CRM `email_suppressions` registry is a global negative-control source. Any `external_trade_prospects` record whose `public_email` matches an active suppression must be forced to `outreach_status=SUPPRESSED`, `email_contact_status=HARD_BOUNCE`, and `do_not_contact=true` before the commercial gate can authorize a send.
+
+Suppression enforcement applies to existing and future prospect rows and propagates when a new suppression is recorded. A stale prospect row may never override an active global suppression. Suppressed addresses remain blocked until a new verified address is established or an explicit, evidence-backed suppression resolution is performed; the system must not silently re-enable them.
+
 ## New outreach
 New outreach is allowed only to one unambiguous CRM prospect that is verified/contactable and not policy-ineligible. Never create qualified demand from outreach, research, prospecting, public records, local caches, or a sent message.
 

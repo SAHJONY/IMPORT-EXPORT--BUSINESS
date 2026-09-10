@@ -4,9 +4,10 @@ import process from 'node:process';
 const clientPath = 'src/sofiaCommercialSafetyGate.ts';
 const runtimePath = 'openclaw/sofia-reyes/commercial-mail-safety-gate.md';
 const transportPath = 'gmail_transport_api.py';
+const suppressionMigrationPath = 'ops/sql/2026-09-10-enforce-global-email-suppressions.sql';
 const failures = [];
 
-for (const path of [clientPath, runtimePath, transportPath]) {
+for (const path of [clientPath, runtimePath, transportPath, suppressionMigrationPath]) {
   if (!fs.existsSync(path)) failures.push(`Missing required file: ${path}`);
 }
 
@@ -14,6 +15,7 @@ if (!failures.length) {
   const client = fs.readFileSync(clientPath, 'utf8');
   const runtime = fs.readFileSync(runtimePath, 'utf8');
   const transport = fs.readFileSync(transportPath, 'utf8');
+  const suppression = fs.readFileSync(suppressionMigrationPath, 'utf8');
 
   const clientMust = [
     ['FOLLOWUP_MIN_HOURS = 168', '168-hour cooldown constant'],
@@ -52,6 +54,8 @@ if (!failures.length) {
     ['Service-role credentials remain server-side only', 'service-role secrecy'],
     ['rate-limited', 'abuse control'],
     ['read the full relevant Gmail thread', 'full-thread requirement'],
+    ['email_suppressions', 'global suppression registry'],
+    ['stale prospect row may never override an active global suppression', 'stale CRM suppression override prevention'],
   ];
 
   const transportMust = [
@@ -70,15 +74,21 @@ if (!failures.length) {
     ['owner_direct_send', 'separate owner-direct path'],
   ];
 
-  for (const [fragment, label] of clientMust) {
-    if (!client.includes(fragment)) failures.push(`Missing client invariant: ${label}`);
-  }
-  for (const [fragment, label] of runtimeMust) {
-    if (!runtime.includes(fragment)) failures.push(`Missing runtime invariant: ${label}`);
-  }
-  for (const [fragment, label] of transportMust) {
-    if (!transport.includes(fragment)) failures.push(`Missing transport invariant: ${label}`);
-  }
+  const suppressionMust = [
+    ['security invoker', 'suppression trigger runs as invoker'],
+    ["new.logical_table <> 'external_trade_prospects'", 'prospect-only guard'],
+    ["s.logical_table = 'email_suppressions'", 'authoritative suppression lookup'],
+    ["'SUPPRESSED'", 'suppressed status enforcement'],
+    ["'{email_contact_status}'", 'hard-bounce contact state'],
+    ["'{do_not_contact}'", 'do-not-contact enforcement'],
+    ['trg_enforce_global_email_suppression_on_trade_record', 'pre-write enforcement trigger'],
+    ['trg_propagate_global_email_suppression', 'suppression propagation trigger'],
+  ];
+
+  for (const [fragment, label] of clientMust) if (!client.includes(fragment)) failures.push(`Missing client invariant: ${label}`);
+  for (const [fragment, label] of runtimeMust) if (!runtime.includes(fragment)) failures.push(`Missing runtime invariant: ${label}`);
+  for (const [fragment, label] of transportMust) if (!transport.includes(fragment)) failures.push(`Missing transport invariant: ${label}`);
+  for (const [fragment, label] of suppressionMust) if (!suppression.includes(fragment)) failures.push(`Missing suppression invariant: ${label}`);
 }
 
 if (failures.length) {
@@ -86,4 +96,4 @@ if (failures.length) {
   process.exit(1);
 }
 
-console.log('PASS  Sofia commercial gate v4 enforces CRM authority, Gmail evidence, 168h cooldown, 10-minute TTL/idempotency, replay protection, transport-boundary enforcement, and post-send reconciliation');
+console.log('PASS  Sofia commercial gate v4 enforces CRM authority, Gmail evidence, global email suppression, 168h cooldown, 10-minute TTL/idempotency, replay protection, transport-boundary enforcement, and post-send reconciliation');
