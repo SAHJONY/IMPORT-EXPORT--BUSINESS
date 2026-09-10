@@ -59,6 +59,10 @@ async function boot(){
    const {default:OwnerCommandCenter}=await import('./OwnerCommandCenter');
    createRoot(rootElement).render(withI18n(<StrictMode><AppBoundary><OwnerCommandCenter/></AppBoundary></StrictMode>));return
  }
+ if(path==='/owner/agent-command'||path.startsWith('/owner/agent-command/')){
+   const {default:AgentCommandCenter}=await import('./AgentCommandCenter');
+   createRoot(rootElement).render(withI18n(<StrictMode><AppBoundary><AgentCommandCenter/></AppBoundary></StrictMode>));return
+ }
  if(path==='/owner/social'||path.startsWith('/owner/social/')){
    const {default:SocialCommandCenter}=await import('./SocialCommandCenter');
    createRoot(rootElement).render(withI18n(<StrictMode><AppBoundary><SocialCommandCenter/></AppBoundary></StrictMode>));return
