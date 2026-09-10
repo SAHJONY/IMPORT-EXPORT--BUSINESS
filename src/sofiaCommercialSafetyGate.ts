@@ -36,6 +36,7 @@ export type SofiaCommercialGateDecision = {
   ambiguous: boolean;
   allow: boolean;
   fail_closed: boolean;
+  decision_expires_at?: string;
   idempotent?: boolean;
   rules?: Record<string, unknown>;
   matches: SofiaCommercialGateMatch[];
@@ -57,6 +58,7 @@ export type SofiaCommercialSendRecord = {
 };
 
 const FOLLOWUP_MIN_HOURS = 168;
+const EXPECTED_GATE_VERSION = '4.0';
 
 function validEmail(value: string | undefined): boolean {
   if (!value) return false;
@@ -72,6 +74,12 @@ function normalizeIso(value: string | null | undefined): string | null {
   const parsed = new Date(value);
   if (!Number.isFinite(parsed.getTime())) return null;
   return parsed.toISOString();
+}
+
+function approvalStillFresh(value: string | undefined): boolean {
+  if (!value) return false;
+  const parsed = new Date(value);
+  return Number.isFinite(parsed.getTime()) && parsed.getTime() > Date.now();
 }
 
 export function createSofiaGateRequestId(): string {
@@ -140,13 +148,14 @@ export async function evaluateSofiaCommercialSend(
   if (error || !data) throw new Error('SOFIA_GATE_CRM_UNAVAILABLE');
 
   if (
-    data.gate_version !== '3.0' ||
+    data.gate_version !== EXPECTED_GATE_VERSION ||
     data.authoritative_source !== 'supabase_crm' ||
     data.request_id !== input.requestId ||
     data.fail_closed !== false ||
     data.allow !== true ||
     data.ambiguous !== false ||
-    data.match_count !== 1
+    data.match_count !== 1 ||
+    !approvalStillFresh(data.decision_expires_at)
   ) {
     return { ...data, allow: false, fail_closed: true };
   }
@@ -156,12 +165,13 @@ export async function evaluateSofiaCommercialSend(
 
 export function assertSofiaCommercialSendAllowed(decision: SofiaCommercialGateDecision): void {
   if (
-    decision.gate_version !== '3.0' ||
+    decision.gate_version !== EXPECTED_GATE_VERSION ||
     !decision.allow ||
     decision.fail_closed ||
     decision.ambiguous ||
     decision.match_count !== 1 ||
-    !validRequestId(decision.request_id)
+    !validRequestId(decision.request_id) ||
+    !approvalStillFresh(decision.decision_expires_at)
   ) {
     throw new Error('SOFIA_COMMERCIAL_SEND_BLOCKED');
   }
@@ -193,7 +203,12 @@ export async function recordSofiaCommercialSend(
     },
   });
 
-  if (error || !data?.recorded || data.gate_version !== '3.0' || data.request_id !== evidence.requestId) {
+  if (
+    error ||
+    !data?.recorded ||
+    data.gate_version !== EXPECTED_GATE_VERSION ||
+    data.request_id !== evidence.requestId
+  ) {
     throw new Error('SOFIA_GATE_POST_SEND_RECONCILIATION_FAILED');
   }
 
