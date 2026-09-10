@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 from auth import verify_owner_token
 from business_email_registry import DEPARTMENTS
 
-app = FastAPI(title="SAHJONY Business Communications Director", version="1.1.0", docs_url=None, redoc_url=None)
+app = FastAPI(title="SAHJONY Business Communications Director", version="1.2.0", docs_url=None, redoc_url=None)
 
 Channel = Literal["email", "whatsapp", "voice", "calendar", "web", "sms", "internal"]
 
@@ -29,15 +29,15 @@ DEPARTMENT_KEYWORDS: dict[str, tuple[str, ...]] = {
 
 ROUTINE_AUTONOMOUS_ACTIONS = [
     "receive and triage inbound business email",
-    "reply to routine non-binding customer questions",
-    "reply to routine supplier and sourcing requests",
-    "request missing RFQ, shipment, compliance or scheduling information",
-    "send non-binding status updates",
+    "reply to routine non-binding customer questions only when channel and commercial gates permit",
+    "reply to routine supplier and sourcing requests only when channel and commercial gates permit",
+    "request missing RFQ, shipment, compliance or scheduling information without inventing demand or authority",
+    "send non-binding status updates through the authorized transport",
     "schedule, reschedule and coordinate routine business meetings",
     "send meeting confirmations and reminders",
     "route conversations across every active SAHJONY business department",
     "maintain thread context across WhatsApp, email, voice and calendar",
-    "draft and send routine follow-ups when a business thread is waiting for a response",
+    "prepare nonresponder email follow-up only after CRM eligibility, full-thread review, actual Gmail timestamp evidence and 168 full hours",
 ]
 
 FAIL_CLOSED_ACTIONS = [
@@ -102,19 +102,23 @@ def communications_director_health() -> dict[str, Any]:
     return {
         "status": "ok",
         "service": "sahjony-business-communications-director",
-        "version": "1.1.0",
+        "version": "1.2.0",
         "mode": "24_7_omnichannel_agentic",
         "channels": ["email", "whatsapp", "voice", "calendar", "web", "internal"],
         "departments": [d["key"] for d in DEPARTMENTS],
         "department_count": len(DEPARTMENTS),
         "email_receive_send": True,
-        "autonomous_routine_email_replies": True,
+        "autonomous_routine_email_replies": "commercial_gate_required",
+        "email_gate_version": "4.0",
+        "email_nonresponder_followup_min_hours": 168,
+        "email_full_thread_required": True,
+        "email_gmail_timestamp_required": True,
         "calendar_management": True,
         "whatsapp_sales_connected": True,
         "voice_coordination": True,
         "cross_channel_context": True,
         "department_handoffs": True,
-        "follow_up_engine": True,
+        "follow_up_engine": "channel_policy_gated",
         "binding_actions_fail_closed": True,
     }
 
@@ -125,7 +129,16 @@ def communications_director_policy() -> dict[str, Any]:
         "routine_autonomous_actions": ROUTINE_AUTONOMOUS_ACTIONS,
         "fail_closed_actions": FAIL_CLOSED_ACTIONS,
         "departments": DEPARTMENTS,
-        "operating_principle": "Autonomously manage routine communications and scheduling; require verified evidence and authority for binding, financial, legal, compliance-release or irreversible actions.",
+        "email_followup_policy": {
+            "crm_eligibility_required": True,
+            "full_thread_required": True,
+            "gmail_latest_outbound_timestamp_required": True,
+            "minimum_elapsed_hours": 168,
+            "same_day_followup_allowed": False,
+            "next_day_followup_allowed": False,
+            "fail_closed": True,
+        },
+        "operating_principle": "Autonomously manage routine communications and scheduling within channel-specific gates; commercial email requires CRM eligibility, full-thread Gmail context and the 168-hour nonresponder rule, while binding, financial, legal, compliance-release or irreversible actions remain owner-gated.",
     }
 
 
@@ -146,7 +159,8 @@ def communications_director_route(p: RouteRequest, authorization: str | None = H
         "matched_signals": matched,
         "autonomous_reply_allowed": not high_risk,
         "owner_approval_required": high_risk,
-        "recommended_action": "prepare and send routine response" if not high_risk else "prepare response and escalate before binding action",
+        "commercial_email_gate_required": p.channel == "email",
+        "recommended_action": "prepare routine response; email transport still requires the commercial gate" if not high_risk else "prepare response and escalate before binding action",
     }
 
 
@@ -161,14 +175,16 @@ def communications_mission_plan(p: CommunicationMission, authorization: str | No
         "choose the best communication channel and preserve sender language",
         "prepare concise business response or information request",
     ]
+    if p.channel in {"email", "omnichannel"}:
+        steps += ["before any email send, enforce CRM eligibility and full Gmail thread review", "for a nonresponder email follow-up, retrieve the newest successful Gmail outbound timestamp and require 168 full hours"]
     if p.calendar_coordination:
         steps += ["check calendar availability", "schedule or propose meeting slots", "send calendar confirmation/reminder"]
     if p.follow_up_required:
-        steps += ["create follow-up state", "continue until reply, resolution, opt-out or escalation threshold"]
+        steps += ["create channel-policy-aware follow-up state", "continue only when the applicable consent, timing, eligibility and governance gates permit"]
     if high_risk:
         steps += ["stop before any binding or irreversible action", "request owner authorization with evidence summary"]
     else:
-        steps += ["send routine non-binding communication autonomously", "record communication outcome and next action"]
+        steps += ["execute only the routine non-binding action permitted by the channel gate", "record communication outcome and next safe action"]
     return {
         "status": "planned",
         "department": dept,
@@ -176,5 +192,6 @@ def communications_mission_plan(p: CommunicationMission, authorization: str | No
         "recipient": p.recipient,
         "autonomous_execution_allowed": not high_risk,
         "owner_approval_required": high_risk,
+        "email_gate_required_before_send": p.channel in {"email", "omnichannel"},
         "steps": steps,
     }
