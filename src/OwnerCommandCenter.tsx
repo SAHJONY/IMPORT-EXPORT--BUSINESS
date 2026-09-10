@@ -63,6 +63,9 @@ export default function OwnerCommandCenter(){
     <header style={s.header}>
       <a href="/" style={s.brand}>SAHJONY <span style={{color:'#66dcff'}}>GLOBAL TRADE</span></a>
       <nav style={s.nav}>
+        <a href="/owner/communications" style={s.link}>Communications</a>
+        <a href="/owner/social" style={s.link}>Social</a>
+        <a href="/owner/jarvis" style={s.link}>JARVIS</a>
         <a href="/owner/priorities" style={s.link}>Priorities</a>
         <a href="/owner/economics" style={s.link}>Economics</a>
         <a href="/owner/sofia-performance" style={s.link}>Sofía</a>
@@ -88,6 +91,9 @@ export default function OwnerCommandCenter(){
     <section style={s.panel}>
       <div style={s.panelHead}><div><div style={s.eyebrow}>EXECUTIVE ACTION QUEUE</div><h2 style={s.h2}>Move the highest-value bottleneck first</h2></div></div>
       <div style={s.grid3}>
+        <a href="/owner/communications" style={s.actionCard}><strong>Run the Communications OS</strong><span>Unify authorized email, WhatsApp, Telegram and social conversations into one evidence-gated relationship and RFQ layer.</span><b>OPEN COMMUNICATIONS →</b></a>
+        <a href="/owner/social" style={s.actionCard}><strong>Run the Social OS</strong><span>Coordinate social publishing, connector health and social-to-RFQ conversion under owner governance.</span><b>OPEN SOCIAL →</b></a>
+        <a href="/owner/jarvis" style={s.actionCard}><strong>Run JARVIS</strong><span>Use the private executive and personal-assistant command layer for owner work.</span><b>OPEN JARVIS →</b></a>
         <a href="/owner/sofia-performance" style={s.actionCard}><strong>Improve Sofía conversion</strong><span>Measure RFQ, quote and PO conversion by segment, surface stale opportunities and improve selling patterns from evidence.</span><b>OPEN SOFÍA BRAIN →</b></a>
         <a href="/owner/priorities" style={s.actionCard}><strong>Allocate effort by expected value</strong><span>Rank governed deals by expected gross profit, close probability, time to close and risk.</span><b>OPEN PRIORITIES →</b></a>
         <a href="/owner/economics" style={s.actionCard}><strong>Protect deal economics</strong><span>Separate evidenced economics from targets and expose capital at risk.</span><b>OPEN ECONOMICS →</b></a>
