@@ -10,6 +10,8 @@ Before any commercial send, read the full relevant Gmail thread and evaluate the
 
 Every evaluation must carry a unique request ID. An ALLOW decision is bound to that request ID and one unambiguous CRM prospect. Reusing a request ID must return the same persisted decision; it must never create a second independent authorization.
 
+Every ALLOW approval expires after **10 minutes (600 seconds)**. A stale approval must be reevaluated from current CRM and Gmail evidence; it may never be replayed after expiration.
+
 The sender may not bypass this gate because a message appears commercially useful or because another workflow previously contacted the recipient.
 
 ## New outreach
@@ -46,7 +48,7 @@ Record outbound only after Gmail confirms a successful send. The post-send recon
 Only after that reconciliation succeeds may CRM `last_outbound_*` fields and outreach status advance. Delivery delays and hard bounces must be reconciled as delivery evidence and must not trigger duplicate resends.
 
 ## Abuse and replay controls
-The authenticated gate is rate-limited. Missing request IDs, malformed evidence, replay with conflicting Gmail evidence, unsupported interaction types, and unauthorized roles fail closed. Service-role credentials remain server-side only and must never be exposed to browser code.
+The authenticated gate is rate-limited. Missing request IDs, malformed evidence, replay with conflicting Gmail evidence, expired approvals, unsupported interaction types, and unauthorized roles fail closed. Service-role credentials remain server-side only and must never be exposed to browser code.
 
 ## Failure mode
-CRM unavailable, Gmail evidence unavailable, malformed gate response, ambiguous CRM match, missing required thread evidence, audit persistence failure, or post-send reconciliation failure all fail closed for new commercial sends. Preserve the business context and surface only the material blocker internally.
+CRM unavailable, Gmail evidence unavailable, malformed gate response, ambiguous CRM match, missing required thread evidence, expired gate approval, audit persistence failure, or post-send reconciliation failure all fail closed for new commercial sends. Preserve the business context and surface only the material blocker internally.
