@@ -63,6 +63,10 @@ async function boot(){
    const {default:SocialCommandCenter}=await import('./SocialCommandCenter');
    createRoot(rootElement).render(withI18n(<StrictMode><AppBoundary><SocialCommandCenter/></AppBoundary></StrictMode>));return
  }
+ if(path==='/owner/communications'||path.startsWith('/owner/communications/')){
+   const {default:OwnerCommunicationsOS}=await import('./OwnerCommunicationsOS');
+   createRoot(rootElement).render(withI18n(<StrictMode><AppBoundary><OwnerCommunicationsOS/></AppBoundary></StrictMode>));return
+ }
  if(path==='/owner/cuba-trade'||path.startsWith('/owner/cuba-trade/')){
    const {default:OwnerCubaTradeCenter}=await import('./OwnerCubaTradeCenter');
    createRoot(rootElement).render(withI18n(<StrictMode><AppBoundary><OwnerCubaTradeCenter/></AppBoundary></StrictMode>));return
