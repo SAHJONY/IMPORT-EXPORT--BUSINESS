@@ -32,8 +32,8 @@ if (!failures.length) {
     ['actual Gmail timestamp', 'Gmail timestamp evidence'],
     ['DO NOT SEND', 'fail-closed send rule'],
     ['genuine inbound reply', 'transactional inbound exception'],
-    ['never create qualified demand from outreach', 'no demand inference'],
-    ['record outbound only after Gmail confirms a successful send', 'post-send recording'],
+    ['Never create qualified demand from outreach', 'no demand inference'],
+    ['Record outbound only after Gmail confirms a successful send', 'post-send recording'],
     ['read the full relevant Gmail thread', 'full-thread requirement'],
   ];
 
