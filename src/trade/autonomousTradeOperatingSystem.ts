@@ -82,8 +82,9 @@ export function landedCost(o: TradeOpportunity) {
   const qty = e.quantity ?? o.quantity ?? 0;
   const unitCost = e.supplierUnitCost ?? 0;
   const variable = qty > 0 ? unitCost * qty : 0;
-  const fixed = [e.freight,e.duties,e.insurance,e.inspection,e.banking,e.otherCosts]
-    .reduce((sum,n)=>sum + (Number.isFinite(n) ? Number(n) : 0),0);
+  const fixedInputs: number[] = [e.freight,e.duties,e.insurance,e.inspection,e.banking,e.otherCosts]
+    .map(n => Number.isFinite(n) ? Number(n) : 0);
+  const fixed = fixedInputs.reduce<number>((sum,n)=>sum+n,0);
   return {
     total: variable + fixed,
     perUnit: qty > 0 ? (variable + fixed) / qty : 0,
