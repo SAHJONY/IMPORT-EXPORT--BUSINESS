@@ -51,6 +51,10 @@ async function boot(){
  }
  if(path==='/travel'||path.startsWith('/travel/')){await renderTravel();return}
  if(path==='/owner'){location.replace('/owner/dashboard');return}
+ if(path==='/owner/jarvis'||path.startsWith('/owner/jarvis/')){
+   const {default:JarvisOwnerCenter}=await import('./JarvisOwnerCenter');
+   createRoot(rootElement).render(withI18n(<StrictMode><AppBoundary><JarvisOwnerCenter/></AppBoundary></StrictMode>));return
+ }
  if(path==='/owner/dashboard'||path.startsWith('/owner/dashboard/')){
    const {default:OwnerCommandCenter}=await import('./OwnerCommandCenter');
    createRoot(rootElement).render(withI18n(<StrictMode><AppBoundary><OwnerCommandCenter/></AppBoundary></StrictMode>));return
