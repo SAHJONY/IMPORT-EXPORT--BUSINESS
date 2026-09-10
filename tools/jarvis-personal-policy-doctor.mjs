@@ -2,13 +2,22 @@ import fs from 'node:fs';
 import process from 'node:process';
 
 const runtimePath = 'openclaw/jarvis/personal-executive-runtime.md';
+const routePath = 'src/main.tsx';
+const uiPath = 'src/JarvisOwnerCenter.tsx';
 const text = fs.readFileSync(runtimePath, 'utf8');
+const routes = fs.readFileSync(routePath, 'utf8');
+const ui = fs.readFileSync(uiPath, 'utf8');
 const failures = [];
 
 function must(fragment, label) {
   if (!text.includes(fragment)) failures.push(`Missing JARVIS policy: ${label}`);
 }
-
+function routeMust(fragment, label) {
+  if (!routes.includes(fragment)) failures.push(`Missing JARVIS route: ${label}`);
+}
+function uiMust(fragment, label) {
+  if (!ui.includes(fragment)) failures.push(`Missing JARVIS UI: ${label}`);
+}
 function mustNot(fragment, label) {
   if (text.includes(fragment)) failures.push(`Forbidden JARVIS policy: ${label}`);
 }
@@ -35,6 +44,13 @@ must('Privacy and Least Privilege', 'least privilege');
 must('Never fabricate messages, leads, customers, reservations, payments, approvals, transactions, tool results, integrations, prices, or completed actions', 'anti-fabrication rule');
 must('Never mix Personal and Business contexts without owner authorization', 'strict context isolation');
 must('Protect the owner\'s time, attention, money, privacy, reputation, and business interests', 'owner protection objective');
+routeMust("path==='/owner/jarvis'", 'private owner JARVIS entry');
+routeMust("import('./JarvisOwnerCenter')", 'JARVIS lazy-loaded command center');
+uiMust('PRIVATE OWNER AI · EXECUTIVE + PERSONAL', 'owner-only assistant identity');
+uiMust("mode==='personal'", 'personal mode selector');
+uiMust("mode==='business'", 'business mode selector');
+uiMust('REQUIRES APPROVAL', 'approval queue state');
+uiMust('localStorage', 'safe browser persistence baseline');
 
 mustNot('silently bypass owner approval', 'no hidden approval bypass');
 
@@ -43,4 +59,4 @@ if (failures.length) {
   process.exit(1);
 }
 
-console.log('PASS  JARVIS personal/executive context isolation, truthful state, approval gates, source-first behavior, and owner protection are enforced');
+console.log('PASS  JARVIS runtime, private route, Personal/Business isolation, truthful state, approval gates, local persistence, and owner protection are enforced');
