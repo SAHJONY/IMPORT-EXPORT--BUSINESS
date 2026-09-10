@@ -40,6 +40,7 @@ if (!failures.length) {
     ['Supabase/CRM is the authoritative commercial source of truth', 'CRM authority'],
     ['168 full hours', '168-hour nonresponder cooldown'],
     ['actual Gmail timestamp', 'Gmail timestamp evidence'],
+    ['10 minutes (600 seconds)', '10-minute approval TTL'],
     ['DO NOT SEND', 'fail-closed send rule'],
     ['genuine inbound reply', 'transactional inbound exception'],
     ['Never create qualified demand from outreach', 'no demand inference'],
@@ -58,6 +59,7 @@ if (!failures.length) {
     ['commercial_gate_version": "4.0', 'transport v4 contract'],
     ['commercial_gate_transport_boundary', 'transport boundary enforcement'],
     ['commercial_gate_exactly_once', 'exactly-once send protection'],
+    ['commercial_gate_approval_ttl_seconds": 600', 'transport TTL contract'],
     ['SOFIA_COMMERCIAL_SEND_REQUIRES_GMAIL_OAUTH', 'commercial SMTP bypass prohibited'],
     ['SOFIA_GATE_SINGLE_EXTERNAL_RECIPIENT_REQUIRED', 'bulk recipient bypass prohibited'],
     ['SOFIA_GATE_RECIPIENT_MISMATCH', 'recipient binding'],
@@ -84,4 +86,4 @@ if (failures.length) {
   process.exit(1);
 }
 
-console.log('PASS  Sofia commercial gate v4 enforces CRM authority, Gmail evidence, 168h cooldown, TTL/idempotency, replay protection, transport-boundary enforcement, and post-send reconciliation');
+console.log('PASS  Sofia commercial gate v4 enforces CRM authority, Gmail evidence, 168h cooldown, 10-minute TTL/idempotency, replay protection, transport-boundary enforcement, and post-send reconciliation');
