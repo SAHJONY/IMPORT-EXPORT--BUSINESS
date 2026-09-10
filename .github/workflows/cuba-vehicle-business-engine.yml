@@ -1,0 +1,41 @@
+name: SAHJONY Cuba Vehicle Business Engine
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '29 */6 * * *'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sahjony-cuba-vehicle-business-engine
+  cancel-in-progress: false
+
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Ensure vehicle input exists
+        run: |
+          mkdir -p public/data/vehicles
+          if [ ! -f public/data/vehicles/candidates.json ]; then
+            printf '{\n  "vehicles": []\n}\n' > public/data/vehicles/candidates.json
+          fi
+      - name: Run vehicle A-to-Z engine
+        run: node tools/cuba-vehicle-business-engine.mjs public/data/vehicles/candidates.json
+      - name: Commit generated vehicle intelligence
+        run: |
+          if git diff --quiet -- public/data/vehicles; then
+            echo "No vehicle intelligence changes"
+            exit 0
+          fi
+          git config user.name "SAHJONY Vehicle Business Engine"
+          git config user.email "vehicle-engine@sahjony.com"
+          git add public/data/vehicles/latest.json public/data/vehicles/history.json
+          git commit -m "Update Cuba vehicle business intelligence"
+          git push

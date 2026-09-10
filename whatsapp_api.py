@@ -22,7 +22,7 @@ from sofia_hermes_nim_brain import configured as hermes_configured, model_name a
 
 app = FastAPI(title="SAHJONY WhatsApp Transport", version="3.1.0", docs_url=None, redoc_url=None)
 
-PROVIDER = os.getenv("WHATSAPP_PROVIDER", "meta_cloud").strip().lower() or "meta_cloud"
+PROVIDER = os.getenv("WHATSAPP_PROVIDER", "hermes").strip().lower() or "hermes"
 CONFIG_TABLE = "system_integrations"
 CONFIG_ID = "whatsapp_meta_cloud"
 
@@ -61,7 +61,7 @@ class ManualWhatsAppConfig(BaseModel):
     graph_api_version: str = Field(min_length=2, max_length=32)
 
 
-class OpenClawBridgeEvent(BaseModel):
+class HermesBridgeEvent(BaseModel):
     event_id: str = Field(min_length=3, max_length=256)
     direction: Literal["inbound", "outbound"]
     message_id: str | None = Field(default=None, max_length=512)
@@ -77,7 +77,7 @@ class OpenClawBridgeEvent(BaseModel):
     media: list[dict[str, Any]] = Field(default_factory=list, max_length=20)
 
 
-class OpenClawHeartbeat(BaseModel):
+class HermesHeartbeat(BaseModel):
     gateway_id: str = Field(default="default", min_length=1, max_length=160)
     account_id: str = Field(default="default", min_length=1, max_length=160)
     channel_connected: bool
@@ -87,7 +87,7 @@ class OpenClawHeartbeat(BaseModel):
     gateway_version: str | None = Field(default=None, max_length=80)
 
 
-class OpenClawAck(BaseModel):
+class HermesAck(BaseModel):
     command_id: str = Field(min_length=3, max_length=256)
     lease_token: str = Field(min_length=12, max_length=256)
     status: Literal["sent", "failed"]
@@ -100,34 +100,34 @@ def _now() -> str:
 
 
 def _provider() -> str:
-    return os.getenv("WHATSAPP_PROVIDER", PROVIDER).strip().lower() or "meta_cloud"
+    return os.getenv("WHATSAPP_PROVIDER", PROVIDER).strip().lower() or "hermes"
 
 
-def _openclaw_bridge_secret() -> str:
-    return os.getenv("OPENCLAW_APP_BRIDGE_SECRET", "").strip()
+def _hermes_bridge_secret() -> str:
+    return (os.getenv("SAHJONY_APP_BRIDGE_SECRET", "").strip() or os.getenv("OPENCLAW_APP_BRIDGE_SECRET", "").strip())
 
 
-def _openclaw_bridge_configured() -> bool:
-    return len(_openclaw_bridge_secret()) >= 24
+def _hermes_bridge_configured() -> bool:
+    return len(_hermes_bridge_secret()) >= 24
 
 
-def _verify_openclaw_signature(raw: bytes, timestamp: str | None, signature: str | None) -> None:
-    secret = _openclaw_bridge_secret()
+def _verify_hermes_signature(raw: bytes, timestamp: str | None, signature: str | None) -> None:
+    secret = _hermes_bridge_secret()
     if len(secret) < 24:
-        raise HTTPException(status_code=503, detail="OpenClaw application bridge is not configured")
+        raise HTTPException(status_code=503, detail="Hermes application bridge is not configured")
     try:
         request_time = int(timestamp or "")
     except ValueError as exc:
-        raise HTTPException(status_code=401, detail="Invalid OpenClaw bridge timestamp") from exc
+        raise HTTPException(status_code=401, detail="Invalid Hermes bridge timestamp") from exc
     if abs(int(datetime.now(timezone.utc).timestamp()) - request_time) > 300:
-        raise HTTPException(status_code=401, detail="Expired OpenClaw bridge request")
+        raise HTTPException(status_code=401, detail="Expired Hermes bridge request")
     expected = "sha256=" + hmac.new(
         secret.encode("utf-8"),
         (str(request_time) + ".").encode("utf-8") + raw,
         hashlib.sha256,
     ).hexdigest()
     if not signature or not hmac.compare_digest(expected, signature):
-        raise HTTPException(status_code=401, detail="Invalid OpenClaw bridge signature")
+        raise HTTPException(status_code=401, detail="Invalid Hermes bridge signature")
 
 
 def _owner(authorization: str | None) -> None:
@@ -136,6 +136,11 @@ def _owner(authorization: str | None) -> None:
     if not verify_owner_token(authorization.removeprefix("Bearer ").strip()):
         raise HTTPException(status_code=403, detail="Invalid owner credential")
 
+
+
+# Legacy symbol aliases retained for tests/import compatibility only.
+# Production routes and runtime authority are Hermes-native.
+_verify_openclaw_signature = _verify_hermes_signature
 
 def _normalize_phone(value: str) -> str:
     digits = "".join(ch for ch in value if ch.isdigit())
@@ -263,7 +268,9 @@ def _embedded_signup_ready(cfg: dict[str, str]) -> bool:
 
 
 def _ai_auto_reply_enabled() -> bool:
-    return os.getenv("WHATSAPP_AI_AUTO_REPLY_ENABLED", "true").strip().lower() == "true"
+    automation = os.getenv("WHATSAPP_AUTOMATION_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}
+    ai_enabled = os.getenv("WHATSAPP_AI_AUTO_REPLY_ENABLED", "true").strip().lower() == "true"
+    return automation and ai_enabled
 
 
 def _openai_ready() -> bool:
@@ -355,7 +362,8 @@ async def _send_text(
 ) -> dict[str, Any]:
     if not _send_ready(cfg):
         raise HTTPException(status_code=503, detail="WhatsApp Cloud API is not configured for sending")
-    recipient = _normalize_phone(to)
+    eligibility = await _assert_compliant_session_outbound(to)
+    recipient = eligibility["recipient"]
     result = await _meta_json(
         _graph_url(cfg, f"{cfg['phone_number_id']}/messages"),
         access_token=cfg["access_token"],
@@ -385,6 +393,15 @@ async def _send_text(
 async def _message_seen(message_id: str | None) -> bool:
     if not message_id:
         return False
+    try:
+        rows = await get_backend().select(
+            "whatsapp_messages",
+            params={"message_id": f"eq.{message_id}", "limit": "1"},
+        ) or []
+        return bool(rows)
+    except Exception:
+        # Fail closed for duplicate protection: transport errors must not create reply storms.
+        return True
 
 
 def _same_phone(left: str | None, right: str | None) -> bool:
@@ -392,6 +409,97 @@ def _same_phone(left: str | None, right: str | None) -> bool:
         return bool(left and right and _normalize_phone(left) == _normalize_phone(right))
     except HTTPException:
         return False
+
+
+def _as_utc(value: Any) -> datetime | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+async def _assert_compliant_session_outbound(to: str) -> dict[str, Any]:
+    """Fail-closed release gate for one-to-one WhatsApp session replies.
+
+    Business-initiated messaging outside the 24-hour customer-service window is
+    intentionally blocked here until the Hermes transport supports approved
+    WhatsApp templates end-to-end.
+    """
+    recipient = _normalize_phone(to)
+    backend = get_backend()
+    now = datetime.now(timezone.utc)
+    active_statuses = {"queued", "dispatching", "submitted", "sent"}
+
+    try:
+        leads = await backend.select("whatsapp_leads", params={"phone": f"eq.{recipient}", "limit": "5"}) or []
+        inbound = await backend.select(
+            "whatsapp_messages",
+            params={"phone": f"eq.{recipient}", "direction": "eq.inbound", "limit": "100", "order": "received_at.desc"},
+        ) or []
+        recipient_outbound = await backend.select(
+            "outbound_notifications",
+            params={"destination": f"eq.{recipient}", "channel": "eq.whatsapp", "limit": "100", "order": "created_at.desc"},
+        ) or []
+        recent_outbound = await backend.select(
+            "outbound_notifications",
+            params={"channel": "eq.whatsapp", "limit": "250", "order": "created_at.desc"},
+        ) or []
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="WhatsApp compliance state unavailable; outbound held") from exc
+
+    for lead in leads:
+        status = str(lead.get("status") or "").upper()
+        if status in {"OPTED_OUT", "DO_NOT_CONTACT", "DNC", "BLOCKED"}:
+            raise HTTPException(status_code=403, detail="WhatsApp recipient has opted out")
+        if lead.get("ai_followup_allowed") is False or lead.get("do_not_contact") is True:
+            raise HTTPException(status_code=403, detail="WhatsApp recipient is suppressed")
+
+    valid_inbound: list[tuple[datetime, dict[str, Any]]] = []
+    for row in inbound:
+        seen = _as_utc(row.get("received_at") or row.get("created_at") or row.get("timestamp"))
+        if seen is not None:
+            valid_inbound.append((seen, row))
+    if not valid_inbound:
+        raise HTTPException(status_code=409, detail="No verified inbound WhatsApp session; approved template required")
+    last_inbound_at, last_inbound = max(valid_inbound, key=lambda item: item[0])
+    if now - last_inbound_at > timedelta(hours=24):
+        raise HTTPException(status_code=409, detail="Outside WhatsApp 24-hour service window; approved template required")
+    if _opt_out(str(last_inbound.get("text") or last_inbound.get("content") or "")):
+        raise HTTPException(status_code=403, detail="Latest WhatsApp message is an opt-out request")
+
+    half_hour = now - timedelta(minutes=30)
+    day = now - timedelta(hours=24)
+    active_recipient_rows = [
+        row for row in recipient_outbound
+        if str(row.get("delivery_status") or row.get("status") or "").lower() in active_statuses
+    ]
+    count_30m = sum(1 for row in active_recipient_rows if (_as_utc(row.get("created_at")) or datetime.min.replace(tzinfo=timezone.utc)) >= half_hour)
+    count_24h = sum(1 for row in active_recipient_rows if (_as_utc(row.get("created_at")) or datetime.min.replace(tzinfo=timezone.utc)) >= day)
+    if count_30m >= 6 or count_24h >= 20:
+        raise HTTPException(status_code=429, detail="WhatsApp recipient rate limit reached; outbound held")
+
+    blast_cutoff = now - timedelta(minutes=10)
+    destinations = {
+        str(row.get("destination") or "")
+        for row in recent_outbound
+        if str(row.get("delivery_status") or row.get("status") or "").lower() in active_statuses
+        and (_as_utc(row.get("created_at")) or datetime.min.replace(tzinfo=timezone.utc)) >= blast_cutoff
+        and row.get("destination")
+    }
+    if recipient not in destinations and len(destinations) >= 20:
+        raise HTTPException(status_code=429, detail="WhatsApp anti-blast safety limit reached; outbound held")
+
+    return {
+        "recipient": recipient,
+        "session_open": True,
+        "last_inbound_at": last_inbound_at.isoformat(),
+        "mode": "customer_service_window",
+    }
 
 
 async def _is_owner_whatsapp(phone: str | None) -> bool:
@@ -528,7 +636,7 @@ async def _record_inbound_event(
         pass
 
 
-async def _openclaw_gateway_state() -> dict[str, Any]:
+async def _hermes_gateway_state() -> dict[str, Any]:
     try:
         rows = await get_backend().select(
             "whatsapp_openclaw_gateways",
@@ -547,7 +655,7 @@ async def _openclaw_gateway_state() -> dict[str, Any]:
             fresh = False
     connected = bool(row.get("channel_connected")) and fresh
     return {
-        "configured": _openclaw_bridge_configured(),
+        "configured": _hermes_bridge_configured(),
         "connected": connected,
         "heartbeat_fresh": fresh,
         "last_seen_at": last_seen or None,
@@ -558,22 +666,44 @@ async def _openclaw_gateway_state() -> dict[str, Any]:
     }
 
 
-async def _enqueue_openclaw_message(payload: WhatsAppSend) -> dict[str, Any]:
-    if not _openclaw_bridge_configured():
-        raise HTTPException(status_code=503, detail="OpenClaw application bridge is not configured")
-    recipient = _normalize_phone(payload.to)
+async def _enqueue_hermes_message(payload: WhatsAppSend) -> dict[str, Any]:
+    if not _hermes_bridge_configured():
+        raise HTTPException(status_code=503, detail="Hermes application bridge is not configured")
+    if os.getenv("WHATSAPP_AUTOMATION_ENABLED", "false").strip().lower() not in {"1", "true", "yes", "on"}:
+        raise HTTPException(status_code=503, detail="WhatsApp automation is paused by safety control")
+    eligibility = await _assert_compliant_session_outbound(payload.to)
+    recipient = eligibility["recipient"]
+    body = payload.body[:4096]
+    fingerprint = hashlib.sha256(f"{recipient}|{body}".encode("utf-8")).hexdigest()
+    recent = await get_backend().select(
+        "whatsapp_openclaw_outbox",
+        params={"recipient": f"eq.{recipient}", "limit": "100", "order": "created_at.desc"},
+    ) or []
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=10)
+    for existing in recent:
+        if str(existing.get("dedupe_fingerprint") or "") != fingerprint:
+            continue
+        try:
+            created = datetime.fromisoformat(str(existing.get("created_at") or "").replace("Z", "+00:00"))
+        except ValueError:
+            created = datetime.now(timezone.utc)
+        if created.astimezone(timezone.utc) >= cutoff and str(existing.get("status") or "") in {"queued", "dispatching", "sent"}:
+            return {"status": "duplicate_suppressed", "provider": "hermes_whatsapp", "command_id": existing.get("command_id"), "recipient": recipient}
     command_id = f"waq_{secrets.token_urlsafe(18)}"
     row = {
         "command_id": command_id,
         "channel": "whatsapp",
         "account_id": "default",
         "recipient": recipient,
-        "body": payload.body[:4096],
+        "body": body,
+        "dedupe_fingerprint": fingerprint,
         "preview_url": payload.preview_url,
         "lead_id": payload.lead_id,
         "customer_id": payload.customer_id,
         "source_url": payload.source_url,
         "status": "queued",
+        "release_mode": eligibility["mode"],
+        "compliance_released_at": _now(),
         "attempts": 0,
         "lease_token": None,
         "lease_expires_at": None,
@@ -585,18 +715,18 @@ async def _enqueue_openclaw_message(payload: WhatsAppSend) -> dict[str, Any]:
     await get_backend().insert("whatsapp_openclaw_outbox", row)
     await _record_outbound(
         to=recipient,
-        body=payload.body[:4096],
+        body=body,
         provider_message_id=None,
         lead_id=payload.lead_id,
         customer_id=payload.customer_id,
         source_url=payload.source_url,
-        provider="openclaw_whatsapp",
+        provider="hermes_whatsapp",
         delivery_status="queued",
         notification_id=command_id,
     )
     return {
         "status": "queued",
-        "provider": "openclaw_whatsapp",
+        "provider": "hermes_whatsapp",
         "command_id": command_id,
         "recipient": recipient,
     }
@@ -650,7 +780,7 @@ async def _process_inbound(
             await _send_text(
                 cfg,
                 to=clean_phone,
-                body="Your WhatsApp opt-out request has been recorded. SAHJONY Global Trade will not send automated follow-ups to this number.",
+                body="Your WhatsApp opt-out request has been recorded. SAHJONY GLOBAL TRADING will not send automated follow-ups to this number.",
                 lead_id=lead_id,
                 autonomous=True,
             )
@@ -660,7 +790,7 @@ async def _process_inbound(
     cognition_ready = hermes_configured() or _openai_ready()
     if not (_ai_auto_reply_enabled() and cognition_ready and _send_ready(cfg)):
         return
-    reply = await generate_sofia_reply(text, contact_name)
+    reply = await generate_sofia_reply(text, contact_name, owner_context=await _is_owner_whatsapp(phone))
     if not reply:
         return
     try:
@@ -674,13 +804,13 @@ async def whatsapp_health() -> dict[str, Any]:
     cfg = await _config()
     persistence = persistent_backend_status()
     provider = _provider()
-    openclaw = await _openclaw_gateway_state()
-    if provider == "openclaw":
+    openclaw = await _hermes_gateway_state()
+    if provider in {"hermes", "openclaw"}:
         return {
             "status": "ok" if openclaw["connected"] else "configuration_required",
             "service": "whatsapp-transport",
             "version": "3.1.0",
-            "provider": "openclaw",
+            "provider": "hermes",
             "send_ready": openclaw["connected"],
             "webhook_ready": openclaw["configured"],
             "bridge_configured": openclaw["configured"],
@@ -859,8 +989,11 @@ async def whatsapp_setup_test(authorization: str | None = Header(None, alias="Au
 @app.post("/whatsapp/send")
 async def whatsapp_send(payload: WhatsAppSend, authorization: str | None = Header(None, alias="Authorization")) -> dict[str, Any]:
     _owner(authorization)
-    if _provider() == "openclaw":
-        return await _enqueue_openclaw_message(payload)
+    provider = _provider()
+    if provider in {"hermes", "openclaw"}:
+        return await _enqueue_hermes_message(payload)
+    raise HTTPException(status_code=503, detail="Meta Cloud transport is disabled by owner policy")
+
     cfg = await _config()
     return await _send_text(
         cfg,
@@ -874,18 +1007,18 @@ async def whatsapp_send(payload: WhatsAppSend, authorization: str | None = Heade
     )
 
 
-@app.post("/whatsapp/openclaw/heartbeat")
-async def openclaw_heartbeat(
+@app.post("/whatsapp/hermes/heartbeat")
+async def hermes_heartbeat(
     request: Request,
     x_sahjony_timestamp: str | None = Header(None, alias="X-SAHJONY-Timestamp"),
     x_sahjony_signature: str | None = Header(None, alias="X-SAHJONY-Signature"),
 ) -> dict[str, Any]:
     raw = await request.body()
-    _verify_openclaw_signature(raw, x_sahjony_timestamp, x_sahjony_signature)
+    _verify_hermes_signature(raw, x_sahjony_timestamp, x_sahjony_signature)
     try:
-        heartbeat = OpenClawHeartbeat.model_validate_json(raw)
+        heartbeat = HermesHeartbeat.model_validate_json(raw)
     except Exception as exc:
-        raise HTTPException(status_code=400, detail="Invalid OpenClaw heartbeat") from exc
+        raise HTTPException(status_code=400, detail="Invalid Hermes heartbeat") from exc
     await get_backend().insert("whatsapp_openclaw_gateways", {
         "gateway_id": heartbeat.gateway_id,
         "account_id": heartbeat.account_id,
@@ -900,18 +1033,18 @@ async def openclaw_heartbeat(
     return {"status": "accepted", "gateway_id": heartbeat.gateway_id, "secrets_exposed": False}
 
 
-@app.post("/whatsapp/openclaw/events")
-async def openclaw_event(
+@app.post("/whatsapp/hermes/events")
+async def hermes_event(
     request: Request,
     x_sahjony_timestamp: str | None = Header(None, alias="X-SAHJONY-Timestamp"),
     x_sahjony_signature: str | None = Header(None, alias="X-SAHJONY-Signature"),
 ) -> dict[str, Any]:
     raw = await request.body()
-    _verify_openclaw_signature(raw, x_sahjony_timestamp, x_sahjony_signature)
+    _verify_hermes_signature(raw, x_sahjony_timestamp, x_sahjony_signature)
     try:
-        event = OpenClawBridgeEvent.model_validate_json(raw)
+        event = HermesBridgeEvent.model_validate_json(raw)
     except Exception as exc:
-        raise HTTPException(status_code=400, detail="Invalid OpenClaw bridge event") from exc
+        raise HTTPException(status_code=400, detail="Invalid Hermes bridge event") from exc
     message_id = event.message_id or event.event_id
     if await _message_seen(message_id):
         return {"status": "duplicate", "event_id": event.event_id}
@@ -938,7 +1071,7 @@ async def openclaw_event(
         message_type=event.message_type,
         text=event.content,
         contact_name=event.contact_name,
-        provider="openclaw_whatsapp",
+        provider="hermes_whatsapp",
         direction=event.direction,
     )
     if event.direction == "inbound":
@@ -954,18 +1087,18 @@ async def openclaw_event(
             event.content,
             event.message_type,
             lead_id,
-            provider="openclaw_whatsapp",
+            provider="hermes_whatsapp",
         )
     return {"status": "accepted", "event_id": event.event_id, "message_id": message_id}
 
 
-@app.get("/whatsapp/openclaw/outbox")
-async def openclaw_outbox(
+@app.get("/whatsapp/hermes/outbox")
+async def hermes_outbox(
     limit: int = Query(10, ge=1, le=25),
     x_sahjony_timestamp: str | None = Header(None, alias="X-SAHJONY-Timestamp"),
     x_sahjony_signature: str | None = Header(None, alias="X-SAHJONY-Signature"),
 ) -> dict[str, Any]:
-    _verify_openclaw_signature(b"", x_sahjony_timestamp, x_sahjony_signature)
+    _verify_hermes_signature(b"", x_sahjony_timestamp, x_sahjony_signature)
     rows = await get_backend().select(
         "whatsapp_openclaw_outbox",
         params={"limit": "100", "order": "created_at.asc"},
@@ -981,7 +1114,39 @@ async def openclaw_outbox(
                 expired = lease_until.astimezone(timezone.utc) <= now
             except ValueError:
                 expired = True
-        if status != "queued" and not expired:
+        if status == "dispatching":
+            if expired:
+                await get_backend().insert("whatsapp_openclaw_outbox", {
+                    **row,
+                    "status": "needs_review",
+                    "last_error": "dispatch_lease_expired_fail_closed",
+                    "lease_token": None,
+                    "lease_expires_at": None,
+                    "updated_at": _now(),
+                })
+            continue
+        if status != "queued":
+            continue
+        if str(row.get("release_mode") or "") != "customer_service_window":
+            await get_backend().insert("whatsapp_openclaw_outbox", {
+                **row,
+                "status": "needs_review",
+                "last_error": "missing_compliance_release",
+                "lease_token": None,
+                "lease_expires_at": None,
+                "updated_at": _now(),
+            })
+            continue
+        attempts = int(row.get("attempts") or 0)
+        if attempts >= 3:
+            await get_backend().insert("whatsapp_openclaw_outbox", {
+                **row,
+                "status": "failed",
+                "last_error": "retry_limit_exceeded",
+                "lease_token": None,
+                "lease_expires_at": None,
+                "updated_at": _now(),
+            })
             continue
         lease_token = secrets.token_urlsafe(24)
         lease_expires_at = (now + timedelta(minutes=2)).isoformat()
@@ -1001,33 +1166,34 @@ async def openclaw_outbox(
             "body": claimed["body"],
             "lease_token": lease_token,
             "lease_expires_at": lease_expires_at,
+            "release_mode": claimed.get("release_mode"),
         })
         if len(commands) >= limit:
             break
     return {"status": "ok", "commands": commands, "count": len(commands)}
 
 
-@app.post("/whatsapp/openclaw/outbox/ack")
-async def openclaw_outbox_ack(
+@app.post("/whatsapp/hermes/outbox/ack")
+async def hermes_outbox_ack(
     request: Request,
     x_sahjony_timestamp: str | None = Header(None, alias="X-SAHJONY-Timestamp"),
     x_sahjony_signature: str | None = Header(None, alias="X-SAHJONY-Signature"),
 ) -> dict[str, Any]:
     raw = await request.body()
-    _verify_openclaw_signature(raw, x_sahjony_timestamp, x_sahjony_signature)
+    _verify_hermes_signature(raw, x_sahjony_timestamp, x_sahjony_signature)
     try:
-        ack = OpenClawAck.model_validate_json(raw)
+        ack = HermesAck.model_validate_json(raw)
     except Exception as exc:
-        raise HTTPException(status_code=400, detail="Invalid OpenClaw outbox acknowledgement") from exc
+        raise HTTPException(status_code=400, detail="Invalid Hermes outbox acknowledgement") from exc
     rows = await get_backend().select(
         "whatsapp_openclaw_outbox",
         params={"command_id": f"eq.{ack.command_id}", "limit": "1"},
     ) or []
     if not rows:
-        raise HTTPException(status_code=404, detail="OpenClaw command not found")
+        raise HTTPException(status_code=404, detail="Hermes command not found")
     row = rows[0]
     if not hmac.compare_digest(str(row.get("lease_token") or ""), ack.lease_token):
-        raise HTTPException(status_code=409, detail="OpenClaw command lease mismatch")
+        raise HTTPException(status_code=409, detail="Hermes command lease mismatch")
     await get_backend().insert("whatsapp_openclaw_outbox", {
         **row,
         "status": ack.status,

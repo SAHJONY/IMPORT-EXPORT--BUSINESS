@@ -18,7 +18,7 @@ from sofia_hermes_nim_brain import model_name as hermes_model_name
 from sofia_human_conversation_engine import build_sofia_prompt
 from whatsapp_relationship_memory_api import _merge_memory
 from whatsapp_sales_brain import analyze_sales_conversation
-from whatsapp_crm_bridge import get_contact_context
+from whatsapp_crm_bridge import get_contact_context, owner_update_report
 from sofia_knowledge_layer import build_business_knowledge
 
 OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses"
@@ -170,7 +170,7 @@ async def _openai_fallback(system: str, user: str) -> tuple[str, dict[str, Any]]
     }
 
 
-async def generate_sofia_reply(text: str, contact_name: str | None) -> str:
+async def generate_sofia_reply(text: str, contact_name: str | None, owner_context: bool = False) -> str:
     if not hermes_configured() and not os.getenv("OPENAI_API_KEY", "").strip():
         return ""
 
@@ -220,9 +220,22 @@ async def generate_sofia_reply(text: str, contact_name: str | None) -> str:
 
     knowledge = await build_business_knowledge(text, crm_context)
     adaptive = await adaptive_context(contact_name)
+    owner_report: dict[str, Any] | None = None
+    if owner_context:
+        try:
+            owner_report = await owner_update_report()
+        except Exception as exc:
+            owner_report = {
+                "status": "degraded",
+                "coverage": "unknown",
+                "source_states": {"owner_report": {"state": "RUNTIME_ERROR", "error_class": type(exc).__name__}},
+            }
     system = build_sofia_prompt(memory)
     system += "\n\n" + adaptive
-    system += "\n\nYou are Sofía Smith, SAHJONY LLC's Executive Manager, Executive Assistant and AI Commercial Executive. Communicate naturally and professionally. Never falsely claim to be a physical human being. If identity or automation is directly asked about, answer truthfully and briefly, then continue helping."
+    system += "\n\nYou are Sofía Smith, SAHJONY GLOBAL TRADING's Executive Manager, Executive Assistant and AI Commercial Executive. Communicate naturally and professionally. Never falsely claim to be a physical human being. If identity or automation is directly asked about, answer truthfully and briefly, then continue helping."
+    if owner_context:
+        system += "\n\nOWNER EXECUTIVE MODE\n- The current sender is the authenticated SAHJONY owner. Treat this as an internal executive request, not a customer sales intake.\n- Never ask the owner to export/upload CRM data as the first response. Use the connected SAHJONY source snapshot supplied below first.\n- Distinguish verified zero from unknown/unreadable. Never convert source failure into zero.\n- If one source is unavailable, give the best partial report from healthy sources and isolate the blocker.\n- Do not fabricate cash, revenue, profit, invoices, payments, opportunities, shipments, or system health.\n- Only ask the owner for something when it is genuinely owner-only and cannot be resolved from connected systems."
+        system += "\n\nLIVE OWNER SOURCE SNAPSHOT\n" + json.dumps(owner_report or {}, ensure_ascii=False, default=str)[:30000]
     system += "\n\nRELATIONSHIP MEMORY\n" + json.dumps({
         "known": memory.get("known") or {},
         "uncertain": memory.get("uncertain") or {},

@@ -1,4 +1,4 @@
-"""Sofia Smith natural conversation policy for SAHJONY LLC.
+"""Sofia Smith natural conversation policy for SAHJONY GLOBAL TRADING.
 
 Makes customer-facing communication warm, concise, contextual and non-robotic while
 remaining truthful about capabilities and never fabricating facts, quotes or commitments.
@@ -13,8 +13,8 @@ from typing import Any
 @dataclass(frozen=True)
 class SofiaConversationPolicy:
     name: str = "Sofia Smith"
-    title: str = "Trade Concierge & Account Executive"
-    company: str = "SAHJONY LLC"
+    title: str = "Executive Manager"
+    company: str = "SAHJONY GLOBAL TRADING"
     max_questions_per_turn: int = 2
 
     def system_prompt(self, memory: dict[str, Any] | None = None) -> str:

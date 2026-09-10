@@ -524,7 +524,7 @@
           </button>
         </form>
         <button id="resetPassword" class="secondary" type="button">
-          Send password setup / reset email
+          Recover / re-link Owner Authenticator
         </button>
         <div id="mfaPanel" class="mfa-panel hidden">
           <h3 id="mfaTitle">Secure your Owner account</h3>
@@ -769,18 +769,21 @@
           return;
         }
         resetPassword.disabled = true;
-        setStatus("Requesting a secure password email from Supabase…");
+        setStatus("Requesting a secure Owner MFA recovery email from Supabase…");
         try {
-          const r = await sb.auth.resetPasswordForEmail(recoveryEmail, {
-            redirectTo: "https://www.sahjony.com/owner-mfa-recovery.html?lang=en-US",
+          const response = await fetch("/owner-auth/recovery/request", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ email: recoveryEmail }),
           });
-          if (r.error) throw r.error;
+          const body = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(body.detail || "Unable to start secure Owner recovery.");
           setStatus(
-            "Password setup/reset email sent. Open the newest Supabase email, then return here to set your password.",
+            body.detail || "Owner recovery email sent. Open only the newest message and follow its link to re-link Authenticator.",
             "ok",
           );
         } catch (err) {
-          setStatus(err?.message || "Unable to send password email.", "bad");
+          setStatus(err?.message || "Unable to send Owner recovery email.", "bad");
         } finally {
           resetPassword.disabled = false;
         }

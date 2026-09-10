@@ -133,13 +133,20 @@ jobs:
           HSESSION=/root/.hermes/platforms/whatsapp/session
           OROOT=/var/lib/sahjony-openclaw-state/credentials/whatsapp
           mkdir -p "$HSESSION" /root/sahjony-cutover-backups
+          # If Hermes already owns a healthy linked-device session, preserve it.
+          # Migration from a retired transport is unnecessary and would be destructive.
+          if [[ -f "$HSESSION/creds.json" ]] && grep -Eqi 'connected|ready|authenticated' /root/.hermes/platforms/whatsapp/bridge.log; then
+            echo HERMES_EXISTING_LINKED_DEVICE_SESSION=HEALTHY
+            echo HERMES_CREDENTIAL_MIGRATION=SKIPPED
+            exit 0
+          fi
           src=""
           while IFS= read -r f; do
             d=$(dirname "$f")
             if [[ -f "$d/creds.json" ]]; then src="$d"; break; fi
           done < <(find "$OROOT" -type f -name creds.json 2>/dev/null)
           if [[ -z "$src" ]]; then
-            echo OPENCLAW_BAILEYS_CREDS_NOT_FOUND=1 >&2
+            echo LEGACY_BAILEYS_CREDS_NOT_FOUND=1 >&2
             exit 18
           fi
           python3 - "$src/creds.json" <<'PY'
@@ -148,9 +155,9 @@ jobs:
           need={'noiseKey','signedIdentityKey','signedPreKey','registrationId','advSecretKey','me','account','signalIdentities','platform'}
           keys=set(d) if isinstance(d,dict) else set()
           if len(keys & need) < 5:
-              print('OPENCLAW_CREDS_NOT_BAILEYS_COMPATIBLE=1')
+              print('LEGACY_CREDS_NOT_BAILEYS_COMPATIBLE=1')
               raise SystemExit(19)
-          print('OPENCLAW_CREDS_BAILEYS_COMPATIBLE=1')
+          print('LEGACY_CREDS_BAILEYS_COMPATIBLE=1')
           PY
           ts=$(date -u +%Y%m%dT%H%M%SZ)
           [[ ! -d "$HSESSION" || -z "$(find "$HSESSION" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ]] || tar -C "$(dirname "$HSESSION")" -czf "/root/sahjony-cutover-backups/hermes-whatsapp-session-$ts.tgz" "$(basename "$HSESSION")"
@@ -177,7 +184,7 @@ jobs:
           tar -C /var/lib -czf "/root/sahjony-cutover-backups/openclaw-state-$ts.tgz" sahjony-openclaw-state sahjony-openclaw-auth 2>/dev/null || true
           systemctl disable --now sahjony-openclaw-runtime-guardian.service 2>/dev/null || true
           systemctl disable --now sahjony-openclaw-health-sidecar.timer 2>/dev/null || true
-          systemctl disable --now openclaw-gateway.service
+          systemctl disable --now openclaw-gateway.service 2>/dev/null || true
           for c in $(docker ps -a --format '{{.Names}}' | grep -Ei 'openclaw' || true); do docker stop "$c" 2>/dev/null || true; done
           sleep 5
           pgrep -f 'openclaw gateway' >/dev/null && { echo OPENCLAW_STILL_RUNNING=1 >&2; exit 23; } || true

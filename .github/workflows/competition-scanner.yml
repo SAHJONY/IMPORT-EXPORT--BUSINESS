@@ -1,0 +1,44 @@
+name: SAHJONY Competition Scanner
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 */6 * * *'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sahjony-competition-scanner
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Run competition intelligence scan
+        run: node tools/competition-scanner.mjs
+
+      - name: Commit evidence-backed changes
+        shell: bash
+        run: |
+          if git diff --quiet -- public/data/competition; then
+            echo "No scanner output changes to commit."
+            exit 0
+          fi
+          git config user.name "SAHJONY Competition Scanner"
+          git config user.email "scanner@sahjony.com"
+          git add public/data/competition/latest.json public/data/competition/history.json
+          git commit -m "chore: update competition intelligence snapshot"
+          git push

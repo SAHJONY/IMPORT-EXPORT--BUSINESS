@@ -1,6 +1,7 @@
 name: Hostinger Hermes Outbox Worker
 
 on:
+  workflow_dispatch:
   push:
     branches: [main]
     paths:
@@ -17,7 +18,7 @@ jobs:
       HOST: 69.62.68.67
       SSH_USER: root
       PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
-      BRIDGE_SECRET: ${{ secrets.OPENCLAW_APP_BRIDGE_SECRET || secrets.SAHJONY_APP_BRIDGE_SECRET }}
+      BRIDGE_SECRET: ${{ secrets.SAHJONY_APP_BRIDGE_SECRET || secrets.OPENCLAW_APP_BRIDGE_SECRET }}
     steps:
       - name: Prepare SSH
         shell: bash
@@ -49,7 +50,7 @@ jobs:
           BASE='https://www.sahjony.com'
           SECRET=open('/opt/sahjony/hermes-outbox/bridge.secret').read().strip()
           BRIDGE='http://127.0.0.1:3000'
-          GATEWAY='hostinger-vps'
+          GATEWAY='hermes-hostinger'
           ACCOUNT='default'
 
           def signed_headers(raw=b''):
@@ -76,17 +77,24 @@ jobs:
 
           def heartbeat():
               payload={'gateway_id':GATEWAY,'account_id':ACCOUNT,'channel_connected':bridge_health(),'business_name':'SAHJONY LLC','model':'hermes-agent','gateway_version':'Hermes WhatsApp bridge'}
-              try: json_request(BASE+'/whatsapp/openclaw/heartbeat','POST',payload,signed_headers)
-              except Exception: pass
+              try:
+                  json_request(BASE+'/whatsapp/hermes/heartbeat','POST',payload,signed_headers)
+                  print('HERMES_HEARTBEAT_POST=OK', flush=True)
+              except urllib.error.HTTPError as e:
+                  print(f'HERMES_HEARTBEAT_POST=HTTP_{e.code}', flush=True)
+              except Exception as e:
+                  print(f'HERMES_HEARTBEAT_POST={type(e).__name__}', flush=True)
 
           def poll():
               try:
-                  d=json_request(BASE+'/whatsapp/openclaw/outbox?limit=5',headers=lambda raw:signed_headers(b''))
+                  d=json_request(BASE+'/whatsapp/hermes/outbox?limit=5',headers=lambda raw:signed_headers(b''))
                   return d.get('commands') or []
               except Exception:
                   return []
 
           def send_local(cmd):
+              if str(cmd.get('release_mode') or '') != 'customer_service_window':
+                  raise RuntimeError('compliance_release_missing')
               recipient=''.join(ch for ch in str(cmd.get('recipient') or '') if ch.isdigit())
               if not recipient: raise RuntimeError('invalid recipient')
               body=str(cmd.get('body') or '')[:4096]
@@ -102,7 +110,7 @@ jobs:
 
           def ack(cmd,status,message_id=None,error=None):
               payload={'command_id':cmd['command_id'],'lease_token':cmd['lease_token'],'status':status,'provider_message_id':message_id,'error':(str(error)[:500] if error else None)}
-              json_request(BASE+'/whatsapp/openclaw/outbox/ack','POST',payload,signed_headers)
+              json_request(BASE+'/whatsapp/hermes/outbox/ack','POST',payload,signed_headers)
 
           def main():
               if len(SECRET)<24: raise SystemExit('bridge secret missing')
@@ -141,7 +149,8 @@ jobs:
           WantedBy=multi-user.target
           UNIT
           systemctl daemon-reload
-          systemctl enable --now sahjony-hermes-outbox.service
+          systemctl enable sahjony-hermes-outbox.service >/dev/null
+          systemctl restart sahjony-hermes-outbox.service
           sleep 8
           systemctl is-active --quiet sahjony-hermes-outbox.service
           curl -fsS --max-time 5 http://127.0.0.1:3000/health >/dev/null
@@ -156,12 +165,17 @@ jobs:
           python3 - <<'PY'
           import json, urllib.request
           d=json.load(urllib.request.urlopen('https://www.sahjony.com/whatsapp/health',timeout=20))
-          h=d.get('hostinger_openclaw') or {}
+          h=d.get('hermes_agent') or {}
           assert h.get('heartbeat_fresh') is True, h
           assert h.get('connected') is True, h
           print('PRODUCTION_WHATSAPP_HEARTBEAT=FRESH')
           print('PRODUCTION_WHATSAPP_CONNECTED=TRUE')
           PY
+      - name: Show Hermes worker diagnostics on failure
+        if: failure()
+        shell: bash
+        run: |
+          ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/key "$SSH_USER@$HOST" 'journalctl -u sahjony-hermes-outbox.service -n 40 --no-pager | grep -E "HERMES_HEARTBEAT_POST|Started|Stopped|Main process exited" || true'
       - name: Cleanup
         if: always()
         run: rm -f ~/.ssh/key

@@ -1,0 +1,111 @@
+{
+  "version": 1,
+  "market": "United States to Cuba ocean logistics",
+  "objective": "Discover bookable, compliant, first-hand wholesale ocean routes and rates from any practical U.S. seaport to any practical Cuban seaport without inventing availability, capacity or pricing.",
+  "originPorts": [
+    {"name":"Houston","state":"TX","priority":"HIGH"},
+    {"name":"New Orleans","state":"LA","priority":"HIGH"},
+    {"name":"Miami","state":"FL","priority":"HIGH"},
+    {"name":"Port Everglades","state":"FL","priority":"HIGH"},
+    {"name":"Jacksonville","state":"FL","priority":"MEDIUM"},
+    {"name":"Savannah","state":"GA","priority":"HIGH"},
+    {"name":"Charleston","state":"SC","priority":"MEDIUM"},
+    {"name":"Norfolk","state":"VA","priority":"MEDIUM"},
+    {"name":"New York/New Jersey","state":"NY/NJ","priority":"HIGH"},
+    {"name":"Baltimore","state":"MD","priority":"MEDIUM"},
+    {"name":"Los Angeles/Long Beach","state":"CA","priority":"MEDIUM"}
+  ],
+  "destinationPorts": [
+    {"name":"Mariel","country":"CU","priority":"HIGH"},
+    {"name":"Havana","country":"CU","priority":"HIGH"},
+    {"name":"Santiago de Cuba","country":"CU","priority":"MEDIUM"}
+  ],
+  "modes": ["FCL_20","FCL_40","LCL","RORO_VEHICLE","CONTAINERIZED_VEHICLE"],
+  "vehiclePolicy": {
+    "maritimeOnly": true,
+    "allowAir": false,
+    "preferFinalDeliveryInCuba": true,
+    "compareRoroVsContainerWhenBookable": true
+  },
+  "supplierPolicy": {
+    "onlyFirstHandWholesale": true,
+    "acceptedRoles": ["ocean_carrier","nvocc","licensed_freight_forwarder_with_direct_contract_rate","port_terminal_operator","direct_import_export_operator"],
+    "rejectRetailResellerAsCostSource": true,
+    "rejectUnverifiedMiddleman": true,
+    "excludeFromSupplierPool": ["Beach Cargo LLC","America Cargo Services"]
+  },
+  "routeStatus": ["VERIFIED_BOOKABLE","QUALIFYING","INDICATIVE_ONLY","BLOCKED_COMPLIANCE","NOT_AVAILABLE","UNVERIFIED"],
+  "requiredEvidence": [
+    "origin_port",
+    "destination_port",
+    "carrier_or_nvocc_identity",
+    "bookable_service_confirmation",
+    "cargo_type_acceptance",
+    "wholesale_or_direct_rate",
+    "sailing_frequency_or_next_departure",
+    "transit_time",
+    "routing_or_transshipment",
+    "documentation_requirements",
+    "us_export_compliance",
+    "cuba_import_or_delivery_scope",
+    "commercial_terms"
+  ],
+  "ranking": {
+    "verifiedBookability": 25,
+    "firstHandWholesaleRole": 20,
+    "totalLandedLogisticsCost": 20,
+    "speed": 10,
+    "cubaFinalMile": 10,
+    "reliability": 10,
+    "capitalExposure": 5
+  },
+  "publicEvidenceSeeds": [
+    {
+      "provider":"Six World Shipping",
+      "role":"licensed_freight_forwarder_candidate",
+      "status":"QUALIFYING",
+      "publishedOrigins":["New York","Savannah","Miami","New Orleans","Houston","Los Angeles"],
+      "publishedDestinations":["Mariel/Havana","Santiago de Cuba"],
+      "publishedMode":"FCL 20/40",
+      "publishedFrequency":"weekly",
+      "source":"https://www.sixworldshipping.com/",
+      "note":"Public marketing evidence only; first-hand contractual rate and bookability must be verified before approval."
+    },
+    {
+      "provider":"Netcycle Trading Corp",
+      "role":"3pl_freight_forwarder_candidate",
+      "status":"QUALIFYING",
+      "publishedOrigins":["Miami"],
+      "publishedDestinations":["Mariel"],
+      "publishedMode":"direct ocean; FCL/LCL capabilities published",
+      "publishedFrequency":"biweekly Miami-Mariel",
+      "source":"https://www.netcyclecorp.com/freight-services",
+      "note":"Public evidence of direct Cuba service and logistics capabilities; wholesale/first-hand economics still require verification."
+    },
+    {
+      "provider":"CMA CGM",
+      "role":"ocean_carrier",
+      "status":"QUALIFYING",
+      "publishedDestinations":["Mariel","Santiago de Cuba"],
+      "publishedMode":"container liner services",
+      "source":"https://www.cma-cgm.com/ebusiness/schedules/port/export?countryCode=CU&delayFrom=2&delayTo=14&fileType=pdf&isDeparture=True",
+      "note":"Carrier service presence in Cuba verified publicly; U.S.-origin lane bookability for specific cargo must be confirmed transaction-by-transaction."
+    },
+    {
+      "provider":"Hapag-Lloyd",
+      "role":"ocean_carrier",
+      "status":"BLOCKED_COMPLIANCE",
+      "publishedDestinations":["Mariel"],
+      "source":"https://www.hapag-lloyd.com/es/services-information/news/2024/12/cuba-import-restriction.html",
+      "note":"Carrier states Cuba shipments to/from USA, Canada and Mexico cannot currently be accommodated for legal reasons."
+    }
+  ],
+  "rules": {
+    "neverInventRoute": true,
+    "neverTreatMarketplaceRateAsFirmCarrierRate": true,
+    "neverTreatMarketingClaimAsApprovedSupplier": true,
+    "neverContactDirectCompetitors": true,
+    "preserveEvidenceAndTimestamp": true,
+    "preferZeroSahjonyCapitalExposure": true
+  }
+}

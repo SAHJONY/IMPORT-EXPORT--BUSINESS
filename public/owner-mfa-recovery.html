@@ -17,7 +17,7 @@
 <main>
   <div class="eyebrow">SAHJONY GLOBAL TRADE · OWNER IDENTITY RECOVERY</div>
   <h1>Re-link Authenticator</h1>
-  <p>This page removes only the stale verified TOTP factor after Supabase has confirmed a fresh password-recovery session for the active SAHJONY owner. It does not bypass password authentication, owner membership, or AAL2.</p>
+  <p>This page replaces only the stale verified TOTP factor after Supabase validates the newest Owner recovery email and the server verifies its one-time recovery state, Owner identity, and active Owner membership. Final Owner access still requires a newly verified AAL2 factor.</p>
   <div id="status" class="status">Checking the secure Supabase recovery session…</div>
   <button id="reset" disabled>Remove old Authenticator and re-link MFA</button>
   <a class="button" href="/owner-login?lang=en-US">Back to Owner Sign In</a>
@@ -27,74 +27,58 @@
 <script>
   const SUPABASE_URL = "https://qprlbmcoksrpuvodxjtt.supabase.co";
   const SUPABASE_KEY = "sb_publishable_-I-dlfNYk4byxK5WQKuqlQ_WIAGkuA-";
-  const MAX_RECOVERY_AGE_SECONDS = 30 * 60;
   const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
     auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true }
   });
   const status = document.getElementById("status");
   const reset = document.getElementById("reset");
   const setStatus = (text, type="") => { status.textContent=text; status.className="status"+(type?" "+type:""); };
-
-  function decodeClaims(token){
-    try {
-      const part = token.split(".")[1];
-      const normalized = part.replace(/-/g,"+").replace(/_/g,"/");
-      const padded = normalized + "=".repeat((4-normalized.length%4)%4);
-      return JSON.parse(atob(padded));
-    } catch { return null; }
-  }
-
-  function hasFreshRecoveryAmr(token){
-    const claims = decodeClaims(token);
-    const amr = Array.isArray(claims?.amr) ? claims.amr : [];
-    const recovery = amr.find(entry => String(entry?.method || "").toLowerCase() === "recovery");
-    const ts = Number(recovery?.timestamp || 0);
-    const now = Math.floor(Date.now()/1000);
-    return Boolean(recovery && Number.isFinite(ts) && ts > 0 && now-ts <= MAX_RECOVERY_AGE_SECONDS && ts <= now+60);
-  }
+  const recoveryState = new URLSearchParams(location.search).get("state") || "";
 
   async function initialize(){
+    if (!/^[A-Za-z0-9_-]{24,256}$/.test(recoveryState)) {
+      setStatus("This recovery link is missing its one-time server state. Return to Owner Sign In and request exactly one new recovery email.", "bad");
+      return;
+    }
     const { data, error } = await sb.auth.getSession();
     const token = data.session?.access_token || "";
     if (error || !token) {
-      setStatus("No valid Supabase session is present. From Owner Sign In, request a fresh password setup/reset email and open that recovery link in this same browser.", "bad");
+      setStatus("Waiting for Supabase to validate the newest Owner recovery email. If this remains here, request one new recovery email and open only the newest link in this browser.", "bad");
       return;
     }
-    if (!hasFreshRecoveryAmr(token)) {
-      setStatus("A Supabase session exists, but it is not a fresh password-recovery session. Request a new password setup/reset email from Owner Sign In, open the newest recovery link in this same browser, then return here.", "bad");
-      return;
-    }
-    setStatus("Fresh Supabase recovery session verified locally. The server will independently verify Owner identity and membership before removing the stale TOTP factor.", "ok");
+    setStatus("Recovery email session detected. The server will independently verify the one-time state, recent email authentication, Owner identity, and membership before changing MFA.", "ok");
     reset.disabled = false;
-  }
-
-  async function edgeErrorDetail(error){
-    try {
-      if (error?.context && typeof error.context.json === "function") {
-        const body = await error.context.json();
-        if (body?.detail) return body.detail;
-      }
-    } catch {}
-    return error?.message || "Secure MFA recovery failed.";
   }
 
   reset.addEventListener("click", async () => {
     reset.disabled = true;
     setStatus("Verifying Owner recovery authorization and removing only the stale verified TOTP factor…");
     try {
-      const { data, error } = await sb.functions.invoke("owner-mfa-recovery-reset", { body: { confirm: "RESET_OLD_TOTP" } });
-      if (error) throw error;
-      if (!data || data.status !== "ready_to_reenroll") throw new Error(data?.detail || "Secure MFA reset was not completed.");
+      const { data: sessionData, error: sessionError } = await sb.auth.getSession();
+      if (sessionError || !sessionData.session?.access_token) throw new Error("Supabase recovery session is unavailable.");
+      const response = await fetch("/owner-auth/recovery/reset-factor", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer " + sessionData.session.access_token,
+        },
+        body: JSON.stringify({ state: recoveryState, confirm: "RESET_OLD_TOTP" }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || data.status !== "ready_to_reenroll") throw new Error(data.detail || "Secure MFA reset was not completed.");
       try { await sb.auth.signOut({ scope: "local" }); } catch {}
       setStatus("Old Authenticator factor cleared securely. Returning to Owner Sign In so a new TOTP QR can be enrolled and verified at AAL2.", "ok");
       setTimeout(() => location.replace("/owner-login?lang=en-US"), 1200);
     } catch (err) {
-      setStatus(await edgeErrorDetail(err), "bad");
+      setStatus(err?.message || "Secure MFA recovery failed.", "bad");
       reset.disabled = false;
     }
   });
 
-  initialize();
+  sb.auth.onAuthStateChange((event) => {
+    if (event === "PASSWORD_RECOVERY" || event === "SIGNED_IN" || event === "INITIAL_SESSION") initialize();
+  });
+  setTimeout(initialize, 350);
 </script>
 <script src="/global-language.js" defer></script>
 </body>

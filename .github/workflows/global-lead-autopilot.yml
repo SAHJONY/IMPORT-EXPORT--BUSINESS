@@ -1,0 +1,49 @@
+name: Global Lead Autopilot
+
+on:
+  schedule:
+    - cron: '17 * * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: global-lead-autopilot
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  research:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      LEAD_SEARCH_AUTONOMY_ENABLED: 'true'
+      LEAD_SEARCH_AUTONOMY_TARGET: '10'
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      OPENAI_PRIMARY_MODEL: ${{ secrets.OPENAI_PRIMARY_MODEL }}
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install runtime dependencies
+        run: pip install -r requirements.txt
+      - name: Verify required runtime configuration
+        run: |
+          python - <<'PY'
+          import os, sys
+          missing=[]
+          if not os.getenv('OPENAI_API_KEY','').strip(): missing.append('OPENAI_API_KEY')
+          if not os.getenv('SUPABASE_URL','').strip(): missing.append('SUPABASE_URL')
+          if not (os.getenv('SUPABASE_SERVICE_ROLE_KEY','').strip() or os.getenv('SUPABASE_SECRET_KEY','').strip()):
+              missing.append('SUPABASE_SERVICE_ROLE_KEY or SUPABASE_SECRET_KEY')
+          if missing:
+              print('Missing required GitHub Actions secrets:', ', '.join(missing))
+              sys.exit(2)
+          print('Required runtime configuration present.')
+          PY
+      - name: Run one governed research cycle
+        run: python tools/global-lead-autopilot.py

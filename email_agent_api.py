@@ -12,13 +12,13 @@ from business_os_api import app as business_os_app
 from business_os_executor_api import app as business_os_executor_app
 from global_deal_decision_api import app as global_deal_decision_app
 
-app = FastAPI(title="SAHJONY Global Trade Email Agent", version="2.5.0", docs_url=None, redoc_url=None)
+app = FastAPI(title="SAHJONY Global Trade Email Agent", version="2.6.0", docs_url=None, redoc_url=None)
 
 AUTO_ACTIONS = [
     "triage and classify inbound business email",
-    "reply autonomously to routine customer, supplier, sourcing, logistics, operations and support inquiries",
-    "send non-binding status updates and information requests",
-    "follow up autonomously on unresolved business threads",
+    "reply autonomously to routine customer, supplier, sourcing, logistics, operations and support inquiries only when the CRM/Gmail commercial gate permits",
+    "send non-binding status updates and information requests only through the gated commercial transport",
+    "follow up on nonresponder business threads only after the full thread is read, CRM eligibility is confirmed, and 168 full hours have elapsed from the newest successful Gmail outbound",
     "preserve thread context and sender language when practical",
     "route messages to the appropriate SAHJONY business department",
     "coordinate routine meetings, calendar invitations, rescheduling and reminders",
@@ -28,7 +28,7 @@ AUTO_ACTIONS = [
     "create and route enterprise missions across business departments",
     "execute routine reversible business missions through a durable action queue",
     "verify execution evidence before marking missions complete",
-    "create durable RFQ packages and open sourcing, logistics and compliance workstreams when a trade opportunity is RFQ-ready",
+    "create durable RFQ packages and open sourcing, logistics and compliance workstreams only when genuine evidence makes a trade opportunity RFQ-ready",
     "evaluate material global deals through GO HOLD BLOCK evidence gates before material execution",
     "manage routine reversible business and application operations until resolution or a governance gate",
 ]
@@ -50,13 +50,22 @@ def email_agent_health():
     return {
         "status": "ok",
         "service": "sahjony-global-trade-email-agent",
-        "version": "2.5.0",
+        "version": "2.6.0",
         "canonical_domain": CANONICAL_DOMAIN,
         "departments": len(DEPARTMENTS),
         "mode": "24_7_agentic_business_communications",
         "receive_email": True,
-        "routine_replies": "autonomous",
-        "autonomous_follow_up": True,
+        "routine_replies": "autonomous_when_gate_allows",
+        "autonomous_follow_up": "gated_168h_nonresponder_only",
+        "commercial_email_gate_version": "4.0",
+        "commercial_send_transport_gate": True,
+        "commercial_gate_approval_ttl_seconds": 600,
+        "nonresponder_followup_min_hours": 168,
+        "full_gmail_thread_required": True,
+        "gmail_timestamp_authoritative": True,
+        "crm_authoritative_for_commercial_eligibility": True,
+        "post_send_gmail_evidence_required": True,
+        "qualified_demand_requires_genuine_inbound_evidence": True,
         "calendar_management": True,
         "whatsapp_sales_brain": True,
         "whatsapp_relationship_memory_360": True,
@@ -92,7 +101,17 @@ def email_agent_policy():
             for d in DEPARTMENTS
         ],
         "channels": ["email", "whatsapp", "voice", "calendar", "web", "internal"],
-        "principle": "Autonomously execute routine reversible work through durable queues, relationship memory, progressive discovery, verified RFQ workstreams and GO/HOLD/BLOCK evidence gates; fail closed before financial, contractual, legal, compliance-release, destructive or other binding commitments.",
+        "commercial_email_gate": {
+            "version": "4.0",
+            "crm_first": True,
+            "full_thread_required": True,
+            "nonresponder_followup_min_hours": 168,
+            "gmail_timestamp_required": True,
+            "approval_ttl_seconds": 600,
+            "post_send_reconciliation_required": True,
+            "fail_closed": True,
+        },
+        "principle": "Autonomously execute routine reversible work through durable queues and evidence gates. Commercial email must pass the CRM/Gmail gate, nonresponder follow-up must wait 168 full hours from the newest successful Gmail outbound, and binding, financial, legal, compliance-release, destructive or irreversible commitments remain owner-gated.",
     }
 
 

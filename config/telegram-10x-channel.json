@@ -1,0 +1,219 @@
+{
+  "version": 6,
+  "channel": "telegram",
+  "brand": "SAHJONY GLOBAL TRADING",
+  "botUsername": "SahjonyGlobalTradeBot",
+  "publicEntryUrl": "https://t.me/SahjonyGlobalTradeBot",
+  "primaryLanguage": "es",
+  "secondaryLanguage": "en",
+  "role": "Proactive Autonomous Sales OS and WhatsApp-parallel commercial channel",
+  "crossChannelIdentity": {
+    "officialWhatsappPhoneE164": "+12816628581",
+    "officialWhatsappPhoneDisplay": "+1 281-662-8581",
+    "whatsappContactUrl": "https://wa.me/12816628581",
+    "sofiaVoicePhoneE164": "+13465346545",
+    "sofiaVoicePhoneDisplay": "+1 346-534-6545",
+    "telegramBotUrl": "https://t.me/SahjonyGlobalTradeBot",
+    "policy": "Telegram, WhatsApp, voice and email reconcile to one CRM customer truth without altering or disconnecting the independent provider sessions.",
+    "whatsappCredentialsMayBeChangedByTelegramAutomation": false,
+    "whatsappSessionMayBeDisconnectedByTelegramAutomation": false,
+    "telegramIsParallelNotReplacementAtCredentialLevel": true,
+    "crossChannelCRMReconciliationRequired": true,
+    "duplicateConversationSuppressionRequired": true
+  },
+  "salesOS": {
+    "enabled": true,
+    "proactive": true,
+    "operatingMode": "proactive_autonomous_with_governed_commitment_gates",
+    "agent": "Sofia Smith",
+    "coverage": "24/7",
+    "northStar": "verified collected gross profit",
+    "objectives": [
+      "respond immediately to inbound commercial conversations",
+      "identify buyer, supplier, logistics, vehicle, cargo and Cuba private-sector intent",
+      "capture structured requirements progressively without interrogating the customer",
+      "score commercial readiness and evidence quality",
+      "reconcile the contact and conversation with CRM truth",
+      "request only missing information needed for the next commercial step",
+      "prepare non-binding quote inputs when evidence is sufficient",
+      "route opportunities to sourcing, logistics, pricing, KYB and compliance engines",
+      "proactively recover stalled inbound or consented opportunities",
+      "surface the next-best-action before a qualified opportunity goes cold",
+      "publish verified commercial calls-to-action when useful",
+      "escalate only material commercial, compliance, payment or binding decisions",
+      "measure conversion from conversation to verified RFQ, firm quote, contracted transaction and collected gross profit"
+    ],
+    "pipeline": [
+      "INBOUND_ENGAGEMENT",
+      "NEED_DISCOVERY",
+      "REQUIREMENTS_CAPTURED",
+      "QUALIFICATION_REVIEW",
+      "QUALIFIED_DEMAND",
+      "SOURCING_AND_LOGISTICS",
+      "QUOTE_INPUTS_COMPLETE",
+      "FIRM_QUOTE_READY",
+      "NEGOTIATION",
+      "CONTRACT_OR_PO",
+      "FULFILLMENT",
+      "INVOICED",
+      "COLLECTED"
+    ],
+    "autonomousActions": [
+      "answer routine inbound questions",
+      "detect language and respond in the customer language",
+      "classify commercial intent",
+      "capture product, quantity, destination, timing, packaging and commercial terms",
+      "ask for missing non-sensitive requirements",
+      "create or update engagement evidence in CRM",
+      "deduplicate cross-channel customer identity when evidence supports a match",
+      "assign sales stage and evidence confidence",
+      "route verified needs to sourcing, pricing, logistics, KYB and compliance workflows",
+      "prepare draft non-binding quote structures from verified inputs",
+      "schedule governed follow-up for inbound or opted-in contacts",
+      "send concise Telegram follow-ups when a previously engaged contact goes quiet and no opt-out exists",
+      "prioritize stalled opportunities by expected gross profit, conversion probability, evidence quality and time-to-revenue",
+      "suppress repeated follow-ups when a newer inbound message or prior proactive touch exists",
+      "surface stalled qualified opportunities",
+      "publish verified offers, routes and service announcements to the public Telegram channel",
+      "handoff material exceptions to the Chairman"
+    ],
+    "proactiveLoop": {
+      "enabled": true,
+      "eligibleContacts": ["telegram_inbound", "explicitly_consented"],
+      "neverColdProspect": true,
+      "defaultQuietHours": "21:00-08:00 contact-local time when known",
+      "cadence": {
+        "firstFollowUpAfterHours": 6,
+        "secondFollowUpAfterHours": 24,
+        "finalFollowUpAfterHours": 72,
+        "maxAutomatedFollowUpsPerConversation": 3
+      },
+      "nextBestActionPriority": [
+        "missing requirement blocking quote",
+        "verified buyer waiting for supplier or carrier input",
+        "firm quote awaiting response",
+        "negotiation with clear unresolved term",
+        "high-value stalled qualified opportunity",
+        "routine incomplete inquiry"
+      ],
+      "messageRules": [
+        "be concise and useful",
+        "reference the known requirement instead of sending a generic sales nudge",
+        "ask for at most the smallest missing information needed for the next step",
+        "never manufacture urgency, scarcity, pricing or availability",
+        "stop immediately on opt-out or negative intent",
+        "do not follow up if a newer customer message exists",
+        "do not duplicate a follow-up already sent through another reconciled channel"
+      ]
+    },
+    "neverAutonomous": [
+      "invent demand, price, capacity, certification or authority",
+      "mark a lead as qualified demand without evidence",
+      "send bulk unsolicited outreach",
+      "make binding pricing commitments from unverified costs",
+      "sign contracts or purchase orders",
+      "move money or change banking instructions",
+      "deploy SAHJONY capital",
+      "override sanctions, export-control, KYB or customs gates",
+      "disclose protected supplier or buyer economics prematurely"
+    ],
+    "qualificationEvidence": {
+      "minimumForQualifiedDemand": [
+        "real counterparty or reachable business contact",
+        "specific product or service requirement",
+        "quantity or shipment size",
+        "destination or delivery point",
+        "commercial intent"
+      ],
+      "preferredForFirmQuote": [
+        "required date or urgency",
+        "specification or acceptable substitute",
+        "packaging or container requirement",
+        "payment preference",
+        "buyer KYB when transaction risk requires it",
+        "verified supplier or carrier cost",
+        "landed-cost inputs",
+        "compliance basis"
+      ]
+    },
+    "followUpPolicy": {
+      "inboundOrConsentedOnly": true,
+      "noBulkColdMessaging": true,
+      "stopOnOptOut": true,
+      "suppressDuplicateCrossChannelFollowups": true,
+      "maxAutomatedFollowUpsPerConversation": 3,
+      "prioritizeBy": ["expected gross profit", "conversion probability", "speed to revenue", "evidence quality", "capital exposure"]
+    },
+    "commercialMetrics": [
+      "inbound conversations",
+      "requirements captured",
+      "qualified RFQs",
+      "firm quotes",
+      "quote-to-order conversion",
+      "contracted transactions",
+      "invoiced revenue",
+      "collected revenue",
+      "collected gross profit",
+      "median response time",
+      "sales cycle time",
+      "follow-up recovery rate",
+      "proactive touches sent",
+      "proactive reply rate",
+      "stalled-opportunity recovery rate"
+    ]
+  },
+  "commands": [
+    {"command":"start","description":"Abrir SAHJONY y hablar con Sofía"},
+    {"command":"cotizar","description":"Solicitar una cotización"},
+    {"command":"comprar","description":"Necesito comprar o importar"},
+    {"command":"vender","description":"Quiero ofrecer productos o capacidad"},
+    {"command":"carga","description":"Carga consolidada y envíos"},
+    {"command":"vehiculo","description":"Envío marítimo de vehículos a Cuba"},
+    {"command":"mipyme","description":"Compras, importación o exportación para MIPYMES"},
+    {"command":"proveedor","description":"Registro y evaluación de proveedores"},
+    {"command":"whatsapp","description":"Contacto oficial SAHJONY por WhatsApp"},
+    {"command":"llamar","description":"Hablar por teléfono con SAHJONY"},
+    {"command":"estado","description":"Estado de una operación existente"},
+    {"command":"ayuda","description":"Opciones y contacto"}
+  ],
+  "routing": {
+    "buyer": "SOFIA_COMMERCIAL",
+    "supplier": "SOFIA_SUPPLIER_INTELLIGENCE",
+    "vehicle": "VEHICLE_A_TO_Z_ENGINE",
+    "consolidatedCargo": "CUBA_PRIVATE_SECTOR_CARGO",
+    "mipyme": "CUBA_PRIVATE_SECTOR_NETWORK",
+    "customs": "CUBA_CUSTOMS_RELEASE",
+    "pricing": "PRICING_AND_MARGIN_ENGINE",
+    "kyb": "KYB_COMPLIANCE_WORKFLOW",
+    "logistics": "LOGISTICS_INTELLIGENCE",
+    "owner": "SOFIA_EXECUTIVE_ASSISTANT"
+  },
+  "truthPolicy": {
+    "telegramMessageIsNotQualifiedDemandByItself": true,
+    "noInventedRates": true,
+    "noInventedCapacity": true,
+    "noAutomaticBindingCommitment": true,
+    "noMoneyMovement": true,
+    "noContractSignature": true,
+    "verifyBeforeFormalQuote": true
+  },
+  "continuityPolicy": {
+    "whatsappUnavailable": "Telegram becomes primary digital messaging channel alongside phone and email",
+    "whatsappAvailable": "Telegram remains a full parallel Sales OS channel",
+    "doNotTouchWhatsappSessionOrCredentials": true,
+    "sameBusinessIdentityAcrossChannels": true
+  },
+  "publicationPolicy": {
+    "publicChannelUse": ["verified offers","verified routes","commercial updates","buyer calls","supplier calls","service announcements","educational trade content"],
+    "neverPublish": ["bank credentials","private customer data","unverified pricing","unverified demand","confidential supplier economics","unverified certifications"],
+    "defaultCallToAction": "Escríbele a Sofía por Telegram @SahjonyGlobalTradeBot o usa WhatsApp +1 281-662-8581. Para llamadas: +1 346-534-6545."
+  },
+  "serviceLevel": {
+    "inbound": "24/7",
+    "languageDetection": true,
+    "spanishFirst": true,
+    "targetFirstResponse": "immediate when the bot runtime is healthy",
+    "proactiveRecovery": true,
+    "humanEscalation": "material risk, compliance ambiguity, binding terms, payment, capital deployment or Chairman decision"
+  }
+}

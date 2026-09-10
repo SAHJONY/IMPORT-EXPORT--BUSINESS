@@ -1,0 +1,43 @@
+name: SAHJONY Cuba Customs Release Scanner
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '37 */6 * * *'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sahjony-cuba-customs-release-scanner
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Run Cuba customs release scanner
+        run: node tools/cuba-customs-release-scanner.mjs
+
+      - name: Commit scanner outputs if changed
+        shell: bash
+        run: |
+          if git diff --quiet -- public/data/cuba-customs-release/latest.json public/data/cuba-customs-release/history.json; then
+            echo "No customs-release intelligence changes to commit."
+            exit 0
+          fi
+          git config user.name "SAHJONY Customs Release Scanner"
+          git config user.email "scanner@sahjony.com"
+          git add public/data/cuba-customs-release/latest.json public/data/cuba-customs-release/history.json
+          git commit -m "Update Cuba customs release intelligence"
+          git push

@@ -1,0 +1,66 @@
+{
+  "version": 1,
+  "name": "SAHJONY Global Lead Engagement Autopilot",
+  "enabled": true,
+  "mode": "governed_proactive_business_outreach",
+  "objective": "Convert evidence-backed research leads into verified commercial conversations and qualified demand without bulk unsolicited outreach or binding commitments.",
+  "cadence": "hourly",
+  "perCycle": {
+    "maxNewResearchLeadsReviewed": 50,
+    "maxFirstContactEmails": 2,
+    "maxFollowUps": 2
+  },
+  "eligibility": {
+    "required": [
+      "real identifiable business",
+      "public business contact method",
+      "opportunity score >= 70",
+      "not a duplicate candidate",
+      "specific evidence-backed commercial relevance",
+      "no prior opt-out or suppression"
+    ],
+    "preferred": [
+      "primary-source company website",
+      "named commercial contact",
+      "clear import, buying, distribution, logistics, manufacturing or supplier role"
+    ]
+  },
+  "outreach": {
+    "channelPriority": ["email"],
+    "senderIdentity": "Sofia Smith, Executive Manager, SAHJONY LLC",
+    "oneToOneOnly": true,
+    "bulkUnsolicitedOutreach": false,
+    "personalizationRequired": true,
+    "mustReferenceEvidenceBackedFit": true,
+    "mustAskForConcreteCommercialRequirements": true,
+    "mustIncludeOptOutLanguage": true,
+    "noPricePromiseWithoutVerifiedInputs": true,
+    "noBindingCommitment": true
+  },
+  "qualification": {
+    "discoveredLeadIsQualifiedDemand": false,
+    "minimumQualifiedDemandEvidence": [
+      "reachable real counterparty",
+      "specific product or service requirement",
+      "quantity or shipment size",
+      "destination or delivery point",
+      "commercial intent"
+    ]
+  },
+  "suppression": {
+    "stopOnOptOut": true,
+    "suppressDuplicateCrossChannelFollowUp": true,
+    "doNotContactCompetitors": ["Beach Cargo", "America Cargo Services"],
+    "respectWhatsAppOutboundKillSwitch": true
+  },
+  "neverAutonomous": [
+    "invent demand, price, capacity, certification or authority",
+    "mark research lead as qualified demand without evidence",
+    "send bulk unsolicited campaigns",
+    "sign contracts or purchase orders",
+    "move money or change banking instructions",
+    "deploy SAHJONY capital",
+    "override sanctions, export-control, KYB or customs controls"
+  ],
+  "primaryMetric": "verified collected gross profit"
+}

@@ -1,0 +1,41 @@
+{
+  "engine": "SAHJONY USA-Cuba Landed Logistics Decision Engine",
+  "version": 1,
+  "status": "ACTIVE",
+  "generatedAt": "2026-09-10T11:51:54.987Z",
+  "policy": {
+    "neverUseRetailBenchmarkAsSahjonyCost": true,
+    "neverInventMissingFee": true,
+    "neverAssumeZeroFee": true,
+    "neverQuoteCustomerFromIndicativeMarketplaceRate": true,
+    "neverTreatHistoricalCustomsRuleAsCurrent": true,
+    "neverMarkProviderAuthorizedFromMarketingClaims": true,
+    "preferZeroSahjonyCapitalExposure": true,
+    "noBindingCommitment": true
+  },
+  "vehiclePolicy": {
+    "shippingMode": "MARITIME_ONLY",
+    "airForbidden": true,
+    "compareRoroAndContainerOnlyWhenVerifiedBookable": true,
+    "requireVehicleSpecificCubaCustomsRules": true,
+    "requireOwnershipAndAuthorizationReview": true,
+    "preferDoorDeliveryInCuba": true
+  },
+  "inputAvailability": {
+    "routeConfig": true,
+    "routeLatest": false,
+    "supplierLatest": false,
+    "customsIntelligenceLatest": false,
+    "customsRecords": false,
+    "customsReleaseLatest": false
+  },
+  "summary": {
+    "candidates": 0,
+    "verifiedLandedCost": 0,
+    "partiallyVerified": 0,
+    "blocked": 0,
+    "quoteReady": 0
+  },
+  "labels": [],
+  "candidates": []
+}

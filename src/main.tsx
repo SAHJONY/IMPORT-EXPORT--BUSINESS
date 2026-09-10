@@ -51,6 +51,10 @@ async function boot(){
  }
  if(path==='/travel'||path.startsWith('/travel/')){await renderTravel();return}
  if(path==='/owner'){location.replace('/owner/dashboard');return}
+ if(path==='/owner/jarvis'||path.startsWith('/owner/jarvis/')){
+   const {default:JarvisOwnerCenter}=await import('./JarvisOwnerCenter');
+   createRoot(rootElement).render(withI18n(<StrictMode><AppBoundary><JarvisOwnerCenter/></AppBoundary></StrictMode>));return
+ }
  if(path==='/owner/dashboard'||path.startsWith('/owner/dashboard/')){
    const {default:OwnerCommandCenter}=await import('./OwnerCommandCenter');
    createRoot(rootElement).render(withI18n(<StrictMode><AppBoundary><OwnerCommandCenter/></AppBoundary></StrictMode>));return
@@ -58,6 +62,18 @@ async function boot(){
  if(path==='/owner/agent-command'||path.startsWith('/owner/agent-command/')){
    const {default:AgentCommandCenter}=await import('./AgentCommandCenter');
    createRoot(rootElement).render(withI18n(<StrictMode><AppBoundary><AgentCommandCenter/></AppBoundary></StrictMode>));return
+ }
+ if(path==='/owner/global-operations'||path.startsWith('/owner/global-operations/')){
+   const {default:GlobalOperationsCenter}=await import('./GlobalOperationsCenter');
+   createRoot(rootElement).render(withI18n(<StrictMode><AppBoundary><GlobalOperationsCenter/></AppBoundary></StrictMode>));return
+ }
+ if(path==='/owner/social'||path.startsWith('/owner/social/')){
+   const {default:SocialCommandCenter}=await import('./SocialCommandCenter');
+   createRoot(rootElement).render(withI18n(<StrictMode><AppBoundary><SocialCommandCenter/></AppBoundary></StrictMode>));return
+ }
+ if(path==='/owner/communications'||path.startsWith('/owner/communications/')){
+   const {default:OwnerCommunicationsOS}=await import('./OwnerCommunicationsOS');
+   createRoot(rootElement).render(withI18n(<StrictMode><AppBoundary><OwnerCommunicationsOS/></AppBoundary></StrictMode>));return
  }
  if(path==='/owner/cuba-trade'||path.startsWith('/owner/cuba-trade/')){
    const {default:OwnerCubaTradeCenter}=await import('./OwnerCubaTradeCenter');

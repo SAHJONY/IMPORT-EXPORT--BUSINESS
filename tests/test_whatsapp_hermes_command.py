@@ -17,7 +17,8 @@ def test_generate_ai_reply_fails_closed_if_hermes_errors(monkeypatch):
     assert asyncio.run(wa._generate_ai_reply('hola', 'Cliente')) == ''
 
 
-def test_health_contract_declares_hermes_cognition_and_openclaw_transport():
+def test_health_contract_declares_hermes_native_transport():
     source = inspect.getsource(__import__('whatsapp_cloud_primary_api').whatsapp_health_hostinger_authority)
-    assert 'hostinger_openclaw' in source
-    assert 'hermes' in source.lower()
+    assert 'hermes-hostinger' in source
+    assert 'hermes_native_whatsapp' in source
+    assert 'hermes_agent_single_authority' in source

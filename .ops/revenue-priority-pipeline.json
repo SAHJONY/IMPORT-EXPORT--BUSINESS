@@ -1,0 +1,88 @@
+{
+  "updatedAt": "2026-09-08T04:53:00-05:00",
+  "objective": "Convert qualified demand into protected, compliant, collected gross profit with minimum SAHJONY capital exposure.",
+  "stageOrder": [
+    "research_lead",
+    "qualified_rfq",
+    "supplier_pricing",
+    "firm_quote",
+    "negotiation",
+    "po_contract",
+    "shipment",
+    "invoice",
+    "collected_revenue"
+  ],
+  "promotionRule": "No opportunity advances without evidence for the current gate. No newsletter or marketplace lead is treated as a deal until buyer identity, authority, quantity, destination, timing and payment capability are verified.",
+  "economicsRule": "No firm customer quote without supplier price, logistics, duties/fees, payment/FX costs, contingency and SAHJONY gross-profit calculation.",
+  "capitalRule": "Prefer structures that avoid SAHJONY funding supplier performance from its own balance sheet. Payment, escrow, LC, documentary or other risk-mitigated structures must be validated per transaction.",
+  "ownerGates": [
+    "binding commercial commitment",
+    "pricing outside approved economics",
+    "banking or payout changes",
+    "credential or ownership changes",
+    "new-customer links"
+  ],
+  "priorityQueue": [
+    {
+      "id": "agro-renew-2026-09",
+      "name": "AGRORENEW diligence",
+      "type": "project/capital-commercial opportunity",
+      "stage": "qualified_rfq",
+      "confidence": "high",
+      "status": "active",
+      "evidence": "Counterparty supplied project documentation and confirmed readiness for technical diligence meeting.",
+      "nextAction": "Confirm diligence meeting time, validate decision-makers, project economics, capital requirement, commercial structure, implementation milestones and documentary evidence before any binding commitment.",
+      "economicsStatus": "pending diligence",
+      "kybStatus": "pending completion",
+      "ownerAttention": true
+    },
+    {
+      "id": "crowley-cuba-direct-2026-09",
+      "name": "Crowley direct Cuba freight-forwarder account",
+      "type": "logistics infrastructure",
+      "stage": "supplier_pricing",
+      "confidence": "high",
+      "status": "active",
+      "evidence": "Six World Shipping advised SAHJONY it may contact Crowley directly, open its own account and book directly. Direct onboarding inquiry sent to Crowley Cuba Service on 2026-09-08.",
+      "nextAction": "Obtain account requirements, routes, schedules, origin/destination fees, current rates, volume terms, booking procedure and cargo/compliance requirements.",
+      "economicsStatus": "awaiting direct rate matrix",
+      "kybStatus": "known carrier; commercial onboarding pending",
+      "ownerAttention": false
+    },
+    {
+      "id": "apacargo-cuba-2026-09",
+      "name": "Apacargo Express commercial relationship",
+      "type": "logistics provider",
+      "stage": "supplier_pricing",
+      "confidence": "high",
+      "status": "active_waiting_counterparty",
+      "evidence": "Eduardo Aparicio responded and stated Apacargo would contact SAHJONY on Tuesday; SAHJONY provided direct contact number.",
+      "nextAction": "Receive call/commercial response; capture net agency USD/kg, modes, inclusions, surcharges, Cuba coverage, SLA, rate validity, contract requirements and executive contact. Avoid duplicate outreach before reasonable business-day follow-up window.",
+      "economicsStatus": "awaiting net commercial rates",
+      "kybStatus": "pending commercial verification",
+      "ownerAttention": false
+    },
+    {
+      "id": "energy-buy-leads-2026-09-07",
+      "name": "Crude oil / EN590 / heavy fuel buyer leads",
+      "type": "buyer lead batch",
+      "stage": "research_lead",
+      "confidence": "unverified",
+      "status": "qualification_required",
+      "evidence": "Fresh go4WorldBusiness buyer-alert emails received 2026-09-07; platform states matched buying inquiries, but SAHJONY has not independently verified each counterparty or transaction authority.",
+      "nextAction": "For each candidate capture buyer legal name, registration, decision-maker, product/spec, quantity, destination, delivery window, target/acceptable pricing framework, payment instrument/bank capability, import authority and sanctions/compliance status before supplier sourcing.",
+      "economicsStatus": "do not price yet",
+      "kybStatus": "unverified",
+      "ownerAttention": false
+    }
+  ],
+  "dailyScorecard": {
+    "qualifiedRfqs": 0,
+    "firmSupplierPrices": 0,
+    "firmQuotes": 0,
+    "poContracts": 0,
+    "invoicedRevenue": 0,
+    "collectedRevenue": 0,
+    "collectedGrossProfit": 0
+  }
+}

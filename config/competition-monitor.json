@@ -1,0 +1,59 @@
+{
+  "version": 1,
+  "defaultMarket": "US-Cuba logistics",
+  "scanIntervalHours": 6,
+  "rules": {
+    "vehicleShippingMode": "MARITIME_ONLY",
+    "preferCubaFinalMile": true,
+    "neverContactCompetitors": true,
+    "neverInventMissingData": true,
+    "directCompetitorsExcludedFromPartnerships": [
+      "Beach Cargo LLC",
+      "America Cargo Services"
+    ]
+  },
+  "competitors": [
+    {
+      "id": "beach_cargo",
+      "name": "Beach Cargo LLC",
+      "tier": "DIRECT_COMPETITOR",
+      "url": "https://www.beachcargo.com/",
+      "watch": ["price", "promotion", "vehicle", "maritime", "air", "delivery", "transit", "route", "tracking"]
+    },
+    {
+      "id": "america_cargo_services",
+      "name": "America Cargo Services",
+      "tier": "DIRECT_COMPETITOR",
+      "url": "https://www.americacargoservices.com/",
+      "watch": ["cuba", "air", "route", "tracking", "service", "price"]
+    },
+    {
+      "id": "tedescargo",
+      "name": "TEDESCARGO SERVICES LLC",
+      "tier": "BENCHMARK",
+      "url": "https://www.tedescargo.com/",
+      "watch": ["vehicle", "maritime", "pickup", "delivery", "documents", "eligibility", "route", "price"]
+    },
+    {
+      "id": "ct_envios",
+      "name": "CT Envios",
+      "tier": "BENCHMARK",
+      "url": "https://www.ctenvios.com/",
+      "watch": ["price", "promotion", "maritime", "door_to_door", "tracking", "minimum", "delivery"]
+    },
+    {
+      "id": "mi_packs_vehicle",
+      "name": "Mi Packs",
+      "tier": "BENCHMARK",
+      "url": "https://mipacks.com/envio-de-autos/",
+      "watch": ["vehicle", "maritime", "delivery", "documents", "eligibility", "guarantee", "price"]
+    },
+    {
+      "id": "domicilio_havana",
+      "name": "Domicilio Havana",
+      "tier": "BENCHMARK",
+      "url": "https://www.domiciliohavana.com/envios-a-cuba/",
+      "watch": ["price", "maritime", "air", "delivery", "province", "transit", "pickup"]
+    }
+  ]
+}

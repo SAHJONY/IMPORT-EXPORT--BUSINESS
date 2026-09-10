@@ -1,0 +1,70 @@
+{
+  "version": 1,
+  "engine": "SAHJONY Cuba Private Sector Network",
+  "objective": "Build a qualified network of Cuban private-sector buyers, suppliers, exporters, local logistics operators and service partners for consolidated cargo, international sourcing, Cuba-origin purchases and lawful B2B trade.",
+  "rules": {
+    "privateSectorPriority": true,
+    "noMassUnsolicitedOutreach": true,
+    "noAutoApprovalFromDirectoryListing": true,
+    "requireKYBForCommercialActivation": true,
+    "requireVerifiedNeedOrCapacityBeforeOpportunityStage": true,
+    "separateBuyerSupplierLogisticsRoles": true,
+    "noBindingCommitmentWithoutChairmanApproval": true,
+    "zeroSahjonyInventoryCapitalByDefault": true,
+    "onlyFirstHandWholesaleSuppliersForImportedGoods": true
+  },
+  "statuses": [
+    "DISCOVERY",
+    "CONTACTABLE",
+    "CONTACTED_KYB_PENDING",
+    "QUALIFIED_BUYER",
+    "QUALIFIED_SUPPLIER",
+    "QUALIFIED_EXPORTER",
+    "QUALIFIED_LOCAL_LOGISTICS",
+    "BLOCKED_COMPLIANCE",
+    "REJECTED"
+  ],
+  "roles": [
+    "BUYER_IMPORTER",
+    "CUBA_SUPPLIER",
+    "CUBA_EXPORTER",
+    "LOCAL_DELIVERY",
+    "CONTAINER_TRUCKING",
+    "WAREHOUSE_FULFILLMENT",
+    "TECHNICAL_SERVICE",
+    "SOURCING_PARTNER"
+  ],
+  "seedCompanies": [
+    {"name":"RENOVA S.R.L.","province":"Camagüey","sector":"Energía y renovables","roles":["BUYER_IMPORTER","TECHNICAL_SERVICE"],"verification":"PUBLIC_COMPANY_DETAILS_FOUND","contact":{"email":"info@renova.cu","phone":"+53 59880000"},"status":"CONTACTABLE","source":"https://www.renovacuba.com/"},
+    {"name":"Producciones Granado","province":"La Habana","sector":"Alimentos / catering","roles":["BUYER_IMPORTER","CUBA_SUPPLIER"],"verification":"CEMIS_VERIFIED","contact":{"phone":"+53 50586327"},"status":"DISCOVERY","source":"https://cemis.io/empresas/producciones-granado.html"},
+    {"name":"ZONA K'LIENTE","province":"La Habana","sector":"Industria y manufactura","roles":["BUYER_IMPORTER","CUBA_SUPPLIER","CUBA_EXPORTER"],"verification":"CEMIS_VERIFIED","status":"DISCOVERY","source":"https://www.cemis.io/empresas/zona-kliente.html"},
+    {"name":"Cafeccino S.U.R.L.","province":"Matanzas","sector":"Comercio y retail","roles":["BUYER_IMPORTER","CUBA_SUPPLIER"],"verification":"CEMIS_VERIFIED","status":"DISCOVERY","source":"https://www.cemis.io/empresas/index.html"},
+    {"name":"XPROYECTO.cu","province":"Artemisa","sector":"Agroalimentario","roles":["BUYER_IMPORTER","SOURCING_PARTNER","TECHNICAL_SERVICE"],"verification":"CEMIS_VERIFIED","status":"CONTACTED_KYB_PENDING","source":"https://www.cemis.io/empresas/index.html"},
+    {"name":"DFORJA Creaciones","province":"La Habana","sector":"Manufactura / muebles","roles":["BUYER_IMPORTER","CUBA_SUPPLIER","CUBA_EXPORTER"],"verification":"PUBLIC_PROFILE_FOUND","status":"CONTACTED_KYB_PENDING","source":"https://www.cemis.io/empresas/index.html"},
+    {"name":"Empresa de Construcción, Fabricación y Mantenimiento CA&CM","province":"Holguín","sector":"Servicios técnicos","roles":["BUYER_IMPORTER","CUBA_SUPPLIER","TECHNICAL_SERVICE"],"verification":"CEMIS_VERIFIED","status":"DISCOVERY","source":"https://www.cemis.io/empresas/index.html"},
+    {"name":"Servicios Integrales de Reparación Tecnológica SIRTEC S.U.R.L.","province":"Granma","sector":"Servicios técnicos","roles":["BUYER_IMPORTER","TECHNICAL_SERVICE"],"verification":"CEMIS_VERIFIED","status":"DISCOVERY","source":"https://www.cemis.io/empresas/index.html"},
+    {"name":"SEGURTEC.SURL","province":"La Habana","sector":"Servicios profesionales","roles":["BUYER_IMPORTER","TECHNICAL_SERVICE"],"verification":"CEMIS_VERIFIED","status":"DISCOVERY","source":"https://www.cemis.io/empresas/index.html"},
+    {"name":"TRANSEAT.SRL","province":"La Habana","sector":"Transporte y logística","roles":["LOCAL_DELIVERY","CONTAINER_TRUCKING","WAREHOUSE_FULFILLMENT"],"verification":"DIRECTORY_PENDING_CONFIRMATION","status":"DISCOVERY","source":"https://www.cemis.io/empresas/index.html"},
+    {"name":"ServiTrans","province":"La Habana","sector":"Transporte y logística","roles":["LOCAL_DELIVERY","SOURCING_PARTNER"],"verification":"DIRECTORY_PENDING_CONFIRMATION","status":"DISCOVERY","source":"https://www.cemis.io/empresas/index.html"},
+    {"name":"Kanguro Exprés","province":"La Habana","sector":"Paquetería / entrega","roles":["LOCAL_DELIVERY","WAREHOUSE_FULFILLMENT"],"verification":"DIRECTORY_PENDING_CONFIRMATION","status":"DISCOVERY","source":"https://www.cemis.io/empresas/index.html"},
+    {"name":"REMFRI","province":"Cuba","sector":"Energía y renovables","roles":["BUYER_IMPORTER","TECHNICAL_SERVICE"],"verification":"DIRECTORY_PENDING_CONFIRMATION","status":"DISCOVERY","source":"https://cemis.io/oportunidades/opp-056-instalacion-solar-residencial-y-en-infraestructura-publica.html"},
+    {"name":"Flores Betancourt","province":"Cuba","sector":"Energía y renovables","roles":["BUYER_IMPORTER","TECHNICAL_SERVICE"],"verification":"DIRECTORY_PENDING_CONFIRMATION","status":"DISCOVERY","source":"https://cemis.io/oportunidades/opp-056-instalacion-solar-residencial-y-en-infraestructura-publica.html"},
+    {"name":"Calzados Caribe","province":"La Habana","sector":"Industria y manufactura","roles":["BUYER_IMPORTER","CUBA_SUPPLIER","CUBA_EXPORTER"],"verification":"DIRECTORY_PENDING_CONFIRMATION","status":"DISCOVERY","source":"https://www.cemis.io/empresas/index.html"},
+    {"name":"Industrias Barea SRL","province":"La Habana","sector":"Envases / manufactura","roles":["BUYER_IMPORTER","CUBA_SUPPLIER","CUBA_EXPORTER"],"verification":"DIRECTORY_PENDING_CONFIRMATION","status":"DISCOVERY","source":"https://www.cemis.io/empresas/index.html"},
+    {"name":"AVISOREX s.r.l","province":"La Habana","sector":"Industria y manufactura","roles":["BUYER_IMPORTER","CUBA_SUPPLIER"],"verification":"DIRECTORY_PENDING_CONFIRMATION","status":"DISCOVERY","source":"https://www.cemis.io/empresas/index.html"},
+    {"name":"MATERPLAT Construcciones S.U.R.L.","province":"Villa Clara","sector":"Construcción y materiales","roles":["BUYER_IMPORTER","CUBA_SUPPLIER"],"verification":"DIRECTORY_PENDING_CONFIRMATION","status":"DISCOVERY","source":"https://www.cemis.io/empresas/index.html"},
+    {"name":"DIMA SOLUCIONES","province":"La Habana","sector":"Materiales de construcción","roles":["BUYER_IMPORTER","CUBA_SUPPLIER"],"verification":"DIRECTORY_PENDING_CONFIRMATION","status":"DISCOVERY","source":"https://www.cemis.io/empresas/index.html"},
+    {"name":"Clima I&G","province":"Santiago de Cuba","sector":"Climatización / servicios técnicos","roles":["BUYER_IMPORTER","TECHNICAL_SERVICE"],"verification":"DIRECTORY_PENDING_CONFIRMATION","status":"DISCOVERY","source":"https://www.cemis.io/empresas/index.html"}
+  ],
+  "activationGates": [
+    "legal_entity_verified",
+    "private_ownership_or_control_verified",
+    "authorized_business_activity_verified",
+    "decision_maker_contact_verified",
+    "specific_purchase_need_or_supply_capacity_verified",
+    "invoice_and_payment_method_verified",
+    "trade_compliance_review_complete",
+    "logistics_path_verified",
+    "commercial_terms_verified"
+  ]
+}

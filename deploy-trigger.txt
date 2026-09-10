@@ -1,1 +1,1 @@
-Production promotion trigger for product-agnostic global trade cleanup and simplified voice architecture.
+Production promotion trigger for secure Owner MFA recovery and canonical Supabase AAL2 Owner login. 2026-09-07T22:53Z

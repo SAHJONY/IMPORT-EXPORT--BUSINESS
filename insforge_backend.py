@@ -65,7 +65,7 @@ def _record_key(row: dict[str, Any]) -> str:
         "shipment_id", "document_id", "message_id", "payment_id", "supplier_id",
         "candidate_id", "authorization_id", "employee_id", "business_id", "country_id",
         "translation_id", "share_id", "engagement_id", "dossier_id", "incident_id",
-        "account_id", "journal_id", "beneficiary_id", "sourcing_request_id",
+        "command_id", "notification_id", "gateway_id", "account_id", "journal_id", "beneficiary_id", "sourcing_request_id",
     )
     for key in preferred:
         value = row.get(key)
@@ -171,25 +171,32 @@ class SupabaseBackend:
     async def select(self, table: str, *, params: dict[str, str] | None = None) -> Any:
         logical_table = _safe_table(table)
         params = params or {}
-        async with httpx.AsyncClient(timeout=60) as client:
-            response = await client.get(
-                self.records_url,
-                headers=self.headers,
-                params={"logical_table": f"eq.{logical_table}", "select": "data,record_key,updated_at", "limit": "10000"},
-            )
-            response.raise_for_status()
-            payload = response.json() if response.content else []
-        rows = [item.get("data") for item in payload if isinstance(item, dict) and isinstance(item.get("data"), dict)]
-        rows = [row for row in rows if _matches(row, params)]
-        order = params.get("order", "")
-        if order:
-            field, _, direction = order.partition(".")
-            rows.sort(key=lambda row: (row.get(field) is None, row.get(field)), reverse=direction.lower() == "desc")
         try: offset = max(0, int(params.get("offset", "0")))
         except ValueError: offset = 0
         try: limit = max(0, min(10000, int(params.get("limit", "5000"))))
         except ValueError: limit = 5000
-        return rows[offset:offset + limit]
+        query: dict[str, str] = {
+            "logical_table": f"eq.{logical_table}",
+            "select": "data,record_key,updated_at",
+            "limit": str(max(1, limit)),
+            "offset": str(offset),
+        }
+        for field, expression in params.items():
+            if field in {"limit", "offset", "order", "select"} or not isinstance(expression, str):
+                continue
+            if field.replace("_", "").isalnum() and expression.split(".", 1)[0] in {"eq", "neq", "like", "ilike", "is", "gt", "gte", "lt", "lte"}:
+                query[f"data->>{field}"] = expression
+        order = params.get("order", "")
+        if order:
+            field, _, direction = order.partition(".")
+            if field.replace("_", "").isalnum() and direction.lower() in {"asc", "desc"}:
+                query["order"] = f"data->>{field}.{direction.lower()}"
+        async with httpx.AsyncClient(timeout=60) as client:
+            response = await client.get(self.records_url, headers=self.headers, params=query)
+            response.raise_for_status()
+            payload = response.json() if response.content else []
+        rows = [item.get("data") for item in payload if isinstance(item, dict) and isinstance(item.get("data"), dict)]
+        return [row for row in rows if _matches(row, params)]
 
     async def patch(self, table: str, values: dict[str, Any], *, params: dict[str, str]) -> Any:
         logical_table = _safe_table(table)

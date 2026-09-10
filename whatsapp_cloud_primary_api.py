@@ -12,15 +12,15 @@ from whatsapp_api import (
     _config,
     _configured,
     _embedded_signup_ready,
-    _enqueue_openclaw_message,
+    _enqueue_hermes_message,
     _openai_ready,
-    _openclaw_gateway_state,
+    _hermes_gateway_state,
     _send_ready,
     _webhook_ready,
-    openclaw_event,
-    openclaw_heartbeat,
-    openclaw_outbox,
-    openclaw_outbox_ack,
+    hermes_event,
+    hermes_heartbeat,
+    hermes_outbox,
+    hermes_outbox_ack,
     whatsapp_embedded_signup_exchange,
     whatsapp_setup_save,
     whatsapp_setup_manual,
@@ -41,11 +41,9 @@ from sofia_agentic_sales_os import sales_os_health
 from whatsapp_crm_bridge import crm_bridge_status, router as crm_bridge_router
 from sofia_agentmail_api import router as agentmail_router
 
-app = FastAPI(title="SAHJONY WhatsApp Hostinger OpenClaw Transport + Hermes Sofía Runtime", version="5.7.0", docs_url=None, redoc_url=None)
+app = FastAPI(title="SAHJONY WhatsApp Hermes Agent Native Transport + Sofía Runtime", version="5.7.0", docs_url=None, redoc_url=None)
 
-# Transport and cognition are intentionally separated:
-# Hostinger/OpenClaw transports WhatsApp traffic; every Sofía inbound turn enters
-# the mandatory Hermes executive environment before any response is generated.
+# Hermes Agent is the sole WhatsApp transport and cognition runtime. No OpenClaw runtime is required or authorized.
 whatsapp_core._generate_ai_reply = generate_hermes_whatsapp_reply
 
 app.add_api_route("/whatsapp/setup", whatsapp_setup_status, methods=["GET"])
@@ -55,15 +53,15 @@ app.add_api_route("/whatsapp/setup/exchange", whatsapp_embedded_signup_exchange,
 app.add_api_route("/whatsapp/setup/test", whatsapp_setup_test, methods=["POST"])
 app.add_api_route("/whatsapp/webhook", whatsapp_webhook_verify, methods=["GET"])
 app.add_api_route("/whatsapp/webhook", whatsapp_webhook_receive, methods=["POST"])
-app.add_api_route("/whatsapp/openclaw/heartbeat", openclaw_heartbeat, methods=["POST"])
-app.add_api_route("/whatsapp/openclaw/events", openclaw_event, methods=["POST"])
-app.add_api_route("/whatsapp/openclaw/outbox", openclaw_outbox, methods=["GET"])
-app.add_api_route("/whatsapp/openclaw/outbox/ack", openclaw_outbox_ack, methods=["POST"])
+app.add_api_route("/whatsapp/hermes/heartbeat", hermes_heartbeat, methods=["POST"])
+app.add_api_route("/whatsapp/hermes/events", hermes_event, methods=["POST"])
+app.add_api_route("/whatsapp/hermes/outbox", hermes_outbox, methods=["GET"])
+app.add_api_route("/whatsapp/hermes/outbox/ack", hermes_outbox_ack, methods=["POST"])
 app.include_router(crm_bridge_router)
 app.include_router(agentmail_router)
 
 
-async def _named_openclaw_gateway_state(gateway_id: str) -> dict[str, Any]:
+async def _named_hermes_gateway_state(gateway_id: str) -> dict[str, Any]:
     try:
         rows = await get_backend().select(
             "whatsapp_openclaw_gateways",
@@ -94,13 +92,17 @@ async def _named_openclaw_gateway_state(gateway_id: str) -> dict[str, Any]:
     }
 
 
+# Legacy symbol alias for import/test compatibility only; production authority is Hermes.
+_named_openclaw_gateway_state = _named_hermes_gateway_state
+_openclaw_gateway_state = _hermes_gateway_state
+
+
 @app.get("/whatsapp/health")
 async def whatsapp_health_hostinger_authority() -> dict[str, Any]:
     cfg = await _config()
     persistence = persistent_backend_status()
 
-    hostinger = await _named_openclaw_gateway_state("hostinger-vps")
-    default_openclaw = await _openclaw_gateway_state()
+    hostinger = await _named_hermes_gateway_state("hermes-hostinger")
     hostinger_ready = bool(hostinger.get("connected"))
     hostinger_configured = bool(hostinger.get("configured"))
 
@@ -127,25 +129,25 @@ async def whatsapp_health_hostinger_authority() -> dict[str, Any]:
         "status": "ok" if hostinger_ready else ("degraded" if hostinger_configured else "configuration_required"),
         "service": "whatsapp-transport",
         "version": "5.7.0",
-        "provider": "hostinger_openclaw",
-        "primary_provider": "hostinger_openclaw",
+        "provider": "hermes_agent",
+        "primary_provider": "hermes_agent",
         "authority": {
             "runtime": "hostinger-vps",
-            "transport": "openclaw",
-            "gateway_id": "hostinger-vps",
+            "transport": "hermes_native_whatsapp",
+            "gateway_id": "hermes-hostinger",
             "sole_production_authority": True,
             "fallback_authority_allowed": False,
         },
         "sofia_environment": hermes,
         "cognition_policy": "hermes_mandatory_for_sofia_whatsapp",
-        "transport_is_not_cognition_runtime": True,
-        "transport_policy": "hostinger_openclaw_single_authority",
+        "transport_is_cognition_runtime": True,
+        "transport_policy": "hermes_agent_single_authority",
         "command_control": {
             "owner": "Juan Gonzalez",
             "orchestrator": "AI Orchestrator",
             "executive_agent": "Sofia Smith",
             "cognition_path": "hermes_context_first",
-            "whatsapp_transport": "hostinger_openclaw",
+            "whatsapp_transport": "hermes_agent",
             "nonbinding_business_execution": "autonomous_under_owner_policy",
             "binding_commitments": "owner_approval_required",
         },
@@ -170,16 +172,6 @@ async def whatsapp_health_hostinger_authority() -> dict[str, Any]:
             "app_secret_configured": bool(cfg.get("app_secret")),
             "graph_api_version_configured": bool(cfg.get("graph_api_version")),
         },
-        "openclaw_default": {
-            "role": "diagnostic_only_non_authoritative",
-            "gateway_id": "default",
-            "configured": bool(default_openclaw.get("configured")),
-            "connected": bool(default_openclaw.get("connected")),
-            "heartbeat_fresh": bool(default_openclaw.get("heartbeat_fresh")),
-            "last_seen_at": default_openclaw.get("last_seen_at"),
-            "can_make_production_ready": False,
-        },
-        "hostinger_openclaw": hostinger,
         "crm_bridge": crm_bridge,
         "crm_bridge_authorization": "server_to_server_hmac",
         "crm_customer_admin_authorization_required": False,
@@ -287,9 +279,9 @@ async def whatsapp_send_hostinger_primary(
 ) -> dict[str, Any]:
     _owner(authorization)
 
-    result = await _enqueue_openclaw_message(payload)
+    result = await _enqueue_hermes_message(payload)
     await record_recovery_event(
-        "hostinger_openclaw_authoritative_enqueue",
-        {"status": "ok", "provider": "hostinger_openclaw", "gateway_id": "hostinger-vps"},
+        "hermes_authoritative_enqueue",
+        {"status": "ok", "provider": "hermes_agent", "gateway_id": "hermes-hostinger"},
     )
     return result
