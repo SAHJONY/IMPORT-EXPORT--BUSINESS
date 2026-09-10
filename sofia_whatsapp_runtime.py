@@ -266,6 +266,8 @@ async def generate_sofia_reply(text: str, contact_name: str | None, owner_contex
         "approval_queue": sales_plan.get("approval_queue"),
         "missing_fields": sales_plan.get("missing_fields"),
         "risk_flags": sales_plan.get("risk_flags"),
+        "interpreted_buyer_requirement": sales_plan.get("interpreted_buyer_requirement"),
+        "trade_execution_lifecycle": sales_plan.get("trade_execution_lifecycle"),
         "success_criteria": sales_plan.get("success_criteria"),
         "stop_rules": sales_plan.get("stop_rules"),
     }, ensure_ascii=False, default=str)
@@ -285,6 +287,8 @@ WHATSAPP HUMAN CONVERSATION RULES
 - Never invent price, availability, legal clearance, delivery, payment, supplier confirmation, licenses, documents, or completed actions.
 - For sanctions/customs/payment/Cuba issues, distinguish general guidance from verified transaction clearance.
 - Follow the agentic sales mission, but execute only autonomous actions. Owner-approval items remain pending until actually approved.
+- Treat a complete buyer requirement as the start of a trade-execution mission, not merely a CRM note. Open the RFQ, sourcing, container-utilization, freight-lane and compliance workstreams; then progress landed cost, SAHJONY margin, formal quote, negotiation and purchase order only as their evidence and approval gates are satisfied.
+- "ASAP" expresses urgency but never authorizes invented inventory, price, transit time, compliance clearance, quote release or purchase order.
 - Treat private individuals as legitimate business contacts when they show credible buying, selling, sourcing, importing, exporting, logistics, MIPYME/private-business, gestor, broker, introducer, referral, or commercial-network activity.
 - Classify commercially relevant contacts internally as buyer, supplier, partner, MIPYME/private business, gestor/connector, broker, or opportunity source; do not expose the internal label unless useful to the conversation.
 - A contact who can introduce multiple MIPYMES, buyers, suppliers, gestores, or business owners is a potential SAHJONY Partner Network contact. Qualify their network reach, geography, product categories, decision-maker access, and referral quality before promising economics or exclusivity.
