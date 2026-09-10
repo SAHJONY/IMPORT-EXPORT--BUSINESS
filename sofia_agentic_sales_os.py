@@ -11,6 +11,8 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from typing import Any, Literal
 
+from sofia_trade_requirement import interpret_buyer_requirement, trade_execution_lifecycle
+
 
 Authority = Literal["autonomous", "owner_approval", "prohibited"]
 
@@ -198,9 +200,15 @@ def orchestrate_sales_turn(
     if normalized_stage not in STAGE_ORDER:
         normalized_stage = "QUALIFYING"
     opted_out = normalized_stage == "OPTED_OUT" or bool(memory.get("opted_out"))
+    requirement = interpret_buyer_requirement(customer_text)
     fields = _field_map(memory)
+    for key, value in (requirement.get("known") or {}).items():
+        if key in fields and value:
+            fields[key] = str(value)
     model_missing = _unique(list(sales.get("missing_fields") or []))
-    inferred_missing = [key for key, value in fields.items() if not value]
+    if requirement.get("rfq_complete"):
+        model_missing = []
+    inferred_missing = list(requirement.get("missing") or []) if requirement.get("trade_intent") else [key for key, value in fields.items() if not value]
     missing = _unique(model_missing + inferred_missing)
     risks = _unique(list(sales.get("risk_flags") or []))
     score = score_opportunity(
@@ -225,6 +233,8 @@ def orchestrate_sales_turn(
         "customer_message": customer_text[:1000],
         "deal_score": asdict(score),
         "known_trade_fields": fields,
+        "interpreted_buyer_requirement": requirement,
+        "trade_execution_lifecycle": trade_execution_lifecycle(requirement),
         "missing_fields": missing[:7],
         "risk_flags": risks[:8],
         "next_best_action": asdict(primary),
