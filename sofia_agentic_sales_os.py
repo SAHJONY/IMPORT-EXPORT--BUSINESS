@@ -208,7 +208,16 @@ def orchestrate_sales_turn(
     model_missing = _unique(list(sales.get("missing_fields") or []))
     if requirement.get("rfq_complete"):
         model_missing = []
-    inferred_missing = list(requirement.get("missing") or []) if requirement.get("trade_intent") else [key for key, value in fields.items() if not value]
+    # A terse follow-up such as "prepare the RFQ" can express trade intent while
+    # relying on facts already captured in memory.  Completeness therefore has
+    # to be evaluated against the merged conversation + memory view, not the
+    # latest message in isolation.
+    rfq_fields = ("product", "specification", "quantity", "destination", "delivery_timeline")
+    inferred_missing = (
+        [key for key in rfq_fields if not fields.get(key)]
+        if requirement.get("trade_intent")
+        else [key for key, value in fields.items() if not value]
+    )
     missing = _unique(model_missing + inferred_missing)
     risks = _unique(list(sales.get("risk_flags") or []))
     score = score_opportunity(
