@@ -8,6 +8,8 @@ Supabase/CRM is the authoritative commercial source of truth. Gmail is the autho
 ## Mandatory pre-send gate
 Before any commercial send, read the full relevant Gmail thread and evaluate the target against the authenticated `sofia-crm-gate` CRM decision. A missing, unavailable, duplicate, ambiguous, blocked, opted-out, DO_NOT_CONTACT, scraped-only/unconsented, hard-bounced, suppressed, or otherwise ineligible CRM result means **DO NOT SEND**.
 
+Every evaluation must carry a unique request ID. An ALLOW decision is bound to that request ID and one unambiguous CRM prospect. Reusing a request ID must return the same persisted decision; it must never create a second independent authorization.
+
 The sender may not bypass this gate because a message appears commercially useful or because another workflow previously contacted the recipient.
 
 ## New outreach
@@ -33,8 +35,18 @@ Use non-binding language unless an owner-approved, evidence-backed binding docum
 ## High-impact boundaries
 Do not purchase services, accept or sign contracts, authorize payments or refunds, change bank/payment instructions, disclose secrets/credentials/identity documents, make legal or compliance determinations, release protected counterparty identities, or make binding pricing/credit/volume commitments without the required owner authority.
 
+## Audited decision contract
+Every gate evaluation is written to the CRM audit ledger with the authenticated user, request ID, interaction type, decision, reason codes, prospect binding, and evaluation time. The audit ledger is append-on-first-decision for a request ID; subsequent evaluations with the same request ID return the persisted result.
+
+A gate ALLOW is not a successful send. It only authorizes the caller to attempt one matching Gmail send.
+
 ## Post-send persistence
-Record outbound only after Gmail confirms a successful send. Never write a successful outreach event to CRM before transport success. Delivery delays and hard bounces must be reconciled as delivery evidence and must not trigger duplicate resends.
+Record outbound only after Gmail confirms a successful send. The post-send reconciliation must use the same gate request ID and Gmail's actual message ID, thread ID, and sent timestamp. A request ID already bound to one Gmail message must reject attempts to bind it to a different message.
+
+Only after that reconciliation succeeds may CRM `last_outbound_*` fields and outreach status advance. Delivery delays and hard bounces must be reconciled as delivery evidence and must not trigger duplicate resends.
+
+## Abuse and replay controls
+The authenticated gate is rate-limited. Missing request IDs, malformed evidence, replay with conflicting Gmail evidence, unsupported interaction types, and unauthorized roles fail closed. Service-role credentials remain server-side only and must never be exposed to browser code.
 
 ## Failure mode
-CRM unavailable, Gmail evidence unavailable, malformed gate response, ambiguous CRM match, or missing required thread evidence all fail closed for new commercial sends. Preserve the business context and surface only the material blocker internally.
+CRM unavailable, Gmail evidence unavailable, malformed gate response, ambiguous CRM match, missing required thread evidence, audit persistence failure, or post-send reconciliation failure all fail closed for new commercial sends. Preserve the business context and surface only the material blocker internally.
