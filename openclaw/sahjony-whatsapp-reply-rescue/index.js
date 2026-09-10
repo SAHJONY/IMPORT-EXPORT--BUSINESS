@@ -88,7 +88,7 @@ function boundedHistory(history) {
 
 async function generateNvidiaReply(history, apiKey, logger) {
   const candidates = [
-    "openai/gpt-oss-120b",
+    "google/gemma-4-31b-it",
     "nvidia/nemotron-3-super-120b-a12b",
     "nvidia/nemotron-3.5-lightning-30b-a3b"
   ];
@@ -110,9 +110,9 @@ async function generateNvidiaReply(history, apiKey, logger) {
             { role: "system", content: SYSTEM_PROMPT },
             ...transcript
           ],
-          temperature: model === "openai/gpt-oss-120b" ? 1 : 0.35,
+          temperature: model === "google/gemma-4-31b-it" ? 0.5 : 0.35,
           top_p: 1,
-          max_tokens: model === "openai/gpt-oss-120b" ? 1600 : 900
+          max_tokens: model === "google/gemma-4-31b-it" ? 1200 : 900
         }),
         signal: AbortSignal.timeout(45000)
       });

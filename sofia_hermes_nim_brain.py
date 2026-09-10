@@ -8,11 +8,11 @@ import httpx
 from sofia_autonomy_os import AUTONOMY_MANDATE, health as autonomy_health
 
 NVIDIA_CHAT_URL = os.getenv("NVIDIA_NIM_BASE_URL", "https://integrate.api.nvidia.com/v1").rstrip("/") + "/chat/completions"
-PREFERRED_NVIDIA_MODEL = "openai/gpt-oss-120b"
-# NVIDIA's hosted catalog currently exposes gpt-oss-20b while the hosted
-# gpt-oss-120b endpoint returns HTTP 410. Keep the runtime fail-safe on the
-# available OpenAI OSS model until a 120B partner endpoint is configured.
-DEFAULT_NVIDIA_MODEL = "openai/gpt-oss-20b"
+PREFERRED_NVIDIA_MODEL = "google/gemma-4-31b-it"
+# Chairman-selected NVIDIA NIM production model. The retired GPT-OSS-120B
+# hosted endpoint returned HTTP 410, so keep the server-side default aligned
+# with the currently available NVIDIA catalog model.
+DEFAULT_NVIDIA_MODEL = "google/gemma-4-31b-it"
 
 HERMES_OPERATING_KERNEL = """
 HERMES-STYLE EXECUTIVE COGNITION KERNEL

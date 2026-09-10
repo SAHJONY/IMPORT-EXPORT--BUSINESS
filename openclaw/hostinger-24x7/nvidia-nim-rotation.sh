@@ -9,12 +9,12 @@ NATIVE_HOME="${OPENCLAW_NATIVE_HOME:-/home/node}"
 NATIVE_STATE_DIR="${OPENCLAW_NATIVE_STATE_DIR:-/var/lib/sahjony-openclaw-state}"
 NATIVE_CONFIG_PATH="${OPENCLAW_NATIVE_CONFIG_PATH:-${NATIVE_STATE_DIR}/openclaw.json}"
 
-# Owner-selected NVIDIA NIM model. Keep a single failover model so one provider
-# owns the turn and we never rotate into a different model unexpectedly.
-# NVIDIA inventory model id: openai/gpt-oss-120b
-# OpenClaw provider-qualified id: nvidia/openai/gpt-oss-120b
+# Owner-selected NVIDIA NIM model. Keep a single primary model so one provider
+# owns the turn and we never rotate unexpectedly.
+# NVIDIA inventory model id: google/gemma-4-31b-it
+# OpenClaw provider-qualified id: nvidia/google/gemma-4-31b-it
 CANDIDATES=(
-  'openai/gpt-oss-120b'
+  'google/gemma-4-31b-it'
 )
 
 mkdir -p "$STATE_DIR" "$(dirname "$LOCK_FILE")"
