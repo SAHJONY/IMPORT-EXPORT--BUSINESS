@@ -1,0 +1,62 @@
+name: Sofia Commercial Gate CI
+
+on:
+  pull_request:
+    paths:
+      - 'src/sofiaCommercialSafetyGate.ts'
+      - 'gmail_transport_api.py'
+      - 'email_agent_api.py'
+      - 'business_communications_director_api.py'
+      - 'openclaw/sofia-reyes/commercial-mail-safety-gate.md'
+      - 'tools/sofia-commercial-gate-doctor.mjs'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/sofia-commercial-gate-ci.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'src/sofiaCommercialSafetyGate.ts'
+      - 'gmail_transport_api.py'
+      - 'email_agent_api.py'
+      - 'business_communications_director_api.py'
+      - 'openclaw/sofia-reyes/commercial-mail-safety-gate.md'
+      - 'tools/sofia-commercial-gate-doctor.mjs'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/sofia-commercial-gate-ci.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sofia-commercial-gate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Python syntax verification
+        run: |
+          python -m py_compile gmail_transport_api.py email_agent_api.py business_communications_director_api.py
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Sofia commercial gate policy doctor
+        run: node tools/sofia-commercial-gate-doctor.mjs
+
+      - name: Production build
+        run: npm run build
