@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "typecheck": "tsc --noEmit",
+    "test": "npm run typecheck && npm run build",
     "doctor": "node tools/ensure-global-language-runtime.mjs && node tools/deployment-guard.mjs",
     "doctor:locale": "node tools/locale-doctor.mjs",
     "doctor:trade-agent": "node tools/trade-agent-route-doctor.mjs",
