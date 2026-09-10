@@ -55,6 +55,10 @@ async function boot(){
    const {default:JarvisOwnerCenter}=await import('./JarvisOwnerCenter');
    createRoot(rootElement).render(withI18n(<StrictMode><AppBoundary><JarvisOwnerCenter/></AppBoundary></StrictMode>));return
  }
+ if(path==='/owner/tinyfish'||path.startsWith('/owner/tinyfish/')){
+   const {default:TinyFishControlPlane}=await import('./TinyFishControlPlane');
+   createRoot(rootElement).render(withI18n(<StrictMode><AppBoundary><TinyFishControlPlane/></AppBoundary></StrictMode>));return
+ }
  if(path==='/owner/dashboard'||path.startsWith('/owner/dashboard/')){
    const {default:OwnerCommandCenter}=await import('./OwnerCommandCenter');
    createRoot(rootElement).render(withI18n(<StrictMode><AppBoundary><OwnerCommandCenter/></AppBoundary></StrictMode>));return
