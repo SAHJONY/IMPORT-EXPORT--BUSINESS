@@ -576,8 +576,9 @@
           </button>
         </div>
         <div id="status" class="status">
-          Owner access is fail-closed. Password authentication comes first;
-          Supabase Authenticator MFA/AAL2 is required before Owner OS access.
+          Owner access is fail-closed. Credentials are verified by the
+          same-origin SAHJONY owner-auth service; MFA is enforced when enabled
+          by the server policy.
         </div>
         <div class="links">
           <a href="/">← Business site</a><a href="/owner">Owner OS</a>
@@ -595,13 +596,15 @@
       const SUPABASE_URL = "https://qprlbmcoksrpuvodxjtt.supabase.co";
       const SUPABASE_KEY = "sb_publishable_-I-dlfNYk4byxK5WQKuqlQ_WIAGkuA-";
       const initialAuthFragment = location.hash;
-      const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
-        auth: {
-          persistSession: true,
-          autoRefreshToken: true,
-          detectSessionInUrl: true,
-        },
-      });
+      const sb = window.supabase?.createClient
+        ? window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
+            auth: {
+              persistSession: true,
+              autoRefreshToken: true,
+              detectSessionInUrl: true,
+            },
+          })
+        : null;
       const form = document.getElementById("login"),
         status = document.getElementById("status"),
         password = document.getElementById("password"),
@@ -618,85 +621,58 @@
         recoveryPanel = document.getElementById("recoveryPanel"),
         newPassword = document.getElementById("newPassword"),
         savePassword = document.getElementById("savePassword");
-      let factorId = "";
       function setStatus(text, type = "") {
         status.className = "status" + (type ? " " + type : "");
         status.textContent = text;
       }
-      async function finishOwner() {
-        const { data, error } = await sb.auth.getSession();
-        if (error) throw error;
-        const token = data.session?.access_token;
-        if (!token)
-          throw new Error("Supabase did not return an authenticated session.");
-        const check = await fetch("/owner-auth/session", {
-          headers: { Authorization: "Bearer " + token },
+      async function authenticateOwner(mfaCode = "") {
+        const response = await fetch("/owner-auth/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
           cache: "no-store",
+          body: JSON.stringify({
+            email: email.value.trim().toLowerCase(),
+            password: password.value,
+            mfa_code: mfaCode || null,
+          }),
         });
-        const body = await check
-          .json()
-          .catch(() => ({ detail: "Owner authorization failed" }));
-        if (!check.ok)
-          throw new Error(body.detail || "Owner authorization failed.");
-        if (body.mfa_verified !== true)
-          throw new Error("Owner MFA is not yet verified at AAL2.");
-        sessionStorage.setItem("sahjony.owner.token", token);
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          const detail = typeof body.detail === "string"
+            ? body.detail
+            : "Owner authentication failed.";
+          throw new Error(detail);
+        }
+        if (!body.token) throw new Error("Owner session was not issued.");
+        sessionStorage.setItem("sahjony.owner.token", body.token);
         password.value = "";
         mfa.value = "";
-        setStatus("Owner identity and MFA verified. Opening Owner OS…", "ok");
+        setStatus(
+          body.mfa_verified
+            ? "Owner identity and MFA verified. Opening Owner OS…"
+            : "Owner identity verified. Opening Owner OS…",
+          "ok",
+        );
         location.assign("/owner/dashboard");
       }
-      async function prepareMfa() {
-        const aal = await sb.auth.mfa.getAuthenticatorAssuranceLevel();
-        if (aal.error) throw aal.error;
-        if (aal.data.currentLevel === "aal2") {
-          await finishOwner();
-          return;
-        }
-        const factors = await sb.auth.mfa.listFactors();
-        if (factors.error) throw factors.error;
-        const totp = factors.data?.totp || [];
-        const verified = totp.find((f) => f.status === "verified");
-        if (verified) {
-          factorId = verified.id;
+      async function signInPassword() {
+        let policy = {};
+        try {
+          const health = await fetch("/owner-auth/health", { cache: "no-store" });
+          if (health.ok) policy = await health.json().catch(() => ({}));
+        } catch {}
+        if (policy.mfa_required) {
           mfaTitle.textContent = "Verify your Authenticator";
           mfaInstructions.textContent =
-            "Open the Authenticator app already linked to this Owner account and enter its current 6-digit code.";
+            "Enter the current 6-digit code from the Authenticator linked to this Owner account.";
           qr.classList.add("hidden");
           secretWrap.classList.add("hidden");
           mfaPanel.classList.remove("hidden");
+          setStatus("Owner MFA is required. Enter your Authenticator code to continue.");
           mfa.focus();
           return;
         }
-        for (const f of totp.filter((f) => f.status !== "verified")) {
-          try {
-            await sb.auth.mfa.unenroll({ factorId: f.id });
-          } catch {}
-        }
-        const enrolled = await sb.auth.mfa.enroll({
-          factorType: "totp",
-          friendlyName: "SAHJONY Owner",
-        });
-        if (enrolled.error) throw enrolled.error;
-        factorId = enrolled.data.id;
-        mfaTitle.textContent = "Set up Owner Authenticator";
-        mfaInstructions.textContent =
-          "Scan this QR code with Microsoft Authenticator, Google Authenticator, 1Password, Authy, or another TOTP app. Then enter the 6-digit code below.";
-        qr.src = enrolled.data.totp.qr_code;
-        qr.classList.remove("hidden");
-        secret.textContent = enrolled.data.totp.secret || "";
-        secretWrap.classList.remove("hidden");
-        mfaPanel.classList.remove("hidden");
-        mfa.focus();
-      }
-      async function signInPassword() {
-        const result = await sb.auth.signInWithPassword({
-          email: email.value.trim().toLowerCase(),
-          password: password.value,
-        });
-        if (result.error) throw result.error;
-        setStatus("Password verified. Checking Owner MFA…", "ok");
-        await prepareMfa();
+        await authenticateOwner();
       }
       async function validateExisting() {
         const token = sessionStorage.getItem("sahjony.owner.token");
@@ -727,7 +703,7 @@
       form.addEventListener("submit", async (e) => {
         e.preventDefault();
         mfaPanel.classList.add("hidden");
-        setStatus("Authenticating password with Supabase…");
+        setStatus("Authenticating securely with SAHJONY Owner Auth…");
         try {
           await signInPassword();
         } catch (err) {
@@ -744,15 +720,9 @@
           return;
         }
         verifyMfa.disabled = true;
-        setStatus("Verifying Supabase MFA challenge…");
+        setStatus("Verifying Owner MFA…");
         try {
-          const verified = await sb.auth.mfa.challengeAndVerify({
-            factorId,
-            code,
-          });
-          if (verified.error) throw verified.error;
-          await sb.auth.refreshSession();
-          await finishOwner();
+          await authenticateOwner(code);
         } catch (err) {
           setStatus(err?.message || "MFA verification failed.", "bad");
           mfa.value = "";
@@ -797,6 +767,11 @@
         savePassword.disabled = true;
         setStatus("Saving your new password securely in Supabase…");
         try {
+          if (!sb) {
+            throw new Error(
+              "The secure recovery library did not load. Refresh the page or use the newest recovery email.",
+            );
+          }
           const r = await sb.auth.updateUser({ password: next });
           if (r.error) throw r.error;
           newPassword.value = "";
