@@ -4,11 +4,11 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: audit | stage | cutover | retire-openclaw
+        description: audit | stage | cutover | retire-openclaw | restore-session-safe
         required: true
         default: audit
         type: choice
-        options: [audit, stage, cutover, retire-openclaw]
+        options: [audit, stage, cutover, retire-openclaw, restore-session-safe]
 
 concurrency:
   group: hostinger-vm-767852-mutation
@@ -80,6 +80,146 @@ jobs:
           pgrep -af 'hermes_cli.main gateway run|openclaw gateway|whatsapp-bridge|bridge.js' || true
           echo HOSTINGER_HERMES_AUDIT_COMPLETE=1
           REMOTE
+      - name: Restore retained Hermes session in fail-closed mode
+        if: ${{ inputs.mode == 'restore-session-safe' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh_opts=(-o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=12 -i ~/.ssh/hostinger-hermes)
+          ssh "${ssh_opts[@]}" "$SSH_USER@$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          H=/root/.hermes
+          SESSION=$H/platforms/whatsapp/session
+          LOG=$H/platforms/whatsapp/bridge.log
+          BACKUPS=/root/sahjony-cutover-backups
+          DROPIN=/root/.config/systemd/user/hermes-gateway.service.d/99-sahjony-fail-closed-recovery.conf
+          stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+
+          test -d "$H"
+          install -d -m 700 "$BACKUPS" "$(dirname "$DROPIN")"
+
+          # Hard recovery gate: no production outbox may run during or after recovery.
+          systemctl disable --now sahjony-hermes-outbox.service 2>/dev/null || true
+          systemctl --user stop hermes-gateway.service 2>/dev/null || true
+          pkill -f '/whatsapp-bridge/bridge.js' 2>/dev/null || true
+
+          # Lexically last drop-in overrides prior broad allowlists. Empty means deny all.
+          cat >"$DROPIN" <<'EOF'
+          [Service]
+          Environment="WHATSAPP_MODE=bot"
+          Environment="WHATSAPP_ALLOWED_USERS="
+          EOF
+          chmod 600 "$DROPIN"
+          systemctl --user daemon-reload
+
+          # Preserve the current failed session before changing anything.
+          if [[ -d "$SESSION" && -n "$(find "$SESSION" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ]]; then
+            tar -C "$(dirname "$SESSION")" -czf "$BACKUPS/hermes-whatsapp-session-pre-safe-restore-$stamp.tgz" "$(basename "$SESSION")"
+            chmod 600 "$BACKUPS/hermes-whatsapp-session-pre-safe-restore-$stamp.tgz"
+          fi
+
+          mapfile -t candidates < <(
+            find "$BACKUPS" -maxdepth 1 -type f -name 'hermes-whatsapp-session-*.tgz' ! -name '*pre-safe-restore*' -printf '%T@ %p\n' 2>/dev/null \
+              | sort -nr | awk 'NR<=3{$1=""; sub(/^ /,""); print}'
+          )
+          ((${#candidates[@]} > 0)) || { echo HERMES_SESSION_BACKUP_MISSING=1 >&2; exit 30; }
+
+          connected=0
+          selected=''
+          attempt=0
+          for archive in "${candidates[@]}"; do
+            attempt=$((attempt+1))
+            echo "HERMES_SAFE_RESTORE_ATTEMPT=$attempt archive=$(basename "$archive")"
+
+            # Validate archive shape before extraction. Never accept absolute or parent paths.
+            tar -tzf "$archive" > /tmp/sahjony-wa-archive.list
+            if grep -Eq '(^|/)\.\.(/|$)|^/' /tmp/sahjony-wa-archive.list; then
+              echo "HERMES_SESSION_BACKUP_UNSAFE_PATH=$(basename "$archive")" >&2
+              continue
+            fi
+
+            rm -rf "$SESSION.safe-restore-tmp"
+            install -d -m 700 "$SESSION.safe-restore-tmp"
+            if ! tar -xzf "$archive" -C "$SESSION.safe-restore-tmp" --strip-components=1; then
+              echo "HERMES_SESSION_BACKUP_EXTRACT_FAILED=$(basename "$archive")" >&2
+              rm -rf "$SESSION.safe-restore-tmp"
+              continue
+            fi
+            if [[ ! -f "$SESSION.safe-restore-tmp/creds.json" ]]; then
+              echo "HERMES_SESSION_BACKUP_CREDS_MISSING=$(basename "$archive")" >&2
+              rm -rf "$SESSION.safe-restore-tmp"
+              continue
+            fi
+            chmod -R go-rwx "$SESSION.safe-restore-tmp"
+
+            systemctl --user stop hermes-gateway.service 2>/dev/null || true
+            rm -rf "$SESSION.failed-safe-restore-$attempt-$stamp"
+            if [[ -d "$SESSION" ]]; then mv "$SESSION" "$SESSION.failed-safe-restore-$attempt-$stamp"; fi
+            mv "$SESSION.safe-restore-tmp" "$SESSION"
+
+            before_lines=0
+            [[ -f "$LOG" ]] && before_lines="$(wc -l < "$LOG" | tr -d ' ')"
+            systemctl --user reset-failed hermes-gateway.service 2>/dev/null || true
+            systemctl --user start hermes-gateway.service
+
+            for _ in $(seq 1 12); do
+              newlog="$(sed -n "$((before_lines+1)),\$p" "$LOG" 2>/dev/null || true)"
+              if grep -Eqi 'logged out|bad session|invalid session' <<<"$newlog"; then
+                break
+              fi
+              if systemctl --user is-active --quiet hermes-gateway.service \
+                && pgrep -f '/whatsapp-bridge/bridge.js.*--mode bot' >/dev/null \
+                && grep -Eqi 'connected|ready|authenticated' <<<"$newlog"; then
+                connected=1
+                selected="$(basename "$archive")"
+                break 2
+              fi
+              sleep 2
+            done
+            systemctl --user stop hermes-gateway.service 2>/dev/null || true
+          done
+
+          if [[ "$connected" != 1 ]]; then
+            systemctl --user stop hermes-gateway.service 2>/dev/null || true
+            echo HERMES_SAFE_SESSION_RESTORE_NOT_CONNECTED=1 >&2
+            exit 34
+          fi
+
+          # Verify recovery is still fail-closed after transport connectivity returns.
+          envline="$(systemctl --user show hermes-gateway.service -p Environment --value)"
+          echo "$envline" | tr ' ' '\n' | grep -Fxq 'WHATSAPP_ALLOWED_USERS=*' && {
+            systemctl --user stop hermes-gateway.service 2>/dev/null || true
+            echo HERMES_FAIL_CLOSED_ALLOWLIST_VIOLATION=1 >&2
+            exit 35
+          } || true
+          systemctl is-active --quiet sahjony-hermes-outbox.service && {
+            systemctl disable --now sahjony-hermes-outbox.service || true
+            systemctl --user stop hermes-gateway.service 2>/dev/null || true
+            echo HERMES_OUTBOX_UNEXPECTEDLY_ACTIVE=1 >&2
+            exit 36
+          } || true
+          systemctl is-enabled --quiet sahjony-hermes-outbox.service && {
+            systemctl disable --now sahjony-hermes-outbox.service || true
+            systemctl --user stop hermes-gateway.service 2>/dev/null || true
+            echo HERMES_OUTBOX_UNEXPECTEDLY_ENABLED=1 >&2
+            exit 37
+          } || true
+
+          bridge_count="$(pgrep -af '/whatsapp-bridge/bridge.js.*--mode bot' | wc -l | tr -d ' ')"
+          [[ "$bridge_count" == 1 ]] || {
+            systemctl --user stop hermes-gateway.service 2>/dev/null || true
+            echo "HERMES_BRIDGE_COUNT_UNSAFE=$bridge_count" >&2
+            exit 38
+          }
+
+          echo "HERMES_SAFE_SESSION_SELECTED=$selected"
+          echo HERMES_SAFE_SESSION_RESTORE=PASS
+          echo HERMES_GATEWAY_CONNECTED_FAIL_CLOSED=1
+          echo HERMES_OUTBOX_DISABLED=1
+          echo HERMES_BRIDGE_COUNT=1
+          echo HERMES_CUSTOMER_SEND_AUTHORITY=0
+          REMOTE
+
       - name: Stage Hermes application and WhatsApp bridge
         if: ${{ inputs.mode == 'stage' || inputs.mode == 'cutover' || inputs.mode == 'retire-openclaw' }}
         shell: bash
