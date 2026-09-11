@@ -8,7 +8,7 @@ on:
         required: true
         default: audit
         type: choice
-        options: [audit, stage, cutover, retire-openclaw]
+        options: [audit, stage, cutover, retire-openclaw, pair-terminal]
 
 concurrency:
   group: hostinger-vm-767852-mutation
@@ -84,6 +84,110 @@ jobs:
           pgrep -af 'hermes_cli.main gateway run|openclaw gateway|whatsapp-bridge|bridge.js' || true
           echo HOSTINGER_HERMES_AUDIT_COMPLETE=1
           REMOTE
+      - name: Start Hermes pair-only session safely
+        if: ${{ inputs.mode == 'pair-terminal' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          opts=(-o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=12 -i ~/.ssh/hostinger-hermes)
+          ssh "${opts[@]}" "$SSH_USER@$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          H=/root/.hermes
+          BRIDGE=$H/hermes-agent/scripts/whatsapp-bridge
+          SESSION=$H/platforms/whatsapp/session
+          DROPIN=$H/../.config/systemd/user/hermes-gateway.service.d/99-sahjony-fail-closed-recovery.conf
+          stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+          systemctl disable --now sahjony-hermes-outbox.service 2>/dev/null || true
+          systemctl --user stop hermes-gateway.service 2>/dev/null || true
+          pkill -f '/whatsapp-bridge/bridge.js' 2>/dev/null || true
+          install -d -m 700 "$(dirname "$DROPIN")" /root/sahjony-cutover-backups
+          cat >"$DROPIN" <<'EOF'
+          [Service]
+          Environment="WHATSAPP_MODE=bot"
+          Environment="WHATSAPP_ALLOWED_USERS="
+          EOF
+          chmod 600 "$DROPIN"
+          systemctl --user daemon-reload
+          if [[ -d "$SESSION" && -n "$(find "$SESSION" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ]]; then
+            tar -C "$(dirname "$SESSION")" -czf "/root/sahjony-cutover-backups/hermes-whatsapp-session-pre-pair-$stamp.tgz" "$(basename "$SESSION")"
+            chmod 600 "/root/sahjony-cutover-backups/hermes-whatsapp-session-pre-pair-$stamp.tgz"
+            mv "$SESSION" "$SESSION.pre-pair-$stamp"
+          fi
+          install -d -m 700 "$SESSION"
+          rm -f /tmp/sahjony-hermes-pair.jsonl /tmp/sahjony-hermes-pair.pid /tmp/sahjony-hermes-qr.txt
+          cd "$BRIDGE"
+          nohup env WHATSAPP_ALLOWED_USERS= node bridge.js --pair-only --pair-json >/tmp/sahjony-hermes-pair.jsonl 2>&1 &
+          echo $! >/tmp/sahjony-hermes-pair.pid
+          for _ in $(seq 1 45); do
+            if grep -q '"event":"qr"' /tmp/sahjony-hermes-pair.jsonl 2>/dev/null; then
+              python3 - <<'PY'
+          import json
+          from pathlib import Path
+          for line in Path('/tmp/sahjony-hermes-pair.jsonl').read_text(errors='ignore').splitlines():
+              try: d=json.loads(line)
+              except Exception: continue
+              if d.get('event')=='qr' and d.get('qr'):
+                  Path('/tmp/sahjony-hermes-qr.txt').write_text(d['qr'])
+                  break
+          PY
+              break
+            fi
+            sleep 1
+          done
+          test -s /tmp/sahjony-hermes-qr.txt || { tail -50 /tmp/sahjony-hermes-pair.jsonl >&2 || true; exit 41; }
+          echo HERMES_PAIR_QR_READY=1
+          REMOTE
+          scp "${opts[@]}" "$SSH_USER@$HOST:/tmp/sahjony-hermes-qr.txt" /tmp/sahjony-hermes-qr.txt
+          test -s /tmp/sahjony-hermes-qr.txt
+      - name: Publish Hermes QR payload
+        if: ${{ inputs.mode == 'pair-terminal' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: SAHJONY-HERMES-WHATSAPP-QR
+          path: /tmp/sahjony-hermes-qr.txt
+          retention-days: 1
+          if-no-files-found: error
+
+      - name: Wait for authorized scan and certify fail-closed transport
+        if: ${{ inputs.mode == 'pair-terminal' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          opts=(-o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=12 -i ~/.ssh/hostinger-hermes)
+          ssh "${opts[@]}" "$SSH_USER@$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          H=/root/.hermes
+          connected=0
+          for _ in $(seq 1 150); do
+            if grep -q '"event":"connected"' /tmp/sahjony-hermes-pair.jsonl 2>/dev/null; then connected=1; break; fi
+            pid="$(cat /tmp/sahjony-hermes-pair.pid 2>/dev/null || true)"
+            [[ -n "$pid" && -d "/proc/$pid" ]] || break
+            sleep 2
+          done
+          [[ "$connected" == 1 ]] || { echo HERMES_PAIR_SCAN_NOT_COMPLETED=1 >&2; exit 42; }
+          systemctl --user reset-failed hermes-gateway.service 2>/dev/null || true
+          systemctl --user start hermes-gateway.service
+          sleep 8
+          systemctl --user is-active --quiet hermes-gateway.service
+          count="$(pgrep -af '/whatsapp-bridge/bridge.js.*--mode bot' | wc -l | tr -d ' ')"
+          [[ "$count" == 1 ]] || { echo "HERMES_BRIDGE_COUNT_UNSAFE=$count" >&2; systemctl --user stop hermes-gateway.service; exit 43; }
+          envline="$(systemctl --user show hermes-gateway.service -p Environment --value)"
+          echo "$envline" | tr ' ' '\n' | grep -Fxq 'WHATSAPP_ALLOWED_USERS=*' && {
+            echo HERMES_ALLOWLIST_NOT_FAIL_CLOSED=1 >&2
+            systemctl --user stop hermes-gateway.service
+            exit 44
+          } || true
+          systemctl is-active --quiet sahjony-hermes-outbox.service && {
+            echo HERMES_OUTBOX_ACTIVE_UNEXPECTEDLY=1 >&2
+            systemctl disable --now sahjony-hermes-outbox.service || true
+            systemctl --user stop hermes-gateway.service || true
+            exit 45
+          } || true
+          echo HERMES_PAIRING_CONNECTED=1
+          echo HERMES_BRIDGE_COUNT=1
+          echo HERMES_CUSTOMER_SEND_AUTHORITY=0
+          REMOTE
+
       - name: Stage Hermes application and WhatsApp bridge
         if: ${{ inputs.mode == 'stage' || inputs.mode == 'cutover' || inputs.mode == 'retire-openclaw' }}
         shell: bash
