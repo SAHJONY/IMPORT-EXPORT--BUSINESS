@@ -40,7 +40,8 @@ function render() {
         button.textContent = 'Prospecto en CRM';
       } catch (error) { feedback.textContent = error.message; button.disabled = false; }
     };
-    card.append(button, feedback); return card;
+    const evaluateLink=node('a','Evaluar costos y margen →'); evaluateLink.href='/owner-business-ready.html?prospect='+encodeURIComponent(p.id);
+    card.append(button, feedback, evaluateLink); return card;
   }));
   $('status').textContent = `${filtered.length} prospectos · ${prospects.filter(p => p.public_email || p.public_phone).length} con contacto publicado · guardados en CRM`;
   if (!rows.length) $('results').append(node('p', 'No hay coincidencias. Prueba otra búsqueda.', 'empty'));
