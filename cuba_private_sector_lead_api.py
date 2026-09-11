@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field, model_validator
 from auth import verify_owner_token
 from insforge_backend import get_backend
 
-app = FastAPI(title='SAHJONY Cuba Private Sector Acquisition', version='1.2.0', docs_url=None, redoc_url=None)
+app = FastAPI(title='SAHJONY Cuba Private Economy & Global Trade OS', version='2.0.0', docs_url=None, redoc_url=None)
 
 
 def now() -> str:
@@ -41,6 +41,9 @@ def internal_identity(role: str | None, authorization: str | None, employee_id: 
 ShippingOption = Literal['SAHJONY_ARRANGED','CUSTOMER_ARRANGED','CONSOLIDATED']
 OrderMode = Literal['SMALL_ORDER','LCL_CONSOLIDATED','FCL']
 TransportMode = Literal['SEA','AIR','BEST_AVAILABLE']
+ParticipantType = Literal['PERSON','TCP','MIPYME','COOPERATIVE','PRIVATE_COMPANY','FOREIGN_BUYER','FOREIGN_SUPPLIER']
+SanctionsState = Literal['CLEAR','PENDING','REVIEW','BLOCKED','ERROR']
+Corridor = Literal['CU-CU','CU-WORLD','WORLD-CU','CU-US','WORLD-WORLD']
 
 
 class PublicLeadIn(BaseModel):
@@ -94,9 +97,125 @@ class PromoteIn(BaseModel):
     assigned_employee_id: str | None = None
 
 
+class CorridorClassifyIn(BaseModel):
+    origin_country: str = Field(min_length=2, max_length=2)
+    destination_country: str = Field(min_length=2, max_length=2)
+    participant_type: ParticipantType
+    counterparty_type: ParticipantType | None = None
+    kyc_kyb_verified: bool = False
+    beneficial_ownership_verified: bool = False
+    sanctions_state: SanctionsState = 'PENDING'
+    us_nexus: bool = False
+    payment_currency: str | None = Field(default=None, max_length=3)
+    stable_family_remittance_pattern: bool = False
+    recurring_recipient: bool = False
+    transaction_anomaly: bool = False
+    fraud_indicator: bool = False
+    structuring_indicator: bool = False
+    product_control_review_complete: bool = False
+
+    @model_validator(mode='after')
+    def normalize(self):
+        self.origin_country = self.origin_country.upper()
+        self.destination_country = self.destination_country.upper()
+        self.payment_currency = self.payment_currency.upper() if self.payment_currency else None
+        return self
+
+
+def classify_corridor(origin: str, destination: str, us_nexus: bool) -> Corridor:
+    if origin == 'CU' and destination == 'CU':
+        return 'CU-CU'
+    if origin == 'CU' and (destination == 'US' or us_nexus):
+        return 'CU-US'
+    if destination == 'CU' and (origin == 'US' or us_nexus):
+        return 'CU-US'
+    if origin == 'CU':
+        return 'CU-WORLD'
+    if destination == 'CU':
+        return 'WORLD-CU'
+    return 'WORLD-WORLD'
+
+
+def corridor_controls(corridor: Corridor) -> list[str]:
+    common = ['KYC_KYB', 'BENEFICIAL_OWNERSHIP', 'SANCTIONS_SCREENING', 'AUDIT_EVIDENCE']
+    if corridor == 'CU-CU':
+        return common + ['CUBA_PRIVATE_SECTOR_ELIGIBILITY', 'BUSINESS_ACTIVITY_REVIEW', 'INVOICE_AND_TAX_EVIDENCE']
+    if corridor in {'CU-WORLD', 'WORLD-CU'}:
+        return common + ['CUBA_TRADE_AUTHORITY_REVIEW', 'COUNTERPARTY_COUNTRY_CONTROLS', 'HS_CLASSIFICATION', 'CUSTOMS', 'BANKING_ROUTE', 'LOGISTICS']
+    if corridor == 'CU-US':
+        return common + ['CACR_OFAC_REVIEW', 'BIS_EXPORT_CONTROL_REVIEW', 'US_NEXUS_REVIEW', 'PRIVATE_SECTOR_ELIGIBILITY', 'BANKING_ROUTE', 'CUSTOMS']
+    return common + ['COUNTERPARTY_COUNTRY_CONTROLS']
+
+
+def decide(payload: CorridorClassifyIn) -> dict:
+    corridor = classify_corridor(payload.origin_country, payload.destination_country, payload.us_nexus)
+    controls = corridor_controls(corridor)
+    reasons: list[str] = []
+
+    if payload.sanctions_state == 'BLOCKED':
+        return {'corridor': corridor, 'risk_band': 'PROHIBITED', 'decision': 'BLOCK', 'reasons': ['SANCTIONS_BLOCK'], 'controls': controls, 'remittance_pattern_effect': 'NONE'}
+    if payload.sanctions_state in {'PENDING', 'REVIEW', 'ERROR'}:
+        return {'corridor': corridor, 'risk_band': 'HIGH', 'decision': 'HOLD', 'reasons': [f'SANCTIONS_{payload.sanctions_state}'], 'controls': controls, 'remittance_pattern_effect': 'NONE'}
+    if not payload.kyc_kyb_verified:
+        reasons.append('KYC_KYB_REQUIRED')
+    if not payload.beneficial_ownership_verified and payload.participant_type != 'PERSON':
+        reasons.append('BENEFICIAL_OWNERSHIP_REQUIRED')
+    if payload.fraud_indicator:
+        reasons.append('FRAUD_INDICATOR')
+    if payload.structuring_indicator:
+        reasons.append('STRUCTURING_INDICATOR')
+    if payload.transaction_anomaly:
+        reasons.append('TRANSACTION_ANOMALY')
+    if corridor == 'CU-US' and not payload.product_control_review_complete:
+        reasons.append('US_PRODUCT_CONTROL_REVIEW_REQUIRED')
+
+    favorable_remittance = payload.stable_family_remittance_pattern and payload.recurring_recipient
+    remittance_effect = 'LOWER_ANOMALY_WEIGHT_ONLY' if favorable_remittance else 'NONE'
+
+    hard_reasons = {'KYC_KYB_REQUIRED', 'BENEFICIAL_OWNERSHIP_REQUIRED', 'FRAUD_INDICATOR', 'STRUCTURING_INDICATOR', 'US_PRODUCT_CONTROL_REVIEW_REQUIRED'}
+    if hard_reasons.intersection(reasons):
+        return {'corridor': corridor, 'risk_band': 'HIGH', 'decision': 'HOLD', 'reasons': reasons, 'controls': controls, 'remittance_pattern_effect': remittance_effect}
+
+    if 'TRANSACTION_ANOMALY' in reasons and not favorable_remittance:
+        return {'corridor': corridor, 'risk_band': 'MEDIUM', 'decision': 'REVIEW', 'reasons': reasons, 'controls': controls, 'remittance_pattern_effect': remittance_effect}
+
+    return {'corridor': corridor, 'risk_band': 'LOW' if favorable_remittance else 'MEDIUM', 'decision': 'ALLOW_WITH_CONTROLS' if not reasons else 'REVIEW', 'reasons': reasons or ['CONTROLS_SATISFIED'], 'controls': controls, 'remittance_pattern_effect': remittance_effect}
+
+
 @app.get('/cuba-private-sector/health')
 async def health():
-    return {'status': 'ok', 'service': 'cuba-private-sector-acquisition', 'version':'1.2.0', 'public_intake': True, 'small_orders_enabled':True, 'lcl_consolidation_enabled':True, 'fcl_enabled':True, 'air_shipping_enabled':True, 'sea_shipping_enabled':True, 'customer_paid_shipping_enabled':True, 'shipping_quote_separate':True, 'default_business_readiness':'BUSINESS_REVIEW_REQUIRED', 'auto_authorization': False, 'auto_eligibility': False, 'fail_closed': True}
+    return {'status': 'ok', 'service': 'cuba-private-economy-global-trade-os', 'version':'2.0.0', 'public_intake': True, 'small_orders_enabled':True, 'lcl_consolidation_enabled':True, 'fcl_enabled':True, 'air_shipping_enabled':True, 'sea_shipping_enabled':True, 'customer_paid_shipping_enabled':True, 'shipping_quote_separate':True, 'default_business_readiness':'BUSINESS_REVIEW_REQUIRED', 'auto_authorization': False, 'auto_eligibility': False, 'fail_closed': True, 'corridors':['CU-CU','CU-WORLD','WORLD-CU','CU-US'], 'live_sanctions_provider_claimed':False}
+
+
+@app.get('/cuba-private-sector/private-economy/overview')
+async def private_economy_overview():
+    return {
+        'service':'SAHJONY Cuba Private Economy & Global Trade OS',
+        'version':'2.0.0',
+        'participants':['PERSON','TCP','MIPYME','COOPERATIVE','PRIVATE_COMPANY','FOREIGN_BUYER','FOREIGN_SUPPLIER'],
+        'corridors':[
+            {'id':'CU-CU','label_es':'Comercio privado dentro de Cuba','mode':'domestic_private_trade'},
+            {'id':'CU-WORLD','label_es':'Exportación privada desde Cuba al mundo','mode':'export'},
+            {'id':'WORLD-CU','label_es':'Importación mundial hacia el sector privado cubano','mode':'import'},
+            {'id':'CU-US','label_es':'Operaciones Cuba–EE.UU. o con nexo estadounidense','mode':'us_nexus_special_review'},
+        ],
+        'workflow':['IDENTITY','KYC_KYB','BENEFICIAL_OWNERSHIP','RFQ','SUPPLIER_BUYER_MATCH','SANCTIONS','PRODUCT_CONTROLS','LANDED_COST','BANKING','LOGISTICS','CUSTOMS','APPROVAL','FULFILLMENT','AUDIT'],
+        'sanctions_mode':'EVIDENCE_REQUIRED',
+        'live_sanctions_provider_claimed':False,
+        'automatic_whitelisting':False,
+        'remittance_policy':'Stable legitimate family-remittance behavior may reduce anomaly weighting only. It never bypasses sanctions, KYC/KYB, fraud, structuring, product controls, or mandatory review.',
+        'decision_policy':'Fail closed on sanctions BLOCKED/PENDING/REVIEW/ERROR and incomplete hard controls.',
+    }
+
+
+@app.get('/cuba-private-sector/private-economy/corridors')
+async def private_economy_corridors():
+    return {'corridors':[{'id':c,'controls':corridor_controls(c)} for c in ['CU-CU','CU-WORLD','WORLD-CU','CU-US']]}
+
+
+@app.post('/cuba-private-sector/private-economy/classify')
+async def private_economy_classify(payload: CorridorClassifyIn):
+    return decide(payload)
 
 
 @app.post('/cuba-private-sector/leads')
