@@ -188,6 +188,7 @@ async def health():
 
 
 @app.get('/cuba-private-sector/private-economy/overview')
+@app.get('/cuba-private-sector/leads/private-economy/overview')
 async def private_economy_overview():
     return {
         'service':'SAHJONY Cuba Private Economy & Global Trade OS',
@@ -209,11 +210,13 @@ async def private_economy_overview():
 
 
 @app.get('/cuba-private-sector/private-economy/corridors')
+@app.get('/cuba-private-sector/leads/private-economy/corridors')
 async def private_economy_corridors():
     return {'corridors':[{'id':c,'controls':corridor_controls(c)} for c in ['CU-CU','CU-WORLD','WORLD-CU','CU-US']]}
 
 
 @app.post('/cuba-private-sector/private-economy/classify')
+@app.post('/cuba-private-sector/leads/private-economy/classify')
 async def private_economy_classify(payload: CorridorClassifyIn):
     return decide(payload)
 
