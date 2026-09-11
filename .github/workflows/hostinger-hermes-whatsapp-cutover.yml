@@ -73,6 +73,7 @@ jobs:
           tail -80 /root/.hermes/platforms/whatsapp/bridge.log 2>/dev/null || true
           echo '=== HERMES PAIR-ONLY INTERFACE ==='
           grep -nE 'PAIR_ONLY|PAIR_JSON|pair-only|pair-json|--pair' /root/.hermes/hermes-agent/scripts/whatsapp-bridge/bridge.js 2>/dev/null || true
+          sed -n '360,460p' /root/.hermes/hermes-agent/scripts/whatsapp-bridge/bridge.js 2>/dev/null || true
           sed -n '1088,1112p' /root/.hermes/hermes-agent/scripts/whatsapp-bridge/bridge.js 2>/dev/null || true
           echo '=== WHATSAPP MODE SEMANTICS ==='
           grep -nE 'self-chat|MODE|mode|allowlist|allowed' /root/.hermes/hermes-agent/scripts/whatsapp-bridge/bridge.js 2>/dev/null | head -160 || true
