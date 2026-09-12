@@ -100,6 +100,10 @@ async function boot(){
    const {default:SofiaSalesPerformanceCenter}=await import('./SofiaSalesPerformanceCenter');
    createRoot(rootElement).render(withI18n(<StrictMode><AppBoundary><SofiaSalesPerformanceCenter/></AppBoundary></StrictMode>));return
  }
+ if(path==='/owner/cuba-laws'||path==='/owner/cuba-law-intelligence'||path.startsWith('/owner/cuba-laws/')||path.startsWith('/owner/cuba-law-intelligence/')){
+   const {default:CubaLawIntelligenceCenter}=await import('./CubaLawIntelligenceCenter');
+   createRoot(rootElement).render(withI18n(<StrictMode><AppBoundary><CubaLawIntelligenceCenter/></AppBoundary></StrictMode>));return
+ }
  if(path==='/owner/intelligence'||path==='/owner/research-intelligence'||path.startsWith('/owner/intelligence/')||path.startsWith('/owner/research-intelligence/')){
    const {default:ResearchIntelligenceCenter}=await import('./ResearchIntelligenceCenter');
    createRoot(rootElement).render(withI18n(<StrictMode><AppBoundary><ResearchIntelligenceCenter/></AppBoundary></StrictMode>));return
