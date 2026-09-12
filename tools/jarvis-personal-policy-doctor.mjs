@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import process from 'node:process';
 
-const runtimePath = 'openclaw/jarvis/personal-executive-runtime.md';
+const runtimePath = 'policies/jarvis/personal-executive-runtime.md';
 const routePath = 'src/main.tsx';
 const uiPath = 'src/JarvisOwnerCenter.tsx';
 const text = fs.readFileSync(runtimePath, 'utf8');
