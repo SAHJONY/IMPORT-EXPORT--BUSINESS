@@ -723,6 +723,10 @@
       "dest": "unified_api.py"
     },
     {
+      "src": "/cuba-laws(.*)",
+      "dest": "unified_api.py"
+    },
+    {
       "src": "/cuba-desk(.*)",
       "dest": "unified_api.py"
     },

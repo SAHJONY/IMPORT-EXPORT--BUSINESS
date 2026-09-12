@@ -185,6 +185,8 @@ async def hold(case_id:str,x_role:str|None=Header(None,alias='X-Role'),authoriza
 
 from cuba_energy_desk_api import app as cuba_energy_desk_app
 from cuba_private_fuels_desk_api import app as cuba_private_fuels_desk_app
+from cuba_law_intelligence_api import app as cuba_law_intelligence_app
 
 app.include_router(cuba_energy_desk_app.router)
 app.include_router(cuba_private_fuels_desk_app.router)
+app.include_router(cuba_law_intelligence_app.router)
