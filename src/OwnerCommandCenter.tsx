@@ -6,7 +6,6 @@ type Probe={key:string;label:string;url:string};
 const probes:Probe[]=[
   {key:'app',label:'Trading OS',url:'/api/health'},
   {key:'whatsapp',label:'WhatsApp',url:'/whatsapp/health'},
-  {key:'worldwide',label:'Worldwide Connect',url:'/api/connect/worldwide/health'},
 ];
 
 const stages=[

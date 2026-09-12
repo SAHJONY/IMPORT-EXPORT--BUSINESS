@@ -40,7 +40,6 @@ from country_activation_api import app as countries_app
 from country_crm_api import app as country_crm_app
 from global_lead_search_api import app as global_lead_search_app
 from cloudflare_crawler_api import app as cloudflare_crawler_app
-from worldwide_connect_api import app as worldwide_connect_app
 from cuba_private_fuels_desk_api import app as cuba_private_fuels_app
 from energy_crude_oil_api import app as energy_app
 from energy_origination_api import app as energy_origination_app
@@ -375,7 +374,7 @@ async def meta_whatsapp_shadow_receive(request: Request):
 
 for subapp in (
     google_contacts_app,
-    activation_app, telegram_app, business_email_app, email_agent_app, gmail_transport_app, owner_auth_app, higgsfield_cloud_app, core_app, customer_crm_app, crm_quality_10x_app, external_trade_prospects_app, profit_machine_app, record_registry_app, latam_trade_research_app, outreach_marketing_app, social_media_management_app, country_crm_app, global_lead_search_app, cloudflare_crawler_app, worldwide_connect_app, cuba_private_fuels_app, cuba_mipymes_app, cuba_sofia_sales_bridge_app, competition_intelligence_app, sofia_deal_match_app, world_clock_trade_app,
+    activation_app, telegram_app, business_email_app, email_agent_app, gmail_transport_app, owner_auth_app, higgsfield_cloud_app, core_app, customer_crm_app, crm_quality_10x_app, external_trade_prospects_app, profit_machine_app, record_registry_app, latam_trade_research_app, outreach_marketing_app, social_media_management_app, country_crm_app, global_lead_search_app, cloudflare_crawler_app, cuba_private_fuels_app, cuba_mipymes_app, cuba_sofia_sales_bridge_app, competition_intelligence_app, sofia_deal_match_app, world_clock_trade_app,
     energy_app, energy_origination_app, energy_intelligence_app, energy_provider_hub_app, energy_provider_ingestion_app, energy_provider_catalog_app, energy_ofac_screening_app, energy_eia_app, energy_deal_flow_app, energy_revenue_intelligence_app,
     communications_app, communication_os_security_app, communication_os_app, communication_agentic_app, communication_platform_app, sofia_unified_comms_app, direct_text_app, wifi_connectivity_app, cuba_communications_app, voice_inbound_app, voice_agent_app, direct_voice_app, voice_autonomy_app, whatsapp_voice_orchestrator_app, documents_app, document_storage_app, shipments_app, agency_owner_app, agency_freight_ops_app, compliance_app, commercial_app, language_app, collaboration_app, finance_app,
     countries_app, cuba_current_app, cuba_transition_app, cuba_trade_desk_app, cuba_private_business_app, cuba_private_sector_lead_app, cuba_logistics_network_app, lead_scout_app, managed_trade_app, intermediary_app, global_sourcing_app, global_marketplace_app, business_readiness_app, us_import_app,
