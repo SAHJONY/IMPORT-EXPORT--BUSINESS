@@ -18,6 +18,10 @@ app = FastAPI(
 )
 
 _PLACES_URL = "https://places.googleapis.com/v1/places:searchText"
+_PLACES_PROXY_URL = os.getenv(
+    "WORLDWIDE_PLACES_PROXY_URL",
+    "https://sahjony-ai-website-agency.vercel.app/api/health?places=1",
+).strip()
 _FIELD_MASK = ",".join(
     (
         "places.id",
@@ -72,16 +76,27 @@ def _safe_place(place: dict[str, Any]) -> dict[str, Any]:
 
 @app.get("/api/connect/worldwide/health")
 async def worldwide_health() -> dict[str, Any]:
-    ready = bool(_places_key())
+    direct = bool(_places_key())
+    proxy = bool(_PLACES_PROXY_URL)
+    ready = direct or proxy
     return {
         "status": "ok" if ready else "configuration_required",
         "service": "worldwide-business-discovery",
         "google_places_ready": ready,
+        "google_places_mode": "direct" if direct else ("secure_proxy" if proxy else "unconfigured"),
         "google_places_api": "places-api-new",
         "search_endpoint": "/api/connect/worldwide/search",
         "owner_authorization_required": True,
         "api_key_exposed": False,
     }
+
+
+@app.post("/api/connect/worldwide/auth-check")
+async def worldwide_auth_check(
+    authorization: str | None = Header(None, alias="Authorization"),
+) -> dict[str, Any]:
+    _owner(authorization)
+    return {"status": "ok", "owner_authorized": True}
 
 
 @app.post("/api/connect/worldwide/search")
@@ -91,8 +106,6 @@ async def worldwide_search(
 ) -> dict[str, Any]:
     _owner(authorization)
     api_key = _places_key()
-    if not api_key:
-        raise HTTPException(503, "Google Places is not configured")
 
     request_body = {
         "textQuery": payload.query.strip(),
@@ -100,6 +113,52 @@ async def worldwide_search(
         "languageCode": payload.language_code,
         "regionCode": payload.region_code.upper(),
     }
+
+    if not api_key:
+        if not _PLACES_PROXY_URL:
+            raise HTTPException(503, "Google Places is not configured")
+        proxy_body = {
+            "query": payload.query.strip(),
+            "limit": payload.limit,
+            "language_code": payload.language_code,
+            "region_code": payload.region_code.upper(),
+        }
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(25.0, connect=8.0)) as client:
+                response = await client.post(
+                    _PLACES_PROXY_URL,
+                    headers={
+                        "Content-Type": "application/json",
+                        "Authorization": authorization or "",
+                    },
+                    json=proxy_body,
+                )
+        except httpx.TimeoutException as exc:
+            raise HTTPException(504, "Google Places proxy timed out") from exc
+        except httpx.HTTPError as exc:
+            raise HTTPException(502, "Google Places proxy transport failed") from exc
+
+        if response.status_code >= 400:
+            raise HTTPException(502, f"Google Places proxy failed with HTTP {response.status_code}")
+        try:
+            proxy_payload = response.json()
+        except ValueError as exc:
+            raise HTTPException(502, "Google Places proxy returned a non-JSON response") from exc
+        results = [
+            item
+            for item in (proxy_payload.get("results") or [])
+            if isinstance(item, dict) and item.get("place_id") and item.get("name")
+        ][: payload.limit]
+        return {
+            "status": "ok",
+            "provider": "google_places_proxy",
+            "query": payload.query.strip(),
+            "result_count": len(results),
+            "usable_results": bool(results),
+            "results": results,
+            "api_key_exposed": False,
+        }
+
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(20.0, connect=8.0)) as client:
             response = await client.post(
