@@ -152,7 +152,7 @@ export default function ResearchIntelligenceCenter() {
     const requests = DATA_ENDPOINTS.map((endpoint) =>
       fetch(endpoint, {
         cache: "no-store",
-        ...(endpoint === "/api/deals" ? { headers: authHeaders() } : {}),
+        headers: authHeaders(),
       }),
     );
     const responses = await Promise.allSettled(requests);

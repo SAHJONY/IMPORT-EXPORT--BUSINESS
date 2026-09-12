@@ -106,3 +106,21 @@ def test_save_failure_never_reports_success(monkeypatch):
     c=TestClient(api.app)
     r=c.post('/business-readiness/deal-worksheets',headers={'X-Role':'owner','Authorization':'Bearer fixture'},json=complete().model_dump(mode='json'))
     assert r.status_code==503
+
+
+def test_canonical_deals_are_private_and_not_a_public_build_asset(monkeypatch):
+    from pathlib import Path
+    import json
+    root=Path(__file__).resolve().parents[1]
+    assert not (root/'public/canonical-deals.json').exists()
+    cfg=json.loads((root/'vercel.json').read_text())
+    route=next(i for i,r in enumerate(cfg['routes']) if r.get('src')=='/canonical-deals\\.json')
+    fs=next(i for i,r in enumerate(cfg['routes']) if r.get('handle')=='filesystem')
+    assert route<fs
+    monkeypatch.setattr(api,'verify_owner_token',lambda token:token=='owner-test')
+    c=TestClient(api.app)
+    assert c.get('/canonical-deals.json').status_code in (400,401,403)
+    assert c.get('/canonical-deals.json',headers={'X-Role':'owner'}).status_code==401
+    r=c.get('/canonical-deals.json',headers={'X-Role':'owner','Authorization':'Bearer owner-test'})
+    assert r.status_code==200 and len(r.json()['deals'])==6
+    assert 'no-store' in r.headers['cache-control']

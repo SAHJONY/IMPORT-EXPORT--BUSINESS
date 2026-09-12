@@ -13,3 +13,5 @@ Production baseline on September 11, 2026: 10 of 28 platform gates passed (36/10
 No counterparties were contacted, payments issued, shipments booked, or research prospects promoted to confirmed demand in this release. An authenticated production session and a completed real transaction remain necessary to certify live business execution.
 
 Validation: 264 tests passed across the Python suite, followed by two additional passing access/persistence tests (266 total); npm test passed; browser verified complete and incomplete calculations, save/read-back with isolated backend data, and 390px mobile layout without horizontal overflow. No production credentials were used for the fixture.
+
+Privacy hardening: the canonical owner deal snapshot was removed from public static assets and is now served only through the authenticated backend with private/no-store caching. All five owner consumers send authentication; the public Trust Center no longer downloads private records. Final suite: 267 Python tests passed; typecheck/build and repository guards passed.

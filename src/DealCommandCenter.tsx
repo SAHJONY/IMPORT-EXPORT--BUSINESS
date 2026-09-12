@@ -1,3 +1,4 @@
+import { ownerDataFetch } from "./ownerDataFetch";
 import { useEffect, useMemo, useState } from "react";
 
 type Stage =
@@ -94,7 +95,7 @@ async function collection(path: string) {
 }
 async function canonical() {
   try {
-    const r = await fetch("/canonical-deals.json", { cache: "no-store" });
+    const r = await ownerDataFetch("/canonical-deals.json");
     if (!r.ok) return [];
     const body = await r.json();
     return Array.isArray(body.deals) ? (body.deals as Deal[]) : [];

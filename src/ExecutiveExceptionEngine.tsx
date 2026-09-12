@@ -1,3 +1,4 @@
+import { ownerDataFetch } from "./ownerDataFetch";
 import {useEffect,useMemo,useState} from 'react';
 
 type Deal={
@@ -66,7 +67,7 @@ export default function ExecutiveExceptionEngine(){
   async function refresh(){
     setLoading(true);setError('');
     try{
-      const r=await fetch('/canonical-deals.json',{cache:'no-store'}); if(!r.ok)throw new Error(`HTTP ${r.status}`);
+      const r=await ownerDataFetch('/canonical-deals.json'); if(!r.ok)throw new Error(`HTTP ${r.status}`);
       const body=await r.json(); setDeals(Array.isArray(body.deals)?body.deals:[]);
     }catch(e){setError(e instanceof Error?e.message:'Unable to load deals');setDeals([])}finally{setLoading(false)}
   }

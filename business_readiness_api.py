@@ -212,3 +212,11 @@ async def save_deal_worksheet(p:DealWorksheet,x_role:str|None=Header(None,alias=
  saved=await b.select('deal_worksheets',params={'id':'eq.'+row['id'],'limit':'1'}) or []
  if not saved: raise HTTPException(503,'Save could not be verified. Refresh the saved worksheets before retrying.')
  return {'worksheet':saved[0],'persisted':True}
+
+@app.get('/canonical-deals.json')
+async def private_canonical_deals(x_role:str|None=Header(None,alias='X-Role'),authorization:str|None=Header(None,alias='Authorization')):
+ who=actor(x_role,authorization,None)
+ if who['role']!='owner': raise HTTPException(403,'Owner access required')
+ from fastapi.responses import JSONResponse
+ from private_deal_snapshot import CANONICAL_DEALS
+ return JSONResponse(CANONICAL_DEALS,headers={'Cache-Control':'private, no-store','Vary':'Authorization','X-Robots-Tag':'noindex, nofollow'})
