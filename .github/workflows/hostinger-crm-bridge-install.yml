@@ -130,13 +130,6 @@ jobs:
           echo SAHJONY_HOSTINGER_CRM_OWNER_REPORT_READY=1
           REMOTE
 
-      - name: Quarantine stale outreach backlog without delivery
-        shell: bash
-        run: |
-          set -euo pipefail
-          scp -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 -i ~/.ssh/hostinger-crm-bridge openclaw/hostinger-24x7/quarantine-stale-outreach.py "$USER@$HOST:/tmp/quarantine-stale-outreach.py"
-          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 -i ~/.ssh/hostinger-crm-bridge "$USER@$HOST" 'set -euo pipefail; python3 -m py_compile /tmp/quarantine-stale-outreach.py; python3 /tmp/quarantine-stale-outreach.py; rm -f /tmp/quarantine-stale-outreach.py'
-
       - name: Cleanup local key
         if: always()
         shell: bash
