@@ -82,6 +82,8 @@ jobs:
           sed -n '1,240p' /root/.hermes/hermes-agent/scripts/whatsapp-bridge/allowlist.js 2>/dev/null || true
           echo '=== MODEL PROVIDER ADAPTER DISCOVERY ==='
           grep -Rni --exclude-dir='__pycache__' -E 'custom_providers|api_key_env|api_key_env_vars|key_env|base_url' /root/.hermes/hermes-agent/*.py /root/.hermes/hermes-agent/hermes_cli /root/.hermes/hermes-agent/providers 2>/dev/null | head -260 || true
+          echo '=== CONFIG ENV REF SEMANTICS ==='
+          grep -Rni -E 'EnvRef|env_ref|\$\{|expand.*env|key_env|api_key_env' /root/.hermes/hermes-agent/hermes_cli/config.py /root/.hermes/hermes-agent/provider* /root/.hermes/hermes-agent/*provider*.py 2>/dev/null | head -180 || true
           echo '=== SAFE MODEL CONFIG SUMMARY ==='
           "$HERMES_PY" - <<'PYMODEL'
           from pathlib import Path
