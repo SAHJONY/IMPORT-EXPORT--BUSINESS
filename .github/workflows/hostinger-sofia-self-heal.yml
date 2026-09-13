@@ -133,19 +133,39 @@ jobs:
             echo SOFIA_WHATSAPP_TRANSPORT_FAIL_CLOSED=1
           fi
 
-          final_doctor="$($BRIDGE doctor)"
-          python3 - "$final_doctor" <<'PY'
+          final_doctor=''
+          crm_ok=false
+          for attempt in 1 2 3; do
+            final_doctor="$($BRIDGE doctor || true)"
+            if python3 - "$final_doctor" <<'PY'
+          import json,sys
+          try: d=json.loads(sys.argv[1])
+          except Exception: raise SystemExit(1)
+          raise SystemExit(0 if d.get('status')=='ok' and (d.get('health') or {}).get('status')=='ok' else 1)
+          PY
+            then
+              crm_ok=true
+              break
+            fi
+            sleep $((attempt*2))
+          done
+          python3 - "$final_doctor" "$crm_ok" <<'PY'
           import json,sys
           d=json.loads(sys.argv[1])
-          if d.get('status')!='ok' or (d.get('health') or {}).get('status')!='ok': raise SystemExit(1)
-          if d.get('pending_count',0) < 0: raise SystemExit(1)
-          print('SOFIA_CRM_BRIDGE_HEALTHY=1')
-          print('SOFIA_QUEUE_PENDING='+str(d.get('pending_count',0)))
+          ok=sys.argv[2]=='true'
+          h=d.get('health') or {}
           q=d.get('queue') or {}
+          print('SOFIA_CRM_HEALTH_STATUS='+str(h.get('status') or 'unknown'))
+          print('SOFIA_CRM_BACKEND_REACHABLE='+str(h.get('backend_reachable')).lower())
+          print('SOFIA_CRM_HEALTH_ERROR='+str(h.get('error') or 'none'))
+          print('SOFIA_QUEUE_PENDING='+str(d.get('pending_count',0)))
           print('SOFIA_QUEUE_ACTIONS='+json.dumps(q.get('actions') or {}, sort_keys=True, separators=(',',':')))
           print('SOFIA_QUEUE_OLDEST='+str(q.get('oldest') or 'none'))
           print('SOFIA_QUEUE_NEWEST='+str(q.get('newest') or 'none'))
           print('SOFIA_QUEUE_MALFORMED='+str(q.get('malformed',0)))
+          if d.get('pending_count',0) < 0: raise SystemExit(1)
+          if not ok: raise SystemExit(1)
+          print('SOFIA_CRM_BRIDGE_HEALTHY=1')
           PY
 
           echo SOFIA_SELF_HEAL_CONTROL_PLANE_HEALTHY=1
