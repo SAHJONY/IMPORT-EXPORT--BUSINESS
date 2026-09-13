@@ -66,21 +66,22 @@ jobs:
             echo SOFIA_CRM_TIMER_RECOVERED=1
           fi
 
+          # The OpenClaw skill mirror is legacy compatibility only. Hermes does
+          # not depend on it, so absence must not trigger recovery or a restart.
           if [[ -f "$SKILL" ]]; then
             if ! grep -q '^description:' "$SKILL"; then
-              echo SOFIA_SKILL_METADATA_INVALID=1 >&2
-              exit 20
-            fi
-            install -d -m 700 /root/.openclaw/skills/whatsapp-crm-bridge
-            if [[ ! -f "$ROOT_SKILL" ]] || ! cmp -s "$SKILL" "$ROOT_SKILL"; then
-              cp "$SKILL" "$ROOT_SKILL"
-              chmod 600 "$ROOT_SKILL"
-              repaired=1
-              echo SOFIA_SKILL_RUNTIME_RESYNCED=1
+              echo SOFIA_LEGACY_SKILL_METADATA_INVALID=1 >&2
+            else
+              install -d -m 700 /root/.openclaw/skills/whatsapp-crm-bridge
+              if [[ ! -f "$ROOT_SKILL" ]] || ! cmp -s "$SKILL" "$ROOT_SKILL"; then
+                cp "$SKILL" "$ROOT_SKILL"
+                chmod 600 "$ROOT_SKILL"
+                repaired=1
+                echo SOFIA_LEGACY_SKILL_RUNTIME_RESYNCED=1
+              fi
             fi
           else
-            echo SOFIA_SKILL_MISSING=1 >&2
-            exit 21
+            echo SOFIA_LEGACY_SKILL_ABSENT=1
           fi
 
           if [[ -x "$BRIDGE" ]]; then
