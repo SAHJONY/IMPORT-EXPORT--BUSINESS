@@ -80,6 +80,28 @@ jobs:
           sed -n '250,325p' /root/.hermes/hermes-agent/scripts/whatsapp-bridge/bridge.js 2>/dev/null || true
           echo '=== WHATSAPP ALLOWLIST SEMANTICS ==='
           sed -n '1,240p' /root/.hermes/hermes-agent/scripts/whatsapp-bridge/allowlist.js 2>/dev/null || true
+          echo '=== MODEL PROVIDER ADAPTER DISCOVERY ==='
+          grep -Rni --exclude-dir='__pycache__' -E 'base_url|baseURL|OPENAI_BASE_URL|NVIDIA_API_KEY|fallback_providers|provider.*openai|api_key_env' /root/.hermes/hermes-agent 2>/dev/null | head -220 || true
+          echo '=== SAFE MODEL CONFIG SUMMARY ==='
+          "$HERMES_PY" - <<'PYMODEL'
+          from pathlib import Path
+          import yaml
+          p=Path('/root/.hermes/config.yaml')
+          d=yaml.safe_load(p.read_text()) or {} if p.exists() else {}
+          def red(v): return '<present>' if v else '<empty>'
+          print('MODEL=',d.get('model'))
+          print('FALLBACK_PROVIDERS=',d.get('fallback_providers'))
+          providers=d.get('providers') or {}
+          if isinstance(providers,dict):
+              for name,cfg in providers.items():
+                  if not isinstance(cfg,dict): continue
+                  safe={}
+                  for k,v in cfg.items():
+                      lk=str(k).lower()
+                      if any(x in lk for x in ('key','token','secret','password','auth','cookie')): safe[k]=red(v)
+                      elif any(x in lk for x in ('url','endpoint','model','provider')): safe[k]=v
+                  if safe: print('PROVIDER',name,safe)
+          PYMODEL
           echo '=== PROCESSES ==='
           pgrep -af 'hermes_cli.main gateway run|openclaw gateway|whatsapp-bridge|bridge.js' || true
           echo HOSTINGER_HERMES_AUDIT_COMPLETE=1
