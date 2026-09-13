@@ -43,3 +43,15 @@ def test_human_quality_without_deceptive_impersonation() -> None:
     assert quality["emotional_intelligence"] is True
     assert quality["human_impersonation"] is False
     assert "Never falsely claim" in owner_executive_instructions()
+
+
+def test_owner_business_data_uses_connected_sources_before_upload_requests() -> None:
+    policy = OWNER_ASSISTANT_CONTRACT["connected_data_policy"]
+    assert policy["live_sources_first"] is True
+    assert policy["never_request_export_when_connected_source_is_available"] is True
+    mission = build_owner_mission("Pull a fresh CRM update report")
+    assert mission["execution_policy"]["connected_business_data"] == "query_live_source_before_requesting_upload"
+    instructions = owner_executive_instructions()
+    assert "connected production systems first" in instructions
+    assert "Do not ask Juan for a CSV" in instructions
+    assert "after a real live-source access attempt fails" in instructions
