@@ -94,11 +94,13 @@ jobs:
           raise SystemExit(0 if ok else 1)
           PY
             then
+              # Do not flush queued work automatically while WhatsApp transport is
+              # fail-closed. Preserve the backlog for deterministic reconciliation.
               systemctl restart sahjony-crm-bridge.timer || true
               sleep 3
-              $BRIDGE flush || true
               repaired=1
-              echo SOFIA_CRM_BRIDGE_RECOVERY_ATTEMPTED=1
+              echo SOFIA_CRM_BRIDGE_TIMER_RECOVERY_ATTEMPTED=1
+              echo SOFIA_CRM_BACKLOG_PRESERVED_FAIL_CLOSED=1
             fi
           else
             echo SOFIA_CRM_BRIDGE_BINARY_MISSING=1 >&2
