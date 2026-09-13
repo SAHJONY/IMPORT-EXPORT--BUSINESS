@@ -81,7 +81,7 @@ jobs:
           echo '=== WHATSAPP ALLOWLIST SEMANTICS ==='
           sed -n '1,240p' /root/.hermes/hermes-agent/scripts/whatsapp-bridge/allowlist.js 2>/dev/null || true
           echo '=== MODEL PROVIDER ADAPTER DISCOVERY ==='
-          grep -Rni --exclude-dir='__pycache__' -E 'base_url|baseURL|OPENAI_BASE_URL|NVIDIA_API_KEY|fallback_providers|provider.*openai|api_key_env' /root/.hermes/hermes-agent 2>/dev/null | head -220 || true
+          grep -Rni --exclude-dir='__pycache__' -E 'custom_providers|api_key_env|api_key_env_vars|key_env|base_url' /root/.hermes/hermes-agent/*.py /root/.hermes/hermes-agent/hermes_cli /root/.hermes/hermes-agent/providers 2>/dev/null | head -260 || true
           echo '=== SAFE MODEL CONFIG SUMMARY ==='
           "$HERMES_PY" - <<'PYMODEL'
           from pathlib import Path
@@ -89,7 +89,14 @@ jobs:
           p=Path('/root/.hermes/config.yaml')
           d=yaml.safe_load(p.read_text()) or {} if p.exists() else {}
           def red(v): return '<present>' if v else '<empty>'
-          print('MODEL=',d.get('model'))
+          m=d.get('model')
+          if isinstance(m,dict):
+              safe={}
+              for k,v in m.items():
+                  lk=str(k).lower()
+                  safe[k]=('<present>' if v else '<empty>') if any(x in lk for x in ('key','token','secret','password','auth','cookie')) else v
+              print('MODEL_SAFE=',safe)
+          else: print('MODEL_SAFE=',m)
           print('FALLBACK_PROVIDERS=',d.get('fallback_providers'))
           providers=d.get('providers') or {}
           if isinstance(providers,dict):
