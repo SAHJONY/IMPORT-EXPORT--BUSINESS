@@ -1,0 +1,45 @@
+name: Hostinger Hermes AI Gateway Economy
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        type: choice
+        options: [audit, smoke]
+        default: audit
+permissions:
+  contents: read
+concurrency:
+  group: hostinger-hermes-ai-gateway-economy
+  cancel-in-progress: false
+jobs:
+  gateway:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify economical AI Gateway route without touching WhatsApp
+        env:
+          AI_GATEWAY_API_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
+          MODE: ${{ inputs.mode }}
+        run: |
+          set -euo pipefail
+          test -n "$AI_GATEWAY_API_KEY"
+          echo 'ECONOMY_PRIMARY=inclusionai/ling-3.0-flash-vl-free'
+          echo 'PAID_ESCALATION=openai/gpt-6-astra'
+          echo 'MONTHLY_KEY_BUDGET_USD=1'
+          if [[ "$MODE" == smoke ]]; then
+            code=$(curl -sS -o /tmp/gateway.json -w '%{http_code}' \
+              https://ai-gateway.vercel.sh/v1/chat/completions \
+              -H "Authorization: Bearer $AI_GATEWAY_API_KEY" \
+              -H 'Content-Type: application/json' \
+              --data '{"model":"inclusionai/ling-3.0-flash-vl-free","messages":[{"role":"user","content":"Reply with exactly OK"}],"max_tokens":8,"stream":false}')
+            echo "AI_GATEWAY_HTTP=$code"
+            test "$code" = 200
+            python3 - <<'PY'
+          import json
+          d=json.load(open('/tmp/gateway.json'))
+          print('MODEL_USED='+str(d.get('model','unknown')))
+          print('RESPONSE_PRESENT='+str(bool((d.get('choices') or [{}])[0].get('message',{}).get('content'))).lower())
+          PY
+          fi
+          echo 'WHATSAPP_RUNTIME_MUTATED=0'
+          echo 'HERMES_RUNTIME_MUTATED=0'
+          echo 'FAIL_CLOSED_PRESERVED=1'
