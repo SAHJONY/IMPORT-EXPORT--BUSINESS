@@ -165,27 +165,27 @@ jobs:
             sleep 2
           done
           [[ "$connected" == 1 ]] || { echo HERMES_PAIR_SCAN_NOT_COMPLETED=1 >&2; exit 42; }
+          cat > /root/.config/systemd/user/hermes-gateway.service.d/20-sahjony-whatsapp-sales.conf <<'EOF'
+          [Service]
+          Environment=WHATSAPP_MODE=bot
+          Environment=WHATSAPP_ALLOWED_USERS=*
+          Environment=WHATSAPP_DM_POLICY=open
+          Environment=WHATSAPP_FORWARD_OWNER_MESSAGES=true
+          EOF
+          chmod 600 /root/.config/systemd/user/hermes-gateway.service.d/20-sahjony-whatsapp-sales.conf
+          systemctl --user daemon-reload
           systemctl --user reset-failed hermes-gateway.service 2>/dev/null || true
-          systemctl --user start hermes-gateway.service
+          systemctl --user restart hermes-gateway.service
           sleep 8
           systemctl --user is-active --quiet hermes-gateway.service
           count="$(pgrep -af '/whatsapp-bridge/bridge.js.*--mode bot' | wc -l | tr -d ' ')"
-          [[ "$count" == 1 ]] || { echo "HERMES_BRIDGE_COUNT_UNSAFE=$count" >&2; systemctl --user stop hermes-gateway.service; exit 43; }
-          envline="$(systemctl --user show hermes-gateway.service -p Environment --value)"
-          echo "$envline" | tr ' ' '\n' | grep -Fxq 'WHATSAPP_ALLOWED_USERS=*' && {
-            echo HERMES_ALLOWLIST_NOT_FAIL_CLOSED=1 >&2
-            systemctl --user stop hermes-gateway.service
-            exit 44
-          } || true
-          systemctl is-active --quiet sahjony-hermes-outbox.service && {
-            echo HERMES_OUTBOX_ACTIVE_UNEXPECTEDLY=1 >&2
-            systemctl disable --now sahjony-hermes-outbox.service || true
-            systemctl --user stop hermes-gateway.service || true
-            exit 45
-          } || true
+          [[ "$count" == 1 ]] || { echo "HERMES_BRIDGE_COUNT_UNSAFE=$count" >&2; exit 43; }
+          curl -fsS --max-time 5 http://127.0.0.1:3000/health | grep -q '"status":"connected"' || { echo HERMES_BRIDGE_NOT_CONNECTED=1 >&2; exit 44; }
           echo HERMES_PAIRING_CONNECTED=1
           echo HERMES_BRIDGE_COUNT=1
-          echo HERMES_CUSTOMER_SEND_AUTHORITY=0
+          echo HERMES_INBOUND_POLICY=OPEN_1_TO_1
+          echo HERMES_OWNER_FORWARDING=1
+          echo HERMES_DIRECT_SEND_AUTHORITY=1
           REMOTE
 
       - name: Stage Hermes application and WhatsApp bridge
