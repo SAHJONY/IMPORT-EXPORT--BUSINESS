@@ -52,11 +52,12 @@ jobs:
 
           echo SOFIA_SELF_HEAL_START=1
 
-          if ! systemctl is-active --quiet openclaw-gateway.service; then
-            systemctl restart openclaw-gateway.service
-            repaired=1
-            sleep 12
-            echo SOFIA_GATEWAY_RESTARTED=1
+          # Hermes is the current WhatsApp transport. This self-heal workflow must
+          # never reactivate a deliberately disabled customer messaging runtime.
+          if systemctl --user is-active --quiet hermes-gateway.service; then
+            echo SOFIA_HERMES_GATEWAY_ACTIVE=1
+          else
+            echo SOFIA_HERMES_GATEWAY_INACTIVE_FAIL_CLOSED=1
           fi
 
           if ! systemctl is-active --quiet sahjony-crm-bridge.timer; then
@@ -103,29 +104,20 @@ jobs:
             exit 22
           fi
 
+          # Legacy OpenClaw state may remain for forensic/CRM compatibility, but
+          # it is no longer an availability gate and must not be restarted here.
           if [[ -f "$CANON" ]]; then
-            OPENCLAW_CONFIG="$CANON" openclaw config validate --json >/tmp/sofia-config-validate.json
-            python3 - <<'PY'
-          import json
-          d=json.load(open('/tmp/sofia-config-validate.json'))
-          if d.get('valid') is False or d.get('ok') is False: raise SystemExit(1)
-          print('SOFIA_OPENCLAW_CONFIG_VALID=1')
-          PY
+            echo SOFIA_LEGACY_OPENCLAW_STATE_PRESENT=1
           else
-            echo SOFIA_CANONICAL_CONFIG_MISSING=1 >&2
-            exit 23
+            echo SOFIA_LEGACY_OPENCLAW_STATE_ABSENT=1
           fi
 
-          if ! journalctl -u openclaw-gateway.service --since '-12 minutes' --no-pager | grep -q 'Listening for WhatsApp inbound messages'; then
-            systemctl restart openclaw-gateway.service
-            repaired=1
-            sleep 14
-            echo SOFIA_WHATSAPP_LISTENER_RECOVERY_ATTEMPTED=1
-          fi
-
-          systemctl is-active --quiet openclaw-gateway.service
           systemctl is-active --quiet sahjony-crm-bridge.timer
-          journalctl -u openclaw-gateway.service --since '-5 minutes' --no-pager | grep -q 'Listening for WhatsApp inbound messages'
+          hermes_state="$(systemctl --user is-active hermes-gateway.service 2>/dev/null || true)"
+          echo "SOFIA_HERMES_GATEWAY_STATE=${hermes_state:-unknown}"
+          if [[ "$hermes_state" != active ]]; then
+            echo SOFIA_WHATSAPP_TRANSPORT_FAIL_CLOSED=1
+          fi
 
           final_doctor="$($BRIDGE doctor)"
           python3 - "$final_doctor" <<'PY'
@@ -137,7 +129,7 @@ jobs:
           print('SOFIA_QUEUE_PENDING='+str(d.get('pending_count',0)))
           PY
 
-          echo SOFIA_WHATSAPP_LISTENING=1
+          echo SOFIA_SELF_HEAL_CONTROL_PLANE_HEALTHY=1
           echo SOFIA_SELF_HEAL_REPAIRED=$repaired
           echo SAHJONY_SOFIA_SELF_HEAL_HEALTHY=1
           REMOTE
