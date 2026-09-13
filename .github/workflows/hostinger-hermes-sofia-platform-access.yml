@@ -142,13 +142,13 @@ jobs:
           ps -eo pid,ppid,etime,%cpu,%mem,args | grep -E 'hermes_cli.main gateway|whatsapp-bridge|hermes-outbox' | grep -v grep || true
           echo '--- whatsapp bridge health ---'
           python3 - <<'PY2'
-import urllib.request
-try:
-    with urllib.request.urlopen('http://127.0.0.1:3000/health',timeout=5) as r:
-        print(r.read().decode('utf-8','replace')[:1000])
-except Exception as exc:
-    print('BRIDGE_HEALTH_ERROR='+type(exc).__name__)
-PY2
+          import urllib.request
+          try:
+              with urllib.request.urlopen('http://127.0.0.1:3000/health',timeout=5) as r:
+                  print(r.read().decode('utf-8','replace')[:1000])
+          except Exception as exc:
+              print('BRIDGE_HEALTH_ERROR='+type(exc).__name__)
+          PY2
           systemctl --user is-active --quiet hermes-gateway.service || { echo HERMES_GATEWAY_ACTIVE=0; exit 31; }
           pgrep -f '/whatsapp-bridge/bridge.js.*--mode bot' >/dev/null || { echo WHATSAPP_BOT_ACTIVE=0; exit 32; }
           echo HERMES_GATEWAY_ACTIVE=1
