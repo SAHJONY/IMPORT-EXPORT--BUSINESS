@@ -28,6 +28,8 @@ jobs:
       USER: root
       PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
     steps:
+      - uses: actions/checkout@v4
+
       - name: Prepare SSH
         shell: bash
         run: |
@@ -37,6 +39,15 @@ jobs:
           printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/sofia-self-heal
           chmod 600 ~/.ssh/sofia-self-heal
           ssh-keygen -y -f ~/.ssh/sofia-self-heal >/dev/null
+
+      - name: Stage read-only CRM bridge doctor
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile openclaw/hostinger-24x7/sahjony-crm-bridge.py
+          opts=(-o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -i ~/.ssh/sofia-self-heal)
+          scp "${opts[@]}" openclaw/hostinger-24x7/sahjony-crm-bridge.py "$USER@$HOST:/tmp/sahjony-crm-bridge.new"
+          ssh "${opts[@]}" "$USER@$HOST" 'python3 -m py_compile /tmp/sahjony-crm-bridge.new && install -m 700 /tmp/sahjony-crm-bridge.new /usr/local/sbin/sahjony-crm-bridge && rm -f /tmp/sahjony-crm-bridge.new && echo SOFIA_CRM_DOCTOR_READ_ONLY_INSTALLED=1'
 
       - name: Diagnose and self-heal Sofia runtime
         shell: bash
@@ -130,6 +141,11 @@ jobs:
           if d.get('pending_count',0) < 0: raise SystemExit(1)
           print('SOFIA_CRM_BRIDGE_HEALTHY=1')
           print('SOFIA_QUEUE_PENDING='+str(d.get('pending_count',0)))
+          q=d.get('queue') or {}
+          print('SOFIA_QUEUE_ACTIONS='+json.dumps(q.get('actions') or {}, sort_keys=True, separators=(',',':')))
+          print('SOFIA_QUEUE_OLDEST='+str(q.get('oldest') or 'none'))
+          print('SOFIA_QUEUE_NEWEST='+str(q.get('newest') or 'none'))
+          print('SOFIA_QUEUE_MALFORMED='+str(q.get('malformed',0)))
           PY
 
           echo SOFIA_SELF_HEAL_CONTROL_PLANE_HEALTHY=1
