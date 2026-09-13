@@ -184,3 +184,39 @@ async def certify(certification_id:str,x_role:str|None=Header(None,alias='X-Role
  if missing: raise HTTPException(409,'Cannot certify; incomplete: '+', '.join(missing))
  ts=now(); await get_backend().patch('first_live_trade_certification',{'e2e_status':'PASSED','owner_certified':True,'owner_certified_at':ts,'updated_at':ts},params={'certification_id':f'eq.{certification_id}'})
  return {'certification_id':certification_id,'e2e_status':'PASSED','owner_certified':True}
+
+# Private worksheets are stored as immutable snapshots, retaining prior assumptions.
+from deal_workbench import DealWorksheet, COSTS, evaluate as evaluate_worksheet
+
+@app.get('/business-readiness/deal-worksheets')
+async def list_deal_worksheets(x_role:str|None=Header(None,alias='X-Role'),authorization:str|None=Header(None,alias='Authorization')):
+ who=actor(x_role,authorization,None)
+ if who['role']!='owner': raise HTTPException(403,'Owner access required')
+ rows=await get_backend().select('deal_worksheets',params={'order':'created_at.desc','limit':'100'}) or []
+ return {'worksheets':[{**r,'evaluation':evaluate_worksheet(DealWorksheet.model_validate(r['inputs']))} for r in rows],'cost_categories':list(COSTS),'limit':100}
+
+@app.post('/business-readiness/deal-worksheets/preview')
+async def preview_deal_worksheet(p:DealWorksheet,x_role:str|None=Header(None,alias='X-Role'),authorization:str|None=Header(None,alias='Authorization')):
+ who=actor(x_role,authorization,None)
+ if who['role']!='owner': raise HTTPException(403,'Owner access required')
+ return evaluate_worksheet(p)
+
+@app.post('/business-readiness/deal-worksheets')
+async def save_deal_worksheet(p:DealWorksheet,x_role:str|None=Header(None,alias='X-Role'),authorization:str|None=Header(None,alias='Authorization')):
+ who=actor(x_role,authorization,None)
+ if who['role']!='owner': raise HTTPException(403,'Owner access required')
+ import uuid
+ row={'id':'dw_'+uuid.uuid4().hex,'created_at':now(),'inputs':p.model_dump(mode='json'),'evaluation':evaluate_worksheet(p),'status':'DRAFT','outreach_authorized':False}
+ b=get_backend()
+ await b.insert('deal_worksheets',row)
+ saved=await b.select('deal_worksheets',params={'id':'eq.'+row['id'],'limit':'1'}) or []
+ if not saved: raise HTTPException(503,'Save could not be verified. Refresh the saved worksheets before retrying.')
+ return {'worksheet':saved[0],'persisted':True}
+
+@app.get('/canonical-deals.json')
+async def private_canonical_deals(x_role:str|None=Header(None,alias='X-Role'),authorization:str|None=Header(None,alias='Authorization')):
+ who=actor(x_role,authorization,None)
+ if who['role']!='owner': raise HTTPException(403,'Owner access required')
+ from fastapi.responses import JSONResponse
+ from private_deal_snapshot import CANONICAL_DEALS
+ return JSONResponse(CANONICAL_DEALS,headers={'Cache-Control':'private, no-store','Vary':'Authorization','X-Robots-Tag':'noindex, nofollow'})

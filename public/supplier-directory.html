@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Worldwide Supplier Directory | SAHJONY</title>
+<meta name="description" content="Explore researched supplier candidates worldwide by product, country and region, with official company sources.">
+<link rel="stylesheet" href="/supplier-directory.css">
+<script src="/supplier-directory.js" type="module"></script>
+</head>
+<body><main class="shell">
+<header><a href="/">SAHJONY · GLOBAL TRADE</a><nav aria-label="Directory navigation"><a href="/global-sourcing">Global sourcing</a><a href="/suppliers">Register supply</a></nav></header>
+<section class="hero"><p class="eyebrow">CUBA · ABASTECIMIENTO PARA NEGOCIOS PRIVADOS</p><h1>Suministros globales.<br>Destino: Cuba.</h1><p class="intro">Find worldwide supplier candidates for Cuban private businesses, with priority on food, solar and productive equipment. Product matches are research suggestions; Cuba delivery eligibility requires confirmation.</p><div id="summary" class="summary" aria-live="polite">Loading researched suppliers…</div></section>
+<aside class="notice"><strong>Research candidates · qualification pending</strong><p>These are publicly researched companies, not approved SAHJONY partners. Company location does not confirm shipment origin. Request current stock, MOQ, pricing, lead time and destination eligibility directly. No supplier outreach has been made.</p></aside>
+<section aria-label="Filter suppliers" class="filters">
+<label>Search suppliers or products<input id="search" type="search" placeholder="Try rice, solar, pumps…"></label>
+<label>Region<select id="region"><option value="">All regions</option></select></label>
+<label>Country<select id="country"><option value="">All countries</option></select></label>
+<label>Category<select id="category"><option value="">All categories</option></select></label>
+<button id="reset" type="button">Clear filters</button>
+</section>
+<p id="result-count" role="status"></p><section id="results" class="grid" aria-label="Supplier candidates"></section>
+<noscript><p>Enable JavaScript to search the directory, or <a href="/data/worldwide-suppliers.json">download the supplier data and official sources</a>.</p></noscript>
+<footer><a href="/start">Start a sourcing request →</a><a href="/data/worldwide-suppliers.json" download>Download research data</a><p>Official source review: <time id="review-date"></time>. Commercial terms require a current quotation.</p></footer>
+</main><script src="/global-language.js" defer></script></body></html>

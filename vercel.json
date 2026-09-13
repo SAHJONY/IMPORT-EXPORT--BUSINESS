@@ -195,6 +195,10 @@
   ],
   "routes": [
     {
+      "src": "/canonical-deals\\.json",
+      "dest": "unified_api.py"
+    },
+    {
       "src": "/owner/supplier-quotes",
       "dest": "/owner-supplier-quotes.html"
     },

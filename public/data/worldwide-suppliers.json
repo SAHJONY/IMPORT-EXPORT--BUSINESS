@@ -1,0 +1,228 @@
+{
+  "researched_on": "2026-09-10",
+  "status": "SOURCED",
+  "methodology": "Official company product and location pages reviewed. Country indicates a company office or operating location, not confirmed shipment origin. No supplier has been contacted or commercially approved through this research. Confirm legal selling entity, origin, destination eligibility, stock, MOQ, prices and terms for each request.",
+  "suppliers": [
+    {
+      "id": "weg",
+      "name": "WEG",
+      "country": "Brazil",
+      "country_code": "BR",
+      "region": "South America",
+      "category": "Industrial equipment",
+      "products": [
+        "Electric motors",
+        "Generators",
+        "Transformers"
+      ],
+      "source_url": "https://ri.weg.net/en/weg/corporate-profile/",
+      "contact_url": "https://www.weg.net/catalog/weg/BR/en/Generation%2CTransmission-and-Distribution/Generators/c/GLOBAL_GENERATORS",
+      "email": "info-br@weg.net",
+      "status": "SOURCED",
+      "reviewed_on": "2026-09-10"
+    },
+    {
+      "id": "abb",
+      "name": "ABB Switzerland",
+      "country": "Switzerland",
+      "country_code": "CH",
+      "region": "Europe",
+      "category": "Electrical infrastructure",
+      "products": [
+        "Switchgear",
+        "Motor controls",
+        "Power protection"
+      ],
+      "source_url": "https://new.abb.com/low-voltage/de-ch",
+      "contact_url": "https://new.abb.com/low-voltage/de-ch/kataloge-und-broschueren",
+      "email": null,
+      "status": "SOURCED",
+      "reviewed_on": "2026-09-10"
+    },
+    {
+      "id": "longi",
+      "name": "LONGi",
+      "country": "China",
+      "country_code": "CN",
+      "region": "Asia",
+      "category": "Solar energy",
+      "products": [
+        "Solar PV modules",
+        "Silicon wafers"
+      ],
+      "source_url": "https://www.longi.com/en/",
+      "contact_url": "https://www.longi.com/en/contact-us/",
+      "email": "market@longi.com",
+      "status": "SOURCED",
+      "reviewed_on": "2026-09-10"
+    },
+    {
+      "id": "tata-steel",
+      "name": "Tata Steel India",
+      "country": "India",
+      "country_code": "IN",
+      "region": "Asia",
+      "category": "Metals",
+      "products": [
+        "Steel coils",
+        "Rebar",
+        "Tubes",
+        "Wire rods"
+      ],
+      "source_url": "https://www.tatasteel.com/products-solutions/india/",
+      "contact_url": "https://www.tatasteel.com/products-solutions/india/",
+      "email": null,
+      "status": "SOURCED",
+      "reviewed_on": "2026-09-10"
+    },
+    {
+      "id": "ocp",
+      "name": "OCP Group",
+      "country": "Morocco",
+      "country_code": "MA",
+      "region": "Africa",
+      "category": "Fertilizers and chemicals",
+      "products": [
+        "Phosphate fertilizers",
+        "Phosphoric acid",
+        "Water-soluble fertilizers"
+      ],
+      "source_url": "https://www.ocpgroup.ma/en/what-we-do/industrial-operations",
+      "contact_url": "https://www.ocpgroup.ma/en/our-solutions/plant-nutrition-solutions",
+      "email": null,
+      "status": "SOURCED",
+      "reviewed_on": "2026-09-10"
+    },
+    {
+      "id": "adm",
+      "name": "ADM",
+      "country": "United States",
+      "country_code": "US",
+      "region": "North America",
+      "category": "Food and agriculture",
+      "products": [
+        "Edible oils",
+        "Flours and grains",
+        "Starches",
+        "Sweeteners"
+      ],
+      "source_url": "https://www.adm.com/en-us/products-services/human-nutrition/products/",
+      "contact_url": "https://www.adm.com/en-us/products-services/human-nutrition/products/",
+      "email": null,
+      "status": "SOURCED",
+      "reviewed_on": "2026-09-10"
+    },
+    {
+      "id": "fonterra",
+      "name": "Fonterra / NZMP",
+      "country": "New Zealand",
+      "country_code": "NZ",
+      "region": "Oceania",
+      "category": "Food and agriculture",
+      "products": [
+        "Dairy ingredients",
+        "Milk proteins",
+        "Cheese",
+        "Butter"
+      ],
+      "source_url": "https://www.fonterra.com/nz/en/our-co-operative/our-strategy/fonterras-ingredients-business.html",
+      "contact_url": "https://www.fonterra.com/nz/en/our-co-operative/our-brands.html",
+      "email": null,
+      "status": "SOURCED",
+      "reviewed_on": "2026-09-10"
+    },
+    {
+      "id": "arcor",
+      "name": "Arcor",
+      "country": "Argentina",
+      "country_code": "AR",
+      "region": "South America",
+      "category": "Food and agriculture",
+      "products": [
+        "Canned foods",
+        "Sauces",
+        "Jams",
+        "Edible oils"
+      ],
+      "source_url": "https://www.arcor.com/en/our-business-food",
+      "contact_url": "https://www.arcor.com/en/our-business-food",
+      "email": null,
+      "status": "SOURCED",
+      "reviewed_on": "2026-09-10"
+    },
+    {
+      "id": "graincorp",
+      "name": "GrainCorp",
+      "country": "Australia",
+      "country_code": "AU",
+      "region": "Oceania",
+      "category": "Food and agriculture",
+      "products": [
+        "Wheat",
+        "Barley",
+        "Canola",
+        "Sorghum"
+      ],
+      "source_url": "https://grains.graincorp.com.au/",
+      "contact_url": "https://grains.graincorp.com.au/for-buyers/",
+      "email": null,
+      "status": "SOURCED",
+      "reviewed_on": "2026-09-10"
+    },
+    {
+      "id": "grundfos",
+      "name": "Grundfos Denmark",
+      "country": "Denmark",
+      "country_code": "DK",
+      "region": "Europe",
+      "category": "Industrial equipment",
+      "products": [
+        "Pumps",
+        "Water systems"
+      ],
+      "source_url": "https://www.grundfos.com/legal/local-sales-companies-full-info-list",
+      "contact_url": "https://www.grundfos.com/legal/local-sales-companies-full-info-list",
+      "email": null,
+      "status": "SOURCED",
+      "reviewed_on": "2026-09-10"
+    },
+    {
+      "id": "olam-india",
+      "name": "Olam Agri India",
+      "country": "India",
+      "country_code": "IN",
+      "region": "Asia",
+      "category": "Food and agriculture",
+      "products": [
+        "Basmati rice",
+        "Non-basmati rice",
+        "Pulses",
+        "Grains"
+      ],
+      "source_url": "https://www.olamagri.com/locations/india",
+      "contact_url": "https://www.olamagri.com/products-services/grains-and-oilseeds",
+      "email": "grains@olamagri.com",
+      "status": "SOURCED",
+      "reviewed_on": "2026-09-10"
+    },
+    {
+      "id": "indorama",
+      "name": "Indorama Corporation",
+      "country": "Singapore",
+      "country_code": "SG",
+      "region": "Asia",
+      "category": "Fertilizers and chemicals",
+      "products": [
+        "Fertilizers",
+        "Polymers",
+        "Fibers and yarns",
+        "Chemicals"
+      ],
+      "source_url": "https://www.indorama.com/products",
+      "contact_url": "https://www.indorama.com/contact-us",
+      "email": "contact@indorama.com",
+      "status": "SOURCED",
+      "reviewed_on": "2026-09-10"
+    }
+  ]
+}

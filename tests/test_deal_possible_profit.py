@@ -1,4 +1,4 @@
-import json
+from private_deal_snapshot import CANONICAL_DEALS
 from pathlib import Path
 
 from external_trade_prospects_api import EXECUTION_SNAPSHOT, MAILBOX_BUY_LEADS
@@ -8,7 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_every_canonical_deal_has_governed_possible_profit():
-    payload = json.loads((ROOT / "public" / "canonical-deals.json").read_text())
+    payload = CANONICAL_DEALS
     assert payload["version"] >= 2
     assert payload["deals"]
     for deal in payload["deals"]:
@@ -26,9 +26,7 @@ def test_every_canonical_deal_has_governed_possible_profit():
 def test_known_profit_scenarios_match_evidenced_deal_math():
     deals = {
         deal["id"]: deal
-        for deal in json.loads(
-            (ROOT / "public" / "canonical-deals.json").read_text()
-        )["deals"]
+        for deal in CANONICAL_DEALS["deals"]
     }
     soda = deals["SAHJONY-SODA-KR-500"]["possibleProfit"]
     assert soda["minUsd"] == 10 * 42

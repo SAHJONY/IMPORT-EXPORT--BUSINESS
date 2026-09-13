@@ -1,3 +1,4 @@
+import { ownerDataFetch } from "./ownerDataFetch";
 import {useEffect,useMemo,useState} from 'react';
 
 type PossibleProfit={status?:string;minUsd?:number;maxUsd?:number;ratePct?:number;period?:string;basis?:string;recurringUsd?:number;recurringPeriod?:string};
@@ -13,15 +14,15 @@ function riskFrom(deal:Deal):EconomicsRow['capitalRisk']{
   if(/100% advance|advance before|deposit/.test(text))return 'HIGH';
   if(/l\/c|letter of credit|escrow|against copy of b\/l/.test(text))return 'MEDIUM';
   if(!text.trim())return 'UNKNOWN';
-  return 'LOW';
+  return 'UNKNOWN';
 }
 function normalize(deal:Deal):EconomicsRow{
   const p=deal.possibleProfit||{};
   const evidenced=p.status==='EVIDENCED_ESTIMATE';
   const target=['UNCONFIRMED_TARGET','TARGET_ONLY'].includes(String(p.status));
   const status:EcononomicsStatus=evidenced?'EVIDENCED':target?'TARGET':'INPUTS REQUIRED';
-  const high=Number.isFinite(Number(p.maxUsd))?Number(p.maxUsd):Number.isFinite(Number(p.minUsd))?Number(p.minUsd):undefined;
-  const low=Number.isFinite(Number(p.minUsd))?Number(p.minUsd):high;
+  const high=p.maxUsd != null && Number.isFinite(Number(p.maxUsd))?Number(p.maxUsd):p.minUsd != null && Number.isFinite(Number(p.minUsd))?Number(p.minUsd):undefined;
+  const low=p.minUsd != null && Number.isFinite(Number(p.minUsd))?Number(p.minUsd):high;
   const confidence=Number(deal.confidence||0);
   const freshness=Math.max(0,30-daysOld(deal.lastActivity));
   const stageWeight=/REVENUE|FULFILLMENT|PAYMENT|CONTRACT|BUYER_ACCEPTANCE|FIRM_QUOTE/.test(String(deal.stage))?25:/SOURCING|QUALIFICATION/.test(String(deal.stage))?10:0;
@@ -29,19 +30,19 @@ function normalize(deal:Deal):EconomicsRow{
   const economicWeight=high?Math.min(25,Math.log10(Math.max(high,1))*5):0;
   const score=Math.round(confidence*.25+freshness*.25+stageWeight+evidenceWeight+economicWeight);
   const reason=evidenced?'Supplier/buyer economics are evidenced, but this remains projected until completed and collected.':target?'Commercial target exists but one or more pricing/protection inputs are unconfirmed.':'Supplier cost, buyer price, protected compensation or other required economics are missing.';
-  return {deal,status,min:low,max:high,recurring:Number.isFinite(Number(p.recurringUsd))?Number(p.recurringUsd):undefined,score,capitalRisk:riskFrom(deal),reason};
+  return {deal,status,min:low,max:high,recurring:p.recurringUsd != null && Number.isFinite(Number(p.recurringUsd))?Number(p.recurringUsd):undefined,score,capitalRisk:riskFrom(deal),reason};
 }
 type EcononomicsStatus=EconomicsRow['status'];
 
 export default function DealEconomicsCenter(){
-  const [rows,setRows]=useState<EconomicsRow[]>([]);const [loading,setLoading]=useState(true);
-  useEffect(()=>{void (async()=>{try{const r=await fetch('/canonical-deals.json',{cache:'no-store'});const j=await r.json() as {deals?:Deal[]};const deals:Deal[]=Array.isArray(j.deals)?j.deals:[];setRows(deals.map(normalize).sort((a:EconomicsRow,b:EconomicsRow)=>b.score-a.score))}finally{setLoading(false)}})()},[]);
+  const [rows,setRows]=useState<EconomicsRow[]>([]);const [loading,setLoading]=useState(true);const [error,setError]=useState('');
+  useEffect(()=>{void (async()=>{try{const r=await ownerDataFetch('/canonical-deals.json');const j=await r.json() as {deals?:Deal[]};const deals:Deal[]=Array.isArray(j.deals)?j.deals:[];setRows(deals.map(normalize).sort((a:EconomicsRow,b:EconomicsRow)=>b.score-a.score))}catch(e){setError(e instanceof Error?e.message:'Unable to load owner records')}finally{setLoading(false)}})()},[]);
   const evidenced=useMemo(()=>rows.filter(r=>r.status==='EVIDENCED'),[rows]);
   const projected=useMemo(()=>evidenced.reduce((sum,r)=>sum+(r.max||0),0),[evidenced]);
   const recurring=useMemo(()=>evidenced.reduce((sum,r)=>sum+(r.recurring||0),0),[evidenced]);
   const highRisk=useMemo(()=>rows.filter(r=>r.capitalRisk==='HIGH').length,[rows]);
   return <main style={s.page}>
-    <header style={s.header}><div><div style={s.kicker}>OWNER OS · ECONOMICS</div><h1 style={s.h1}>Deal economics & capital risk</h1><p style={s.lead}>Rank opportunities by evidenced economics, commercial maturity and capital exposure. Projected profit is never booked revenue.</p></div><nav style={s.nav}><a style={s.link} href="/owner/dashboard">Dashboard</a><a style={s.link} href="/owner/deals">Deals</a><a style={s.link} href="/owner/exceptions">Exceptions</a></nav></header>
+    <header style={s.header}><div><div style={s.kicker}>OWNER OS · ECONOMICS</div><h1 style={s.h1}>Deal economics & capital risk</h1><p style={s.lead}>Rank opportunities by evidenced economics, commercial maturity and capital exposure. Projected profit is never booked revenue.</p></div><nav style={s.nav}><a style={s.link} href="/owner/dashboard">Dashboard</a><a style={s.link} href="/owner/deals">Deals</a><a style={s.link} href="/owner/exceptions">Exceptions</a></nav></header>{error&&<p role="alert" style={{color:"#ff9b9b",padding:16}}>{error}</p>}
     <section style={s.metrics}>
       <article style={s.metric}><small>Evidenced economics</small><strong>{evidenced.length}</strong></article>
       <article style={s.metric}><small>Projected profit · evidenced deals</small><strong>{money(projected)}</strong></article>

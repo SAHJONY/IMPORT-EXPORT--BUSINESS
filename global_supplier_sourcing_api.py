@@ -359,3 +359,52 @@ async def select_candidate(candidate_id:str,x_role:str|None=Header(None,alias='X
  await get_backend().patch('global_sourcing_requests',{'status':'SHORTLISTED','updated_at':now()},params={'sourcing_request_id':f'eq.{c["sourcing_request_id"]}'})
  return {'global_candidate_id':candidate_id,'selected':True,'supplier_country':c.get('supplier_country'),
   'candidate_control_status':c.get('corridor_status'),'country_corridor':status['country_corridor'],'selection_status':status}
+
+
+@app.get('/global-sourcing/cuba-prospects')
+async def cuba_prospects(x_role:str|None=Header(None,alias='X-Role'),authorization:str|None=Header(None,alias='Authorization'),x_employee_id:str|None=Header(None,alias='X-Employee-Id')):
+ actor=identity(x_role,authorization,x_employee_id)
+ if actor['role']!='owner': raise HTTPException(403,'Owner access required')
+ rows=await get_backend().select('cuba_market_research',params={'batch_id':'eq.cuba-market-2026-09-10','limit':'1000'}) or []
+ return {'prospects':sorted([r for r in rows if r.get('kind')=='BUYER'],key=lambda p:-p.get('priority_score',0)),'providers':[r for r in rows if r.get('kind')=='PROVIDER'],'quotes':[r for r in rows if r.get('kind')=='FREIGHT_QUOTE'],'researched_on':'2026-09-10','confirmed_deals':0,'source':'CRM'}
+
+
+@app.post('/global-sourcing/cuba-prospects/{prospect_id}/import')
+async def import_cuba_prospect(prospect_id:str,x_role:str|None=Header(None,alias='X-Role'),authorization:str|None=Header(None,alias='Authorization'),x_employee_id:str|None=Header(None,alias='X-Employee-Id')):
+ actor=identity(x_role,authorization,x_employee_id)
+ if actor['role']!='owner': raise HTTPException(403,'Owner access required')
+ from lead_scout_api import LeadScoutIn, fingerprint, opportunity_score, priority
+ import hashlib
+ records=await get_backend().select('cuba_market_research',params={'id':f'eq.{prospect_id}','kind':'eq.BUYER','limit':'1'}) or []
+ prospect=records[0] if records else None
+ if not prospect: raise HTTPException(404,'Unknown Cuba prospect')
+ model=LeadScoutIn(scout_name='SAHJONY Cuba Market Research',scout_code='CUBA-RESEARCH-20260910',
+  business_name=prospect['business_name'],country='CU',city_region=prospect['province'],deal_side='BUYER',lead_type='BUYER',
+  product_need_or_offer='RESEARCH PROPOSAL — DEMAND NOT CONFIRMED: '+prospect['proposal'],
+  source_url=prospect['source_url'],source_description=prospect['observed_activity'][:600],
+  email=prospect.get('public_email'),phone=prospect.get('public_phone'),
+  evidence_urls=prospect['evidence_urls'],notes=prospect['ownership_evidence']+' '+prospect['next_step'],consent_to_business_contact=False)
+ backend=get_backend(); fp=fingerprint(model)
+ existing=await backend.select('lead_scout_leads',params={'fingerprint':f'eq.{fp}','limit':'1'}) or []
+ if existing: return {'lead_id':existing[0]['lead_id'],'already_present':True,'automatic_deal_promotion':False}
+ # Stable primary key prevents simultaneous imports from creating duplicate rows.
+ lead_id='lsl_cu_'+hashlib.sha256(fp.encode()).hexdigest()[:24]
+ score=opportunity_score(model); ts=now()
+ row={**model.model_dump(),'lead_id':lead_id,'fingerprint':fp,'opportunity_score':score,'qualification_priority':priority(score),
+  'status':'NEW','duplicate_candidate':False,'duplicate_of_lead_id':None,'referral_credit_status':'NOT_APPLICABLE',
+  'commission_status':'NOT_APPLICABLE','created_at':ts,'updated_at':ts}
+ await backend.insert('lead_scout_leads',row)
+ return {'lead_id':lead_id,'already_present':False,'automatic_deal_promotion':False,'outreach_authorized':False}
+
+
+class PriceComparisonIn(BaseModel):
+ offer:dict
+ competitor:dict
+
+
+@app.post('/global-sourcing/compare-prices')
+async def compare_market_prices(p:PriceComparisonIn,x_role:str|None=Header(None,alias='X-Role'),authorization:str|None=Header(None,alias='Authorization'),x_employee_id:str|None=Header(None,alias='X-Employee-Id')):
+ actor=identity(x_role,authorization,x_employee_id)
+ if actor['role']!='owner': raise HTTPException(403,'Owner access required')
+ from cuba_market_intelligence import compare_prices
+ return compare_prices(p.offer,p.competitor)

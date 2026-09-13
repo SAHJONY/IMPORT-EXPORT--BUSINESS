@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Literal
 
 from fastapi import FastAPI, Header, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 from auth import verify_owner_token
 from pricing_engine import PricingError, TRANSACTION_CURRENCY, business_quote, consumer_quote, policy_snapshot
@@ -21,6 +21,7 @@ def require_owner(authorization: str | None, x_role: str | None):
 
 
 class PricingPreviewIn(BaseModel):
+    model_config = ConfigDict(allow_inf_nan=False)
     supplier_cost: float = Field(gt=0)
     international_freight: float = Field(default=0, ge=0)
     local_delivery: float = Field(default=0, ge=0)
@@ -66,6 +67,8 @@ async def preview(audience: Literal['consumer','business'], p: PricingPreviewIn,
     except PricingError as exc:
         raise HTTPException(409, str(exc)) from exc
     return {
+        'costs_complete': all(name in p.model_fields_set for name in ('supplier_cost','international_freight','local_delivery','compliance_cost','payment_cost','handling_cost','support_cost','insurance_cost','duty_tax_cost')),
+        'missing_cost_fields': [name for name in ('supplier_cost','international_freight','local_delivery','compliance_cost','payment_cost','handling_cost','support_cost','insurance_cost','duty_tax_cost') if name not in p.model_fields_set],
         'audience': quote['audience'],
         'customer_price': quote['customer_price'],
         'currency': TRANSACTION_CURRENCY,

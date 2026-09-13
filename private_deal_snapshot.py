@@ -1,0 +1,305 @@
+"""Private owner deal snapshot. Serve only through authenticated APIs."""
+CANONICAL_DEALS = {'version': 2,
+ 'updated_at': '2026-08-27T01:45:00Z',
+ 'policy': 'Canonical governed deal records. Possible profit is projected, never booked revenue. '
+           'No QUALIFIED, CONTRACTED, FUNDED, CLOSING_READY or REVENUE status without documentary '
+           'evidence.',
+ 'deals': [{'id': 'SAHJONY-UMB-CA-8000',
+            'title': '8,000 Wooden Patio Umbrellas',
+            'market': 'Canada',
+            'stage': 'FIRM_QUOTE',
+            'priority': 'A',
+            'buyer': 'Active Canadian requirement; buyer-side validation pending',
+            'supplier': 'Milan Umbrella; engaged',
+            'sahjonyPosition': 'Sourcing/origination intermediary; framework accepted',
+            'economics': '8% supplier-side commission requested; not yet contractually confirmed',
+            'possibleProfit': {'status': 'TARGET_ONLY',
+                               'ratePct': 8,
+                               'basis': '8% supplier-side commission requested; final product '
+                                        'value and written protection are pending',
+                               'period': '8,000-unit order'},
+            'payment': 'Supplier proposal: 30% deposit / 70% against copy of B/L',
+            'blocker': 'Final FOB pricing, written commission protection and buyer qualification',
+            'nextAction': 'Receive tier pricing; lock protected economics; issue controlled buyer '
+                          'offer',
+            'lastActivity': '2026-08-26',
+            'confidence': 72,
+            'source': 'Governed email evidence',
+            'evidence': ['Supplier confirmed intermediary framework',
+                         'MOQ 1,000 pcs',
+                         'Monthly capacity 3,000 pcs',
+                         'FSC available',
+                         'Sample lead time 15 days',
+                         'Production 60-75 days after pre-production sample and deposit'],
+            'documents': ['Quotation pending', 'Artwork/specification pending'],
+            'timeline': [{'at': '2026-08-26',
+                          'event': 'RFQ sent for 8,000 units',
+                          'status': 'complete'},
+                         {'at': '2026-08-26',
+                          'event': 'Supplier accepted intermediary framework',
+                          'status': 'complete'},
+                         {'at': '2026-08-26',
+                          'event': 'Protected 8% economics requested',
+                          'status': 'waiting'},
+                         {'at': 'Next',
+                          'event': 'Firm tier quotation and controlled buyer presentation',
+                          'status': 'next'}]},
+           {'id': 'SAHJONY-SODA-KR-500',
+            'title': 'Soda Ash Light · 500 MT/month',
+            'market': 'South Korea',
+            'stage': 'FIRM_QUOTE',
+            'priority': 'A',
+            'buyer': 'Public South Korea requirement; controlled 42 MT trial offer sent at USD '
+                     '280/MT FOB Qingdao; buyer acceptance, legal identity and KYB not yet '
+                     'evidenced',
+            'supplier': 'TNJ Chemical primary; YRC alternate',
+            'sahjonyPosition': 'Commercial intermediary; TNJ confirms supplier net pricing and '
+                               'SAHJONY may add its own commission; repeat-customer protection '
+                               'previously confirmed',
+            'economics': 'TNJ net USD 265/MT FOB Qingdao; SAHJONY controlled buyer offer USD '
+                         '280/MT; target margin USD 15/MT, equal to USD 630 on 42 MT if completed. '
+                         'Negotiation floor USD 10/MT. At 500 MT/month, USD 15/MT would equal USD '
+                         '7,500/month if commercially accepted; not contracted revenue.',
+            'possibleProfit': {'status': 'EVIDENCED_ESTIMATE',
+                               'minUsd': 420,
+                               'maxUsd': 630,
+                               'period': '42 MT controlled trial',
+                               'basis': 'USD 10–15/MT margin × 42 MT; supplier net and buyer offer '
+                                        'are evidenced, but buyer acceptance and fee collection '
+                                        'are not',
+                               'recurringUsd': 7500,
+                               'recurringPeriod': '500 MT/month target at USD 15/MT'},
+            'payment': '100% irrevocable L/C at sight; supplier requires acceptable original L/C '
+                       'before shipment lead time begins',
+            'blocker': 'Buyer response/acceptance, buyer KYB, L/C issuing-bank information, L/C '
+                       'draft review and TNJ future monthly allocation still required',
+            'nextAction': 'Obtain buyer acceptance in principle of USD 280/MT controlled trial, '
+                          'buyer legal identity/KYB and L/C bank details; then secure written '
+                          'commission/payment mechanics and supplier review of draft L/C',
+            'lastActivity': '2026-08-27',
+            'confidence': 78,
+            'source': 'Governed Gmail evidence',
+            'evidence': ['TNJ firm 42 MT net offer: USD 265/MT FOB Qingdao',
+                         'Packing: 25 kg bags, 21 MT per 20-foot FCL without pallets',
+                         'Delivery about 15 days after receipt of original L/C',
+                         'Payment: 100% irrevocable L/C at sight',
+                         'Quotation validity: 3 days',
+                         'Origin: China',
+                         'Supplier states offer is net and SAHJONY may add its own commission',
+                         'Supplier states commission cooperation is available',
+                         'SAHJONY sent controlled non-binding buyer offer at USD 280/MT FOB '
+                         'Qingdao for 42 MT on 2026-08-27'],
+            'documents': ['TNJ COA',
+                          'TNJ TDS',
+                          'TNJ MSDS',
+                          'YRC MSDS/COA',
+                          'TNJ 42 MT email quotation dated 2026-08-27',
+                          'Controlled buyer offer dated 2026-08-27'],
+            'timeline': [{'at': '2026-08-25',
+                          'event': '500 MT/month RFQs issued',
+                          'status': 'complete'},
+                         {'at': '2026-08-26',
+                          'event': 'TNJ confirmed L/C and commission/customer protection mechanics',
+                          'status': 'complete'},
+                         {'at': '2026-08-27',
+                          'event': 'TNJ issued executable 42 MT net offer at USD 265/MT FOB '
+                                   'Qingdao, valid 3 days',
+                          'status': 'complete'},
+                         {'at': '2026-08-27',
+                          'event': 'SAHJONY set USD 15/MT target margin and sent controlled buyer '
+                                   'offer at USD 280/MT FOB Qingdao',
+                          'status': 'complete'},
+                         {'at': 'Next',
+                          'event': 'Buyer accepts controlled economics, provides KYB and L/C '
+                                   'details, then supplier reviews draft L/C',
+                          'status': 'next'}]},
+           {'id': 'SAHJONY-EV-NA-20FT',
+            'title': 'AC/DC EV Chargers · 20-ft container',
+            'market': 'United States / Canada',
+            'stage': 'QUALIFICATION',
+            'priority': 'B',
+            'buyer': 'North America program requirement; buyer validation pending',
+            'supplier': 'Servotech Renewable Power System; interested',
+            'sahjonyPosition': 'Origination/channel intermediary',
+            'economics': '8% supplier-side channel/referral commission requested; awaiting '
+                         'confirmation',
+            'possibleProfit': {'status': 'TARGET_ONLY',
+                               'ratePct': 8,
+                               'basis': '8% supplier-side channel/referral commission requested; '
+                                        'compliant SKU pricing and written protection are pending',
+                               'period': 'Initial 20-ft container'},
+            'payment': 'Pending supplier commercial package',
+            'blocker': 'North America certifications, SKU-level pricing, container load, warranty '
+                       'and protected economics',
+            'nextAction': 'Receive compliant SKU package; verify certifications; lock economics; '
+                          'buyer-side review',
+            'lastActivity': '2026-08-25',
+            'confidence': 50,
+            'source': 'Governed email evidence',
+            'evidence': ['Export sales manager confirmed interest',
+                         'Supplier requested company profile/business contact',
+                         'Commercial package requested',
+                         '8% protected partner economics requested'],
+            'documents': ['Company profile requested',
+                          'Product catalog pending',
+                          'Certification evidence pending'],
+            'timeline': [{'at': '2026-08-25',
+                          'event': 'North America RFQ routed to Servotech',
+                          'status': 'complete'},
+                         {'at': '2026-08-25',
+                          'event': 'Export sales confirmed interest',
+                          'status': 'complete'},
+                         {'at': '2026-08-25',
+                          'event': '8% protected economics requested',
+                          'status': 'waiting'},
+                         {'at': 'Next',
+                          'event': 'Receive compliant SKU/price/certification package',
+                          'status': 'next'}]},
+           {'id': 'SAHJONY-MOTOR-OM-20FT',
+            'title': 'Industrial Motors · 20-ft container',
+            'market': 'Oman',
+            'stage': 'BLOCKED',
+            'priority': 'B',
+            'buyer': 'Oman requirement; detailed technical schedule pending',
+            'supplier': 'Bharat Bijlee; engaged',
+            'sahjonyPosition': 'Sourcing intermediary; economics not yet protected',
+            'economics': 'Not established',
+            'possibleProfit': {'status': 'INPUTS_REQUIRED',
+                               'basis': 'Supplier price, buyer offer and protected SAHJONY '
+                                        'compensation are not established',
+                               'period': 'Initial 20-ft container'},
+            'payment': 'Supplier requires 100% advance before dispatch; buyer-side requirement is '
+                       'L/C',
+            'blocker': 'Payment-term mismatch plus missing model-by-model technical schedule',
+            'nextAction': 'Obtain bank-backed payment alternative or replace supplier; complete '
+                          'technical schedule',
+            'lastActivity': '2026-08-26',
+            'confidence': 32,
+            'source': 'Governed email evidence',
+            'evidence': ['Supplier catalogues received',
+                         'Safe-area lead time 12-14 weeks',
+                         'Non-standard/hazardous lead time 18-20 weeks',
+                         'Ex-works Mumbai',
+                         '100% advance before dispatch'],
+            'documents': ['LT motor catalog', 'HT motor catalog', 'IE4/IE5 catalog'],
+            'timeline': [{'at': '2026-08-25', 'event': 'RFQ issued', 'status': 'complete'},
+                         {'at': '2026-08-26',
+                          'event': 'Supplier capability and catalogs received',
+                          'status': 'complete'},
+                         {'at': '2026-08-26',
+                          'event': '100% advance requirement identified',
+                          'status': 'blocked'},
+                         {'at': 'Next',
+                          'event': 'Resolve payment mismatch or replace supplier',
+                          'status': 'next'}]},
+           {'id': 'SAHJONY-POWER-445MW-V942',
+            'title': '445 MW Siemens V94.2 / Combined-Cycle Plant',
+            'market': 'Destination pending buyer verification',
+            'stage': 'QUALIFICATION',
+            'priority': 'A',
+            'buyer': 'Private buyer requirement referenced by SAHJONY; destination, '
+                     'site/permitting, fuel supply, PPA/offtake, budget, timeline and proof of '
+                     'funds not yet verified',
+            'supplier': 'American Plant & Equipment; Jason Ford replied on behalf of Victor '
+                        'Lebron; specific asset availability and seller authority not yet '
+                        'confirmed',
+            'sahjonyPosition': 'Sourcing/origination intermediary; controlled introduction '
+                               'requested',
+            'economics': 'Intermediary/referral protection requested in writing; not confirmed',
+            'possibleProfit': {'status': 'INPUTS_REQUIRED',
+                               'basis': 'Asset price, buyer budget and protected intermediary '
+                                        'compensation are not verified',
+                               'period': 'Potential plant transaction'},
+            'payment': 'Not established',
+            'blocker': 'Seller-side asset package and authority unverified; buyer qualification '
+                       'package incomplete; intermediary protection unconfirmed',
+            'nextAction': 'Receive asset package, current availability, technical/commercial basis '
+                          'and seller authority; secure written SAHJONY protection; then obtain '
+                          'buyer qualification evidence before any direct introduction',
+            'lastActivity': '2026-08-26',
+            'confidence': 40,
+            'source': 'Governed Gmail thread evidence',
+            'evidence': ["American Plant & Equipment replied to SAHJONY's 445 MW inquiry",
+                         'Counterparty requested ultimate destination, fuel supply, permits, '
+                         'PPA/offtake, environmental/site approval, budget, timeline and proof of '
+                         'funds',
+                         'SAHJONY explicitly stated those buyer-side items are not yet verified',
+                         'SAHJONY requested current asset availability, technical configuration, '
+                         'commercial basis, seller/mandate authority and written intermediary '
+                         'protection'],
+            'documents': ['Asset package pending',
+                          'Seller/mandate authority evidence pending',
+                          'Buyer qualification evidence pending',
+                          'Intermediary protection pending'],
+            'timeline': [{'at': '2026-08-26',
+                          'event': 'SAHJONY opened controlled inquiry for TT-2097, TY-1940 and '
+                                   'TY-2031 / approximately 445 MW',
+                          'status': 'complete'},
+                         {'at': '2026-08-26',
+                          'event': 'American Plant & Equipment requested buyer/project '
+                                   'qualification information',
+                          'status': 'complete'},
+                         {'at': '2026-08-26',
+                          'event': 'SAHJONY requested seller-side asset validation and protected '
+                                   'intermediary path before buyer disclosure',
+                          'status': 'complete'},
+                         {'at': 'Next',
+                          'event': 'Validate asset/seller authority and obtain buyer-side '
+                                   'qualification evidence',
+                          'status': 'next'}]},
+           {'id': 'SAHJONY-AL-SCRAP-KE-25-50',
+            'title': 'Aluminium 6063 Extrusion + UBC Scrap · 25–50 MT Trial',
+            'market': 'Mombasa, Kenya',
+            'stage': 'FIRM_QUOTE',
+            'priority': 'B',
+            'buyer': 'Trial requirement referenced by SAHJONY; buyer acceptance and identity not '
+                     'released',
+            'supplier': 'Nautica Metal Scrap B.V.; SCO received',
+            'sahjonyPosition': 'Procurement/origination intermediary; buyer identity withheld '
+                               'pending KYB, payment alignment and fee protection',
+            'economics': 'USD 150/MT supplier-side origination commission requested; not confirmed',
+            'possibleProfit': {'status': 'UNCONFIRMED_TARGET',
+                               'minUsd': 3750,
+                               'maxUsd': 7500,
+                               'period': '25–50 MT trial',
+                               'basis': 'USD 150/MT requested supplier-side commission × 25–50 MT; '
+                                        'supplier has not confirmed the commission'},
+            'payment': 'Supplier standard: 30% T/T advance / 70% T/T against copy B/L; buyer-side '
+                       'preference: irrevocable 100% L/C at sight',
+            'blocker': 'Payment mismatch, supplier KYB/stock evidence pending, exact available '
+                       'quantity pending, and SAHJONY commission protection unconfirmed',
+            'nextAction': 'Obtain KYB, current stock photos/XRF, exact quantity, bank-secured '
+                          'payment alternative and written commission protection before controlled '
+                          'buyer review',
+            'lastActivity': '2026-08-25',
+            'confidence': 48,
+            'source': 'Governed Gmail thread evidence',
+            'evidence': ['Supplier issued 5-banking-day SCO for 25–50 MT trial',
+                         '6063 quoted USD 2,120/MT FOB Rotterdam and USD 2,290/MT CFR Mombasa',
+                         'UBC quoted USD 2,050/MT FOB Rotterdam and USD 2,120/MT CFR Mombasa',
+                         'SGS or Bureau Veritas inspection offered at loading',
+                         'Supplier states shipment lead time approximately 25–27 days after '
+                         'advance/payment instrument and formalities',
+                         'SAHJONY requested L/C alternative, KYB/stock evidence and USD 150/MT '
+                         'protected supplier-side economics'],
+            'documents': ['SCO in email',
+                          'KYB documents pending',
+                          'Current stock photos/videos pending',
+                          '6063 XRF/chemical analysis pending',
+                          'Inspection certificate available if ordered'],
+            'timeline': [{'at': '2026-08-24',
+                          'event': 'SAHJONY issued RFQ for 25–50 MT aluminium scrap trial to '
+                                   'Mombasa',
+                          'status': 'complete'},
+                         {'at': '2026-08-25',
+                          'event': 'Nautica Metal Scrap B.V. issued SCO with FOB/CFR prices and '
+                                   '30/70 T/T terms',
+                          'status': 'complete'},
+                         {'at': '2026-08-25',
+                          'event': 'SAHJONY requested KYB, stock evidence, L/C alternative and USD '
+                                   '150/MT protected economics',
+                          'status': 'waiting'},
+                         {'at': 'Next',
+                          'event': 'Supplier verification and commercial alignment before buyer '
+                                   'presentation',
+                          'status': 'next'}]}]}

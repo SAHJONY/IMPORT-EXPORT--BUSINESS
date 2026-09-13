@@ -63,7 +63,7 @@ def _record_key(row: dict[str, Any]) -> str:
     preferred = (
         "id", "event_id", "customer_id", "intake_id", "request_id", "case_id",
         "shipment_id", "document_id", "message_id", "payment_id", "supplier_id",
-        "candidate_id", "authorization_id", "employee_id", "business_id", "country_id",
+        "global_candidate_id", "candidate_id", "authorization_id", "employee_id", "business_id", "country_id",
         "translation_id", "share_id", "engagement_id", "dossier_id", "incident_id",
         "command_id", "notification_id", "gateway_id", "account_id", "journal_id", "beneficiary_id", "sourcing_request_id",
     )

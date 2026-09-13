@@ -44,15 +44,15 @@ function known(value: string) {
   return Boolean(value && value !== "—" && !/not linked|not established|platform record|unknown|pending/i.test(value));
 }
 
-function stageFor(row: RawDeal, score: number, buyerKnown: boolean, supplierKnown: boolean, profitKnown: boolean) {
+function stageFor(row: RawDeal) {
   const raw = text(row.stage || row.status || "LEAD").toUpperCase();
-  if (/REVENUE|COLLECTED/.test(raw)) return "Collected revenue";
-  if (/INVOICE/.test(raw)) return "Invoiced";
-  if (/CONTRACT|PO/.test(raw)) return "Contracted transaction";
-  if (/FIRM_QUOTE/.test(raw)) return "Firm quotation";
-  if (/RFQ/.test(raw)) return "RFQ ready";
-  if (score >= 75 && buyerKnown && supplierKnown && profitKnown) return "RFQ ready";
-  if (score >= 55 && buyerKnown) return "Qualified demand";
+  // Ranking scores and company names cannot establish a commercial milestone.
+  if (["REVENUE", "COLLECTED", "COLLECTED_REVENUE"].includes(raw)) return "Collected revenue";
+  if (["INVOICE", "INVOICED"].includes(raw)) return "Invoiced";
+  if (["CONTRACTED", "CONTRACTED_TRANSACTION", "PO"].includes(raw)) return "Contracted transaction";
+  if (raw === "FIRM_QUOTE") return "Firm quotation";
+  if (["RFQ", "RFQ_READY"].includes(raw)) return "RFQ ready";
+  if (row.demand_confirmed === true && row.buyer_authority_verified === true) return "Qualified demand";
   return "Research lead";
 }
 
@@ -106,7 +106,7 @@ function normalize(row: RawDeal, index: number): IntelligenceRow {
     title: text(row.title || row.product_need || row.product || row.legal_name || `Opportunity ${index + 1}`),
     market: text(row.market || row.destination_country || row.country_code || row.destination),
     sourceStage: text(row.stage || row.status || "LEAD"),
-    intelligenceStage: stageFor(row, score, buyerKnown, supplierKnown, profitKnown),
+    intelligenceStage: stageFor(row),
     priority,
     buyer,
     supplier,
@@ -152,7 +152,7 @@ export default function ResearchIntelligenceCenter() {
     const requests = DATA_ENDPOINTS.map((endpoint) =>
       fetch(endpoint, {
         cache: "no-store",
-        ...(endpoint === "/api/deals" ? { headers: authHeaders() } : {}),
+        headers: authHeaders(),
       }),
     );
     const responses = await Promise.allSettled(requests);
@@ -195,7 +195,7 @@ export default function ResearchIntelligenceCenter() {
             <h1>Research Intelligence Center</h1>
             <p>Prioritize evidence-backed demand by commercial quality, profit visibility, counterparty readiness and conversion probability. Research activity is not revenue: every opportunity stays separated until it becomes qualified demand, RFQ ready, firmly quoted, contracted, invoiced and collected.</p>
           </div>
-          <div className="actions">
+          <div className="actions"><a className="btn" href="/owner-cuba-prospects.html">Cuba buyers, suppliers & shipping</a>
             <a className="btn" href="/owner/dashboard">Executive dashboard</a>
             <a className="btn" href="/owner/deals">Deal Command Center</a>
             <button className="btn primary" onClick={refresh}>{loading ? "Syncing…" : "Sync intelligence"}</button>

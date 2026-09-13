@@ -67,6 +67,7 @@ export default function OwnerCommandCenter(){
         <a href="/owner/social" style={s.link}>Social</a>
         <a href="/owner/jarvis" style={s.link}>JARVIS</a>
         <a href="/owner/priorities" style={s.link}>Priorities</a>
+        <a href="/owner-business-ready.html" style={s.link}>Business execution</a>
         <a href="/owner/economics" style={s.link}>Economics</a>
         <a href="/owner/sofia-performance" style={s.link}>Sofía</a>
         <a href="/owner/exceptions" style={s.link}>Exceptions</a>
@@ -97,6 +98,7 @@ export default function OwnerCommandCenter(){
         <a href="/owner/jarvis" style={s.actionCard}><strong>Run JARVIS</strong><span>Use the private executive and personal-assistant command layer for owner work.</span><b>OPEN JARVIS →</b></a>
         <a href="/owner/sofia-performance" style={s.actionCard}><strong>Improve Sofía conversion</strong><span>Measure RFQ, quote and PO conversion by segment, surface stale opportunities and improve selling patterns from evidence.</span><b>OPEN SOFÍA BRAIN →</b></a>
         <a href="/owner/priorities" style={s.actionCard}><strong>Allocate effort by expected value</strong><span>Rank governed deals by expected gross profit, close probability, time to close and risk.</span><b>OPEN PRIORITIES →</b></a>
+        <a href="/owner-business-ready.html" style={s.link}>Business execution</a>
         <a href="/owner/economics" style={s.actionCard}><strong>Protect deal economics</strong><span>Separate evidenced economics from targets and expose capital at risk.</span><b>OPEN ECONOMICS →</b></a>
         <a href="/owner/exceptions" style={s.actionCard}><strong>Resolve executive exceptions</strong><span>Escalate blocked RFQs, missing economics, stale deals, PO/payment and logistics risks.</span><b>OPEN EXCEPTIONS →</b></a>
         <a href="/owner/deals" style={s.actionCard}><strong>Close active opportunities</strong><span>Advance qualified demand to firm price, quote and PO.</span><b>GO TO DEALS →</b></a>

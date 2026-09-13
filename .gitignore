@@ -17,3 +17,9 @@ htmlcov/
 .DS_Store
 .idea/
 .vscode/
+.vercel
+
+# Owner-only CRM research snapshots include private correspondence.
+data/cuba_buyer_research_*.json
+data/cuba_crm_import_*.json
+data/cuba_shipping_intelligence_*.json
