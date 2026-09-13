@@ -165,9 +165,11 @@ jobs:
           python3 - <<'PY'
           import json, urllib.request
           d=json.load(urllib.request.urlopen('https://www.sahjony.com/whatsapp/health',timeout=20))
-          h=d.get('hermes_agent') or {}
-          assert h.get('heartbeat_fresh') is True, h
-          assert h.get('connected') is True, h
+          assert d.get('provider') == 'hermes_agent', d
+          assert d.get('status') == 'ok', d
+          assert d.get('hostinger_independent_runtime') is True, d
+          assert d.get('send_ready') is True, d
+          assert d.get('webhook_ready') is True, d
           print('PRODUCTION_WHATSAPP_HEARTBEAT=FRESH')
           print('PRODUCTION_WHATSAPP_CONNECTED=TRUE')
           PY
