@@ -32,7 +32,24 @@ jobs:
               -H 'Content-Type: application/json' \
               --data '{"model":"inclusionai/ling-3.0-flash-vl-free","messages":[{"role":"user","content":"Reply with exactly OK"}],"max_tokens":8,"stream":false}')
             echo "AI_GATEWAY_HTTP=$code"
-            test "$code" = 200
+            if [[ "$code" != 200 ]]; then
+              python3 - <<'PYERR'
+import json
+try:
+    d=json.load(open('/tmp/gateway.json'))
+except Exception:
+    print('AI_GATEWAY_ERROR=unparseable_response')
+    raise SystemExit(0)
+e=d.get('error') if isinstance(d,dict) else None
+if isinstance(e,dict):
+    print('AI_GATEWAY_ERROR_CODE='+str(e.get('code') or 'none'))
+    print('AI_GATEWAY_ERROR_TYPE='+str(e.get('type') or 'none'))
+    print('AI_GATEWAY_ERROR_MESSAGE='+str(e.get('message') or '')[:500])
+else:
+    print('AI_GATEWAY_ERROR_BODY='+str(d)[:500])
+PYERR
+              exit 20
+            fi
             python3 - <<'PY'
           import json
           d=json.load(open('/tmp/gateway.json'))
