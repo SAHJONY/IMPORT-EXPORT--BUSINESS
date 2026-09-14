@@ -1,3 +1,0 @@
-Production deployment trigger for the operational business cockpit release.
-Target main includes the public landing page, complete OS launcher, governed trade workspaces, and operational Business Action Center through commit 76522d55e509571dba89d222a71b999aee4846ec.
-Release trigger: 2026-08-22 20:25 UTC.

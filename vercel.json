@@ -507,10 +507,6 @@
       "dest": "cuba_mipymes_api.py"
     },
     {
-      "src": "/api/connect/worldwide(.*)",
-      "dest": "unified_api.py"
-    },
-    {
       "src": "/cuba-fuels(.*)",
       "dest": "unified_api.py"
     },

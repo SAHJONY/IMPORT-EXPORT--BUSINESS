@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import process from 'node:process';
 
 const clientPath = 'src/sofiaCommercialSafetyGate.ts';
-const runtimePath = 'openclaw/sofia-reyes/commercial-mail-safety-gate.md';
+const runtimePath = 'policies/sofia/commercial-mail-safety-gate.md';
 const transportPath = 'gmail_transport_api.py';
 const suppressionMigrationPath = 'ops/sql/2026-09-10-enforce-global-email-suppressions.sql';
 const failures = [];
@@ -60,10 +60,10 @@ if (!failures.length) {
 
   const transportMust = [
     ['commercial_gate_enforced', 'transport advertises enforced gate'],
-    ['commercial_gate_version": "4.0', 'transport v4 contract'],
+    ['commercial_gate_version\": \"4.0', 'transport v4 contract'],
     ['commercial_gate_transport_boundary', 'transport boundary enforcement'],
     ['commercial_gate_exactly_once', 'exactly-once send protection'],
-    ['commercial_gate_approval_ttl_seconds": 600', 'transport TTL contract'],
+    ['commercial_gate_approval_ttl_seconds\": 600', 'transport TTL contract'],
     ['SOFIA_COMMERCIAL_SEND_REQUIRES_GMAIL_OAUTH', 'commercial SMTP bypass prohibited'],
     ['SOFIA_GATE_SINGLE_EXTERNAL_RECIPIENT_REQUIRED', 'bulk recipient bypass prohibited'],
     ['SOFIA_GATE_RECIPIENT_MISMATCH', 'recipient binding'],

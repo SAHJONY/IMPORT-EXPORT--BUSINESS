@@ -1,8 +1,8 @@
 import fs from 'node:fs';
 import process from 'node:process';
 
-const runtimePath = 'openclaw/sofia-reyes/human-conversation-runtime.md';
-const metricsPath = 'openclaw/sofia-reyes/owner-metrics-10x-runtime.md';
+const runtimePath = 'policies/sofia/executive-runtime.md';
+const metricsPath = 'policies/sofia/owner-metrics.md';
 const text = fs.readFileSync(runtimePath, 'utf8');
 const metrics = fs.readFileSync(metricsPath, 'utf8');
 const failures = [];

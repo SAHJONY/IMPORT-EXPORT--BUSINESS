@@ -35,18 +35,14 @@ jobs:
       - name: Deployment Doctor
         run: npm run doctor
 
-      - name: Validate WhatsApp CRM bridge Python
+      - name: Validate live WhatsApp CRM bridge Python
         run: |
           set -euo pipefail
           python3 -m py_compile \
             whatsapp_crm_bridge.py \
             whatsapp_cloud_primary_api.py \
-            sofia_whatsapp_runtime.py \
-            openclaw/hostinger-24x7/sahjony-crm-bridge.py
-          test -s openclaw/skills/whatsapp-crm-bridge/SKILL.md
-          test -x openclaw/hostinger-24x7/install-crm-bridge.sh || chmod +x openclaw/hostinger-24x7/install-crm-bridge.sh
-          bash -n openclaw/hostinger-24x7/install-crm-bridge.sh
-          echo "WhatsApp CRM bridge syntax and skill artifacts verified."
+            sofia_whatsapp_runtime.py
+          echo "Live WhatsApp CRM bridge syntax verified."
 
       - name: Live Business Doctor
         run: npm run doctor:live-business
@@ -69,12 +65,13 @@ jobs:
           test -f payment_api.py
           test -f physical_postgres.py
           test -f whatsapp_crm_bridge.py
-          test -f openclaw/hostinger-24x7/sahjony-crm-bridge.py
+          test -f whatsapp_cloud_primary_api.py
+          test -f sofia_whatsapp_runtime.py
           grep -Fq '"/cuba-partners"' vercel.json
           grep -Fq '"/cuba-partners-api(.*)"' vercel.json
           grep -Fq '"/owner/cuba-partners"' vercel.json
           grep -Fq '"/owner-payments(.*)"' vercel.json
-          echo "Build artifacts, physical ledgers, governed routes, and CRM bridge verified."
+          echo "Build artifacts, physical ledgers, governed routes, and live CRM bridge verified."
 
   production-smoke:
     if: github.ref == 'refs/heads/main'
