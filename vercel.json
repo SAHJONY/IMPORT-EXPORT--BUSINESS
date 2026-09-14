@@ -867,6 +867,18 @@
       "dest": "unified_api.py"
     },
     {
+      "src": "/conversion(.*)",
+      "dest": "unified_api.py"
+    },
+    {
+      "src": "/owner/conversion-dashboard",
+      "dest": "unified_api.py"
+    },
+    {
+      "src": "/supplier-demand/public-summary",
+      "dest": "unified_api.py"
+    },
+    {
       "src": "/health",
       "dest": "unified_api.py"
     },
