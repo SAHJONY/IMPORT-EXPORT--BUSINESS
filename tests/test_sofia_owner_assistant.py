@@ -55,3 +55,16 @@ def test_owner_business_data_uses_connected_sources_before_upload_requests() -> 
     assert "connected production systems first" in instructions
     assert "Do not ask Juan for a CSV" in instructions
     assert "after a real live-source access attempt fails" in instructions
+
+
+def test_owner_execute_first_forbids_generic_requirement_checklist() -> None:
+    policy = OWNER_ASSISTANT_CONTRACT["owner_execute_first_policy"]
+    assert policy["generic_requirements_checklist_forbidden"] is True
+    assert policy["connected_context_before_questions"] is True
+    assert policy["ask_only_single_genuine_blocker"] is True
+    mission = build_owner_mission("Proceed with the SAHJONY update report")
+    assert mission["execution_policy"]["owner_execute_first"] == "infer_context_use_connected_systems_execute_then_report"
+    instructions = owner_executive_instructions()
+    assert "generic requirements checklist" in instructions
+    assert "single minimum missing fact" in instructions
+    assert "endpoints, credentials, or access details" in instructions
