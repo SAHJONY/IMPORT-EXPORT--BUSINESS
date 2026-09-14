@@ -219,6 +219,18 @@
       "dest": "/start-es.html"
     },
     {
+      "src": "/es/about",
+      "dest": "/about-es.html"
+    },
+    {
+      "src": "/es/trust-center",
+      "dest": "/trust-center-es.html"
+    },
+    {
+      "src": "/es/find",
+      "dest": "/find-es.html"
+    },
+    {
       "src": "/privacy",
       "dest": "/privacy.html"
     },

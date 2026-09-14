@@ -93,6 +93,12 @@
     if((currentPath==='/'||currentPath==='/business')&&baseLocale(target)==='es'){setStored('es');location.assign('/es');return}
     if(currentPath==='/es'&&baseLocale(target)==='en'){setStored('en-US');location.assign('/');return}
     if(currentPath==='/start'&&baseLocale(target)==='es'){setStored('es');location.assign('/es/start');return}
+    if((currentPath==='/about'||currentPath==='/about.html')&&baseLocale(target)==='es'){setStored('es');location.assign('/es/about');return}
+    if((currentPath==='/trust-center'||currentPath==='/trust-center.html')&&baseLocale(target)==='es'){setStored('es');location.assign('/es/trust-center');return}
+    if((currentPath==='/find'||currentPath==='/find.html')&&baseLocale(target)==='es'){setStored('es');location.assign('/es/find');return}
+    if(currentPath==='/es/find'&&baseLocale(target)==='en'){setStored('en-US');location.assign('/find.html');return}
+    if(currentPath==='/es/about'&&baseLocale(target)==='en'){setStored('en-US');location.assign('/about');return}
+    if(currentPath==='/es/trust-center'&&baseLocale(target)==='en'){setStored('en-US');location.assign('/trust-center.html');return}
     if(currentPath==='/es/start'&&baseLocale(target)==='en'){setStored('en-US');location.assign('/start');return}
     if(currentPath==='/es'&&baseLocale(target)==='en'){setStored('en-US');location.assign('/');return}
     active=target;if(persist){setStored(target);rewriteUrl(target)}propagateNavigation(target);announceLocale(target);
