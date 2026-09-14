@@ -303,6 +303,26 @@
       "dest": "/supplier-documents.html"
     },
     {
+      "src": "/es/customer-payments",
+      "dest": "/customer-payments-es.html"
+    },
+    {
+      "src": "/es/supplier-commercial-terms",
+      "dest": "/supplier-commercial-terms-es.html"
+    },
+    {
+      "src": "/es/suppliers",
+      "dest": "/suppliers-es.html"
+    },
+    {
+      "src": "/supplier-cuba-terms",
+      "dest": "/supplier-cuba-terms.html"
+    },
+    {
+      "src": "/es/supplier-cuba-terms",
+      "dest": "/supplier-cuba-terms-es.html"
+    },
+    {
       "src": "/customer-payments",
       "dest": "/customer-payments.html"
     },
