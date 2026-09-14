@@ -677,8 +677,9 @@ async def _enqueue_hermes_message(payload: WhatsAppSend) -> dict[str, Any]:
     fingerprint = hashlib.sha256(f"{recipient}|{body}".encode("utf-8")).hexdigest()
     recent = await get_backend().select(
         "whatsapp_openclaw_outbox",
-        params={"recipient": f"eq.{recipient}", "limit": "100", "order": "created_at.desc"},
+        params={"recipient": f"eq.{recipient}", "limit": "250"},
     ) or []
+    recent.sort(key=lambda row: str(row.get("created_at") or ""), reverse=True)
     cutoff = datetime.now(timezone.utc) - timedelta(minutes=10)
     for existing in recent:
         if str(existing.get("dedupe_fingerprint") or "") != fingerprint:
@@ -1099,10 +1100,14 @@ async def hermes_outbox(
     x_sahjony_signature: str | None = Header(None, alias="X-SAHJONY-Signature"),
 ) -> dict[str, Any]:
     _verify_hermes_signature(b"", x_sahjony_timestamp, x_sahjony_signature)
+    # The durable backend stores logical rows in JSON. Ordering by data->>created_at
+    # forces an expensive database sort and can time out. Fetch only actionable
+    # rows, then preserve deterministic FIFO order in memory.
     rows = await get_backend().select(
         "whatsapp_openclaw_outbox",
-        params={"limit": "100", "order": "created_at.asc"},
+        params={"status": "in.(queued,dispatching)", "limit": "500"},
     ) or []
+    rows.sort(key=lambda row: str(row.get("created_at") or "9999-12-31T23:59:59+00:00"))
     now = datetime.now(timezone.utc)
     commands: list[dict[str, Any]] = []
     for row in rows:
