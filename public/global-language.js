@@ -245,6 +245,8 @@
     const es=baseLocale(document.documentElement.lang||sourceLocale)==='es';footer.innerHTML='<div class="inner"><div><strong>SAHJONY LLC</strong><br><span>Houston, Texas, USA</span></div><div class="contact"><a href="https://wa.me/12816628581">WhatsApp +1 281-662-8581</a><a href="tel:+17132948801">'+(es?'Teléfono':'Voice')+' +1 713-294-8801</a><a href="mailto:ventas@sahjony.com">ventas@sahjony.com</a></div><div class="legal"><a href="/privacy?lang='+(es?'es':'en-US')+'">'+(es?'Privacidad':'Privacy')+'</a><a href="/terms?lang='+(es?'es':'en-US')+'">'+(es?'Términos':'Terms')+'</a></div></div>';
     document.body.appendChild(footer);
   }
+  function bootAnalytics(){if(location.pathname.startsWith('/owner')||document.querySelector('script[data-sahjony-conversion]'))return;const script=document.createElement('script');script.src='/conversion-analytics.js';script.defer=true;script.dataset.sahjonyConversion='true';document.head.appendChild(script)}
   function bootContact(){normalizePublicContact();mountPublicFooter()}
-  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',bootContact,{once:true});else bootContact();
+  function bootPublic(){bootContact();bootAnalytics()}
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',bootPublic,{once:true});else bootPublic();
 })();

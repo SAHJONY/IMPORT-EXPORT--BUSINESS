@@ -81,7 +81,7 @@ function Brand({ownerShortcut=false}:{ownerShortcut?:boolean}){
 function LegacyPublicSite(){
  return <div className="public-site institutional-public">
   <div className="signal-strip"><span><i/>GLOBAL TRADE NETWORK</span><strong>Human-led. AI-powered. Evidence-controlled.</strong><span>SAHJONY LLC · UNITED STATES</span></div>
-  <header className="public-nav"><Brand ownerShortcut/><nav className="public-links" aria-label="Primary navigation"><a href="#solutions">Capabilities</a><a href="/marketplace">Marketplace</a><a href="#process">Process</a><a href="/cuba-private-sector">Cuba Desk</a><a className="primary-link" href="/start">Start a request <span aria-hidden="true">↗</span></a></nav></header>
+  <header className="public-nav"><Brand ownerShortcut/><nav className="public-links" aria-label="Primary navigation"><a href="#solutions">Capabilities</a><a href="/marketplace">Marketplace</a><a href="#process">Process</a><a href="/suppliers">Become a supplier</a><a className="primary-link" href="/start">Start a request <span aria-hidden="true">↗</span></a></nav></header>
   <main>
    <section className="public-hero ultra-hero">
     <div className="hero-copy">
@@ -187,24 +187,28 @@ function PublicSite(){
 
 function PublicRfqForm(){
  const [status,setStatus]=useState<{kind:'idle'|'busy'|'success'|'error';message:string}>({kind:'idle',message:'Submission begins qualification; it does not create a quote, purchase commitment or shipment.'});
- async function submit(event:React.FormEvent<HTMLFormElement>){
-  event.preventDefault();
-  const form=event.currentTarget;
-  setStatus({kind:'busy',message:'Creating your secure trade intake…'});
-  const data=Object.fromEntries(new FormData(form).entries()) as Record<string,string>;
-  const payload:Record<string,string|number>={...data,destination_country:data.destination_country.trim().toUpperCase()};
-  if(data.quantity)payload.quantity=Number(data.quantity);else delete payload.quantity;
-  try{
-   const response=await fetch('/crm/intake',{method:'POST',headers:{'Content-Type':'application/json','Accept':'application/json'},body:JSON.stringify(payload)});
-   const body=await response.json().catch(()=>({}));
-   if(!response.ok)throw new Error(typeof body.detail==='string'?body.detail:'The request could not be accepted.');
-   const intakeId=body?.intake?.intake_id;
-   if(!intakeId)throw new Error('The server did not confirm an intake ID. Please retry.');
-   setStatus({kind:'success',message:`Request received · ${intakeId}. SAHJONY will review the commercial requirement and contact you about qualification.`});
-   form.reset();
-  }catch(cause){setStatus({kind:'error',message:cause instanceof Error?cause.message:'Submission failed. Please review the form and retry.'})}
+ const [attachmentsReady,setAttachmentsReady]=useState(false);
+ useEffect(()=>{fetch('/crm/intake-attachments/health',{cache:'no-store'}).then(r=>r.json()).then(j=>setAttachmentsReady(Boolean(j.ready))).catch(()=>setAttachmentsReady(false))},[]);
+ async function uploadAttachment(intakeId:string,cap:any,file:File|null){
+  if(!file)return '';
+  if(!cap?.available)return ' The RFQ is saved; secure attachment upload is temporarily unavailable and the trade desk can collect the file during follow-up.';
+  const a=await fetch(`/crm/intakes/${encodeURIComponent(intakeId)}/attachments/authorize`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:cap.token,filename:file.name,content_type:file.type||'application/octet-stream',size_bytes:file.size})});
+  const aj=await a.json().catch(()=>({}));if(!a.ok)throw new Error(aj.detail||'Attachment authorization failed.');
+  const put=await fetch(aj.upload.url,{method:aj.upload.method||'PUT',headers:aj.upload.headers||{'Content-Type':file.type},body:file});if(!put.ok)throw new Error('Attachment transfer failed.');
+  const c=await fetch(`/crm/intakes/${encodeURIComponent(intakeId)}/attachments/${encodeURIComponent(aj.document_id)}/complete`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:cap.token})});
+  const cj=await c.json().catch(()=>({}));if(!c.ok)throw new Error(cj.detail||'Attachment verification failed.');
+  return ' Attachment received and held until malware scanning clears it.';
  }
- return <form className="finale-form" onSubmit={submit} data-cinematic-reveal aria-describedby="inquiry-note"><div><label>BUSINESS NAME<input name="legal_name" required autoComplete="organization" placeholder="Legal business name"/></label><label>CONTACT NAME<input name="contact_name" required autoComplete="name" placeholder="Your full name"/></label></div><label>PRODUCT OR NEED<input name="product_need" required minLength={2} placeholder="Product, grade, model or commercial need"/></label><div><label>QUANTITY<input type="number" min="0" step="any" name="quantity" inputMode="decimal" placeholder="Target volume"/></label><label>DESTINATION COUNTRY<input name="destination_country" required minLength={2} maxLength={3} autoCapitalize="characters" pattern="[A-Za-z]{2,3}" title="Use a 2- or 3-letter country code" placeholder="US, MX, CA…"/></label></div><div><label>REQUIRED BY<input type="date" name="target_delivery_date" required/></label><label>BUSINESS EMAIL<input type="email" name="email" required autoComplete="email" placeholder="name@company.com"/></label></div><button type="submit" disabled={status.kind==='busy'}>{status.kind==='busy'?'Submitting…':'Submit qualified request'} <span aria-hidden="true">↗</span></button><small id="inquiry-note" className={`form-response ${status.kind}`} role="status" aria-live="polite">{status.message}</small></form>
+ async function submit(event:React.FormEvent<HTMLFormElement>){
+  event.preventDefault();const form=event.currentTarget;setStatus({kind:'busy',message:'Creating your secure trade intake…'});
+  const fd=new FormData(form);const file=(fd.get('spec_file') instanceof File?fd.get('spec_file') as File:null);fd.delete('spec_file');
+  if(file&&file.size>10*1024*1024){setStatus({kind:'error',message:'Attachment exceeds the 10 MB limit.'});return}
+  const data=Object.fromEntries(fd.entries()) as Record<string,string>;const payload:Record<string,string|number>={...data,destination_country:data.destination_country.trim().toUpperCase()};
+  for(const k of ['quantity','target_budget']){if(data[k])payload[k]=Number(data[k]);else delete payload[k]}
+  Object.keys(payload).forEach(k=>payload[k]===''&&delete payload[k]);
+  try{const response=await fetch('/crm/intake',{method:'POST',headers:{'Content-Type':'application/json','Accept':'application/json'},body:JSON.stringify(payload)});const body=await response.json().catch(()=>({}));if(!response.ok)throw new Error(typeof body.detail==='string'?body.detail:'The request could not be accepted.');const intakeId=body?.intake?.intake_id;if(!intakeId)throw new Error('The server did not confirm an intake ID. Please retry.');let attachment='';try{attachment=await uploadAttachment(intakeId,body?.attachment_capability,file)}catch(cause){attachment=` The RFQ is saved, but the optional attachment was not accepted: ${cause instanceof Error?cause.message:'upload unavailable'}`};setStatus({kind:'success',message:`Request received · ${intakeId}. SAHJONY will review the commercial requirement and contact you about qualification.${attachment}`});window.dispatchEvent(new CustomEvent('sahjony:conversion',{detail:{event:'rfq_submit',source:'homepage_rfq'}}));form.reset()}catch(cause){setStatus({kind:'error',message:cause instanceof Error?cause.message:'Submission failed. Please review the form and retry.'})}
+ }
+ return <form className="finale-form" onSubmit={submit} data-cinematic-reveal aria-describedby="inquiry-note"><div><label>BUSINESS NAME<input name="legal_name" required autoComplete="organization" placeholder="Legal business name"/></label><label>CONTACT NAME<input name="contact_name" required autoComplete="name" placeholder="Your full name"/></label></div><label>PRODUCT OR NEED<input name="product_need" required minLength={2} placeholder="Product, grade, model or commercial need"/></label><div><label>QUANTITY<input type="number" min="0" step="any" name="quantity" inputMode="decimal" placeholder="Target volume"/></label><label>DESTINATION COUNTRY<input name="destination_country" required minLength={2} maxLength={3} autoCapitalize="characters" pattern="[A-Za-z]{2,3}" title="Use a 2- or 3-letter country code" placeholder="US, MX, CA…"/></label></div><div><label>TARGET BUDGET<input type="number" min="0" step="any" name="target_budget" inputMode="decimal" placeholder="Commercial target"/></label><label>INCOTERM<input name="preferred_incoterm" placeholder="FOB, CIF, DDP…"/></label></div><div><label>REQUIRED BY<input type="date" name="target_delivery_date" required/></label><label>BUSINESS EMAIL<input type="email" name="email" required autoComplete="email" placeholder="name@company.com"/></label></div><label>PHONE / CALLBACK<input name="phone" autoComplete="tel" placeholder="+1 …"/></label>{attachmentsReady&&<label>OPTIONAL SPEC / DRAWING<input type="file" name="spec_file" accept=".pdf,.png,.jpg,.jpeg,.webp,.csv,.txt,.json,.docx,.xlsx"/><span className="field-note">One file · max 10 MB · held until malware scanning clears it.</span></label>}<button type="submit" disabled={status.kind==='busy'}>{status.kind==='busy'?'Submitting…':'Submit qualified request'} <span aria-hidden="true">↗</span></button><small id="inquiry-note" className={`form-response ${status.kind}`} role="status" aria-live="polite">{status.message}</small></form>
 }
 
 function StatePage({title,text,path}:{title:string;text:string;path:string}){return <div className="route-state"><Brand/><div className="route-card"><div className="eyebrow gold">SAHJONY GLOBAL TRADE</div><h1>{title}</h1><p>{text}</p><button className="primary-button" onClick={()=>nav(path)}>Continue</button></div></div>}
