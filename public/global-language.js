@@ -54,6 +54,20 @@
       try{const u=new URL(raw,location.origin);if(u.origin!==location.origin)return;u.searchParams.delete('locale');u.searchParams.set('lang',marker);a.setAttribute('href',u.pathname+u.search+u.hash)}catch{}
     });
   }
+  function propagateForms(locale){
+    const marker=normalizeLocale(locale)||sourceLocale;
+    document.querySelectorAll('form').forEach(form=>{
+      const method=(form.getAttribute('method')||'get').toLowerCase();
+      if(method!=='get'||form.closest('[data-no-translate]'))return;
+      let input=form.querySelector('input[type="hidden"][name="lang"][data-sahjony-locale]');
+      if(!input){input=document.createElement('input');input.type='hidden';input.name='lang';input.dataset.sahjonyLocale='true';form.appendChild(input)}
+      input.value=marker;
+    });
+  }
+  function propagateNavigation(locale){propagateLinks(locale);propagateForms(locale)}
+  function announceLocale(locale){
+    try{window.dispatchEvent(new CustomEvent('sahjony:localechange',{detail:{locale:normalizeLocale(locale)||sourceLocale}}))}catch{}
+  }
   function meaningful(value){const text=String(value||'').trim();return text.length>=2&&!/^[-+–—•·|/\\\s\d.,:$%()]+$/.test(text)}
   function blocked(el){return !el||SKIP_TAGS.has(el.tagName)||Boolean(el.closest('[data-no-translate],.sahjony-language'))}
   function collect(){
@@ -80,10 +94,10 @@
     if(currentPath==='/es'&&baseLocale(target)==='en'){setStored('en-US');location.assign('/');return}
     if(currentPath==='/es/start'&&baseLocale(target)==='en'){setStored('en-US');location.assign('/start');return}
     if(currentPath==='/es'&&baseLocale(target)==='en'){setStored('en-US');location.assign('/');return}
-    active=target;if(persist){setStored(target);rewriteUrl(target)}propagateLinks(target);
+    active=target;if(persist){setStored(target);rewriteUrl(target)}propagateNavigation(target);announceLocale(target);
     if(sameLanguage(target,sourceLocale)){restore();applyDirection(target);state('ok',baseLocale(target)==='en'?'English':'Original');return}
     busy=true;state('busy',baseLocale(target)==='es'?'Traduciendo…':'Translating…');
-    try{restore();const items=collect();const chunks=[];let chunk=[],chars=0;for(const item of items){const size=item.text.length;if(chunk.length&&(chunk.length>=20||chars+size>4500)){chunks.push(chunk);chunk=[];chars=0}chunk.push(item);chars+=size}if(chunk.length)chunks.push(chunk);const results=await Promise.all(chunks.map(current=>translateBatch(current.map(item=>item.text),target)));results.forEach((payload,chunkIndex)=>{const current=chunks[chunkIndex];payload.translations.forEach((entry,index)=>{const item=current[index];if(!item)return;const value=entry.text||item.text;if(item.kind==='text')item.node.nodeValue=value;else if(item.kind==='attr')item.el.setAttribute(item.attr,value);else if(item.kind==='option')item.el.textContent=value})});applyDirection(target);state('ok',target);propagateLinks(target)}catch(error){restore();applyDirection(sourceLocale);state('error',baseLocale(target)==='es'?'Traducción no disponible':'Translation unavailable');console.warn('SAHJONY language layer:',error)}finally{busy=false}
+    try{restore();const items=collect();const chunks=[];let chunk=[],chars=0;for(const item of items){const size=item.text.length;if(chunk.length&&(chunk.length>=20||chars+size>4500)){chunks.push(chunk);chunk=[];chars=0}chunk.push(item);chars+=size}if(chunk.length)chunks.push(chunk);const results=await Promise.all(chunks.map(current=>translateBatch(current.map(item=>item.text),target)));results.forEach((payload,chunkIndex)=>{const current=chunks[chunkIndex];payload.translations.forEach((entry,index)=>{const item=current[index];if(!item)return;const value=entry.text||item.text;if(item.kind==='text')item.node.nodeValue=value;else if(item.kind==='attr')item.el.setAttribute(item.attr,value);else if(item.kind==='option')item.el.textContent=value})});applyDirection(target);state('ok',target);propagateNavigation(target);announceLocale(target)}catch(error){restore();applyDirection(sourceLocale);state('error',baseLocale(target)==='es'?'Traducción no disponible':'Translation unavailable');console.warn('SAHJONY language layer:',error)}finally{busy=false}
   }
   async function geoDefault(){try{const r=await fetch(UI_GEO,{cache:'no-store'});if(!r.ok)return '';const j=await r.json();return normalizeLocale(j.default_locale||'')}catch{return ''}}
   function mountSelector(){
@@ -99,8 +113,9 @@
   async function boot(){
     const select=mountSelector();const requested=requestedLocale();const stored=storedLocale();const nativeSpanish=(location.pathname.replace(/\/+$/,'')||'/').startsWith('/es');const geo=!requested&&!stored&&!nativeSpanish?await geoDefault():'';active=requested||(nativeSpanish?sourceLocale:(stored||geo||sourceLocale));
     if(select){if(!LOCALES.includes(active))LOCALES.push(active);if(!Array.from(select.options).some(option=>option.value===active)){const option=document.createElement('option');option.value=active;option.textContent=active;select.appendChild(option)}select.value=active}
-    setStored(active);rewriteUrl(active);propagateLinks(active);await applyLanguage(active,{persist:false});
-    const observer=new MutationObserver(records=>{if(!sameLanguage(active,sourceLocale)&&!busy){if(records.every(record=>record.target.closest?.('.sahjony-language')))return;clearTimeout(observerTimer);observerTimer=setTimeout(()=>applyLanguage(active,{persist:false}),350)}});observer.observe(document.body,{childList:true,subtree:true});
+    setStored(active);rewriteUrl(active);propagateNavigation(active);announceLocale(active);await applyLanguage(active,{persist:false});
+    const observer=new MutationObserver(records=>{if(!sameLanguage(active,sourceLocale)&&!busy){if(records.every(record=>record.target.closest?.('.sahjony-language')))return;clearTimeout(observerTimer);observerTimer=setTimeout(()=>applyLanguage(active,{persist:false}),350)}});observer.observe(document.body,{childList:true,characterData:true,subtree:true});
+    addEventListener('popstate',()=>{const next=requestedLocale()||storedLocale()||active||sourceLocale;active=next;propagateNavigation(next);clearTimeout(observerTimer);observerTimer=setTimeout(()=>applyLanguage(next,{persist:false}),80)});
   }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
 })();
