@@ -12,7 +12,7 @@ from auth import verify_owner_token
 from insforge_backend import get_backend, persistent_backend_status
 from voice_agent_api import _openai_key, _reasoning_model, _realtime_model, _realtime_voice
 
-app = FastAPI(title="SAHJONY Agentic Communication OS", version="1.1.0", docs_url=None, redoc_url=None)
+app = FastAPI(title="SAHJONY Agentic Communication OS", version="1.2.0", docs_url=None, redoc_url=None)
 
 Channel = Literal["direct_text", "web_voice", "web_video", "screen_share", "whatsapp", "email", "pstn", "portal"]
 Priority = Literal["urgent", "high", "normal", "low"]
@@ -54,8 +54,54 @@ def _direct_text_ready() -> bool:
     return bool(persistent_backend_status().get("configured", False) and _openai_key())
 
 
-def _whatsapp_send_ready() -> bool:
-    return bool(_env("WHATSAPP_ACCESS_TOKEN") and _env("WHATSAPP_PHONE_NUMBER_ID") and _env("WHATSAPP_GRAPH_API_VERSION"))
+async def _whatsapp_state() -> dict[str, Any]:
+    """Return the governed Hermes state; Meta transport is forbidden by owner policy."""
+    provider = (_env("WHATSAPP_PROVIDER") or "hermes").lower()
+    bridge_secret = _env("SAHJONY_APP_BRIDGE_SECRET", "OPENCLAW_APP_BRIDGE_SECRET")
+    automation = (_env("WHATSAPP_AUTOMATION_ENABLED") or "false").lower() in {"1", "true", "yes", "on"}
+    state: dict[str, Any] = {
+        "ready": False,
+        "transport": "hermes_hostinger",
+        "provider": "hermes",
+        "bridge_configured": len(bridge_secret) >= 24,
+        "gateway_connected": False,
+        "heartbeat_fresh": False,
+        "automation_enabled": automation,
+        "policy": "owner_governed",
+    }
+    if provider != "hermes":
+        state["policy_blocker"] = "Only the Hermes/Hostinger transport is permitted."
+        return state
+    try:
+        rows = await get_backend().select(
+            "whatsapp_openclaw_gateways",
+            params={"gateway_id": "eq.default", "limit": "1"},
+        ) or []
+    except Exception:
+        state["policy_blocker"] = "Hermes gateway state is unavailable."
+        return state
+    row = rows[0] if rows else {}
+    last_seen = str(row.get("last_seen_at") or "")
+    if last_seen:
+        try:
+            seen_at = datetime.fromisoformat(last_seen.replace("Z", "+00:00"))
+            if seen_at.tzinfo is None:
+                seen_at = seen_at.replace(tzinfo=timezone.utc)
+            state["heartbeat_fresh"] = _now_dt() - seen_at.astimezone(timezone.utc) <= timedelta(minutes=5)
+        except ValueError:
+            state["heartbeat_fresh"] = False
+    state["gateway_connected"] = bool(row.get("channel_connected")) and state["heartbeat_fresh"]
+    state["ready"] = bool(state["bridge_configured"] and state["gateway_connected"] and automation)
+    state["last_seen_at"] = last_seen or None
+    state["business_number"] = row.get("business_number")
+    state["business_name"] = row.get("business_name")
+    if not state["ready"]:
+        state["policy_blocker"] = (
+            "Hermes automation is paused." if not automation
+            else "Hermes bridge is not configured." if not state["bridge_configured"]
+            else "Hermes gateway heartbeat is not connected."
+        )
+    return state
 
 
 def _email_ready() -> bool:
@@ -75,14 +121,14 @@ def _tmobile_runtime_ready() -> bool:
     return all(_env(name) for name in required)
 
 
-def _channel_state() -> dict[str, dict[str, Any]]:
+async def _channel_state() -> dict[str, dict[str, Any]]:
     direct = _direct_voice_ready()
     return {
         "direct_text": {"ready": _direct_text_ready(), "transport": "direct_internet_text", "ai": "gpt-5.6-sol", "carrier_fee": False, "notifications": True},
         "web_voice": {"ready": direct, "transport": "browser_webrtc", "ai": "openai_realtime", "carrier_fee": False},
         "web_video": {"ready": direct, "transport": "browser_webrtc_camera_plus_realtime_image_frames", "ai": "openai_realtime", "carrier_fee": False},
         "screen_share": {"ready": direct, "transport": "browser_webrtc_screen_plus_realtime_image_frames", "ai": "openai_realtime", "carrier_fee": False},
-        "whatsapp": {"ready": _whatsapp_send_ready(), "transport": "meta_cloud", "voice_invite": direct},
+        "whatsapp": {**(await _whatsapp_state()), "voice_invite": direct},
         "email": {"ready": _email_ready(), "transport": "native_business_email"},
         "pstn": {"ready": _tmobile_runtime_ready(), "transport": "tmobile_devedge_byon", "ai": "openai_realtime", "reasoning": _reasoning_model(), "auto_answer": True, "autonomous_outbound": True},
         "portal": {"ready": persistent_backend_status().get("configured", False), "transport": "native_portal"},
@@ -91,13 +137,13 @@ def _channel_state() -> dict[str, dict[str, Any]]:
 
 @app.get("/communications-os/health")
 async def health() -> dict[str, Any]:
-    channels = _channel_state()
+    channels = await _channel_state()
     persistence = persistent_backend_status()
     ready_count = sum(1 for value in channels.values() if value["ready"])
     return {
         "status": "ok" if persistence.get("configured") and _openai_key() else "configuration_required",
         "service": "sahjony-agentic-communication-os",
-        "version": "1.1.0",
+        "version": "1.2.0",
         "operating_mode": "24x7_event_driven",
         "reasoning_model": _reasoning_model(),
         "realtime_model": _realtime_model(),
@@ -375,6 +421,7 @@ async def command_center(authorization: str | None = Header(None, alias="Authori
     handoffs = await get_backend().select("communication_handoffs", params={"status": "eq.REQUESTED", "order": "created_at.desc", "limit": "80"})
     rooms = await get_backend().select("communication_rooms", params={"status": "eq.OPEN", "order": "created_at.desc", "limit": "80"})
     voice_queue = await get_backend().select("voice_outbound_queue", params={"order": "created_at.desc", "limit": "80"})
+    whatsapp_queue = await get_backend().select("whatsapp_openclaw_outbox", params={"order": "created_at.desc", "limit": "80"})
     text_threads = await get_backend().select("direct_text_threads", params={"status": "eq.OPEN", "order": "updated_at.desc", "limit": "80"})
     notifications = await get_backend().select("direct_text_notifications", params={"order": "created_at.desc", "limit": "80"})
     return {
@@ -384,6 +431,7 @@ async def command_center(authorization: str | None = Header(None, alias="Authori
         "requested_handoffs": handoffs or [],
         "open_rooms": rooms or [],
         "voice_queue": voice_queue or [],
+        "whatsapp_queue": whatsapp_queue or [],
         "text_threads": text_threads or [],
         "notifications": notifications or [],
         "public_voice_url": f"{_base_url().rstrip('/')}/call-sahjony.html",
