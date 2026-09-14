@@ -421,7 +421,8 @@ async def command_center(authorization: str | None = Header(None, alias="Authori
     handoffs = await get_backend().select("communication_handoffs", params={"status": "eq.REQUESTED", "order": "created_at.desc", "limit": "80"})
     rooms = await get_backend().select("communication_rooms", params={"status": "eq.OPEN", "order": "created_at.desc", "limit": "80"})
     voice_queue = await get_backend().select("voice_outbound_queue", params={"order": "created_at.desc", "limit": "80"})
-    whatsapp_queue = await get_backend().select("whatsapp_openclaw_outbox", params={"order": "created_at.desc", "limit": "80"})
+    whatsapp_queue = await get_backend().select("whatsapp_openclaw_outbox", params={"limit": "250"})
+    whatsapp_queue = sorted(whatsapp_queue or [], key=lambda row: str(row.get("created_at") or ""), reverse=True)[:80]
     text_threads = await get_backend().select("direct_text_threads", params={"status": "eq.OPEN", "order": "updated_at.desc", "limit": "80"})
     notifications = await get_backend().select("direct_text_notifications", params={"order": "created_at.desc", "limit": "80"})
     return {
