@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 from typing import Any
 
@@ -86,9 +87,9 @@ def _probe() -> dict[str, Any]:
     }
 
 
-async def production_schema_evidence() -> dict[str, Any]:
+async def production_schema_evidence(timeout_seconds: float = 6.0) -> dict[str, Any]:
     try:
-        return _probe()
+        return await asyncio.wait_for(asyncio.to_thread(_probe), timeout=timeout_seconds)
     except Exception as exc:
         detail = str(exc).strip().splitlines()[0][:240] if str(exc).strip() else "unknown Supabase evidence error"
         return {

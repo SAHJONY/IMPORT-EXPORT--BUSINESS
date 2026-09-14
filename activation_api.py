@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import os
 
@@ -19,6 +20,22 @@ from secure_storage import storage_configuration_status
 from trade_connectors import trade_connectors
 
 app = FastAPI(title="SAHJONY Supabase Production Activation Control", version="2.0.0", docs_url=None, redoc_url=None)
+
+
+async def _bounded_connector_health(timeout_seconds: float = 6.0) -> dict[str, Any]:
+    try:
+        return await asyncio.wait_for(trade_connectors.health(), timeout=timeout_seconds)
+    except Exception as exc:
+        detail = str(exc).strip().splitlines()[0][:180] if str(exc).strip() else type(exc).__name__
+        return {
+            "connectors": [],
+            "by_name": {},
+            "configured_count": 0,
+            "reachable_count": 0,
+            "all_configured_reachable": False,
+            "status": "degraded",
+            "reason": f"{type(exc).__name__}: {detail}",
+        }
 
 
 def _present(name: str) -> bool:
@@ -226,9 +243,11 @@ async def sync_crm_seeds(authorization: str | None = Header(None, alias="Authori
 
 @app.get("/activation/health")
 async def activation_health():
-    schema_evidence = await production_schema_evidence()
+    schema_evidence, connector_health = await asyncio.gather(
+        production_schema_evidence(),
+        _bounded_connector_health(),
+    )
     crm_seeds = {name: {"status": "not_run_by_health", "expected": expected} for name, expected, _runner in _crm_seed_jobs()}
-    connector_health = await trade_connectors.health()
     readiness = evaluate_production_readiness(runtime_ok=True, connector_health=connector_health, persistence_schema_evidence=schema_evidence)
     providers = _provider_state(schema_evidence)
     external = _external_requirements(schema_evidence)
