@@ -93,8 +93,14 @@ def _supabase_password_login(email: str, password: str) -> dict[str, Any]:
         response=httpx.post(f"{base}/auth/v1/token",params={"grant_type":"password"},headers={"apikey":key,"Content-Type":"application/json"},json={"email":email,"password":password},timeout=15)
     except Exception as exc:
         raise HTTPException(status_code=503,detail="Supabase Auth is temporarily unreachable") from exc
-    if response.status_code!=200:
-        raise HTTPException(status_code=401,detail="Invalid credentials")
+    if response.status_code != 200:
+        if response.status_code in {400, 401}:
+            raise HTTPException(status_code=401, detail="Invalid credentials")
+        if response.status_code == 429:
+            raise HTTPException(status_code=503, detail="Authentication service is temporarily rate-limited. Please retry shortly.")
+        if 500 <= response.status_code <= 599:
+            raise HTTPException(status_code=503, detail="Authentication service is temporarily unavailable. Please retry shortly.")
+        raise HTTPException(status_code=502, detail="Authentication service returned an unexpected response")
     payload=response.json() if response.content else {}
     access_token=str(payload.get("access_token") or "")
     claims=decode_supabase_jwt(access_token)
