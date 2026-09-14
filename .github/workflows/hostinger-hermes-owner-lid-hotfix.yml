@@ -35,8 +35,16 @@ jobs:
           p.write_text(s)
           PY
           python3 -m py_compile "$f"
+          PYTHONPATH=/root/.hermes/hermes-agent /root/.hermes/hermes-agent/venv/bin/python - <<'PY_QUIET_DRAIN'
+          from gateway.drain_control import write_drain_request
+          write_drain_request(principal="sahjony-managed-restart", suppress_notification=True)
+          PY_QUIET_DRAIN
           systemctl --user restart hermes-gateway.service
           sleep 10
+          PYTHONPATH=/root/.hermes/hermes-agent /root/.hermes/hermes-agent/venv/bin/python - <<'PY_QUIET_CLEAR'
+          from gateway.drain_control import clear_drain_request
+          clear_drain_request()
+          PY_QUIET_CLEAR
           systemctl --user is-active --quiet hermes-gateway.service
           pgrep -f '/whatsapp-bridge/bridge.js.*--mode bot' >/dev/null
           echo OWNER_LID_HOTFIX=PASS
