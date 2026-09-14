@@ -113,7 +113,7 @@ function PublicSite(){
  const facts=[['PRODUCT','Defined need'],['QUANTITY','Commercial volume'],['DESTINATION','Named corridor'],['TIMING','Required window']];
  return <div className="public-site institutional-public cinematic-trade-os">
   <div className="signal-strip"><span><i/>GLOBAL TRADE NETWORK</span><strong>Global sourcing · Supplier verification · Managed trade</strong><span>SAHJONY LLC · UNITED STATES</span></div>
-  <header className="public-nav cinematic-nav"><Brand ownerShortcut/><nav className="public-links" aria-label="Primary navigation"><a className="text-link" href="#demand">Demand</a><a className="text-link" href="#sourcing">Sourcing</a><a className="text-link" href="#control">Control</a><a className="text-link" href="/marketplace">Marketplace</a><a className="text-link" href="/trust-center.html">How we verify</a><a className="text-link" href="tel:+17132948801">Call trade desk · +1 713-294-8801</a><a className="primary-link" href="#inquiry">Request a quote <span aria-hidden="true">↗</span></a></nav></header>
+  <header className="public-nav cinematic-nav"><Brand ownerShortcut/><nav className="public-links" aria-label="Primary navigation"><a className="text-link" href="#demand">Demand</a><a className="text-link" href="#sourcing">Sourcing</a><a className="text-link" href="#control">Control</a><a className="text-link" href="/marketplace">Marketplace</a><a className="text-link" href="/suppliers">Suppliers</a><a className="text-link" href="/trust-center.html">How we verify</a><a className="text-link" href="tel:+17132948801">Call trade desk · +1 713-294-8801</a><a className="primary-link" href="#inquiry">Request a quote <span aria-hidden="true">↗</span></a></nav></header>
   <main>
    <section className="cinematic-chapter chapter-hero" data-cinematic>
     <div className="chapter-media hero-media" data-cinematic-media/>
@@ -122,7 +122,7 @@ function PublicSite(){
      <div className="chapter-index" data-cinematic-reveal><span>01 / 06</span><i/> START</div>
      <h1 data-cinematic-reveal>Global trade.<br/><em>Under control.</em></h1>
      <p data-cinematic-reveal>SAHJONY LLC helps businesses find qualified suppliers, compare commercial terms, coordinate compliance and documents, and manage the path from request to delivery.</p>
-     <div className="chapter-actions" data-cinematic-reveal><a className="primary-link large" href="#inquiry">Request a quote ↗</a><a className="quiet-link" href="tel:+17132948801">Talk to the trade desk · +1 713-294-8801</a><a className="quiet-link" href="mailto:ventas@sahjony.com?subject=Callback%20request">Request a callback</a><a className="quiet-link" href="https://wa.me/12816628581">Talk to us on WhatsApp</a></div>
+     <div className="chapter-actions" data-cinematic-reveal><a className="primary-link large" href="#inquiry">Request a quote ↗</a><a className="quiet-link" href="tel:+17132948801">Talk to the trade desk · +1 713-294-8801</a><a className="quiet-link" href="mailto:ventas@sahjony.com?subject=Callback%20request">Request a callback</a><a className="quiet-link" href="https://wa.me/12816628581">Talk to us on WhatsApp</a><a className="quiet-link" href="/suppliers">I sell / manufacture → Supplier Center</a></div>
     </div>
     <div className="scroll-cue" data-float><span>SCROLL TO MOVE FORWARD</span><i/></div>
    </section>

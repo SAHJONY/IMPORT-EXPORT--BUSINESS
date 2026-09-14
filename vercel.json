@@ -263,6 +263,34 @@
       "dest": "/partner-share.html"
     },
     {
+      "src": "/suppliers/demand",
+      "dest": "/supplier-demand.html"
+    },
+    {
+      "src": "/suppliers/contact",
+      "dest": "/supplier-contact.html"
+    },
+    {
+      "src": "/supplier-contact",
+      "dest": "/supplier-contact.html"
+    },
+    {
+      "src": "/supplier-quote",
+      "dest": "/supplier-quote.html"
+    },
+    {
+      "src": "/suppliers/quote",
+      "dest": "/supplier-quote.html"
+    },
+    {
+      "src": "/supplier-commercial-terms",
+      "dest": "/supplier-commercial-terms.html"
+    },
+    {
+      "src": "/suppliers/commercial-terms",
+      "dest": "/supplier-commercial-terms.html"
+    },
+    {
       "src": "/supplier-demand",
       "dest": "/supplier-demand.html"
     },
