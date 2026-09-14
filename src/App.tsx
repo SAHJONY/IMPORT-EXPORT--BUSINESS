@@ -112,7 +112,7 @@ function PublicSite(){
  const facts=[['PRODUCT','Defined need'],['QUANTITY','Commercial volume'],['DESTINATION','Named corridor'],['TIMING','Required window']];
  return <div className="public-site institutional-public cinematic-trade-os">
   <div className="signal-strip"><span><i/>GLOBAL TRADE NETWORK</span><strong>Human-led · AI-powered · Evidence-controlled</strong><span>SAHJONY LLC · UNITED STATES</span></div>
-  <header className="public-nav cinematic-nav"><Brand ownerShortcut/><nav className="public-links" aria-label="Primary navigation"><a className="text-link" href="#demand">Demand</a><a className="text-link" href="#sourcing">Sourcing</a><a className="text-link" href="#control">Control</a><a className="text-link" href="/cuba-private-sector">Cuba Desk</a><a className="owner-entry" href="/owner-login">Private owner</a><a className="primary-link" href="#inquiry">Submit RFQ <span aria-hidden="true">↗</span></a></nav></header>
+  <header className="public-nav cinematic-nav"><Brand ownerShortcut/><nav className="public-links" aria-label="Primary navigation"><a className="text-link" href="#demand">Demand</a><a className="text-link" href="#sourcing">Sourcing</a><a className="text-link" href="#control">Control</a><a className="text-link" href="/cuba-private-sector">Cuba Desk</a><a className="primary-link" href="#inquiry">Submit RFQ <span aria-hidden="true">↗</span></a></nav></header>
   <main>
    <section className="cinematic-chapter chapter-hero" data-cinematic>
     <div className="chapter-media hero-media" data-cinematic-media/>
@@ -121,7 +121,7 @@ function PublicSite(){
      <div className="chapter-index" data-cinematic-reveal><span>01 / 06</span><i/> ENTRANCE</div>
      <h1 data-cinematic-reveal>Global trade.<br/><em>Under control.</em></h1>
      <p data-cinematic-reveal>SAHJONY TRADING OS coordinates sourcing, economics, compliance, documents, logistics and delivery across borders.</p>
-     <div className="chapter-actions" data-cinematic-reveal><a className="primary-link large" href="#inquiry">Start a trade request ↗</a><a className="quiet-link" href="#demand">Enter the system ↓</a></div>
+     <div className="chapter-actions" data-cinematic-reveal><a className="primary-link large" href="#inquiry">Start a trade request ↗</a><a className="quiet-link" href="#demand">Explore the process ↓</a></div>
     </div>
     <div className="scroll-cue" data-float><span>SCROLL TO MOVE FORWARD</span><i/></div>
    </section>
@@ -173,12 +173,12 @@ function PublicSite(){
     <div className="chapter-media finale-media" data-cinematic-media/>
     <div className="chapter-shade"/>
     <div className="chapter-content finale-grid">
-     <div><div className="chapter-index" data-cinematic-reveal><span>06 / 06</span><i/> GRAND FINALE</div><h2 data-cinematic-reveal>Tell SAHJONY what needs to move across borders.</h2><p data-cinematic-reveal>Submit the commercial need. The system creates the controlled path.</p></div>
+     <div><div className="chapter-index" data-cinematic-reveal><span>06 / 06</span><i/> CONTACT & NEXT STEP</div><h2 data-cinematic-reveal>Tell SAHJONY what needs to move across borders.</h2><p data-cinematic-reveal>Submit the commercial need. The system creates the controlled path.</p></div>
      <PublicRfqForm/>
     </div>
    </section>
   </main>
-  <footer><span>© SAHJONY LLC · Global Trade Operating System</span><nav aria-label="Footer navigation"><a href="/global-sourcing">Global sourcing</a><a href="/partners">Partners</a><a href="/cuba-private-sector">Cuba Desk</a><a href="/owner-login">Private owner</a></nav><span>www.sahjony.com</span></footer>
+  <footer><span>© SAHJONY LLC · Global Trade Operating System</span><nav aria-label="Footer navigation"><a href="/global-sourcing">Global sourcing</a><a href="/partners">Partners</a><a href="/cuba-private-sector">Cuba Desk</a></nav><span>www.sahjony.com</span></footer>
  </div>
 }
 
@@ -249,7 +249,7 @@ function Dashboard({role,health,token,api}:any){
 
 function Brief({n,title,text}:{n:string;title:string;text:string}){return <div className="brief-item"><span>{n}</span><div><strong>{title}</strong><small>{text}</small></div></div>}
 function HiggsfieldStudio({api}:any){
- const scenes=[['entrance','01','Entrance'],['demand','02','Demand'],['sourcing','03','Global sourcing'],['control','04','Trade control'],['execution','05','Execution'],['finale','06','Grand finale']] as const;
+ const scenes=[['entrance','01','Entrance'],['demand','02','Demand'],['sourcing','03','Global sourcing'],['control','04','Trade control'],['execution','05','Execution'],['finale','06','Contact']] as const;
  const [health,setHealth]=useState<any>(null);
  const [jobs,setJobs]=useState<Record<string,{request_id:string;status:string;url?:string}>>({});
  const [busy,setBusy]=useState('');
