@@ -22,7 +22,7 @@ env:
 
 jobs:
   sync_openai:
-    if: github.event_name == 'workflow_dispatch' || github.event.head_commit.message == 'ops: sync OpenAI to Hostinger OpenClaw'
+    if: "${{ github.event_name == 'workflow_dispatch' || github.event.head_commit.message == 'ops: sync OpenAI to Hostinger OpenClaw' }}"
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:

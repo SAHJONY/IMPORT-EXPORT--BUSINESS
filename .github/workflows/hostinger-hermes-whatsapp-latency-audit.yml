@@ -36,23 +36,23 @@ jobs:
             | tail -n 500 || true
           echo '--- session text hits for leaked operator notice ---'
           python3 - <<'PY'
-from pathlib import Path
-roots=[Path('/root/.hermes/sessions'),Path('/root/.hermes')]
-needles=['Redirected current run','iteration 1/90','elapsed']
-seen=set()
-for root in roots:
-    if not root.exists(): continue
-    for p in root.rglob('*'):
-        if not p.is_file() or p.stat().st_size>8_000_000: continue
-        if any(x in p.parts for x in ('node_modules','.git')): continue
-        try: t=p.read_text(errors='ignore')
-        except: continue
-        if any(n.lower() in t.lower() for n in needles):
+          from pathlib import Path
+          roots=[Path('/root/.hermes/sessions'),Path('/root/.hermes')]
+          needles=['Redirected current run','iteration 1/90','elapsed']
+          seen=set()
+          for root in roots:
+              if not root.exists(): continue
+              for p in root.rglob('*'):
+                  if not p.is_file() or p.stat().st_size>8_000_000: continue
+                  if any(x in p.parts for x in ('node_modules','.git')): continue
+                  try: t=p.read_text(errors='ignore')
+                  except: continue
+                  if any(n.lower() in t.lower() for n in needles):
             s=str(p)
             if s not in seen:
                 seen.add(s); print('HIT_PATH='+s)
-print('LEAK_HIT_FILES='+str(len(seen)))
-PY
+          print('LEAK_HIT_FILES='+str(len(seen)))
+          PY
           echo '--- bridge recent log candidates ---'
           find /root/.hermes /opt/sahjony -maxdepth 5 -type f \( -iname '*bridge*.log' -o -iname '*gateway*.log' -o -iname '*whatsapp*.log' \) -mmin -180 -print 2>/dev/null | head -n 80 || true
           REMOTE

@@ -56,7 +56,7 @@ jobs:
             sender_aliases = expand_whatsapp_aliases(sender_raw)
             owner_channel_prompt = None
             if owner_id and owner_id in sender_aliases:
-'''
+          '''
           new = '''            owner_id = normalize_whatsapp_identifier(
                 os.getenv("OWNER_WHATSAPP_E164") or os.getenv("SAHJONY_OWNER_WHATSAPP_E164") or ""
             )
@@ -70,7 +70,7 @@ jobs:
                 or (owner_lid and (owner_lid == sender_norm or owner_lid in sender_aliases))
             )
             if is_owner_sender:
-'''
+          '''
           if old in s:
               s = s.replace(old, new, 1)
           elif 'is_owner_sender = bool(' not in s:
