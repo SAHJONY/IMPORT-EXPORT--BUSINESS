@@ -76,7 +76,9 @@
   async function applyLanguage(locale,{persist=true}={}){
     if(busy)return;const target=normalizeLocale(locale)||sourceLocale;
     const currentPath=location.pathname.replace(/\/+$/,'')||'/';
-    if(currentPath==='/'&&baseLocale(target)==='es'){setStored('es');location.assign('/es');return}
+    if((currentPath==='/'||currentPath==='/business')&&baseLocale(target)==='es'){setStored('es');location.assign('/es');return}
+    if(currentPath==='/es'&&baseLocale(target)==='en'){setStored('en-US');location.assign('/');return}
+    if(currentPath==='/es/start'&&baseLocale(target)==='en'){setStored('en-US');location.assign('/start');return}
     if(currentPath==='/es'&&baseLocale(target)==='en'){setStored('en-US');location.assign('/');return}
     active=target;if(persist){setStored(target);rewriteUrl(target)}propagateLinks(target);
     if(sameLanguage(target,sourceLocale)){restore();applyDirection(target);state('ok',baseLocale(target)==='en'?'English':'Original');return}
@@ -89,13 +91,13 @@
     const style=document.createElement('style');
     style.textContent='.sahjony-language{position:fixed;right:16px;bottom:16px;z-index:2147483000;display:flex;gap:7px;align-items:center;padding:8px 9px;border:1px solid rgba(255,255,255,.16);border-radius:999px;background:rgba(5,14,24,.94);box-shadow:0 12px 40px rgba(0,0,0,.28);backdrop-filter:blur(14px);font:600 12px Inter,system-ui,sans-serif;color:#eef6ff}.sahjony-language select{max-width:190px;background:#0a1b2a;color:#eef6ff;border:1px solid rgba(255,255,255,.14);border-radius:999px;padding:7px 10px;font:inherit}.sahjony-language button{border:0;border-radius:999px;padding:7px 10px;background:#e9f3fb;color:#07111d;font:800 11px Inter,system-ui,sans-serif;cursor:pointer}.sahjony-language small{opacity:.78}.sahjony-language[data-state=error] small{color:#ffb8bd;opacity:1}@media(max-width:600px){.sahjony-language{position:relative;left:auto;right:auto;bottom:auto;z-index:20;width:calc(100% - 20px);margin:14px auto max(14px,env(safe-area-inset-bottom));justify-content:center;box-shadow:none}.sahjony-language select{max-width:55vw}}';
     document.head.appendChild(style);
-    const root=document.createElement('div');root.className='sahjony-language';root.setAttribute('data-no-translate','true');root.innerHTML='<small>Language</small><select aria-label="Language"></select><button type="button">Original</button>';document.body.appendChild(root);
-    const select=root.querySelector('select');let displayNames=null;try{displayNames=new Intl.DisplayNames([navigator.language||'en'],{type:'language'})}catch{}
+    const root=document.createElement('div');root.className='sahjony-language';root.setAttribute('data-no-translate','true');root.innerHTML='<small>'+(baseLocale(sourceLocale)==='es'?'Idioma':'Language')+'</small><select aria-label="Language"></select><button type="button">Original</button>';document.body.appendChild(root);
+    const select=root.querySelector('select');let displayNames=null;try{displayNames=new Intl.DisplayNames([sourceLocale||navigator.language||'en'],{type:'language'})}catch{}
     for(const locale of LOCALES){const option=document.createElement('option');option.value=locale;let label=locale;try{label=(displayNames?.of(baseLocale(locale))||locale)+' · '+locale}catch{}option.textContent=label;select.appendChild(option)}
     select.addEventListener('change',()=>applyLanguage(select.value,{persist:true}));root.querySelector('button').addEventListener('click',()=>{select.value=sourceLocale;applyLanguage(sourceLocale,{persist:true})});return select;
   }
   async function boot(){
-    const select=mountSelector();const requested=requestedLocale();const stored=storedLocale();const geo=!requested&&!stored?await geoDefault():'';active=requested||stored||geo||sourceLocale;
+    const select=mountSelector();const requested=requestedLocale();const stored=storedLocale();const nativeSpanish=(location.pathname.replace(/\/+$/,'')||'/').startsWith('/es');const geo=!requested&&!stored&&!nativeSpanish?await geoDefault():'';active=requested||(nativeSpanish?sourceLocale:(stored||geo||sourceLocale));
     if(select){if(!LOCALES.includes(active))LOCALES.push(active);if(!Array.from(select.options).some(option=>option.value===active)){const option=document.createElement('option');option.value=active;option.textContent=active;select.appendChild(option)}select.value=active}
     setStored(active);rewriteUrl(active);propagateLinks(active);await applyLanguage(active,{persist:false});
     const observer=new MutationObserver(records=>{if(!sameLanguage(active,sourceLocale)&&!busy){if(records.every(record=>record.target.closest?.('.sahjony-language')))return;clearTimeout(observerTimer);observerTimer=setTimeout(()=>applyLanguage(active,{persist:false}),350)}});observer.observe(document.body,{childList:true,subtree:true});
@@ -210,7 +212,7 @@
     style.textContent='.sahjony-public-contact-footer{border-top:1px solid rgba(255,255,255,.12);margin-top:34px;padding:24px 18px 30px;background:#050b13;color:#dbe7ee;font:600 12px Inter,system-ui,sans-serif}.sahjony-public-contact-footer .inner{max-width:1180px;margin:auto;display:flex;gap:14px;justify-content:space-between;align-items:center;flex-wrap:wrap}.sahjony-public-contact-footer .contact{display:flex;gap:10px;flex-wrap:wrap}.sahjony-public-contact-footer a{color:#dbe7ee;text-decoration:none;border:1px solid rgba(255,255,255,.13);border-radius:999px;padding:8px 11px}.sahjony-public-contact-footer .legal{display:flex;gap:10px;flex-wrap:wrap;color:#92a7b5}@media(max-width:600px){.sahjony-public-contact-footer .inner{display:grid}.sahjony-public-contact-footer .contact,.sahjony-public-contact-footer .legal{display:grid}}';
     document.head.appendChild(style);
     const footer=document.createElement('footer');footer.className='sahjony-public-contact-footer';footer.setAttribute('data-no-translate','true');
-    footer.innerHTML='<div class="inner"><div><strong>SAHJONY LLC</strong><br><span>Houston, Texas, USA</span></div><div class="contact"><a href="https://wa.me/12816628581">WhatsApp +1 281-662-8581</a><a href="tel:+17132948801">Voice +1 713-294-8801</a><a href="mailto:ventas@sahjony.com">ventas@sahjony.com</a></div><div class="legal"><a href="/privacy">Privacy</a><a href="/terms">Terms</a></div></div>';
+    const es=baseLocale(document.documentElement.lang||sourceLocale)==='es';footer.innerHTML='<div class="inner"><div><strong>SAHJONY LLC</strong><br><span>Houston, Texas, USA</span></div><div class="contact"><a href="https://wa.me/12816628581">WhatsApp +1 281-662-8581</a><a href="tel:+17132948801">'+(es?'Teléfono':'Voice')+' +1 713-294-8801</a><a href="mailto:ventas@sahjony.com">ventas@sahjony.com</a></div><div class="legal"><a href="/privacy?lang='+(es?'es':'en-US')+'">'+(es?'Privacidad':'Privacy')+'</a><a href="/terms?lang='+(es?'es':'en-US')+'">'+(es?'Términos':'Terms')+'</a></div></div>';
     document.body.appendChild(footer);
   }
   function bootContact(){normalizePublicContact();mountPublicFooter()}

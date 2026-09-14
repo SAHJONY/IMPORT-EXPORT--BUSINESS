@@ -215,6 +215,10 @@
       "dest": "/es.html"
     },
     {
+      "src": "/es/start",
+      "dest": "/start-es.html"
+    },
+    {
       "src": "/privacy",
       "dest": "/privacy.html"
     },
