@@ -18,6 +18,8 @@ REQUIRED_ENV = {
     "CARRIER_E2E_VERIFIED": "true",
     "FX_EXECUTION_PROVIDER": "live-test-provider",
     "SIGNED_DOCUMENT_STORAGE_VERIFIED": "true",
+    "DOCUMENT_MALWARE_SCAN_REQUIRED": "true",
+    "MALWARE_SCAN_CALLBACK_SECRET": "scanner-callback-test",
     "TRANSLATION_PROVIDER": "azure",
     "AZURE_TRANSLATOR_ENDPOINT": "https://api.cognitive.microsofttranslator.com",
     "AZURE_TRANSLATOR_KEY": "translator-test",

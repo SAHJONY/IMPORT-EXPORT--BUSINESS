@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import os, secrets
-from datetime import datetime, timezone
+import hashlib, os, secrets
+from datetime import datetime, timedelta, timezone
 from typing import Literal
 from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field, field_validator
@@ -9,6 +9,7 @@ from auth import verify_owner_token
 from insforge_backend import get_backend
 from crm_campaign_bootstrap import CAMPAIGN, bootstrap_cuba_mipyme_outreach, load_seed
 from sofia_crm_growth_engine import build_growth_queue, growth_health
+from secure_storage import create_upload_url, object_key, storage_configuration_status, validate_file, verify_uploaded_object
 
 app=FastAPI(title='SAHJONY Customer CRM',version='1.5.0',docs_url=None,redoc_url=None)
 Role=Literal['owner','employee']
@@ -73,6 +74,64 @@ class IntakeIn(BaseModel):
         if '@' not in value or value.startswith('@') or value.endswith('@') or '.' not in value.split('@',1)[1]:
             raise ValueError('Valid email required')
         return value
+
+class IntakeAttachmentAuthorizeIn(BaseModel):
+    token:str=Field(min_length=32,max_length=256)
+    filename:str=Field(min_length=1,max_length=240)
+    content_type:str=Field(min_length=3,max_length=160)
+    size_bytes:int=Field(gt=0,le=10*1024*1024)
+
+class IntakeAttachmentCompleteIn(BaseModel):
+    token:str=Field(min_length=32,max_length=256)
+
+PUBLIC_ATTACHMENT_TTL_MINUTES=15
+PUBLIC_ATTACHMENT_MAX_FILES=1
+PUBLIC_ATTACHMENT_MAX_BYTES=10*1024*1024
+
+def _sha256(value:str)->str:
+    return hashlib.sha256(value.encode('utf-8')).hexdigest()
+
+def _env_true(name:str,default:str='false')->bool:
+    return os.getenv(name,default).strip().lower() in {'1','true','yes','on'}
+
+def public_attachment_readiness()->dict:
+    storage=storage_configuration_status()
+    scan_required=_env_true('DOCUMENT_MALWARE_SCAN_REQUIRED','true')
+    callback=bool(os.getenv('MALWARE_SCAN_CALLBACK_SECRET','').strip())
+    signed_verified=_env_true('SIGNED_DOCUMENT_STORAGE_VERIFIED','false')
+    ready=bool(storage.get('configured') and signed_verified and scan_required and callback)
+    return {
+        'ready':ready,
+        'storage_configured':bool(storage.get('configured')),
+        'signed_storage_verified':signed_verified,
+        'malware_scan_required':scan_required,
+        'malware_scan_callback_configured':callback,
+        'max_files':PUBLIC_ATTACHMENT_MAX_FILES,
+        'max_bytes':PUBLIC_ATTACHMENT_MAX_BYTES,
+        'allowed_types':['application/pdf','image/jpeg','image/png','image/webp','text/csv','text/plain','application/json','application/vnd.openxmlformats-officedocument.wordprocessingml.document','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
+    }
+
+async def _attachment_capability(intake_id:str,token:str)->tuple[dict,dict]:
+    backend=get_backend()
+    rows=await backend.select('customer_crm_audit',params={'intake_id':f'eq.{intake_id}','event_type':'eq.attachment_capability_issued','order':'created_at.desc','limit':'1'}) or []
+    if not rows: raise HTTPException(403,'Attachment capability not found')
+    event=rows[0]; payload=event.get('payload') or {}
+    expected=str(payload.get('token_sha256') or '')
+    if not expected or not secrets.compare_digest(expected,_sha256(token)): raise HTTPException(403,'Invalid attachment capability')
+    expires=str(payload.get('expires_at') or '')
+    try: deadline=datetime.fromisoformat(expires.replace('Z','+00:00'))
+    except Exception: raise HTTPException(403,'Invalid attachment capability')
+    if datetime.now(timezone.utc)>=deadline: raise HTTPException(410,'Attachment capability expired')
+    intake=await backend.select('customer_trade_intakes',params={'intake_id':f'eq.{intake_id}','limit':'1'}) or []
+    if not intake: raise HTTPException(404,'Intake not found')
+    return event,intake[0]
+
+async def _storage_event(document_id:str,event_type:str,customer_id:str,doc:dict,detail:str):
+    await get_backend().insert('document_storage_events',{
+        'storage_event_id':f'dse_{secrets.token_urlsafe(14)}','document_id':document_id,'event_type':event_type,
+        'actor_role':'customer','actor_id':customer_id,'object_key':doc.get('storage_object_key'),'content_type':doc.get('content_type'),
+        'size_bytes':doc.get('size_bytes'),'object_etag':doc.get('object_etag'),'detail':detail,'created_at':now()
+    })
 
 class ProspectIntakeIn(BaseModel):
     product_need:str=Field(min_length=2,max_length=1000)
@@ -254,7 +313,63 @@ async def public_intake(p:IntakeIn):
     row={'intake_id':intake_id,'customer_id':customer_id,'product_need':p.product_need,'specifications':p.specifications,'quantity':p.quantity,'target_budget':p.target_budget,'currency':p.currency.upper(),'destination_country':p.destination_country.upper(),'target_delivery_date':p.target_delivery_date,'preferred_incoterm':p.preferred_incoterm,'notes':p.notes,'status':'NEW','qualification_status':'PENDING','created_at':ts,'updated_at':ts}
     await backend.insert('customer_trade_intakes',row)
     await audit({'role':'customer','id':customer_id},'intake_created','Customer submitted a new trade sourcing request',customer_id,intake_id)
-    return {'intake':row,'customer':{'customer_id':customer_id,'legal_name':p.legal_name,'contact_name':p.contact_name,'email':email}}
+    attachment=public_attachment_readiness()
+    capability={'available':False,**attachment}
+    if attachment['ready']:
+        raw_token=secrets.token_urlsafe(32)
+        expires=(datetime.now(timezone.utc)+timedelta(minutes=PUBLIC_ATTACHMENT_TTL_MINUTES)).isoformat()
+        await audit({'role':'customer','id':customer_id},'attachment_capability_issued','Short-lived RFQ attachment capability issued',customer_id,intake_id,{'token_sha256':_sha256(raw_token),'expires_at':expires,'max_files':PUBLIC_ATTACHMENT_MAX_FILES,'max_bytes':PUBLIC_ATTACHMENT_MAX_BYTES})
+        capability={'available':True,'token':raw_token,'expires_at':expires,**attachment}
+    return {'intake':row,'customer':{'customer_id':customer_id,'legal_name':p.legal_name,'contact_name':p.contact_name,'email':email},'attachment_capability':capability}
+
+@app.get('/crm/intake-attachments/health')
+async def intake_attachment_health():
+    readiness=public_attachment_readiness()
+    return {'status':'ok' if readiness['ready'] else 'configuration_required','service':'public-intake-attachments','fail_closed':True,**readiness}
+
+@app.post('/crm/intakes/{intake_id}/attachments/authorize')
+async def authorize_intake_attachment(intake_id:str,p:IntakeAttachmentAuthorizeIn):
+    readiness=public_attachment_readiness()
+    if not readiness['ready']:
+        raise HTTPException(503,'Secure RFQ attachments are temporarily unavailable until signed storage and malware scanning are fully verified')
+    _,intake=await _attachment_capability(intake_id,p.token)
+    backend=get_backend()
+    prior=await backend.select('customer_crm_audit',params={'intake_id':f'eq.{intake_id}','event_type':'eq.attachment_authorized','limit':'10'}) or []
+    if len(prior)>=PUBLIC_ATTACHMENT_MAX_FILES: raise HTTPException(409,'This intake attachment capability has already been used')
+    safe_name=validate_file(p.filename,p.content_type.lower(),p.size_bytes)
+    if p.size_bytes>PUBLIC_ATTACHMENT_MAX_BYTES: raise HTTPException(413,'Public RFQ attachment exceeds the 10 MB limit')
+    customer_id=str(intake['customer_id']); document_id=f'doc_{secrets.token_urlsafe(16)}'; ts=now()
+    key=object_key(trade_case_id=f'intake_{intake_id}',document_id=document_id,version=1,filename=safe_name)
+    signed=create_upload_url(key=key,content_type=p.content_type.lower(),size_bytes=p.size_bytes)
+    doc={'document_id':document_id,'trade_case_id':f'intake:{intake_id}','customer_id':customer_id,'document_type':'other','title':f'RFQ specification · {safe_name}',
+         'original_filename':safe_name,'storage_object_key':key,'content_type':p.content_type.lower(),'size_bytes':p.size_bytes,'object_etag':None,'checksum_sha256':None,
+         'version':1,'supersedes_document_id':None,'storage_status':'upload_authorized','malware_scan_status':'not_started','status':'customer_submitted','customer_visible':True,
+         'legal_hold':False,'created_by_role':'customer','created_by_id':customer_id,'created_at':ts,'updated_at':ts}
+    await backend.insert('trade_documents',doc)
+    await _storage_event(document_id,'upload_authorized',customer_id,doc,'Public RFQ attachment authorized with short-lived signed URL')
+    await audit({'role':'customer','id':customer_id},'attachment_authorized','RFQ attachment upload authorized',customer_id,intake_id,{'document_id':document_id,'filename':safe_name,'content_type':p.content_type.lower(),'size_bytes':p.size_bytes})
+    return {'document_id':document_id,'intake_id':intake_id,'upload':signed,'expires_with_capability':True,'next':'PUT the file to upload.url, then call the complete endpoint'}
+
+@app.post('/crm/intakes/{intake_id}/attachments/{document_id}/complete')
+async def complete_intake_attachment(intake_id:str,document_id:str,p:IntakeAttachmentCompleteIn):
+    readiness=public_attachment_readiness()
+    if not readiness['ready']: raise HTTPException(503,'Secure RFQ attachments are temporarily unavailable')
+    _,intake=await _attachment_capability(intake_id,p.token)
+    backend=get_backend(); customer_id=str(intake['customer_id'])
+    rows=await backend.select('trade_documents',params={'document_id':f'eq.{document_id}','limit':'1'}) or []
+    if not rows: raise HTTPException(404,'Attachment not found')
+    doc=rows[0]
+    if doc.get('trade_case_id')!=f'intake:{intake_id}' or str(doc.get('customer_id') or '')!=customer_id or doc.get('created_by_role')!='customer':
+        raise HTTPException(403,'Attachment is outside this intake capability')
+    if doc.get('storage_status') not in {'upload_authorized','uploaded'}: raise HTTPException(409,'Attachment is not awaiting upload verification')
+    verified=verify_uploaded_object(key=doc['storage_object_key'],expected_content_type=doc['content_type'],expected_size=int(doc['size_bytes']))
+    values={'object_etag':verified.get('etag'),'storage_status':'scan_pending','malware_scan_status':'pending','updated_at':now()}
+    await backend.patch('trade_documents',values,params={'document_id':f'eq.{document_id}'})
+    doc.update(values)
+    await _storage_event(document_id,'upload_verified',customer_id,doc,'Object size and MIME verified against public RFQ declaration')
+    await _storage_event(document_id,'scan_requested',customer_id,doc,'Awaiting configured malware scanning pipeline; file remains fail-closed')
+    await audit({'role':'customer','id':customer_id},'attachment_upload_verified','RFQ attachment upload verified and queued for malware scan',customer_id,intake_id,{'document_id':document_id,'storage_status':'scan_pending'})
+    return {'document_id':document_id,'intake_id':intake_id,'storage_status':'scan_pending','malware_scan_status':'pending','usable':False,'message':'Upload received. The file remains blocked until malware scanning clears it.'}
 
 @app.get('/crm/customers')
 async def list_customers(x_role:str|None=Header(None,alias='X-Role'),authorization:str|None=Header(None,alias='Authorization'),x_employee_id:str|None=Header(None,alias='X-Employee-Id')):
