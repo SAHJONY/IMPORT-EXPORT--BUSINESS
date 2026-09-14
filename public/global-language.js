@@ -92,6 +92,7 @@
     const currentPath=location.pathname.replace(/\/+$/,'')||'/';
     if((currentPath==='/'||currentPath==='/business')&&baseLocale(target)==='es'){setStored('es');location.assign('/es');return}
     if(currentPath==='/es'&&baseLocale(target)==='en'){setStored('en-US');location.assign('/');return}
+    if(currentPath==='/start'&&baseLocale(target)==='es'){setStored('es');location.assign('/es/start');return}
     if(currentPath==='/es/start'&&baseLocale(target)==='en'){setStored('en-US');location.assign('/start');return}
     if(currentPath==='/es'&&baseLocale(target)==='en'){setStored('en-US');location.assign('/');return}
     active=target;if(persist){setStored(target);rewriteUrl(target)}propagateNavigation(target);announceLocale(target);
