@@ -211,6 +211,54 @@
       "dest": "/index.html"
     },
     {
+      "src": "/privacy",
+      "dest": "/privacy.html"
+    },
+    {
+      "src": "/terms",
+      "dest": "/terms.html"
+    },
+    {
+      "src": "/about",
+      "dest": "/about.html"
+    },
+    {
+      "src": "/partners/register",
+      "dest": "/partner-register.html"
+    },
+    {
+      "src": "/partners/leads",
+      "dest": "/partner-leads.html"
+    },
+    {
+      "src": "/partners/deals",
+      "dest": "/partner-deals.html"
+    },
+    {
+      "src": "/partners/communications",
+      "dest": "/partner-communications.html"
+    },
+    {
+      "src": "/partners/share",
+      "dest": "/partner-share.html"
+    },
+    {
+      "src": "/supplier-demand",
+      "dest": "/supplier-demand.html"
+    },
+    {
+      "src": "/supplier-opportunities",
+      "dest": "/supplier-opportunities.html"
+    },
+    {
+      "src": "/supplier-documents",
+      "dest": "/supplier-documents.html"
+    },
+    {
+      "src": "/customer-payments",
+      "dest": "/customer-payments.html"
+    },
+    {
       "src": "/marketplace",
       "dest": "/industrial-marketplace.html"
     },

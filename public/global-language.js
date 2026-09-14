@@ -6,7 +6,7 @@
   const UI_TRANSLATE='/ui-language/translate-batch';
   const UI_GEO='/ui-language/geo';
   const RTL=new Set(['ar','fa','he','ur','ps','sd','ug','yi']);
-  const LOCALES=['en-US','es','fr','pt-BR','de','it','nl','pl','ru','uk','tr','ar','he','fa','ur','hi','bn','zh-Hans','zh-Hant','ja','ko','vi','th','id','ms','fil','sw','am','ha','yo','ig','zu','af','el','cs','ro','hu','sv','no','da','fi'];
+  const LOCALES=['en-US','es'];
   const SKIP_TAGS=new Set(['SCRIPT','STYLE','NOSCRIPT','CODE','PRE','TEXTAREA']);
   const originalText=new WeakMap();
   const originalAttrs=new WeakMap();
@@ -72,12 +72,12 @@
   function restore(){const walker=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT);let node;while((node=walker.nextNode()))if(originalText.has(node))node.nodeValue=originalText.get(node);document.querySelectorAll('*').forEach(el=>{const map=originalAttrs.get(el);if(map)for(const [key,value] of Object.entries(map))el.setAttribute(key,value);if(el.tagName==='OPTION'&&originalText.has(el))el.textContent=originalText.get(el)})}
   function state(kind,label){const root=document.querySelector('.sahjony-language');if(!root)return;root.dataset.state=kind;const small=root.querySelector('small');if(small)small.textContent=label||''}
   function applyDirection(locale){document.documentElement.lang=normalizeLocale(locale)||sourceLocale;document.documentElement.dir=direction(locale)}
-  async function translateBatch(texts,target){const key=sourceLocale+'>'+target+'|'+texts.join('\u241e');if(cache.has(key))return cache.get(key);const response=await fetch(UI_TRANSLATE,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({texts,target_locale:target,source_locale:sourceLocale})});const payload=await response.json().catch(()=>({}));if(!response.ok)throw new Error(payload.detail||'UI translation unavailable');const result=payload.translations||[];if(result.length!==texts.length)throw new Error('UI translation response mismatch');cache.set(key,payload);return payload}
+  async function translateBatch(texts,target){const key=sourceLocale+'>'+target+'|'+texts.join('\u241e');if(cache.has(key))return cache.get(key);const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),12000);try{const response=await fetch(UI_TRANSLATE,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({texts,target_locale:target,source_locale:sourceLocale}),signal:controller.signal});const payload=await response.json().catch(()=>({}));if(!response.ok)throw new Error(payload.detail||'UI translation unavailable');const result=payload.translations||[];if(result.length!==texts.length)throw new Error('UI translation response mismatch');cache.set(key,payload);return payload}finally{clearTimeout(timer)}}
   async function applyLanguage(locale,{persist=true}={}){
     if(busy)return;const target=normalizeLocale(locale)||sourceLocale;active=target;if(persist){setStored(target);rewriteUrl(target)}propagateLinks(target);
     if(sameLanguage(target,sourceLocale)){restore();applyDirection(target);state('ok',baseLocale(target)==='en'?'English':'Original');return}
     busy=true;state('busy',baseLocale(target)==='es'?'Traduciendo…':'Translating…');
-    try{restore();const items=collect();const chunks=[];let chunk=[],chars=0;for(const item of items){const size=item.text.length;if(chunk.length&&(chunk.length>=40||chars+size>10000)){chunks.push(chunk);chunk=[];chars=0}chunk.push(item);chars+=size}if(chunk.length)chunks.push(chunk);for(const current of chunks){const payload=await translateBatch(current.map(item=>item.text),target);payload.translations.forEach((entry,index)=>{const item=current[index];if(!item)return;const value=entry.text||item.text;if(item.kind==='text')item.node.nodeValue=value;else if(item.kind==='attr')item.el.setAttribute(item.attr,value);else if(item.kind==='option')item.el.textContent=value})}applyDirection(target);state('ok',target);propagateLinks(target)}catch(error){restore();applyDirection(sourceLocale);state('error','Original');console.warn('SAHJONY language layer:',error)}finally{busy=false}
+    try{restore();const items=collect();const chunks=[];let chunk=[],chars=0;for(const item of items){const size=item.text.length;if(chunk.length&&(chunk.length>=40||chars+size>10000)){chunks.push(chunk);chunk=[];chars=0}chunk.push(item);chars+=size}if(chunk.length)chunks.push(chunk);const results=await Promise.all(chunks.map(current=>translateBatch(current.map(item=>item.text),target)));results.forEach((payload,chunkIndex)=>{const current=chunks[chunkIndex];payload.translations.forEach((entry,index)=>{const item=current[index];if(!item)return;const value=entry.text||item.text;if(item.kind==='text')item.node.nodeValue=value;else if(item.kind==='attr')item.el.setAttribute(item.attr,value);else if(item.kind==='option')item.el.textContent=value})});applyDirection(target);state('ok',target);propagateLinks(target)}catch(error){restore();applyDirection(sourceLocale);state('error',baseLocale(target)==='es'?'Traducción no disponible':'Translation unavailable');console.warn('SAHJONY language layer:',error)}finally{busy=false}
   }
   async function geoDefault(){try{const r=await fetch(UI_GEO,{cache:'no-store'});if(!r.ok)return '';const j=await r.json();return normalizeLocale(j.default_locale||'')}catch{return ''}}
   function mountSelector(){
@@ -183,4 +183,32 @@
   script.defer=true;
   script.dataset.cubaProductTransparency='true';
   document.head.appendChild(script);
+})();
+
+
+(()=>{
+  function normalizePublicContact(){
+    document.querySelectorAll('a[href^="mailto:"]').forEach(a=>{
+      const href=(a.getAttribute('href')||'').toLowerCase();
+      if(href.includes('sahjonytradingus@gmail.com')||href.includes('info@sahjony.com')){a.setAttribute('href','mailto:ventas@sahjony.com');if((a.textContent||'').includes('@'))a.textContent='ventas@sahjony.com'}
+    });
+    const walker=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT);let node;
+    while((node=walker.nextNode())){
+      if(node.parentElement?.closest('script,style,textarea,[data-no-contact-normalize]'))continue;
+      node.nodeValue=(node.nodeValue||'').replace(/sahjonytradingus@gmail\.com|info@sahjony\.com/gi,'ventas@sahjony.com');
+    }
+  }
+  function mountPublicFooter(){
+    const path=location.pathname.replace(/\/+$/,'')||'/';
+    if(path==='/owner-login'||path==='/owner'||path.startsWith('/owner/'))return;
+    if(document.querySelector('.sahjony-public-contact-footer'))return;
+    const style=document.createElement('style');
+    style.textContent='.sahjony-public-contact-footer{border-top:1px solid rgba(255,255,255,.12);margin-top:34px;padding:24px 18px 30px;background:#050b13;color:#dbe7ee;font:600 12px Inter,system-ui,sans-serif}.sahjony-public-contact-footer .inner{max-width:1180px;margin:auto;display:flex;gap:14px;justify-content:space-between;align-items:center;flex-wrap:wrap}.sahjony-public-contact-footer .contact{display:flex;gap:10px;flex-wrap:wrap}.sahjony-public-contact-footer a{color:#dbe7ee;text-decoration:none;border:1px solid rgba(255,255,255,.13);border-radius:999px;padding:8px 11px}.sahjony-public-contact-footer .legal{display:flex;gap:10px;flex-wrap:wrap;color:#92a7b5}@media(max-width:600px){.sahjony-public-contact-footer .inner{display:grid}.sahjony-public-contact-footer .contact,.sahjony-public-contact-footer .legal{display:grid}}';
+    document.head.appendChild(style);
+    const footer=document.createElement('footer');footer.className='sahjony-public-contact-footer';footer.setAttribute('data-no-translate','true');
+    footer.innerHTML='<div class="inner"><div><strong>SAHJONY LLC</strong><br><span>Houston, Texas, USA</span></div><div class="contact"><a href="https://wa.me/12816628581">WhatsApp +1 281-662-8581</a><a href="tel:+17132948801">Voice +1 713-294-8801</a><a href="mailto:ventas@sahjony.com">ventas@sahjony.com</a></div><div class="legal"><a href="/privacy">Privacy</a><a href="/terms">Terms</a></div></div>';
+    document.body.appendChild(footer);
+  }
+  function bootContact(){normalizePublicContact();mountPublicFooter()}
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',bootContact,{once:true});else bootContact();
 })();
