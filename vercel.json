@@ -211,6 +211,10 @@
       "dest": "/index.html"
     },
     {
+      "src": "/es",
+      "dest": "/es.html"
+    },
+    {
       "src": "/privacy",
       "dest": "/privacy.html"
     },
