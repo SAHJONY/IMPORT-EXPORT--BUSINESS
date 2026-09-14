@@ -4,7 +4,7 @@ import httpx
 from fastapi import FastAPI, HTTPException, Query
 from pypdf import PdfReader
 
-app=FastAPI(title='SAHJONY Cuba Private Sector CRM',version='3.1.1',docs_url=None,redoc_url=None)
+app=FastAPI(title='SAHJONY Cuba Private Sector CRM',version='3.2.0',docs_url=None,redoc_url=None)
 ORG='org_sahjony_global_trade'; TARGET=15600; INDEX='https://www.minjus.gob.cu/es/publicaciones/prontuario'
 SOURCES={
 '2026-02-03':('Relación CNA-MIPYMES Registro Mercantil 03.02.2026','https://www.minjus.gob.cu/sites/default/files/archivos/publicacion/2026-03/Febrero%203.2026%20Relaci%C3%B3n%20MIPYMES%20Y%20CNA%20%203.02.26%20.pdf'),
@@ -35,6 +35,26 @@ async def rows():
    if len(p)<1000: break
    off+=len(p)
  return out
+async def paged_private_rows(limit:int,offset:int,q:str|None=None,province_filter:str|None=None):
+ u,k=cfg(); h={'apikey':k,'Authorization':f'Bearer {k}','Accept':'application/json','Prefer':'count=exact'}
+ params={'logical_table':'eq.external_trade_prospects','data->>actor_type':'in.(MIPYME_PRIVADA,EMPRESA_PRIVADA,OTHER_NON_STATE_VERIFIED)','select':'record_key,data','order':'record_key.asc','limit':str(limit),'offset':str(offset)}
+ if q:
+  term=re.sub(r'[^0-9A-Za-zÁÉÍÓÚÜÑáéíóúüñ .&@+-]+',' ',q).strip()[:120]
+  if term: params['or']=f'(data->>buyer_company.ilike.*{term}*,data->>company_name.ilike.*{term}*,data->>business_name.ilike.*{term}*,data->>primary_activity.ilike.*{term}*)'
+ if province_filter:
+  province_clean=re.sub(r'[^A-Za-zÁÉÍÓÚÜÑáéíóúüñ .-]+',' ',province_filter).strip()[:80]
+  if province_clean: params['data->>province']=f'ilike.*{province_clean}*'
+ async with httpx.AsyncClient(timeout=20) as client:
+  response=await client.get(f'{u}/rest/v1/sahjony_trade_records',headers=h,params=params); response.raise_for_status(); payload=response.json() if response.content else []
+  total=0; content_range=response.headers.get('content-range','')
+  try: total=int(content_range.rsplit('/',1)[1])
+  except Exception: total=offset+len(payload)
+  out=[]
+  for row in payload:
+   if isinstance(row.get('data'),dict):
+    item=dict(row['data']); item['_record_key']=row.get('record_key'); out.append(item)
+  return out,total
+
 async def private_row_count():
  u,k=cfg(); h={'apikey':k,'Authorization':f'Bearer {k}','Accept':'application/json','Prefer':'count=exact'}
  params={'logical_table':'eq.external_trade_prospects','data->>actor_type':'in.(MIPYME_PRIVADA,EMPRESA_PRIVADA,OTHER_NON_STATE_VERIFIED)','select':'record_key','limit':'1'}
@@ -152,14 +172,15 @@ async def mep_ceiling():
 @app.get('/cuba-mipymes-api/health')
 @app.get('/crm/cuba-mipymes/health')
 async def health():
- cur=await private_row_count(); return {'status':'ok','service':'cuba-private-sector-read-only-crm','version':'3.1.2','record_count':cur,'count_semantics':'canonical_private_records','target':TARGET,'remaining_shortfall':max(TARGET-cur,0),'source_scope':'public_registry_and_official_actor_lists_research','ownership_policy':'evidence_only','binding_actions':False}
+ cur=await private_row_count(); return {'status':'ok','service':'cuba-private-sector-read-only-crm','version':'3.2.0','record_count':cur,'count_semantics':'canonical_private_records','target':TARGET,'remaining_shortfall':max(TARGET-cur,0),'source_scope':'public_registry_and_official_actor_lists_research','ownership_policy':'evidence_only','binding_actions':False}
 @app.get('/cuba-mipymes-api/list')
 @app.get('/crm/cuba-mipymes')
 @app.get('/crm/cuba-mipymes/list')
-async def list_records():
- seen=set(); out=[]
- for r in await rows():
+async def list_records(limit:int=Query(100,ge=1,le=250),offset:int=Query(0,ge=0),q:str|None=Query(None,max_length=120),province:str|None=Query(None,max_length=80)):
+ page,total=await paged_private_rows(limit,offset,q,province); seen=set(); out=[]
+ for r in page:
   k=norm(r.get('buyer_company') or r.get('company_name') or r.get('business_name'))
   if not k or k in seen or not is_private(r):continue
   seen.add(k); out.append({x:r.get(x) for x in ('external_reference','buyer_company','buyer_country','buyer_contact','public_email','public_phone','actor_type','province','municipality','product_category','product_description','destination','source_type','source_platform','source_name','source_provenance','source_url','verification_status','registry_status','verification_date','qualification_stage','import_export_relevance','evidence_summary','next_action','created_at','updated_at')})
- out.sort(key=lambda x:str(x.get('buyer_company') or '').casefold()); return {'status':'ok','count':len(out),'records':out,'classification':'RESEARCH / VERIFIED PUBLIC SOURCE','notice':'Registry-only records are not active buyers or RFQs without independent demand evidence.'}
+ out.sort(key=lambda x:str(x.get('buyer_company') or '').casefold())
+ return {'status':'ok','count':len(out),'total':total,'limit':limit,'offset':offset,'has_more':offset+limit<total,'records':out,'classification':'RESEARCH / VERIFIED PUBLIC SOURCE','notice':'Registry-only records are not active buyers or RFQs without independent demand evidence.'}
