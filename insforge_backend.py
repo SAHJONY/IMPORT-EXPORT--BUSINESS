@@ -191,8 +191,23 @@ class SupabaseBackend:
             field, _, direction = order.partition(".")
             if field.replace("_", "").isalnum() and direction.lower() in {"asc", "desc"}:
                 query["order"] = f"data->>{field}.{direction.lower()}"
+        retryable_statuses = {429, 500, 502, 503, 504, 525}
         async with httpx.AsyncClient(timeout=60) as client:
-            response = await client.get(self.records_url, headers=self.headers, params=query)
+            response = None
+            for attempt in range(3):
+                try:
+                    response = await client.get(self.records_url, headers=self.headers, params=query)
+                    if response.status_code not in retryable_statuses:
+                        response.raise_for_status()
+                        break
+                    if attempt == 2:
+                        response.raise_for_status()
+                except (httpx.TimeoutException, httpx.TransportError):
+                    if attempt == 2:
+                        raise
+                await asyncio.sleep(0.25 * (attempt + 1))
+            if response is None:
+                raise RuntimeError("Supabase select did not produce a response")
             response.raise_for_status()
             payload = response.json() if response.content else []
         rows = [item.get("data") for item in payload if isinstance(item, dict) and isinstance(item.get("data"), dict)]
