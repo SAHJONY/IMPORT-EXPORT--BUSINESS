@@ -81,14 +81,14 @@ function Brand({ownerShortcut=false}:{ownerShortcut?:boolean}){
 function LegacyPublicSite(){
  return <div className="public-site institutional-public">
   <div className="signal-strip"><span><i/>GLOBAL TRADE NETWORK</span><strong>Human-led. AI-powered. Evidence-controlled.</strong><span>SAHJONY LLC · UNITED STATES</span></div>
-  <header className="public-nav"><Brand ownerShortcut/><nav className="public-links" aria-label="Primary navigation"><a href="#solutions">Capabilities</a><a href="/industrial-marketplace">Marketplace</a><a href="#process">Process</a><a href="/cuba-private-sector">Cuba Desk</a><a className="primary-link" href="/start">Start a request <span aria-hidden="true">↗</span></a></nav></header>
+  <header className="public-nav"><Brand ownerShortcut/><nav className="public-links" aria-label="Primary navigation"><a href="#solutions">Capabilities</a><a href="/marketplace">Marketplace</a><a href="#process">Process</a><a href="/cuba-private-sector">Cuba Desk</a><a className="primary-link" href="/start">Start a request <span aria-hidden="true">↗</span></a></nav></header>
   <main>
    <section className="public-hero ultra-hero">
     <div className="hero-copy">
      <div className="eyebrow gold"><span>01</span> GLOBAL TRADE, REENGINEERED</div>
      <h1>Move products across borders. <span>Without losing control.</span></h1>
      <p>SAHJONY LLC brings sourcing, deal intelligence, compliance, documentation, logistics and commercial execution into one premium global trade experience.</p>
-     <div className="hero-actions"><a className="primary-link large" href="/start">Launch a sourcing request <span aria-hidden="true">↗</span></a><a className="secondary-link large" href="/industrial-marketplace">Explore the marketplace</a></div>
+     <div className="hero-actions"><a className="primary-link large" href="/start">Launch a sourcing request <span aria-hidden="true">↗</span></a><a className="secondary-link large" href="/marketplace">Explore the marketplace</a></div>
      <div className="trust-row" aria-label="Platform capabilities"><span><i/>Worldwide sourcing</span><span><i/>Case-based execution</span><span><i/>Governed releases</span></div>
     </div>
     <div className="trade-room" aria-label="SAHJONY trade control room preview">
@@ -113,7 +113,7 @@ function PublicSite(){
  const facts=[['PRODUCT','Defined need'],['QUANTITY','Commercial volume'],['DESTINATION','Named corridor'],['TIMING','Required window']];
  return <div className="public-site institutional-public cinematic-trade-os">
   <div className="signal-strip"><span><i/>GLOBAL TRADE NETWORK</span><strong>Global sourcing · Supplier verification · Managed trade</strong><span>SAHJONY LLC · UNITED STATES</span></div>
-  <header className="public-nav cinematic-nav"><Brand ownerShortcut/><nav className="public-links" aria-label="Primary navigation"><a className="text-link" href="#demand">Demand</a><a className="text-link" href="#sourcing">Sourcing</a><a className="text-link" href="#control">Control</a><a className="text-link" href="/cuba-private-sector">Cuba Desk</a><a className="text-link" href="/trust-center.html">How we verify</a><a className="text-link" href="https://wa.me/12816628581">WhatsApp</a><a className="primary-link" href="#inquiry">Request a quote <span aria-hidden="true">↗</span></a></nav></header>
+  <header className="public-nav cinematic-nav"><Brand ownerShortcut/><nav className="public-links" aria-label="Primary navigation"><a className="text-link" href="#demand">Demand</a><a className="text-link" href="#sourcing">Sourcing</a><a className="text-link" href="#control">Control</a><a className="text-link" href="/marketplace">Marketplace</a><a className="text-link" href="/trust-center.html">How we verify</a><a className="text-link" href="tel:+17132948801">Call trade desk · +1 713-294-8801</a><a className="primary-link" href="#inquiry">Request a quote <span aria-hidden="true">↗</span></a></nav></header>
   <main>
    <section className="cinematic-chapter chapter-hero" data-cinematic>
     <div className="chapter-media hero-media" data-cinematic-media/>
@@ -122,7 +122,7 @@ function PublicSite(){
      <div className="chapter-index" data-cinematic-reveal><span>01 / 06</span><i/> START</div>
      <h1 data-cinematic-reveal>Global trade.<br/><em>Under control.</em></h1>
      <p data-cinematic-reveal>SAHJONY LLC helps businesses find qualified suppliers, compare commercial terms, coordinate compliance and documents, and manage the path from request to delivery.</p>
-     <div className="chapter-actions" data-cinematic-reveal><a className="primary-link large" href="#inquiry">Request a quote ↗</a><a className="quiet-link" href="https://wa.me/12816628581">Talk to us on WhatsApp</a></div>
+     <div className="chapter-actions" data-cinematic-reveal><a className="primary-link large" href="#inquiry">Request a quote ↗</a><a className="quiet-link" href="tel:+17132948801">Talk to the trade desk · +1 713-294-8801</a><a className="quiet-link" href="mailto:ventas@sahjony.com?subject=Callback%20request">Request a callback</a><a className="quiet-link" href="https://wa.me/12816628581">Talk to us on WhatsApp</a></div>
     </div>
     <div className="scroll-cue" data-float><span>SCROLL TO MOVE FORWARD</span><i/></div>
    </section>
@@ -147,6 +147,8 @@ function PublicSite(){
      <div className="floating-callouts" data-cinematic-reveal><article data-float><small>SUPPLIER</small><strong>Identity verified</strong><span>KYB · capacity · origin</span></article><article data-float><small>COMMERCIAL</small><strong>Terms compared</strong><span>MOQ · Incoterms · lead time</span></article><article data-float><small>ECONOMICS</small><strong>Landed path</strong><span>Cost · freight · protected margin</span></article></div>
     </div>
    </section>
+
+   <section className="institutional-section"><div className="eyebrow gold"><span>PROOF</span> CURRENT SOURCING EVIDENCE</div><h2>Industrial sourcing evidence, with the gaps left visible.</h2><p>Current governed example — not a completed deal; evidence ledger last refreshed 2026-08-27: industrial motors for a 20-ft container. Supplier capability and catalogs were received; safe-area lead time was quoted at 12–14 weeks, non-standard/hazardous at 18–20 weeks, Ex Works Mumbai. The case is blocked because supplier payment terms require 100% advance while the buyer-side requirement is L/C, so SAHJONY has not presented it as executable.</p><div className="chapter-actions"><a className="secondary-link large" href="/trust-center.html">Review the evidence policy</a><a className="quiet-link" href="/start?product_need=industrial%20pumps">Start an industrial RFQ</a></div></section>
 
    <section id="control" className="cinematic-chapter control-chapter" data-cinematic>
     <div className="control-grid" data-cinematic-media/>
@@ -179,7 +181,7 @@ function PublicSite(){
     </div>
    </section>
   </main>
-  <footer><span>© SAHJONY LLC · Global Trade Operating System</span><nav aria-label="Footer navigation"><a href="/global-sourcing">Global sourcing</a><a href="/partners">Partners</a><a href="/cuba-private-sector">Cuba Desk</a></nav><span>www.sahjony.com</span></footer>
+  <footer><span>© SAHJONY LLC · Global Trade Operating System</span><nav aria-label="Footer navigation"><a href="/global-sourcing">Global sourcing</a><a href="/partners">Partners</a><a href="/marketplace">Marketplace</a><a href="tel:+17132948801">+1 713-294-8801</a></nav><span>www.sahjony.com</span></footer>
  </div>
 }
 
@@ -202,7 +204,7 @@ function PublicRfqForm(){
    form.reset();
   }catch(cause){setStatus({kind:'error',message:cause instanceof Error?cause.message:'Submission failed. Please review the form and retry.'})}
  }
- return <form className="finale-form" onSubmit={submit} data-cinematic-reveal aria-describedby="inquiry-note"><div><label>BUSINESS NAME<input name="legal_name" required autoComplete="organization" placeholder="Legal business name"/></label><label>CONTACT NAME<input name="contact_name" required autoComplete="name" placeholder="Your full name"/></label></div><label>PRODUCT OR NEED<input name="product_need" required minLength={2} placeholder="Product, grade, model or commercial need"/></label><div><label>QUANTITY<input type="number" min="0" step="any" name="quantity" inputMode="decimal" placeholder="Target volume"/></label><label>DESTINATION COUNTRY<input name="destination_country" required minLength={2} maxLength={3} autoCapitalize="characters" pattern="[A-Za-z]{2,3}" title="Use a 2- or 3-letter country code" placeholder="US, MX, CU…"/></label></div><div><label>REQUIRED BY<input type="date" name="target_delivery_date" required/></label><label>BUSINESS EMAIL<input type="email" name="email" required autoComplete="email" placeholder="name@company.com"/></label></div><button type="submit" disabled={status.kind==='busy'}>{status.kind==='busy'?'Submitting…':'Submit qualified request'} <span aria-hidden="true">↗</span></button><small id="inquiry-note" className={`form-response ${status.kind}`} role="status" aria-live="polite">{status.message}</small></form>
+ return <form className="finale-form" onSubmit={submit} data-cinematic-reveal aria-describedby="inquiry-note"><div><label>BUSINESS NAME<input name="legal_name" required autoComplete="organization" placeholder="Legal business name"/></label><label>CONTACT NAME<input name="contact_name" required autoComplete="name" placeholder="Your full name"/></label></div><label>PRODUCT OR NEED<input name="product_need" required minLength={2} placeholder="Product, grade, model or commercial need"/></label><div><label>QUANTITY<input type="number" min="0" step="any" name="quantity" inputMode="decimal" placeholder="Target volume"/></label><label>DESTINATION COUNTRY<input name="destination_country" required minLength={2} maxLength={3} autoCapitalize="characters" pattern="[A-Za-z]{2,3}" title="Use a 2- or 3-letter country code" placeholder="US, MX, CA…"/></label></div><div><label>REQUIRED BY<input type="date" name="target_delivery_date" required/></label><label>BUSINESS EMAIL<input type="email" name="email" required autoComplete="email" placeholder="name@company.com"/></label></div><button type="submit" disabled={status.kind==='busy'}>{status.kind==='busy'?'Submitting…':'Submit qualified request'} <span aria-hidden="true">↗</span></button><small id="inquiry-note" className={`form-response ${status.kind}`} role="status" aria-live="polite">{status.message}</small></form>
 }
 
 function StatePage({title,text,path}:{title:string;text:string;path:string}){return <div className="route-state"><Brand/><div className="route-card"><div className="eyebrow gold">SAHJONY GLOBAL TRADE</div><h1>{title}</h1><p>{text}</p><button className="primary-button" onClick={()=>nav(path)}>Continue</button></div></div>}
