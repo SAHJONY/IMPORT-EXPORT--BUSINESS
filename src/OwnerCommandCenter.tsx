@@ -55,7 +55,16 @@ export default function OwnerCommandCenter(){
     setLoading(false);
   }
 
-  useEffect(()=>{void refresh();const id=window.setInterval(()=>void refresh(),60000);return()=>window.clearInterval(id)},[]);
+  useEffect(()=>{
+    if(!sessionStorage.getItem('sahjony.owner.token')){
+      const next=encodeURIComponent(location.pathname+location.search);
+      location.replace(`/owner-login?next=${next}`);
+      return;
+    }
+    void refresh();
+    const id=window.setInterval(()=>void refresh(),60000);
+    return()=>window.clearInterval(id);
+  },[]);
   const healthy=useMemo(()=>Object.values(health).filter(item=>item.ok).length,[health]);
   const readiness=probes.length?Math.round((healthy/probes.length)*100):0;
 
