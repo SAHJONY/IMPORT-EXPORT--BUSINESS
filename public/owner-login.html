@@ -596,6 +596,13 @@
       const SUPABASE_URL = "https://qprlbmcoksrpuvodxjtt.supabase.co";
       const SUPABASE_KEY = "sb_publishable_-I-dlfNYk4byxK5WQKuqlQ_WIAGkuA-";
       const initialAuthFragment = location.hash;
+      const requestedNext =
+        new URLSearchParams(location.search).get("next") || "/owner/dashboard";
+      const ownerNext =
+        /^\/owner(?:\/|$)/.test(requestedNext) &&
+        !requestedNext.startsWith("//")
+          ? requestedNext
+          : "/owner/dashboard";
       const sb = window.supabase?.createClient
         ? window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
             auth: {
@@ -653,7 +660,7 @@
             : "Owner identity verified. Opening Owner OS…",
           "ok",
         );
-        location.assign("/owner/dashboard");
+        location.assign(ownerNext);
       }
       async function signInPassword() {
         let policy = {};
@@ -684,7 +691,7 @@
             });
             if (r.ok) {
               setStatus("Owner session active. Opening Owner OS…", "ok");
-              location.replace("/owner/dashboard");
+              location.replace(ownerNext);
               return;
             }
             sessionStorage.removeItem("sahjony.owner.token");
