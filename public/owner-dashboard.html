@@ -65,4 +65,4 @@
 </div></section>
 
 <div class="notice"><strong>Canonical record relationship:</strong> MIPYME / Buyer → Supplier → Partner or Gestor → Deal → Protected Economics → Execution → Invoice → <strong>Cash Collected</strong>.</div>
-</main><script>const token=sessionStorage.getItem('sahjony.owner.token');if(!token)location.replace('/owner-login');</script></body></html>
+</main><script>const token=sessionStorage.getItem('sahjony.owner.token');if(!token){const next=encodeURIComponent(location.pathname+location.search);location.replace('/owner-login?next='+next);}</script></body></html>
