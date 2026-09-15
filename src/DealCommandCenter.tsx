@@ -193,7 +193,8 @@ export default function DealCommandCenter() {
   const [syncedAt, setSyncedAt] = useState("");
   useEffect(() => {
     if (!sessionStorage.getItem("sahjony.owner.token")) {
-      location.replace("/owner-login");
+      const next = encodeURIComponent(location.pathname + location.search);
+      location.replace(`/owner-login?next=${next}`);
       return;
     }
     refresh();

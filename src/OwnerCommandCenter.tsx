@@ -55,7 +55,16 @@ export default function OwnerCommandCenter(){
     setLoading(false);
   }
 
-  useEffect(()=>{void refresh();const id=window.setInterval(()=>void refresh(),60000);return()=>window.clearInterval(id)},[]);
+  useEffect(()=>{
+    if(!sessionStorage.getItem('sahjony.owner.token')){
+      const next=encodeURIComponent(location.pathname+location.search);
+      location.replace(`/owner-login?next=${next}`);
+      return;
+    }
+    void refresh();
+    const id=window.setInterval(()=>void refresh(),60000);
+    return()=>window.clearInterval(id);
+  },[]);
   const healthy=useMemo(()=>Object.values(health).filter(item=>item.ok).length,[health]);
   const readiness=probes.length?Math.round((healthy/probes.length)*100):0;
 
@@ -63,6 +72,8 @@ export default function OwnerCommandCenter(){
     <header style={s.header}>
       <a href="/" style={s.brand}>SAHJONY <span style={{color:'#66dcff'}}>GLOBAL TRADE</span></a>
       <nav style={s.nav}>
+        <a href="/owner/deals" style={s.link}>Deals</a>
+        <a href="/owner/crm" style={s.link}>CRM</a>
         <a href="/owner/communications" style={s.link}>Communications</a>
         <a href="/owner/social" style={s.link}>Social</a>
         <a href="/owner/jarvis" style={s.link}>JARVIS</a>
@@ -70,7 +81,6 @@ export default function OwnerCommandCenter(){
         <a href="/owner/economics" style={s.link}>Economics</a>
         <a href="/owner/sofia-performance" style={s.link}>Sofía</a>
         <a href="/owner/exceptions" style={s.link}>Exceptions</a>
-        <a href="/owner/deals" style={s.link}>Deals</a>
         <a href="/owner/intelligence" style={s.link}>Intelligence</a>
         <a href="/owner/agent-command" style={s.link}>Agent Command</a>
         <button onClick={()=>void refresh()} style={s.button}>{loading?'Checking…':'Refresh systems'}</button>
@@ -92,6 +102,8 @@ export default function OwnerCommandCenter(){
     <section style={s.panel}>
       <div style={s.panelHead}><div><div style={s.eyebrow}>EXECUTIVE ACTION QUEUE</div><h2 style={s.h2}>Move the highest-value bottleneck first</h2></div></div>
       <div style={s.grid3}>
+        <a href="/owner/deals" style={s.actionCard}><strong>Open Deal Command Center</strong><span>Review every live opportunity, blocker, next action, protected economics and closing stage.</span><b>OPEN DEALS →</b></a>
+        <a href="/owner/crm" style={s.actionCard}><strong>Open CRM & Opportunities</strong><span>Qualify buyer demand, manage follow-up and promote viable opportunities into sourcing and managed trade.</span><b>OPEN CRM →</b></a>
         <a href="/owner/communications" style={s.actionCard}><strong>Run the Communications OS</strong><span>Unify authorized email, WhatsApp, Telegram and social conversations into one evidence-gated relationship and RFQ layer.</span><b>OPEN COMMUNICATIONS →</b></a>
         <a href="/owner/social" style={s.actionCard}><strong>Run the Social OS</strong><span>Coordinate social publishing, connector health and social-to-RFQ conversion under owner governance.</span><b>OPEN SOCIAL →</b></a>
         <a href="/owner/jarvis" style={s.actionCard}><strong>Run JARVIS</strong><span>Use the private executive and personal-assistant command layer for owner work.</span><b>OPEN JARVIS →</b></a>
@@ -100,7 +112,6 @@ export default function OwnerCommandCenter(){
         <a href="/owner/priorities" style={s.actionCard}><strong>Allocate effort by expected value</strong><span>Rank governed deals by expected gross profit, close probability, time to close and risk.</span><b>OPEN PRIORITIES →</b></a>
         <a href="/owner/economics" style={s.actionCard}><strong>Protect deal economics</strong><span>Separate evidenced economics from targets and expose capital at risk.</span><b>OPEN ECONOMICS →</b></a>
         <a href="/owner/exceptions" style={s.actionCard}><strong>Resolve executive exceptions</strong><span>Escalate blocked RFQs, missing economics, stale deals, PO/payment and logistics risks.</span><b>OPEN EXCEPTIONS →</b></a>
-        <a href="/owner/deals" style={s.actionCard}><strong>Close active opportunities</strong><span>Advance qualified demand to firm price, quote and PO.</span><b>GO TO DEALS →</b></a>
         <a href="/owner/intelligence" style={s.actionCard}><strong>Find evidence-backed demand</strong><span>Research buyers, suppliers, pricing, logistics and counterparties.</span><b>OPEN INTELLIGENCE →</b></a>
         <a href="/owner/agent-command" style={s.actionCard}><strong>Control AI operations</strong><span>See TinyFish, Codex, Remote Desktop, Opera fallback, health, permissions and the agent execution pipeline.</span><b>OPEN AGENT COMMAND →</b></a>
         <a href="/start" style={s.actionCard}><strong>Capture a new RFQ</strong><span>Turn inbound demand into structured commercial requirements.</span><b>START REQUEST →</b></a>
