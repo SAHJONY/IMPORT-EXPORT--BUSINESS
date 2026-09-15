@@ -224,13 +224,13 @@ function Portal({role,section}:{role:Role;section:ModuleKey}){
  const [searchOpen,setSearchOpen]=useState(false);
  const [query,setQuery]=useState('');
 
- useEffect(()=>{if(role==='owner'&&!token)location.replace('/owner-login')},[role,token]);
+ useEffect(()=>{if(role==='owner'&&!token)location.replace('/owner-login?next='+encodeURIComponent(location.pathname+location.search))},[role,token]);
  useEffect(()=>{safeSet(`sahjony.${role}.token`,token)},[role,token]);
  useEffect(()=>{safeSet('sahjony.employee.id',employeeId)},[employeeId]);
  useEffect(()=>{const fn=(e:KeyboardEvent)=>{if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='k'){e.preventDefault();setSearchOpen(v=>!v)}if(e.key==='Escape'){setSearchOpen(false);setDrawer(false)}};addEventListener('keydown',fn);return()=>removeEventListener('keydown',fn)},[]);
 
  const headers=(json=false)=>{const h:Record<string,string>={'X-Role':role};if(token)h.Authorization=`Bearer ${token}`;if(role==='employee')h['X-Employee-Id']=employeeId;if(json)h['Content-Type']='application/json';return h};
- async function api(path:string,opts:RequestInit={}){const response=await fetch(path,{...opts,headers:{...headers(Boolean(opts.body)),...(opts.headers||{})}});const body=await response.json().catch(()=>({detail:`HTTP ${response.status}`}));if((response.status===401||response.status===403)&&role==='owner'){safeRemove('sahjony.owner.token');location.replace('/owner-login')}if(!response.ok)throw new Error(body.detail||`HTTP ${response.status}`);return body}
+ async function api(path:string,opts:RequestInit={}){const response=await fetch(path,{...opts,headers:{...headers(Boolean(opts.body)),...(opts.headers||{})}});const body=await response.json().catch(()=>({detail:`HTTP ${response.status}`}));if((response.status===401||response.status===403)&&role==='owner'){safeRemove('sahjony.owner.token');location.replace('/owner-login?next='+encodeURIComponent(location.pathname+location.search))}if(!response.ok)throw new Error(body.detail||`HTTP ${response.status}`);return body}
  async function refresh(){const cfg=modules[section];setLoading(true);setError('');try{if(cfg.health){const response=await fetch(cfg.health,{cache:'no-store'});setHealth({ok:response.ok,...await response.json().catch(()=>({}))})}if(cfg.data&&token){const body=await api(cfg.data,{cache:'no-store'});const list=Object.values(body).find(v=>Array.isArray(v)) as any[]|undefined;setRecords(list||[])}else setRecords([])}catch(e:any){setError(e.message||'Unable to load workspace')}finally{setLoading(false)}}
  useEffect(()=>{refresh();setDrawer(false)},[role,section]);
 
