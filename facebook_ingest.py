@@ -198,11 +198,16 @@ async def main() -> int:
     ap.add_argument("--state", default=os.environ.get("FACEBOOK_INGEST_STATE", DEFAULT_STATE))
     ap.add_argument("--dry-run", action="store_true",
                     help="Fetch and normalize from Facebook but do not write to the backend.")
+    ap.add_argument("--outbox", default="",
+                    help="Write the normalized fresh items as JSON to this path, for transport "
+                         "to the backend when this host has no DB credentials "
+                         "(used with the fb-social-inbox-ingest GitHub workflow).")
     args = ap.parse_args()
 
     state = _load_state(args.state)
     backend = None if args.dry_run else get_backend()
     summary: dict = {"synced_at": _now_iso(), "sources": {}, "total_new": 0, "total_errors": 0}
+    all_fresh: list = []  # normalized fresh items across sources (for --outbox transport)
 
     sources = [
         {"key": "page", "kind": "timeline", "profile_id": PAGE_ID, "label": "Sahjony LLC Page"},
@@ -275,6 +280,7 @@ async def main() -> int:
         fresh = [r for r in rows if not since or not r["created_at"] or r["created_at"] > since]
         if fresh and backend is not None:
             await backend.insert(TABLE, fresh)
+        all_fresh.extend(fresh)
         ssum["new_items"] = len(fresh)
         summary["total_new"] += len(fresh)
         if ssum["error"]:
@@ -292,6 +298,10 @@ async def main() -> int:
     _save_state(args.state, state)
     summary["state_file"] = args.state
     summary["dry_run"] = bool(args.dry_run)
+    if args.outbox:
+        with open(args.outbox, "w", encoding="utf-8") as f:
+            json.dump(all_fresh, f, ensure_ascii=False, indent=1)
+        summary["outbox"] = {"path": args.outbox, "items": len(all_fresh)}
     print(json.dumps(summary, indent=2, ensure_ascii=False))
     return 0 if summary["total_errors"] == 0 else 2
 
