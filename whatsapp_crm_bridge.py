@@ -131,6 +131,12 @@ class CRMOutreachStatusIn(BaseModel):
     operation_id: str = Field(min_length=8, max_length=160)
 
 
+class CRMRFQOutreachIn(BaseModel):
+    operation_id: str = Field(min_length=8, max_length=160)
+    intake_ids: list[str] = Field(min_length=1, max_length=25)
+    dry_run: bool = False
+
+
 async def _operation(operation_id: str) -> dict[str, Any] | None:
     rows = await get_backend().select(
         "crm_bridge_operations",
@@ -236,6 +242,53 @@ async def run_outreach_pilot(payload: CRMOutreachPilotIn) -> dict[str, Any]:
     result = {"status": "queued", "operation_id": payload.operation_id, "eligible": len(candidates), "selected": len(selected), "queued": queued, "messages_sent": 0}
     await _record_operation(payload.operation_id, "outreach_pilot", result)
     return result
+
+
+async def run_rfq_outreach(payload: CRMRFQOutreachIn) -> dict[str, Any]:
+    prior = await _operation(payload.operation_id)
+    if prior:
+        result = prior.get("result") if isinstance(prior.get("result"), dict) else {}
+        return {"status": "duplicate", "operation_id": payload.operation_id, **result}
+    backend = get_backend()
+    wanted = list(dict.fromkeys(str(v).strip() for v in payload.intake_ids if str(v).strip()))
+    rows = await backend.select("trade_rfq_intakes", params={"limit": "5000"}) or []
+    selected = [r for r in rows if str(r.get("id") or "") in wanted]
+    if len(selected) != len(wanted):
+        found = {str(r.get("id") or "") for r in selected}
+        raise HTTPException(status_code=400, detail=f"Unknown RFQ intake IDs: {sorted(set(wanted)-found)}")
+    blocked = {"DO_NOT_CONTACT", "OPTED_OUT", "LOST"}
+    plans = []
+    for row in selected:
+        phone = _safe_phone(row.get("contact_phone"))
+        if not phone:
+            raise HTTPException(status_code=400, detail=f"RFQ {row.get('id')} has no single valid WhatsApp phone")
+        accounts = await _rows_by_phone("customer_accounts", phone, limit=5)
+        account = accounts[0] if accounts else {}
+        status = str(account.get("sales_status") or account.get("status") or "NEW").upper()
+        consent = str(account.get("consent_status") or "").upper()
+        if status in blocked or consent in {"REVOKED", "DO_NOT_CONTACT"}:
+            raise HTTPException(status_code=409, detail=f"RFQ {row.get('id')} is suppressed from outreach")
+        messages = await _rows_by_phone("whatsapp_messages", phone, limit=25)
+        prior_inbound = any(str(m.get("direction") or "").lower()=="inbound" for m in messages)
+        explicit = account.get("consent_to_business_contact") is True or consent == "CONSENTED"
+        if not (explicit or prior_inbound):
+            raise HTTPException(status_code=409, detail=f"RFQ {row.get('id')} lacks WhatsApp business-contact consent/prior inbound")
+        product = str(row.get("product") or "esta oportunidad").strip()
+        next_action = str(row.get("next_action") or "").strip()
+        body = (f"Hola, soy Sofía de SAHJONY Global Trade. Estamos dando seguimiento a {product}. "
+                f"{next_action} Si no deseas más mensajes, dímelo y no volveremos a contactarte.")[:4096]
+        plans.append((row, phone, account, body))
+    if payload.dry_run:
+        result={"status":"planned","operation_id":payload.operation_id,"requested":len(wanted),"selected":len(plans),"queued":0,"messages_sent":0}
+        await _record_operation(payload.operation_id,"rfq_outreach_dry_run",result); return result
+    queued=0
+    for row, phone, account, body in plans:
+        command_id=f"waq_{secrets.token_urlsafe(18)}"; ts=_now(); customer_id=account.get("customer_id")
+        await backend.insert("whatsapp_openclaw_outbox", {"command_id":command_id,"channel":"whatsapp","account_id":"default","recipient":phone,"body":body,"preview_url":False,"lead_id":None,"customer_id":customer_id,"source_url":f"crm:rfq-outreach:{payload.operation_id}:{row.get('id')}","status":"queued","attempts":0,"lease_token":None,"lease_expires_at":None,"provider_message_id":None,"last_error":None,"created_at":ts,"updated_at":ts})
+        await backend.insert("outbound_notifications", {"notification_id":command_id,"event_id":payload.operation_id,"recipient_role":"customer","recipient_id":customer_id or "external","channel":"whatsapp","destination":phone,"subject":"Governed RFQ qualification","body":body,"delivery_status":"queued","provider":"hermes_whatsapp","provider_message_id":None,"source_url":f"crm:rfq-outreach:{payload.operation_id}:{row.get('id')}","autonomous":True,"attempts":0,"last_error":None,"created_at":ts,"updated_at":ts})
+        queued += 1
+    result={"status":"queued","operation_id":payload.operation_id,"requested":len(wanted),"selected":len(plans),"queued":queued,"messages_sent":0}
+    await _record_operation(payload.operation_id,"rfq_outreach",result); return result
 
 
 async def outreach_pilot_status(payload: CRMOutreachStatusIn) -> dict[str, Any]:
@@ -835,6 +888,22 @@ async def crm_outreach_pilot(
     except Exception as exc:
         raise HTTPException(status_code=400, detail="Invalid outreach pilot payload") from exc
     return await run_outreach_pilot(payload)
+
+
+@router.post("/whatsapp/crm/rfq-outreach")
+async def crm_rfq_outreach(
+    request: Request,
+    x_sahjony_timestamp: str | None = Header(None, alias="X-SAHJONY-Timestamp"),
+    x_sahjony_nonce: str | None = Header(None, alias="X-SAHJONY-Nonce"),
+    x_sahjony_crm_signature: str | None = Header(None, alias="X-SAHJONY-CRM-Signature"),
+) -> dict[str, Any]:
+    raw = await request.body()
+    _verify_bridge_request(request, raw, *_headers(x_sahjony_timestamp, x_sahjony_nonce, x_sahjony_crm_signature))
+    try:
+        payload = CRMRFQOutreachIn.model_validate_json(raw)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Invalid targeted RFQ outreach payload") from exc
+    return await run_rfq_outreach(payload)
 
 
 @router.post("/whatsapp/crm/outreach-pilot/status")
