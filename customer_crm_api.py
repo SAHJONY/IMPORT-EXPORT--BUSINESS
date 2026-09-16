@@ -66,6 +66,12 @@ class IntakeIn(BaseModel):
     target_delivery_date:str|None=None
     preferred_incoterm:str|None=None
     notes:str|None=None
+    # First-touch attribution (captured client-side, never invented server-side)
+    utm_source:str|None=Field(default=None,max_length=200)
+    utm_medium:str|None=Field(default=None,max_length=200)
+    utm_campaign:str|None=Field(default=None,max_length=200)
+    referrer:str|None=Field(default=None,max_length=500)
+    lead_type:str=Field(default='RFQ',max_length=40)
 
     @field_validator('email')
     @classmethod
@@ -299,6 +305,41 @@ async def growth_summary(x_role:str|None=Header(None,alias='X-Role'),authorizati
         return round((numerator/denominator)*100,1) if denominator else 0.0
     return {'status':'ok','scope':actor['role'],'total_accounts':total_accounts,'prospects':len(prospects),'outreach_events':len(outreach_events),'replied':len(replied),'follow_up_due':len(follow_up),'do_not_contact':len(do_not_contact),'real_intakes':real_intakes,'qualified_intakes':len(qualified),'promoted_intakes':len(promoted),'conversion':{'account_to_intake_pct':rate(real_intakes,total_accounts),'intake_to_qualified_pct':rate(len(qualified),real_intakes),'qualified_to_promoted_pct':rate(len(promoted),len(qualified)),'account_to_promoted_pct':rate(len(promoted),total_accounts)},'next_actions':['Work follow-up-due prospects' if follow_up else 'Capture replies and new trade requirements','Qualify new intakes' if real_intakes>len(qualified) else 'Generate more qualified demand','Promote qualified intakes into sourcing' if len(qualified)>len(promoted) else 'Build sourcing pipeline from promoted demand']}
 
+async def _bridge_intake_to_owner_queue(backend,ts,p,intake_id,customer_id,first_touch):
+    """Mirror a public intake into trade_rfq_intakes so it appears in the
+    owner's Qualification Queue (RfqIntakeCenter). Uses only columns the
+    owner's own manual-save path writes, so no schema assumptions are made.
+    Raises on failure; the caller treats it as best-effort."""
+    is_partner=first_touch.get('lead_type')=='PARTNER' or (p.product_need or '').upper().startswith('PARTNER APPLICATION')
+    key_fields=[('legal_name',p.legal_name),('contact_name',p.contact_name),('email',p.email),('product_need',p.product_need),('destination_country',p.destination_country)]
+    missing=[name for name,value in key_fields if not value]
+    notes_lines=[]
+    if p.notes:
+        notes_lines.append(str(p.notes)[:2000])
+    contact_line=f"Contact: {p.contact_name} <{p.email}>"+(f" {p.phone}" if p.phone else "")
+    notes_lines.append(contact_line)
+    if p.website:
+        notes_lines.append(f"Website: {p.website}")
+    touch_line=' '.join(f"{k}={v}" for k,v in first_touch.items() if k!='lead_type' and v)
+    if touch_line:
+        notes_lines.append(f"First touch: {touch_line}")
+    notes_lines.append(f"Canonical intake: {intake_id} / customer {customer_id}")
+    row={
+        'source':'partner_application' if is_partner else 'public_website',
+        'buyer_name':p.contact_name,
+        'company_name':p.legal_name,
+        'product':p.product_need,
+        'destination_country':(p.destination_country or '').upper(),
+        'specification':p.specifications,
+        'notes':'\n'.join(notes_lines)[:4000],
+        'completeness_score':round(100*(len(key_fields)-len(missing))/len(key_fields)),
+        'stage':'NEW',
+        'qualification_status':'PENDING',
+        'missing_fields':missing,
+        'next_action':'Review partner application' if is_partner else 'Review intake and qualify',
+    }
+    await backend.insert('trade_rfq_intakes',row)
+
 @app.post('/crm/intake')
 async def public_intake(p:IntakeIn):
     backend=get_backend(); ts=now(); email=p.email
@@ -312,7 +353,17 @@ async def public_intake(p:IntakeIn):
     intake_id=f'int_{secrets.token_urlsafe(10)}'
     row={'intake_id':intake_id,'customer_id':customer_id,'product_need':p.product_need,'specifications':p.specifications,'quantity':p.quantity,'target_budget':p.target_budget,'currency':p.currency.upper(),'destination_country':p.destination_country.upper(),'target_delivery_date':p.target_delivery_date,'preferred_incoterm':p.preferred_incoterm,'notes':p.notes,'status':'NEW','qualification_status':'PENDING','created_at':ts,'updated_at':ts}
     await backend.insert('customer_trade_intakes',row)
-    await audit({'role':'customer','id':customer_id},'intake_created','Customer submitted a new trade sourcing request',customer_id,intake_id)
+    # First-touch attribution: captured client-side only, never invented here.
+    first_touch={k:v for k,v in {'utm_source':p.utm_source,'utm_medium':p.utm_medium,'utm_campaign':p.utm_campaign,'referrer':p.referrer}.items() if v}
+    first_touch['lead_type']=(p.lead_type or 'RFQ').upper()
+    await audit({'role':'customer','id':customer_id},'intake_created','Customer submitted a new trade sourcing request',customer_id,intake_id,{'first_touch':first_touch})
+    # Bridge: mirror into the owner Qualification Queue (trade_rfq_intakes).
+    # Best-effort only — the canonical intake above is authoritative and a
+    # bridge failure must never block a real customer submission.
+    try:
+        await _bridge_intake_to_owner_queue(backend,ts,p,intake_id,customer_id,first_touch)
+    except Exception as exc:
+        await audit({'role':'system','id':'intake-bridge'},'queue_bridge_failed','Owner queue bridge failed; canonical intake persisted',customer_id,intake_id,{'error_type':type(exc).__name__})
     attachment=public_attachment_readiness()
     capability={'available':False,**attachment}
     if attachment['ready']:
