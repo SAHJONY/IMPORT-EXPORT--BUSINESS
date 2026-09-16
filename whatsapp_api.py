@@ -1069,6 +1069,22 @@ async def hermes_event(
             message_type=event.message_type,
             direction=event.direction,
         )
+        if event.direction == "inbound":
+            # Owner-initiated inbound messages stay private (business_events),
+            # but they still create a verified session record so the compliance
+            # gate can see a genuine owner conversation exactly like any
+            # customer conversation. The 24h window, opt-out, rate-limit and
+            # anti-blast checks in _assert_compliant_session_outbound still
+            # apply unchanged; nothing here invents or backdates a session.
+            await _register_inbound_message(
+                phone=normalized_phone or phone,
+                message_id=message_id,
+                message_type=event.message_type,
+                text=event.content,
+                contact_name=event.contact_name,
+                provider="hermes_whatsapp",
+                direction="inbound",
+            )
         return {"status": "accepted_owner_private", "event_id": event.event_id, "message_id": message_id, "public_visibility": False}
     await _register_inbound_message(
         phone=normalized_phone or phone,
