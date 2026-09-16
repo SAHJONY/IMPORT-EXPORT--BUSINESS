@@ -791,7 +791,11 @@ async def _process_inbound(
     cognition_ready = hermes_configured() or _openai_ready()
     if not (_ai_auto_reply_enabled() and cognition_ready and _send_ready(cfg)):
         return
-    reply = await generate_sofia_reply(text, contact_name, owner_context=await _is_owner_whatsapp(phone))
+    reply = await generate_sofia_reply(
+        text, contact_name,
+        owner_context=await _is_owner_whatsapp(phone),
+        sender_phone=clean_phone or None,
+    )
     if not reply:
         return
     try:
