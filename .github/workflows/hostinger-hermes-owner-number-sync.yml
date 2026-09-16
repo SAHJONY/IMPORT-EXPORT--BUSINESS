@@ -56,7 +56,7 @@ jobs:
             sender_aliases = expand_whatsapp_aliases(sender_raw)
             owner_channel_prompt = None
             if owner_id and owner_id in sender_aliases:
-'''
+          '''
           new = '''            owner_id = normalize_whatsapp_identifier(
                 os.getenv("OWNER_WHATSAPP_E164") or os.getenv("SAHJONY_OWNER_WHATSAPP_E164") or ""
             )
@@ -70,7 +70,7 @@ jobs:
                 or (owner_lid and (owner_lid == sender_norm or owner_lid in sender_aliases))
             )
             if is_owner_sender:
-'''
+          '''
           if old in s:
               s = s.replace(old, new, 1)
           elif 'is_owner_sender = bool(' not in s:
@@ -91,8 +91,16 @@ jobs:
           chmod 600 /root/.hermes/SOUL.md
 
           systemctl --user daemon-reload
+          PYTHONPATH=/root/.hermes/hermes-agent /root/.hermes/hermes-agent/venv/bin/python - <<'PY_QUIET_DRAIN'
+          from gateway.drain_control import write_drain_request
+          write_drain_request(principal="sahjony-managed-restart", suppress_notification=True)
+          PY_QUIET_DRAIN
           systemctl --user restart hermes-gateway.service
           sleep 10
+          PYTHONPATH=/root/.hermes/hermes-agent /root/.hermes/hermes-agent/venv/bin/python - <<'PY_QUIET_CLEAR'
+          from gateway.drain_control import clear_drain_request
+          clear_drain_request()
+          PY_QUIET_CLEAR
           systemctl --user is-active --quiet hermes-gateway.service
           envline="$(systemctl --user show hermes-gateway.service -p Environment --value)"
           echo "$envline" | grep -q 'OWNER_WHATSAPP_E164='

@@ -32,7 +32,11 @@ jobs:
           replacements={
             'fundador y CEO de PRIMO':'propietario de SAHJONY LLC',
             'protocolo de banca soberana':'SAHJONY LLC',
-            'CEO de PRIMO':'propietario de SAHJONY LLC'
+            'CEO de PRIMO':'propietario de SAHJONY LLC',
+            'founder of PRIMO and SAHJONY':'Chairman and owner of SAHJONY LLC',
+            'Founder & CEO of PRIMO':'Chairman and owner of SAHJONY LLC',
+            'founder of PRIMO':'owner of SAHJONY LLC',
+            'CEO of PRIMO':'owner of SAHJONY LLC',
           }
           con=sqlite3.connect(db,timeout=30)
           con.execute('PRAGMA busy_timeout=30000')

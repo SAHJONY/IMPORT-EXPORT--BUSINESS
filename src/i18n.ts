@@ -62,6 +62,11 @@ function syncBrowserState(language:string){
 }
 
 i18n.on('languageChanged',syncBrowserState);
+window.addEventListener('sahjony:localechange',event=>{
+  const locale=normalizeLocale((event as CustomEvent<{locale?:string}>).detail?.locale||'');
+  const language=locale==='es'?'es':'en';
+  if(i18n.language!==language)void i18n.changeLanguage(language);
+});
 syncBrowserState(initialLanguage);
 
 export default i18n;

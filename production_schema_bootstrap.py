@@ -93,10 +93,20 @@ CREATE TABLE IF NOT EXISTS cuba_partner_accounts (
     referral_token_hash text NOT NULL,
     automatic_commission_payout boolean NOT NULL DEFAULT false,
     owner_note text,
+    utm_source text,
+    utm_medium text,
+    utm_campaign text,
+    referrer text,
+    first_touch_source text,
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS cuba_partner_accounts_status_idx ON cuba_partner_accounts(status, created_at DESC);
+ALTER TABLE cuba_partner_accounts ADD COLUMN IF NOT EXISTS utm_source text;
+ALTER TABLE cuba_partner_accounts ADD COLUMN IF NOT EXISTS utm_medium text;
+ALTER TABLE cuba_partner_accounts ADD COLUMN IF NOT EXISTS utm_campaign text;
+ALTER TABLE cuba_partner_accounts ADD COLUMN IF NOT EXISTS referrer text;
+ALTER TABLE cuba_partner_accounts ADD COLUMN IF NOT EXISTS first_touch_source text;
 
 CREATE TABLE IF NOT EXISTS cuba_partner_referrals (
     id bigserial PRIMARY KEY,

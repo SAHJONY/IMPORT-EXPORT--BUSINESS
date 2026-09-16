@@ -8,3 +8,27 @@
 
 @media(max-width:1100px){.public-hero,.capabilities,.command-hero,.module-hero,.action-grid{grid-template-columns:1fr}.public-kpis{grid-template-columns:repeat(2,1fr)}.os-shell{grid-template-columns:1fr}.os-side{position:relative;height:auto;border-right:0;border-bottom:1px solid var(--line)}.os-side nav{grid-template-columns:repeat(4,1fr)}.metric-grid{grid-template-columns:repeat(2,1fr)}.runtime-badge{justify-self:start}.records-grid article{grid-template-columns:repeat(2,1fr)}}
 @media(max-width:720px){.public-nav{align-items:flex-start;flex-direction:column;padding:12px}.public-hero{padding:54px 14px 30px}.hero-copy h1{font-size:52px}.public-kpis,.cap-grid{grid-template-columns:1fr}.public-kpis,.capabilities{padding-left:14px;padding-right:14px}.os-main{padding:12px}.os-side nav{grid-template-columns:repeat(2,1fr)}.os-top{align-items:flex-start;flex-direction:column}.auth-row,.auth-row input,.auth-row select{width:100%}.command-hero,.module-hero{padding:18px}.command-hero h1,.module-hero h1{font-size:43px}.metric-grid,.launcher,.trade-form{grid-template-columns:1fr}.trade-form textarea,.form-actions{grid-column:auto}.records-grid article{grid-template-columns:1fr}.public-nav nav{width:100%}.public-nav nav button{flex:1}.hero-actions button{width:100%}}
+
+/* ---- PILAR 4: shared design-system alignment (public site + owner dashboard) ---- */
+:root{
+  --sj-bg:#050b13;--sj-panel:#0a1a29;--sj-panel2:#10283c;
+  --sj-line:rgba(255,255,255,.10);--sj-text:#f4f9ff;--sj-muted:#8ea6ba;
+  --sj-accent:#5ad8ff;--sj-green:#78efb8;--sj-gold:#e6c675;--sj-danger:#ff7d86;
+  --sj-focus:#8fe3ff;
+}
+/* Visible keyboard focus (WCAG 2.4.7) */
+a:focus-visible,button:focus-visible,input:focus-visible,textarea:focus-visible,
+select:focus-visible,summary:focus-visible,[tabindex]:focus-visible{
+  outline:2px solid var(--sj-focus);outline-offset:3px;border-radius:6px;
+}
+/* 44px touch targets on coarse pointers */
+@media(pointer:coarse){
+  button,input,textarea,select{min-height:44px}
+}
+/* Respect reduced motion */
+@media(prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:.001s!important;transition-duration:.001s!important}
+  html{scroll-behavior:auto}
+}
+/* Action feedback: disabled/loading buttons */
+button[disabled]{opacity:.65;cursor:wait}

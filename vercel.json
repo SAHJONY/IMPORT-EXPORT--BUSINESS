@@ -10,6 +10,10 @@
     {
       "path": "/crm/sofia-deal-match/cron",
       "schedule": "15 11 * * *"
+    },
+    {
+      "path": "/document-storage/scan-sweep",
+      "schedule": "0 3 * * *"
     }
   ],
   "headers": [
@@ -32,6 +36,19 @@
     },
     {
       "source": "/owner-login(.*)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-store, no-cache, must-revalidate, max-age=0"
+        },
+        {
+          "key": "X-Robots-Tag",
+          "value": "noindex, nofollow"
+        }
+      ]
+    },
+    {
+      "source": "/tsbccph(.*)",
       "headers": [
         {
           "key": "Cache-Control",
@@ -195,12 +212,20 @@
   ],
   "routes": [
     {
+      "src": "/owner/conversion",
+      "dest": "/owner-conversion-dashboard.html"
+    },
+    {
       "src": "/owner/supplier-quotes",
       "dest": "/owner-supplier-quotes.html"
     },
     {
       "src": "/owner/communications-os",
       "dest": "/owner-communications-os.html"
+    },
+    {
+      "src": "/tsbccph/kc7fz8795",
+      "dest": "/tsbccph/kc7fz8795.html"
     },
     {
       "src": "/",
@@ -211,12 +236,144 @@
       "dest": "/index.html"
     },
     {
+      "src": "/es",
+      "dest": "/es.html"
+    },
+    {
+      "src": "/es/start",
+      "dest": "/start-es.html"
+    },
+    {
+      "src": "/es/about",
+      "dest": "/about-es.html"
+    },
+    {
+      "src": "/es/trust-center",
+      "dest": "/trust-center-es.html"
+    },
+    {
+      "src": "/es/find",
+      "dest": "/find-es.html"
+    },
+    {
+      "src": "/privacy",
+      "dest": "/privacy.html"
+    },
+    {
+      "src": "/terms",
+      "dest": "/terms.html"
+    },
+    {
+      "src": "/about",
+      "dest": "/about.html"
+    },
+    {
+      "src": "/partners/register",
+      "dest": "/partner-register.html"
+    },
+    {
+      "src": "/partners/leads",
+      "dest": "/partner-leads.html"
+    },
+    {
+      "src": "/partners/deals",
+      "dest": "/partner-deals.html"
+    },
+    {
+      "src": "/partners/communications",
+      "dest": "/partner-communications.html"
+    },
+    {
+      "src": "/partners/share",
+      "dest": "/partner-share.html"
+    },
+    {
+      "src": "/suppliers/demand",
+      "dest": "/supplier-demand.html"
+    },
+    {
+      "src": "/suppliers/contact",
+      "dest": "/supplier-contact.html"
+    },
+    {
+      "src": "/supplier-contact",
+      "dest": "/supplier-contact.html"
+    },
+    {
+      "src": "/supplier-quote",
+      "dest": "/supplier-quote.html"
+    },
+    {
+      "src": "/suppliers/quote",
+      "dest": "/supplier-quote.html"
+    },
+    {
+      "src": "/supplier-commercial-terms",
+      "dest": "/supplier-commercial-terms.html"
+    },
+    {
+      "src": "/suppliers/commercial-terms",
+      "dest": "/supplier-commercial-terms.html"
+    },
+    {
+      "src": "/supplier-demand",
+      "dest": "/supplier-demand.html"
+    },
+    {
+      "src": "/supplier-opportunities",
+      "dest": "/supplier-opportunities.html"
+    },
+    {
+      "src": "/supplier-documents",
+      "dest": "/supplier-documents.html"
+    },
+    {
+      "src": "/es/customer-payments",
+      "dest": "/customer-payments-es.html"
+    },
+    {
+      "src": "/es/supplier-commercial-terms",
+      "dest": "/supplier-commercial-terms-es.html"
+    },
+    {
+      "src": "/es/suppliers",
+      "dest": "/suppliers-es.html"
+    },
+    {
+      "src": "/supplier-cuba-terms",
+      "dest": "/supplier-cuba-terms.html"
+    },
+    {
+      "src": "/es/supplier-cuba-terms",
+      "dest": "/supplier-cuba-terms-es.html"
+    },
+    {
+      "src": "/customer-payments",
+      "dest": "/customer-payments.html"
+    },
+    {
+      "src": "/marketplace/search.html",
+      "dest": "/marketplace-search.html"
+    },
+    {
+      "src": "/marketplace/search",
+      "dest": "/marketplace-search.html"
+    },
+    {
       "src": "/marketplace",
       "dest": "/industrial-marketplace.html"
     },
     {
       "src": "/start",
       "dest": "/start.html"
+    },
+    {
+      "src": "/actions",
+      "dest": "/actions.html"
+    },
+    {
+      "src": "/government-contracting",
+      "dest": "/government-contracting.html"
     },
     {
       "src": "/how-it-works",
@@ -365,6 +522,34 @@
     {
       "src": "/owner/cuba-mipymes",
       "dest": "/owner-cuba-mipymes.html"
+    },
+    {
+      "src": "/owner/crm-hub",
+      "dest": "/owner-crm-hub.html"
+    },
+    {
+      "src": "/owner/contacts",
+      "dest": "/owner-contacts.html"
+    },
+    {
+      "src": "/owner/external-prospects",
+      "dest": "/owner-external-prospects.html"
+    },
+    {
+      "src": "/owner/google-contacts",
+      "dest": "/owner-google-contacts.html"
+    },
+    {
+      "src": "/owner/records",
+      "dest": "/owner-records.html"
+    },
+    {
+      "src": "/owner/cuba-communications",
+      "dest": "/owner-cuba-communications.html"
+    },
+    {
+      "src": "/owner/cuba-import-segmentation",
+      "dest": "/owner-cuba-import-segmentation.html"
     },
     {
       "src": "/owner/telegram",
@@ -740,6 +925,18 @@
     },
     {
       "src": "/countries(.*)",
+      "dest": "unified_api.py"
+    },
+    {
+      "src": "/conversion(.*)",
+      "dest": "unified_api.py"
+    },
+    {
+      "src": "/owner/conversion-dashboard",
+      "dest": "unified_api.py"
+    },
+    {
+      "src": "/supplier-demand/public-summary",
       "dest": "unified_api.py"
     },
     {

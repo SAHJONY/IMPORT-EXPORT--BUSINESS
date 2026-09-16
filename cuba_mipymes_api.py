@@ -1,10 +1,12 @@
 import hashlib, io, os, re, unicodedata
 from datetime import datetime, timezone
 import httpx
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, Header, HTTPException, Query, Request
 from pypdf import PdfReader
 
-app=FastAPI(title='SAHJONY Cuba Private Sector CRM',version='3.1.1',docs_url=None,redoc_url=None)
+from auth import verify_owner_token
+
+app=FastAPI(title='SAHJONY Cuba Private Sector CRM',version='3.3.0',docs_url=None,redoc_url=None)
 ORG='org_sahjony_global_trade'; TARGET=15600; INDEX='https://www.minjus.gob.cu/es/publicaciones/prontuario'
 SOURCES={
 '2026-02-03':('Relación CNA-MIPYMES Registro Mercantil 03.02.2026','https://www.minjus.gob.cu/sites/default/files/archivos/publicacion/2026-03/Febrero%203.2026%20Relaci%C3%B3n%20MIPYMES%20Y%20CNA%20%203.02.26%20.pdf'),
@@ -35,6 +37,26 @@ async def rows():
    if len(p)<1000: break
    off+=len(p)
  return out
+async def paged_private_rows(limit:int,offset:int,q:str|None=None,province_filter:str|None=None):
+ u,k=cfg(); h={'apikey':k,'Authorization':f'Bearer {k}','Accept':'application/json','Prefer':'count=exact'}
+ params={'logical_table':'eq.external_trade_prospects','data->>actor_type':'in.(MIPYME_PRIVADA,EMPRESA_PRIVADA,OTHER_NON_STATE_VERIFIED)','select':'record_key,data','order':'record_key.asc','limit':str(limit),'offset':str(offset)}
+ if q:
+  term=re.sub(r'[^0-9A-Za-zÁÉÍÓÚÜÑáéíóúüñ .&@+-]+',' ',q).strip()[:120]
+  if term: params['or']=f'(data->>buyer_company.ilike.*{term}*,data->>company_name.ilike.*{term}*,data->>business_name.ilike.*{term}*,data->>primary_activity.ilike.*{term}*)'
+ if province_filter:
+  province_clean=re.sub(r'[^A-Za-zÁÉÍÓÚÜÑáéíóúüñ .-]+',' ',province_filter).strip()[:80]
+  if province_clean: params['data->>province']=f'ilike.*{province_clean}*'
+ async with httpx.AsyncClient(timeout=20) as client:
+  response=await client.get(f'{u}/rest/v1/sahjony_trade_records',headers=h,params=params); response.raise_for_status(); payload=response.json() if response.content else []
+  total=0; content_range=response.headers.get('content-range','')
+  try: total=int(content_range.rsplit('/',1)[1])
+  except Exception: total=offset+len(payload)
+  out=[]
+  for row in payload:
+   if isinstance(row.get('data'),dict):
+    item=dict(row['data']); item['_record_key']=row.get('record_key'); item['_flat']=row; out.append(item)
+  return out,total
+
 async def private_row_count():
  u,k=cfg(); h={'apikey':k,'Authorization':f'Bearer {k}','Accept':'application/json','Prefer':'count=exact'}
  params={'logical_table':'eq.external_trade_prospects','data->>actor_type':'in.(MIPYME_PRIVADA,EMPRESA_PRIVADA,OTHER_NON_STATE_VERIFIED)','select':'record_key','limit':'1'}
@@ -152,14 +174,91 @@ async def mep_ceiling():
 @app.get('/cuba-mipymes-api/health')
 @app.get('/crm/cuba-mipymes/health')
 async def health():
- cur=await private_row_count(); return {'status':'ok','service':'cuba-private-sector-read-only-crm','version':'3.1.2','record_count':cur,'count_semantics':'canonical_private_records','target':TARGET,'remaining_shortfall':max(TARGET-cur,0),'source_scope':'public_registry_and_official_actor_lists_research','ownership_policy':'evidence_only','binding_actions':False}
+ cur=await private_row_count(); return {'status':'ok','service':'cuba-private-sector-crm','version':'3.3.0','contact_writes':'owner-authenticated-contact-update-only','record_count':cur,'count_semantics':'canonical_private_records','target':TARGET,'remaining_shortfall':max(TARGET-cur,0),'source_scope':'public_registry_and_official_actor_lists_research','ownership_policy':'evidence_only','binding_actions':False}
 @app.get('/cuba-mipymes-api/list')
 @app.get('/crm/cuba-mipymes')
 @app.get('/crm/cuba-mipymes/list')
-async def list_records():
- seen=set(); out=[]
- for r in await rows():
+async def list_records(limit:int=Query(100,ge=1,le=250),offset:int=Query(0,ge=0),q:str|None=Query(None,max_length=120),province:str|None=Query(None,max_length=80)):
+ page,total=await paged_private_rows(limit,offset,q,province); seen=set(); out=[]
+ for r in page:
   k=norm(r.get('buyer_company') or r.get('company_name') or r.get('business_name'))
   if not k or k in seen or not is_private(r):continue
-  seen.add(k); out.append({x:r.get(x) for x in ('external_reference','buyer_company','buyer_country','buyer_contact','public_email','public_phone','actor_type','province','municipality','product_category','product_description','destination','source_type','source_platform','source_name','source_provenance','source_url','verification_status','registry_status','verification_date','qualification_stage','import_export_relevance','evidence_summary','next_action','created_at','updated_at')})
- out.sort(key=lambda x:str(x.get('buyer_company') or '').casefold()); return {'status':'ok','count':len(out),'records':out,'classification':'RESEARCH / VERIFIED PUBLIC SOURCE','notice':'Registry-only records are not active buyers or RFQs without independent demand evidence.'}
+  seen.add(k); rec={x:r.get(x) for x in ('external_reference','buyer_company','buyer_country','buyer_contact','public_email','public_phone','actor_type','province','municipality','product_category','product_description','destination','source_type','source_platform','source_name','source_provenance','source_url','verification_status','registry_status','verification_date','qualification_stage','import_export_relevance','evidence_summary','next_action','contact_source_name','contact_source_url','contact_verified_at','created_at','updated_at')}
+  rec['record_key']=r.get('_record_key')
+  flat=r.get('_flat') or {}
+  for x in ('public_email','public_phone','buyer_contact','contact_source_name','contact_source_url','contact_verified_at'):
+   if flat.get(x):rec[x]=flat.get(x)
+  out.append(rec)
+ out.sort(key=lambda x:str(x.get('buyer_company') or '').casefold())
+ return {'status':'ok','count':len(out),'total':total,'limit':limit,'offset':offset,'has_more':offset+limit<total,'records':out,'classification':'RESEARCH / VERIFIED PUBLIC SOURCE','notice':'Registry-only records are not active buyers or RFQs without independent demand evidence.'}
+MAX_CONTACT_ITEMS=100
+PHONE_RE=re.compile(r'^[\d\s+\-()/]{6,40}$')
+def _auth_owner(x_role,authorization):
+ if x_role!='owner':raise HTTPException(403,'Owner role required')
+ if not authorization or not authorization.startswith('Bearer '):raise HTTPException(401,'Missing Authorization')
+ if not verify_owner_token(authorization.removeprefix('Bearer ').strip()):raise HTTPException(403,'Invalid owner credential')
+def _clean_contact_item(raw,idx):
+ if not isinstance(raw,dict):return None,None,{'index':idx,'error':'Item must be an object'}
+ rk=str(raw.get('record_key') or '').strip()[:200]
+ email=str(raw.get('public_email') or '').strip()[:320]
+ phone=str(raw.get('public_phone') or '').strip()[:40]
+ src_name=str(raw.get('contact_source_name') or '').strip()[:500]
+ src_url=str(raw.get('contact_source_url') or '').strip()[:500]
+ if not rk:return None,None,{'index':idx,'error':'record_key is required'}
+ if not email and not phone:return None,None,{'index':idx,'error':'At least one of public_email or public_phone is required'}
+ if email and '@' not in email:return None,None,{'index':idx,'error':'public_email must contain @'}
+ if phone and not PHONE_RE.match(phone):return None,None,{'index':idx,'error':'public_phone must be 6-40 chars of digits, spaces, +, -, /, ( or )'}
+ now=datetime.now(timezone.utc).isoformat()
+ fields={'buyer_contact':phone or email,'contact_verified_at':now,'updated_at':now}
+ if email:fields['public_email']=email
+ if phone:fields['public_phone']=phone
+ if src_name:fields['contact_source_name']=src_name
+ if src_url:fields['contact_source_url']=src_url
+ return rk,fields,None
+async def _fetch_existing_rows(keys):
+ # Read current rows so contact fields merge into the existing data JSON
+ # instead of replacing it. Only touches columns known to exist.
+ if not keys:return {}
+ u,k=cfg(); h={'apikey':k,'Authorization':f'Bearer {k}','Accept':'application/json'}
+ quoted=','.join('"'+kk.replace('"','""')+'"' for kk in keys)
+ params={'logical_table':'eq.external_trade_prospects','record_key':f'in.({quoted})','select':'record_key,data','limit':str(len(keys))}
+ out={}
+ async with httpx.AsyncClient(timeout=30) as c:
+  r=await c.get(f'{u}/rest/v1/sahjony_trade_records',headers=h,params=params); r.raise_for_status()
+  for row in (r.json() if r.content else []):
+   if isinstance(row.get('data'),dict):out[str(row.get('record_key'))]=row
+ return out
+@app.post('/crm/cuba-mipymes/contact-update')
+async def contact_update(request:Request,x_role:str|None=Header(None,alias='X-Role'),authorization:str|None=Header(None,alias='Authorization')):
+ """Owner-authenticated write of verified contact info onto CRM records.
+
+ Body: {"items":[{"record_key":str,"public_email":str|None,"public_phone":str|None,"contact_source_name":str,"contact_source_url":str}]}.
+ Contact fields merge into each record's existing data JSON — every other
+ field is preserved and no table schema change is required. Invalid items are
+ rejected with per-item errors; one bad item never fails the whole batch.
+ Never invents contact data — the endpoint only persists what it is given.
+ """
+ _auth_owner(x_role,authorization)
+ try:payload=await request.json()
+ except Exception:raise HTTPException(400,'Body must be JSON')
+ raw_items=payload.get('items') if isinstance(payload,dict) else None
+ if not isinstance(raw_items,list):raise HTTPException(400,'Body must be {"items": [...]}')
+ if len(raw_items)>MAX_CONTACT_ITEMS:raise HTTPException(400,f'Too many items (max {MAX_CONTACT_ITEMS})')
+ cleaned=[];errors=[]
+ for idx,raw in enumerate(raw_items):
+  rk,fields,err=_clean_contact_item(raw,idx)
+  if err:errors.append(err)
+  else:cleaned.append((rk,fields))
+ updated=0
+ if cleaned:
+  try:existing=await _fetch_existing_rows([rk for rk,_ in cleaned])
+  except Exception as e:raise HTTPException(502,f'Could not read existing CRM rows: {e}')
+  merged=[]
+  for rk,fields in cleaned:
+   data=dict((existing.get(rk) or {}).get('data') or {})
+   data.update(fields)
+   merged.append({'logical_table':'external_trade_prospects','record_key':rk,'data':data})
+  missing=[rk for rk,_ in cleaned if rk not in existing]
+  if missing:raise HTTPException(404,f'record_key not found: {missing[:5]}')
+  updated=await upsert(merged)
+ return {'status':'ok','received':len(raw_items),'updated':updated,'rejected':len(errors),'errors':errors}

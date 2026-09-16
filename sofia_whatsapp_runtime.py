@@ -16,6 +16,24 @@ from sofia_hermes_nim_brain import generate as hermes_generate
 from sofia_hermes_nim_brain import configured as hermes_configured
 from sofia_hermes_nim_brain import model_name as hermes_model_name
 from sofia_human_conversation_engine import build_sofia_prompt
+from sofia_track_classifier import (
+    TRACK_ASK,
+    TRACK_IMPORT_EXPORT,
+    TRACK_MY_CUBA_CASH,
+    classify_track,
+)
+from sofia_my_cuba_cash_track import (
+    IMPORT_EXPORT_TRACK_GUARD,
+    MY_CUBA_CASH_SYSTEM_BLOCK,
+    TRACK_ASK_GUIDANCE,
+)
+from sofia_cubacash_intake_client import (
+    apply_intake_update,
+    detect_update_intent,
+    fetch_intakes,
+    format_intake_summary,
+    looks_like_intake_inquiry,
+)
 from whatsapp_relationship_memory_api import _merge_memory
 from whatsapp_sales_brain import analyze_sales_conversation
 from whatsapp_crm_bridge import get_contact_context, owner_update_report
@@ -170,7 +188,162 @@ async def _openai_fallback(system: str, user: str) -> tuple[str, dict[str, Any]]
     }
 
 
-async def generate_sofia_reply(text: str, contact_name: str | None, owner_context: bool = False) -> str:
+async def _resolve_business_track(
+    text: str,
+    *,
+    sender_phone: str | None,
+    lead_id: str | None,
+    transcript: str = "",
+    owner_context: bool,
+) -> dict[str, Any]:
+    """Classify the inbound message into a business track and build the prompt addition.
+
+    Returns {"action": "short_circuit", "reply": str, "audit": {...}} when Sofia must
+    answer deterministically (exactly one clarifying question, or an ambiguous
+    multi-intake update target), otherwise
+    {"action": "continue", "prompt_addition": str, "audit": {...}}.
+
+    Track continuity: a follow-up message with no track signal of its own (e.g.
+    "¿cómo va mi solicitud?") inherits the track the conversation already
+    established, instead of re-asking. A message that classifies on its own
+    always wins — that is how mid-conversation track switches are honored.
+
+    Owner-context mode is unchanged: no classification, no intake access.
+    """
+    if owner_context:
+        return {
+            "action": "continue",
+            "prompt_addition": "",
+            "audit": {"business_track": "owner_context"},
+        }
+
+    decision = classify_track(text)
+    classification_source = "message"
+    if decision.track == TRACK_ASK and transcript.strip():
+        inherited = classify_track(transcript[-3000:])
+        if inherited.track in (TRACK_IMPORT_EXPORT, TRACK_MY_CUBA_CASH):
+            decision = inherited
+            classification_source = "history"
+    audit: dict[str, Any] = {
+        "business_track": decision.track,
+        "classification_confidence": round(decision.confidence, 2),
+        "classification_signals": decision.signals[:8],
+        "classification_language": decision.language,
+        "classification_source": classification_source,
+    }
+
+    if decision.track == TRACK_ASK:
+        if not transcript.strip():
+            return {
+                "action": "short_circuit",
+                "reply": decision.clarifying_question or "",
+                "audit": audit,
+            }
+        return {
+            "action": "continue",
+            "prompt_addition": "\n\n" + TRACK_ASK_GUIDANCE.format(
+                question=decision.clarifying_question or ""
+            ),
+            "audit": audit,
+        }
+
+    if decision.track == TRACK_IMPORT_EXPORT:
+        return {
+            "action": "continue",
+            "prompt_addition": "\n\n" + IMPORT_EXPORT_TRACK_GUARD,
+            "audit": audit,
+        }
+
+    # --- MY CUBA CASH track -------------------------------------------------
+    addition = "\n\n" + MY_CUBA_CASH_SYSTEM_BLOCK
+    if sender_phone:
+        e164 = sender_phone if sender_phone.startswith("+") else f"+{sender_phone}"
+        update_intent = detect_update_intent(text)
+        try:
+            intakes = await fetch_intakes(e164)
+            fetch_error: str | None = None
+        except Exception as exc:
+            intakes = None
+            fetch_error = type(exc).__name__
+        if update_intent is not None:
+            field, value = update_intent
+            if intakes is None:
+                addition += (
+                    "\n\nINTAKE UPDATE REQUESTED — LOOKUP FAILED "
+                    f"({fetch_error}). Tell the customer you could not verify their "
+                    "request right now and will follow up; do not claim any change was made."
+                )
+                audit["cubacash_update"] = "lookup_failed"
+            elif not intakes:
+                addition += (
+                    "\n\nThe customer asked to update a request, but NO intake records were "
+                    "found for their number at mycubacash.com. Say so plainly and offer to "
+                    "start a new request; do not invent one."
+                )
+                audit["cubacash_update"] = "no_intakes"
+            elif len(intakes) > 1:
+                return {
+                    "action": "short_circuit",
+                    "reply": (
+                        "Veo varias solicitudes a tu nombre:\n"
+                        + format_intake_summary(intakes, max_items=5)
+                        + "\n¿Cuál quieres actualizar?"
+                    ),
+                    "audit": {**audit, "cubacash_update": "ambiguous_target"},
+                }
+            else:
+                target_id = str(intakes[0].get("id"))
+                try:
+                    result = await apply_intake_update(
+                        target_id, {field: value}, sender_phone_e164=e164
+                    )
+                except ValueError as exc:
+                    # Allowlist violation = programmer error: loud in audit, safe in reply.
+                    result = {"ok": False, "reason": "validation_error"}
+                    audit["cubacash_validation_error"] = str(exc)[:200]
+                except Exception as exc:
+                    result = {"ok": False, "reason": f"transport_{type(exc).__name__}"}
+                if result.get("ok"):
+                    addition += (
+                        "\n\nVERIFIED INTAKE UPDATE — read-back confirmed at mycubacash.com:\n"
+                        + json.dumps(result["record"], ensure_ascii=False, default=str)[:2000]
+                        + "\nReport this outcome truthfully and briefly; do not add details not shown above."
+                    )
+                    audit["cubacash_update"] = "ok"
+                    audit["cubacash_intake_id"] = target_id
+                else:
+                    addition += (
+                        "\n\nINTAKE UPDATE COULD NOT BE CONFIRMED "
+                        f"(reason: {result.get('reason')}). Acknowledge without inventing details; "
+                        "say the change could not be confirmed and it will be followed up."
+                    )
+                    audit["cubacash_update"] = "failed"
+        elif looks_like_intake_inquiry(text):
+            if intakes is None:
+                addition += (
+                    "\n\nIntake lookup temporarily unavailable — do not invent intake details; "
+                    "say you will check and follow up."
+                )
+            elif intakes:
+                addition += (
+                    "\n\nVERIFIED CUSTOMER INTAKE RECORDS (mycubacash.com, read-only, newest first):\n"
+                    + format_intake_summary(intakes)
+                    + "\nUse only these verified records. Never invent amounts, statuses, or timelines."
+                )
+            else:
+                addition += (
+                    "\n\nNo intake records found for this sender at mycubacash.com. Say so plainly "
+                    "and offer to start a new request; do not invent one."
+                )
+    return {"action": "continue", "prompt_addition": addition, "audit": audit}
+
+
+async def generate_sofia_reply(
+    text: str,
+    contact_name: str | None,
+    owner_context: bool = False,
+    sender_phone: str | None = None,
+) -> str:
     if not hermes_configured() and not os.getenv("OPENAI_API_KEY", "").strip():
         return ""
 
@@ -233,6 +406,21 @@ async def generate_sofia_reply(text: str, contact_name: str | None, owner_contex
     system = build_sofia_prompt(memory)
     system += "\n\n" + adaptive
     system += "\n\nYou are Sofía Smith, SAHJONY GLOBAL TRADING's Executive Manager, Executive Assistant and AI Commercial Executive. Communicate naturally and professionally. Never falsely claim to be a physical human being. If identity or automation is directly asked about, answer truthfully and briefly, then continue helping."
+    track_resolution = await _resolve_business_track(
+        text,
+        sender_phone=sender_phone,
+        lead_id=lead_id,
+        transcript=transcript,
+        owner_context=owner_context,
+    )
+    track_audit: dict[str, Any] = dict(track_resolution.get("audit") or {})
+    if track_resolution.get("action") == "short_circuit":
+        await _audit(lead_id, "sofia_track_clarification", {
+            "summary": "Sofia answered deterministically for an ambiguous business track",
+            **track_audit,
+        })
+        return str(track_resolution.get("reply") or "")[:4096]
+    system += str(track_resolution.get("prompt_addition") or "")
     if owner_context:
         system += "\n\nOWNER EXECUTIVE MODE\n- The current sender is the authenticated SAHJONY owner. Treat this as an internal executive request, not a customer sales intake.\n- Never ask the owner to export/upload CRM data as the first response. Use the connected SAHJONY source snapshot supplied below first.\n- Distinguish verified zero from unknown/unreadable. Never convert source failure into zero.\n- If one source is unavailable, give the best partial report from healthy sources and isolate the blocker.\n- Do not fabricate cash, revenue, profit, invoices, payments, opportunities, shipments, or system health.\n- Only ask the owner for something when it is genuinely owner-only and cannot be resolved from connected systems."
         system += "\n\nLIVE OWNER SOURCE SNAPSHOT\n" + json.dumps(owner_report or {}, ensure_ascii=False, default=str)[:30000]
@@ -329,6 +517,10 @@ WHATSAPP HUMAN CONVERSATION RULES
             "crm_context_loaded": bool(crm_context.get("crm_connected")),
             "sales_intelligence_loaded": True,
             "adaptive_context_loaded": True,
+            "business_track": track_audit.get("business_track"),
+            "classification_confidence": track_audit.get("classification_confidence"),
+            "classification_signals": track_audit.get("classification_signals"),
+            "cubacash_update": track_audit.get("cubacash_update"),
             "agentic_sales_plan": sales_plan,
             "hermes_style_agentic_loop": True,
             "max_new_questions": 2,

@@ -35,8 +35,16 @@ jobs:
             printf '%s\n' '' '## Owner fast-response path' '- For simple owner identity, company identity, Sofia identity/role, or business-description questions, answer immediately from this canonical SOUL and verified owner mapping. Do not launch research, tools, or long-running work first.' '- Keep these owner answers short and direct. Never emit internal queue, redirect, iteration, elapsed-time, model, gateway, or tool-status notices into WhatsApp.' '- For an owner request for an update report, use verified SAHJONY CRM/platform data when available. If a live source is temporarily unavailable, give the verified facts already available, clearly mark the unavailable live slice, and continue recovery internally; never tell the owner to supply CSV/SQL/link data that SAHJONY should already own.' '- When a newer owner message arrives while a non-binding task is still running, prioritize the newer owner message and interrupt stale work rather than making the owner wait behind it.' >> "$SOUL"
           fi
           chmod 600 "$SOUL"
+          PYTHONPATH=/root/.hermes/hermes-agent /root/.hermes/hermes-agent/venv/bin/python - <<'PY_QUIET_DRAIN'
+          from gateway.drain_control import write_drain_request
+          write_drain_request(principal="sahjony-managed-restart", suppress_notification=True)
+          PY_QUIET_DRAIN
           systemctl --user restart hermes-gateway.service
           sleep 12
+          PYTHONPATH=/root/.hermes/hermes-agent /root/.hermes/hermes-agent/venv/bin/python - <<'PY_QUIET_CLEAR'
+          from gateway.drain_control import clear_drain_request
+          clear_drain_request()
+          PY_QUIET_CLEAR
           systemctl --user is-active --quiet hermes-gateway.service
           pgrep -f '/whatsapp-bridge/bridge.js.*--mode bot' >/dev/null
           "$H/hermes-agent/venv/bin/python" -c "import yaml; d=yaml.safe_load(open('/root/.hermes/config.yaml')) or {}; x=d.get('display',{}); print('BUSY_ACK_ENABLED='+str(x.get('busy_ack_enabled')).lower()); print('BUSY_ACK_DETAIL='+str(x.get('busy_ack_detail')).lower()); print('BUSY_INPUT_MODE='+str(x.get('busy_input_mode'))); assert x.get('busy_ack_enabled') is False; assert x.get('busy_ack_detail') is False; assert x.get('busy_input_mode')=='interrupt'"

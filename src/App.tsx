@@ -41,7 +41,8 @@ const labelFor=(role:Role,key:ModuleKey)=>role==='customer'?(modules[key].custom
 const safeGet=(key:string)=>{try{return sessionStorage.getItem(key)||''}catch{return ''}};
 const safeSet=(key:string,value:string)=>{try{if(value)sessionStorage.setItem(key,value);else sessionStorage.removeItem(key)}catch{}};
 const safeRemove=(key:string)=>{try{sessionStorage.removeItem(key)}catch{}};
-function nav(path:string){history.pushState({},'',path);dispatchEvent(new PopStateEvent('popstate'))}
+function localizedPath(path:string){try{const u=new URL(path,location.origin);const stored=localStorage.getItem('sahjony.locale')||new URLSearchParams(location.search).get('lang')||'';if(stored.toLowerCase().startsWith('es'))u.searchParams.set('lang','es');else if(stored)u.searchParams.set('lang','en-US');return u.pathname+u.search+u.hash}catch{return path}}
+function nav(path:string){history.pushState({},'',localizedPath(path));dispatchEvent(new PopStateEvent('popstate'))}
 
 function route():RouteState{
  const parts=location.pathname.split('/').filter(Boolean);
@@ -71,7 +72,7 @@ function Brand({ownerShortcut=false}:{ownerShortcut?:boolean}){
   if(!ownerShortcut){nav('/');return}
   clicks.current+=1;
   if(reset.current)window.clearTimeout(reset.current);
-  if(clicks.current>=3){clicks.current=0;location.assign('/owner-login');return}
+  if(clicks.current>=3){clicks.current=0;location.assign(localizedPath('/owner-login'));return}
   reset.current=window.setTimeout(()=>{clicks.current=0},800);
  }
  return <button className="brand-button" onClick={activate} aria-label="SAHJONY LLC home"><span className="brand-symbol" aria-hidden="true"><i/></span><span className="brand-copy"><strong>SAHJONY LLC</strong><small>GLOBAL TRADE OS</small></span></button>
@@ -80,14 +81,14 @@ function Brand({ownerShortcut=false}:{ownerShortcut?:boolean}){
 function LegacyPublicSite(){
  return <div className="public-site institutional-public">
   <div className="signal-strip"><span><i/>GLOBAL TRADE NETWORK</span><strong>Human-led. AI-powered. Evidence-controlled.</strong><span>SAHJONY LLC · UNITED STATES</span></div>
-  <header className="public-nav"><Brand ownerShortcut/><nav className="public-links" aria-label="Primary navigation"><a href="#solutions">Capabilities</a><a href="/industrial-marketplace">Marketplace</a><a href="#process">Process</a><a href="/cuba-private-sector">Cuba Desk</a><a className="primary-link" href="/start">Start a request <span aria-hidden="true">↗</span></a></nav></header>
+  <header className="public-nav"><Brand ownerShortcut/><nav className="public-links" aria-label="Primary navigation"><a href="#solutions">Capabilities</a><a href="/marketplace">Marketplace</a><a href="#process">Process</a><a href="/suppliers">Become a supplier</a><a className="primary-link" href="/start">Start a request <span aria-hidden="true">↗</span></a></nav></header>
   <main>
    <section className="public-hero ultra-hero">
     <div className="hero-copy">
      <div className="eyebrow gold"><span>01</span> GLOBAL TRADE, REENGINEERED</div>
      <h1>Move products across borders. <span>Without losing control.</span></h1>
      <p>SAHJONY LLC brings sourcing, deal intelligence, compliance, documentation, logistics and commercial execution into one premium global trade experience.</p>
-     <div className="hero-actions"><a className="primary-link large" href="/start">Launch a sourcing request <span aria-hidden="true">↗</span></a><a className="secondary-link large" href="/industrial-marketplace">Explore the marketplace</a></div>
+     <div className="hero-actions"><a className="primary-link large" href="/start">Launch a sourcing request <span aria-hidden="true">↗</span></a><a className="secondary-link large" href="/marketplace">Explore the marketplace</a></div>
      <div className="trust-row" aria-label="Platform capabilities"><span><i/>Worldwide sourcing</span><span><i/>Case-based execution</span><span><i/>Governed releases</span></div>
     </div>
     <div className="trade-room" aria-label="SAHJONY trade control room preview">
@@ -111,26 +112,26 @@ function LegacyPublicSite(){
 function PublicSite(){
  const facts=[['PRODUCT','Defined need'],['QUANTITY','Commercial volume'],['DESTINATION','Named corridor'],['TIMING','Required window']];
  return <div className="public-site institutional-public cinematic-trade-os">
-  <div className="signal-strip"><span><i/>GLOBAL TRADE NETWORK</span><strong>Human-led · AI-powered · Evidence-controlled</strong><span>SAHJONY LLC · UNITED STATES</span></div>
-  <header className="public-nav cinematic-nav"><Brand ownerShortcut/><nav className="public-links" aria-label="Primary navigation"><a className="text-link" href="#demand">Demand</a><a className="text-link" href="#sourcing">Sourcing</a><a className="text-link" href="#control">Control</a><a className="text-link" href="/cuba-private-sector">Cuba Desk</a><a className="owner-entry" href="/owner-login">Private owner</a><a className="primary-link" href="#inquiry">Submit RFQ <span aria-hidden="true">↗</span></a></nav></header>
+  <div className="signal-strip"><span><i/>GLOBAL TRADE NETWORK</span><strong>Global sourcing · Supplier verification · Managed trade</strong><span>SAHJONY LLC · UNITED STATES</span></div>
+  <header className="public-nav cinematic-nav"><Brand ownerShortcut/><nav className="public-links" aria-label="Primary navigation"><a className="text-link" href="#demand">Demand</a><a className="text-link" href="#sourcing">Sourcing</a><a className="text-link" href="#control">Control</a><a className="text-link" href="/marketplace">Marketplace</a><a className="text-link" href="/suppliers">Suppliers</a><a className="text-link" href="/supplier-commercial-terms">Supplier terms</a><a className="text-link" href="/trust-center.html">How we verify</a><a className="text-link" href="tel:+12816628581">Call trade desk · +1 281-662-8581</a><a className="primary-link" href="#inquiry">Request a quote <span aria-hidden="true">↗</span></a></nav></header>
   <main>
    <section className="cinematic-chapter chapter-hero" data-cinematic>
     <div className="chapter-media hero-media" data-cinematic-media/>
     <div className="chapter-shade"/>
     <div className="chapter-content hero-chapter-copy">
-     <div className="chapter-index" data-cinematic-reveal><span>01 / 06</span><i/> ENTRANCE</div>
+     <div className="chapter-index" data-cinematic-reveal><span>Start</span></div>
      <h1 data-cinematic-reveal>Global trade.<br/><em>Under control.</em></h1>
-     <p data-cinematic-reveal>SAHJONY TRADING OS coordinates sourcing, economics, compliance, documents, logistics and delivery across borders.</p>
-     <div className="chapter-actions" data-cinematic-reveal><a className="primary-link large" href="#inquiry">Start a trade request ↗</a><a className="quiet-link" href="#demand">Enter the system ↓</a></div>
+     <p data-cinematic-reveal>SAHJONY LLC helps businesses find qualified suppliers. SAHJONY is a Houston-based managed sourcing desk: we compare real quotes on price, lead time and terms, and coordinate compliance and delivery — you approve every step.</p>
+     <div className="chapter-actions" data-cinematic-reveal><a className="primary-link large" href="#inquiry">Request a quote ↗</a><a className="quiet-link" href="tel:+12816628581">Talk to the trade desk · +1 281-662-8581</a><a className="quiet-link" href="mailto:ventas@sahjony.com?subject=Callback%20request">Request a callback</a><a className="quiet-link" href="https://wa.me/12816628581">Talk to us on WhatsApp</a><a className="quiet-link" href="/suppliers">I sell / manufacture → Supplier Center</a></div>
     </div>
-    <div className="scroll-cue" data-float><span>SCROLL TO MOVE FORWARD</span><i/></div>
+    <div className="scroll-cue" data-float><span>SCROLL</span><i/></div>
    </section>
 
    <section id="demand" className="cinematic-chapter split-chapter demand-chapter" data-cinematic>
     <div className="chapter-media manufacturing-media" data-cinematic-media/>
     <div className="chapter-shade"/>
     <div className="chapter-content split-copy">
-     <div className="chapter-index" data-cinematic-reveal><span>02 / 06</span><i/> APPROACH</div>
+     <div className="chapter-index" data-cinematic-reveal><span>Your need</span></div>
      <h2 data-cinematic-reveal>Every movement starts with precise demand.</h2>
      <p data-cinematic-reveal>Product, volume, destination and timing become one qualified operating record before sourcing begins.</p>
      <div className="demand-facts" data-cinematic-reveal>{facts.map(([a,b],i)=><article key={a}><small>{String(i+1).padStart(2,'0')} · {a}</small><strong>{b}</strong></article>)}</div>
@@ -141,20 +142,22 @@ function PublicSite(){
     <div className="chapter-media logistics-media" data-cinematic-media/>
     <div className="chapter-shade"/>
     <div className="chapter-content core-copy">
-     <div className="chapter-index" data-cinematic-reveal><span>03 / 06</span><i/> CORE EXPERIENCE</div>
+     <div className="chapter-index" data-cinematic-reveal><span>Supplier search</span></div>
      <h2 data-cinematic-reveal>Source the world.<br/>Compare what matters.</h2>
      <div className="floating-callouts" data-cinematic-reveal><article data-float><small>SUPPLIER</small><strong>Identity verified</strong><span>KYB · capacity · origin</span></article><article data-float><small>COMMERCIAL</small><strong>Terms compared</strong><span>MOQ · Incoterms · lead time</span></article><article data-float><small>ECONOMICS</small><strong>Landed path</strong><span>Cost · freight · protected margin</span></article></div>
     </div>
    </section>
 
+   <section className="institutional-section"><div className="eyebrow gold"><span>PROOF</span> CURRENT SOURCING EVIDENCE</div><h2>Industrial sourcing evidence, with the gaps left visible.</h2><p>Current governed example — not a completed deal; evidence ledger last refreshed 2026-08-27: industrial motors for a 20-ft container. Supplier capability and catalogs were received; safe-area lead time was quoted at 12–14 weeks, non-standard/hazardous at 18–20 weeks, Ex Works Mumbai. The case is blocked because supplier payment terms require 100% advance while the buyer-side requirement is L/C, so SAHJONY has not presented it as executable.</p><div className="chapter-actions"><a className="secondary-link large" href="/trust-center.html">Review the evidence policy</a><a className="quiet-link" href="/start?product_need=industrial%20pumps">Start an industrial RFQ</a></div></section>
+
    <section id="control" className="cinematic-chapter control-chapter" data-cinematic>
     <div className="control-grid" data-cinematic-media/>
     <div className="chapter-content control-copy">
-     <div className="chapter-index" data-cinematic-reveal><span>04 / 06</span><i/> SIGNATURE DETAIL</div>
+     <div className="chapter-index" data-cinematic-reveal><span>Verification</span></div>
      <h2 data-cinematic-reveal>The release is earned by evidence.</h2>
      <p data-cinematic-reveal>SAHJONY holds each transaction at the right gate until counterparty, product, corridor, payment and documents are ready.</p>
      <div className="control-rail" data-cinematic-reveal>{['KYB','HTS / ECCN','SANCTIONS','TERMS','DOCUMENTS','PAYMENT'].map((x,i)=><span key={x}><i className={i<4?'ready':''}/>{x}</span>)}</div>
-     <div className="control-console" data-cinematic-reveal><small>RELEASE POSTURE</small><strong>FAIL-CLOSED</strong><span>AI recommends · Owner governs · Evidence releases</span></div>
+     <div className="control-console" data-cinematic-reveal><small>TRANSACTION STATUS</small><strong>HELD UNTIL VERIFIED</strong><span>We do not move a transaction forward until the required counterparty, product, payment and document checks are complete.</span></div>
     </div>
    </section>
 
@@ -162,7 +165,7 @@ function PublicSite(){
     <div className="chapter-media energy-media" data-cinematic-media/>
     <div className="chapter-shade"/>
     <div className="chapter-content execution-copy">
-     <div className="chapter-index" data-cinematic-reveal><span>05 / 06</span><i/> EXECUTION</div>
+     <div className="chapter-index" data-cinematic-reveal><span>Coordination</span></div>
      <h2 data-cinematic-reveal>Origin to destination.<br/>One visible path.</h2>
      <p data-cinematic-reveal>Factory, freight, port, vessel, customs and delivery remain linked to the same commercial truth.</p>
      <div className="execution-route" data-cinematic-reveal><span>ORIGIN</span><i/><span>SAHJONY CONTROL</span><i/><span>DESTINATION</span></div>
@@ -173,35 +176,39 @@ function PublicSite(){
     <div className="chapter-media finale-media" data-cinematic-media/>
     <div className="chapter-shade"/>
     <div className="chapter-content finale-grid">
-     <div><div className="chapter-index" data-cinematic-reveal><span>06 / 06</span><i/> GRAND FINALE</div><h2 data-cinematic-reveal>Tell SAHJONY what needs to move across borders.</h2><p data-cinematic-reveal>Submit the commercial need. The system creates the controlled path.</p></div>
+     <div><div className="chapter-index" data-cinematic-reveal><span>Contact us</span></div><h2 data-cinematic-reveal>Tell SAHJONY what needs to move across borders.</h2><p data-cinematic-reveal>Submit the commercial need. The system creates the controlled path.</p></div>
      <PublicRfqForm/>
     </div>
    </section>
   </main>
-  <footer><span>© SAHJONY LLC · Global Trade Operating System</span><nav aria-label="Footer navigation"><a href="/global-sourcing">Global sourcing</a><a href="/partners">Partners</a><a href="/cuba-private-sector">Cuba Desk</a><a href="/owner-login">Private owner</a></nav><span>www.sahjony.com</span></footer>
+  <footer><span>© SAHJONY LLC · Global Trade Operating System</span><nav aria-label="Footer navigation"><a href="/global-sourcing">Global sourcing</a><a href="/partners">Partners</a><a href="/marketplace">Marketplace</a><a href="tel:+12816628581">+1 281-662-8581</a></nav><span>www.sahjony.com</span></footer>
  </div>
 }
 
 function PublicRfqForm(){
  const [status,setStatus]=useState<{kind:'idle'|'busy'|'success'|'error';message:string}>({kind:'idle',message:'Submission begins qualification; it does not create a quote, purchase commitment or shipment.'});
- async function submit(event:React.FormEvent<HTMLFormElement>){
-  event.preventDefault();
-  const form=event.currentTarget;
-  setStatus({kind:'busy',message:'Creating your secure trade intake…'});
-  const data=Object.fromEntries(new FormData(form).entries()) as Record<string,string>;
-  const payload:Record<string,string|number>={...data,destination_country:data.destination_country.trim().toUpperCase()};
-  if(data.quantity)payload.quantity=Number(data.quantity);else delete payload.quantity;
-  try{
-   const response=await fetch('/crm/intake',{method:'POST',headers:{'Content-Type':'application/json','Accept':'application/json'},body:JSON.stringify(payload)});
-   const body=await response.json().catch(()=>({}));
-   if(!response.ok)throw new Error(typeof body.detail==='string'?body.detail:'The request could not be accepted.');
-   const intakeId=body?.intake?.intake_id;
-   if(!intakeId)throw new Error('The server did not confirm an intake ID. Please retry.');
-   setStatus({kind:'success',message:`Request received · ${intakeId}. SAHJONY will review the commercial requirement and contact you about qualification.`});
-   form.reset();
-  }catch(cause){setStatus({kind:'error',message:cause instanceof Error?cause.message:'Submission failed. Please review the form and retry.'})}
+ const [attachmentsReady,setAttachmentsReady]=useState(false);
+ useEffect(()=>{fetch('/crm/intake-attachments/health',{cache:'no-store'}).then(r=>r.json()).then(j=>setAttachmentsReady(Boolean(j.ready))).catch(()=>setAttachmentsReady(false))},[]);
+ async function uploadAttachment(intakeId:string,cap:any,file:File|null){
+  if(!file)return '';
+  if(!cap?.available)return ' The RFQ is saved; secure attachment upload is temporarily unavailable and the trade desk can collect the file during follow-up.';
+  const a=await fetch(`/crm/intakes/${encodeURIComponent(intakeId)}/attachments/authorize`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:cap.token,filename:file.name,content_type:file.type||'application/octet-stream',size_bytes:file.size})});
+  const aj=await a.json().catch(()=>({}));if(!a.ok)throw new Error(aj.detail||'Attachment authorization failed.');
+  const put=await fetch(aj.upload.url,{method:aj.upload.method||'PUT',headers:aj.upload.headers||{'Content-Type':file.type},body:file});if(!put.ok)throw new Error('Attachment transfer failed.');
+  const c=await fetch(`/crm/intakes/${encodeURIComponent(intakeId)}/attachments/${encodeURIComponent(aj.document_id)}/complete`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:cap.token})});
+  const cj=await c.json().catch(()=>({}));if(!c.ok)throw new Error(cj.detail||'Attachment verification failed.');
+  return ' Attachment received and held until malware scanning clears it.';
  }
- return <form className="finale-form" onSubmit={submit} data-cinematic-reveal aria-describedby="inquiry-note"><div><label>BUSINESS NAME<input name="legal_name" required autoComplete="organization" placeholder="Legal business name"/></label><label>CONTACT NAME<input name="contact_name" required autoComplete="name" placeholder="Your full name"/></label></div><label>PRODUCT OR NEED<input name="product_need" required minLength={2} placeholder="Product, grade, model or commercial need"/></label><div><label>QUANTITY<input type="number" min="0" step="any" name="quantity" inputMode="decimal" placeholder="Target volume"/></label><label>DESTINATION COUNTRY<input name="destination_country" required minLength={2} maxLength={3} autoCapitalize="characters" pattern="[A-Za-z]{2,3}" title="Use a 2- or 3-letter country code" placeholder="US, MX, CU…"/></label></div><div><label>REQUIRED BY<input type="date" name="target_delivery_date" required/></label><label>BUSINESS EMAIL<input type="email" name="email" required autoComplete="email" placeholder="name@company.com"/></label></div><button type="submit" disabled={status.kind==='busy'}>{status.kind==='busy'?'Submitting…':'Submit qualified request'} <span aria-hidden="true">↗</span></button><small id="inquiry-note" className={`form-response ${status.kind}`} role="status" aria-live="polite">{status.message}</small></form>
+ async function submit(event:React.FormEvent<HTMLFormElement>){
+  event.preventDefault();const form=event.currentTarget;setStatus({kind:'busy',message:'Creating your secure trade intake…'});
+  const fd=new FormData(form);const file=(fd.get('spec_file') instanceof File?fd.get('spec_file') as File:null);fd.delete('spec_file');
+  if(file&&file.size>10*1024*1024){setStatus({kind:'error',message:'Attachment exceeds the 10 MB limit.'});return}
+  const data=Object.fromEntries(fd.entries()) as Record<string,string>;const payload:Record<string,string|number>={...data,destination_country:data.destination_country.trim().toUpperCase()};
+  for(const k of ['quantity','target_budget']){if(data[k])payload[k]=Number(data[k]);else delete payload[k]}
+  Object.keys(payload).forEach(k=>payload[k]===''&&delete payload[k]);
+  try{const response=await fetch('/crm/intake',{method:'POST',headers:{'Content-Type':'application/json','Accept':'application/json'},body:JSON.stringify(payload)});const body=await response.json().catch(()=>({}));if(!response.ok)throw new Error(typeof body.detail==='string'?body.detail:'The request could not be accepted.');const intakeId=body?.intake?.intake_id;if(!intakeId)throw new Error('The server did not confirm an intake ID. Please retry.');let attachment='';try{attachment=await uploadAttachment(intakeId,body?.attachment_capability,file)}catch(cause){attachment=` The RFQ is saved, but the optional attachment was not accepted: ${cause instanceof Error?cause.message:'upload unavailable'}`};setStatus({kind:'success',message:`Request received · ${intakeId}. SAHJONY will review the commercial requirement and contact you about qualification.${attachment}`});window.dispatchEvent(new CustomEvent('sahjony:conversion',{detail:{event:'rfq_submit',source:'homepage_rfq'}}));form.reset()}catch(cause){setStatus({kind:'error',message:cause instanceof Error?cause.message:'Submission failed. Please review the form and retry.'})}
+ }
+ return <form className="finale-form" onSubmit={submit} data-cinematic-reveal aria-describedby="inquiry-note"><div><label>BUSINESS NAME<input name="legal_name" required autoComplete="organization" placeholder="Legal business name"/></label><label>CONTACT NAME<input name="contact_name" required autoComplete="name" placeholder="Your full name"/></label></div><label>PRODUCT OR NEED<input name="product_need" required minLength={2} placeholder="Product, grade, model or commercial need"/></label><div><label>QUANTITY<input type="number" min="0" step="any" name="quantity" inputMode="decimal" placeholder="Target volume"/></label><label>DESTINATION COUNTRY<input name="destination_country" required minLength={2} maxLength={3} autoCapitalize="characters" pattern="[A-Za-z]{2,3}" title="Use a 2- or 3-letter country code" placeholder="US, MX, CA…"/></label></div><div><label>TARGET BUDGET<input type="number" min="0" step="any" name="target_budget" inputMode="decimal" placeholder="Commercial target"/></label><label>INCOTERM<input name="preferred_incoterm" placeholder="FOB, CIF, DDP…"/></label></div><div><label>REQUIRED BY<input type="date" name="target_delivery_date" required/></label><label>BUSINESS EMAIL<input type="email" name="email" required autoComplete="email" placeholder="name@company.com"/></label></div><label>PHONE / CALLBACK<input name="phone" autoComplete="tel" placeholder="+1 …"/></label>{attachmentsReady&&<label>OPTIONAL SPEC / DRAWING<input type="file" name="spec_file" accept=".pdf,.png,.jpg,.jpeg,.webp,.csv,.txt,.json,.docx,.xlsx"/><span className="field-note">One file · max 10 MB · held until malware scanning clears it.</span></label>}<button type="submit" disabled={status.kind==='busy'}>{status.kind==='busy'?'Submitting…':'Submit qualified request'} <span aria-hidden="true">↗</span></button><small id="inquiry-note" className={`form-response ${status.kind}`} role="status" aria-live="polite">{status.message}</small></form>
 }
 
 function StatePage({title,text,path}:{title:string;text:string;path:string}){return <div className="route-state"><Brand/><div className="route-card"><div className="eyebrow gold">SAHJONY GLOBAL TRADE</div><h1>{title}</h1><p>{text}</p><button className="primary-button" onClick={()=>nav(path)}>Continue</button></div></div>}
@@ -217,21 +224,21 @@ function Portal({role,section}:{role:Role;section:ModuleKey}){
  const [searchOpen,setSearchOpen]=useState(false);
  const [query,setQuery]=useState('');
 
- useEffect(()=>{if(role==='owner'&&!token)location.replace('/owner-login')},[role,token]);
+ useEffect(()=>{if(role==='owner'&&!token)location.replace('/owner-login?next='+encodeURIComponent(location.pathname+location.search))},[role,token]);
  useEffect(()=>{safeSet(`sahjony.${role}.token`,token)},[role,token]);
  useEffect(()=>{safeSet('sahjony.employee.id',employeeId)},[employeeId]);
  useEffect(()=>{const fn=(e:KeyboardEvent)=>{if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='k'){e.preventDefault();setSearchOpen(v=>!v)}if(e.key==='Escape'){setSearchOpen(false);setDrawer(false)}};addEventListener('keydown',fn);return()=>removeEventListener('keydown',fn)},[]);
 
  const headers=(json=false)=>{const h:Record<string,string>={'X-Role':role};if(token)h.Authorization=`Bearer ${token}`;if(role==='employee')h['X-Employee-Id']=employeeId;if(json)h['Content-Type']='application/json';return h};
- async function api(path:string,opts:RequestInit={}){const response=await fetch(path,{...opts,headers:{...headers(Boolean(opts.body)),...(opts.headers||{})}});const body=await response.json().catch(()=>({detail:`HTTP ${response.status}`}));if((response.status===401||response.status===403)&&role==='owner'){safeRemove('sahjony.owner.token');location.replace('/owner-login')}if(!response.ok)throw new Error(body.detail||`HTTP ${response.status}`);return body}
+ async function api(path:string,opts:RequestInit={}){const response=await fetch(path,{...opts,headers:{...headers(Boolean(opts.body)),...(opts.headers||{})}});const body=await response.json().catch(()=>({detail:`HTTP ${response.status}`}));if((response.status===401||response.status===403)&&role==='owner'){safeRemove('sahjony.owner.token');location.replace('/owner-login?next='+encodeURIComponent(location.pathname+location.search))}if(!response.ok)throw new Error(body.detail||`HTTP ${response.status}`);return body}
  async function refresh(){const cfg=modules[section];setLoading(true);setError('');try{if(cfg.health){const response=await fetch(cfg.health,{cache:'no-store'});setHealth({ok:response.ok,...await response.json().catch(()=>({}))})}if(cfg.data&&token){const body=await api(cfg.data,{cache:'no-store'});const list=Object.values(body).find(v=>Array.isArray(v)) as any[]|undefined;setRecords(list||[])}else setRecords([])}catch(e:any){setError(e.message||'Unable to load workspace')}finally{setLoading(false)}}
  useEffect(()=>{refresh();setDrawer(false)},[role,section]);
 
  const scope=role==='owner'?'OWNER COMMAND':role==='employee'?'EMPLOYEE OPERATIONS':'CUSTOMER PORTAL';
  const searchable=useMemo(()=>groupsFor(role).flatMap(([group,items])=>items.map(key=>({key,group,label:labelFor(role,key),description:modules[key].description}))).filter(item=>`${item.group} ${item.label} ${item.description}`.toLowerCase().includes(query.toLowerCase())),[role,query]);
- function signOut(){safeRemove(`sahjony.${role}.token`);setToken('');role==='owner'?location.assign('/owner-login'):nav('/')}
+ function signOut(){safeRemove(`sahjony.${role}.token`);setToken('');role==='owner'?location.assign(localizedPath('/owner-login')):nav('/')}
 
- return <div className={`os-shell role-${role}`}><aside className={`os-side ${drawer?'open':''}`}><div className="side-head"><Brand/><button className="close-drawer" onClick={()=>setDrawer(false)}>×</button></div><div className="scope-badge">{scope}</div><nav className="grouped-nav">{groupsFor(role).map(([group,items])=><section className="nav-group" key={group}><small>{group}</small>{items.map(key=><button key={key} className={section===key?'active':''} onClick={()=>nav(rolePath(role,key))}><span className="nav-dot"/><span>{labelFor(role,key)}</span></button>)}</section>)}{role==='owner'&&<section className="nav-group"><small>Channels</small><button onClick={()=>location.assign('/owner/telegram')}><span className="nav-dot"/><span>Telegram Control</span></button></section>}</nav><div className="side-foot"><span className="security-dot"/><div><strong>{token?'Session active':'Access required'}</strong><small>{role==='owner'?'Owner full scope':role==='employee'?`Employee · ${employeeId}`:'Customer workspace'}</small></div></div></aside>{drawer&&<button className="drawer-backdrop" onClick={()=>setDrawer(false)} aria-label="Close navigation"/>}<main className="os-main"><header className="os-top"><div className="top-left"><button className="mobile-menu" onClick={()=>setDrawer(true)}>☰</button><div className="breadcrumbs"><span>{scope}</span><strong>{labelFor(role,section)}</strong></div></div><div className="top-actions"><button className="search-button" onClick={()=>setSearchOpen(true)}>⌘K <span>Search SAHJONY</span></button><button className="icon-button" onClick={refresh}>{loading?'…':'↻'}</button><div className="profile-chip"><span className="avatar">{role[0].toUpperCase()}</span><div><strong>{role==='owner'?'Owner':role==='employee'?employeeId:'Customer'}</strong><small>{token?'Authenticated':'Limited access'}</small></div><button onClick={signOut}>Sign out</button></div></div></header>{!token&&role!=='owner'?<CredentialGate role={role} employeeId={employeeId} setEmployeeId={setEmployeeId} onToken={setToken}/>:section==='dashboard'?<Dashboard role={role} health={health} token={token} api={api}/>:section==='crm'?<CRMWorkspace role={role} records={records} refresh={refresh} api={api} error={error}/>:<GenericWorkspace role={role} section={section} health={health} records={records} loading={loading} error={error} refresh={refresh}/>}</main>{searchOpen&&<CommandPalette role={role} query={query} setQuery={setQuery} results={searchable} close={()=>setSearchOpen(false)}/>}</div>
+ return <div className={`os-shell role-${role}`}><aside className={`os-side ${drawer?'open':''}`}><div className="side-head"><Brand/><button className="close-drawer" onClick={()=>setDrawer(false)}>×</button></div><div className="scope-badge">{scope}</div><nav className="grouped-nav">{groupsFor(role).map(([group,items])=><section className="nav-group" key={group}><small>{group}</small>{items.map(key=><button key={key} className={section===key?'active':''} onClick={()=>nav(rolePath(role,key))}><span className="nav-dot"/><span>{labelFor(role,key)}</span></button>)}</section>)}{role==='owner'&&<section className="nav-group"><small>Channels</small><button onClick={()=>location.assign(localizedPath('/owner/telegram'))}><span className="nav-dot"/><span>Telegram Control</span></button></section>}</nav><div className="side-foot"><span className="security-dot"/><div><strong>{token?'Session active':'Access required'}</strong><small>{role==='owner'?'Owner full scope':role==='employee'?`Employee · ${employeeId}`:'Customer workspace'}</small></div></div></aside>{drawer&&<button className="drawer-backdrop" onClick={()=>setDrawer(false)} aria-label="Close navigation"/>}<main className="os-main"><header className="os-top"><div className="top-left"><button className="mobile-menu" onClick={()=>setDrawer(true)}>☰</button><div className="breadcrumbs"><span>{scope}</span><strong>{labelFor(role,section)}</strong></div></div><div className="top-actions"><button className="search-button" onClick={()=>setSearchOpen(true)}>⌘K <span>Search SAHJONY</span></button><button className="icon-button" onClick={refresh}>{loading?'…':'↻'}</button><div className="profile-chip"><span className="avatar">{role[0].toUpperCase()}</span><div><strong>{role==='owner'?'Owner':role==='employee'?employeeId:'Customer'}</strong><small>{token?'Authenticated':'Limited access'}</small></div><button onClick={signOut}>Sign out</button></div></div></header>{!token&&role!=='owner'?<CredentialGate role={role} employeeId={employeeId} setEmployeeId={setEmployeeId} onToken={setToken}/>:section==='dashboard'?<Dashboard role={role} health={health} token={token} api={api}/>:section==='crm'?<CRMWorkspace role={role} records={records} refresh={refresh} api={api} error={error}/>:<GenericWorkspace role={role} section={section} health={health} records={records} loading={loading} error={error} refresh={refresh}/>}</main>{searchOpen&&<CommandPalette role={role} query={query} setQuery={setQuery} results={searchable} close={()=>setSearchOpen(false)}/>}</div>
 }
 
 function CredentialGate({role,employeeId,setEmployeeId,onToken}:any){const [value,setValue]=useState('');return <form className="credential-gate" onSubmit={event=>{event.preventDefault();if(value.trim())onToken(value)}}><div className="eyebrow gold">SECURE WORKSPACE</div><h1>{role==='employee'?'Employee access':'Customer access'}</h1><p>Authenticate to load protected business records. Credentials remain in this browser session only.</p>{role==='employee'&&<label>Employee ID<input autoComplete="username" required value={employeeId} onChange={e=>setEmployeeId(e.target.value)}/></label>}<label>Access credential<input type="password" autoComplete="current-password" required value={value} onChange={e=>setValue(e.target.value)}/></label><button className="primary-button" type="submit" disabled={!value.trim()}>Enter workspace</button></form>}
@@ -249,7 +256,7 @@ function Dashboard({role,health,token,api}:any){
 
 function Brief({n,title,text}:{n:string;title:string;text:string}){return <div className="brief-item"><span>{n}</span><div><strong>{title}</strong><small>{text}</small></div></div>}
 function HiggsfieldStudio({api}:any){
- const scenes=[['entrance','01','Entrance'],['demand','02','Demand'],['sourcing','03','Global sourcing'],['control','04','Trade control'],['execution','05','Execution'],['finale','06','Grand finale']] as const;
+ const scenes=[['entrance','01','Entrance'],['demand','02','Demand'],['sourcing','03','Global sourcing'],['control','04','Trade control'],['execution','05','Execution'],['finale','06','Contact']] as const;
  const [health,setHealth]=useState<any>(null);
  const [jobs,setJobs]=useState<Record<string,{request_id:string;status:string;url?:string}>>({});
  const [busy,setBusy]=useState('');

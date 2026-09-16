@@ -677,8 +677,9 @@ async def _enqueue_hermes_message(payload: WhatsAppSend) -> dict[str, Any]:
     fingerprint = hashlib.sha256(f"{recipient}|{body}".encode("utf-8")).hexdigest()
     recent = await get_backend().select(
         "whatsapp_openclaw_outbox",
-        params={"recipient": f"eq.{recipient}", "limit": "100", "order": "created_at.desc"},
+        params={"recipient": f"eq.{recipient}", "limit": "250"},
     ) or []
+    recent.sort(key=lambda row: str(row.get("created_at") or ""), reverse=True)
     cutoff = datetime.now(timezone.utc) - timedelta(minutes=10)
     for existing in recent:
         if str(existing.get("dedupe_fingerprint") or "") != fingerprint:
@@ -790,7 +791,11 @@ async def _process_inbound(
     cognition_ready = hermes_configured() or _openai_ready()
     if not (_ai_auto_reply_enabled() and cognition_ready and _send_ready(cfg)):
         return
-    reply = await generate_sofia_reply(text, contact_name, owner_context=await _is_owner_whatsapp(phone))
+    reply = await generate_sofia_reply(
+        text, contact_name,
+        owner_context=await _is_owner_whatsapp(phone),
+        sender_phone=clean_phone or None,
+    )
     if not reply:
         return
     try:
@@ -1064,6 +1069,22 @@ async def hermes_event(
             message_type=event.message_type,
             direction=event.direction,
         )
+        if event.direction == "inbound":
+            # Owner-initiated inbound messages stay private (business_events),
+            # but they still create a verified session record so the compliance
+            # gate can see a genuine owner conversation exactly like any
+            # customer conversation. The 24h window, opt-out, rate-limit and
+            # anti-blast checks in _assert_compliant_session_outbound still
+            # apply unchanged; nothing here invents or backdates a session.
+            await _register_inbound_message(
+                phone=normalized_phone or phone,
+                message_id=message_id,
+                message_type=event.message_type,
+                text=event.content,
+                contact_name=event.contact_name,
+                provider="hermes_whatsapp",
+                direction="inbound",
+            )
         return {"status": "accepted_owner_private", "event_id": event.event_id, "message_id": message_id, "public_visibility": False}
     await _register_inbound_message(
         phone=normalized_phone or phone,
@@ -1099,10 +1120,14 @@ async def hermes_outbox(
     x_sahjony_signature: str | None = Header(None, alias="X-SAHJONY-Signature"),
 ) -> dict[str, Any]:
     _verify_hermes_signature(b"", x_sahjony_timestamp, x_sahjony_signature)
+    # The durable backend stores logical rows in JSON. Ordering by data->>created_at
+    # forces an expensive database sort and can time out. Fetch only actionable
+    # rows, then preserve deterministic FIFO order in memory.
     rows = await get_backend().select(
         "whatsapp_openclaw_outbox",
-        params={"limit": "100", "order": "created_at.asc"},
+        params={"status": "in.(queued,dispatching)", "limit": "500"},
     ) or []
+    rows.sort(key=lambda row: str(row.get("created_at") or "9999-12-31T23:59:59+00:00"))
     now = datetime.now(timezone.utc)
     commands: list[dict[str, Any]] = []
     for row in rows:
@@ -1218,6 +1243,83 @@ async def hermes_outbox_ack(
     except Exception:
         pass
     return {"status": "accepted", "command_id": ack.command_id, "delivery_status": ack.status}
+
+
+class HermesDirectSend(BaseModel):
+    recipient: str = Field(min_length=8, max_length=20)
+    body: str = Field(min_length=1, max_length=1000)
+
+
+@app.post("/whatsapp/hermes/outbox/enqueue")
+async def hermes_outbox_enqueue(
+    request: Request,
+    x_sahjony_timestamp: str | None = Header(None, alias="X-SAHJONY-Timestamp"),
+    x_sahjony_signature: str | None = Header(None, alias="X-SAHJONY-Signature"),
+) -> dict[str, Any]:
+    """Owner-governed direct WhatsApp send. Enqueues exactly one message for the Hermes outbox worker.
+
+    Governance: the only caller is the `Hostinger Hermes WhatsApp Direct Send`
+    workflow, which Juan dispatches explicitly per message (one recipient, one
+    text per dispatch, dry-run by default). Cold-recipient ban risk is surfaced
+    to the owner before every live dispatch — never sent silently.
+    """
+    raw = await request.body()
+    _verify_hermes_signature(raw, x_sahjony_timestamp, x_sahjony_signature)
+    try:
+        payload = HermesDirectSend.model_validate_json(raw)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Invalid direct-send payload") from exc
+    digits = "".join(ch for ch in payload.recipient if ch.isdigit())
+    if not 8 <= len(digits) <= 15:
+        raise HTTPException(status_code=400, detail="Recipient must be 8-15 digits")
+    command_id = f"wad_{secrets.token_urlsafe(18)}"
+    ts = _now()
+    await get_backend().insert("whatsapp_openclaw_outbox", {
+        "command_id": command_id,
+        "channel": "whatsapp",
+        "account_id": "default",
+        "recipient": digits,
+        "body": payload.body,
+        "preview_url": False,
+        "lead_id": None,
+        "customer_id": None,
+        "source_url": f"owner:direct-send:{command_id}",
+        "release_mode": "customer_service_window",
+        "status": "queued",
+        "attempts": 0,
+        "lease_token": None,
+        "lease_expires_at": None,
+        "provider_message_id": None,
+        "last_error": None,
+        "created_at": ts,
+        "updated_at": ts,
+    })
+    return {"status": "queued", "command_id": command_id, "recipient": digits}
+
+
+@app.get("/whatsapp/hermes/outbox/status")
+async def hermes_outbox_status(
+    command_id: str = Query(min_length=3, max_length=256),
+    x_sahjony_timestamp: str | None = Header(None, alias="X-SAHJONY-Timestamp"),
+    x_sahjony_signature: str | None = Header(None, alias="X-SAHJONY-Signature"),
+) -> dict[str, Any]:
+    """Delivery status for one outbox command (polled by the direct-send workflow)."""
+    _verify_hermes_signature(b"", x_sahjony_timestamp, x_sahjony_signature)
+    rows = await get_backend().select(
+        "whatsapp_openclaw_outbox",
+        params={"command_id": f"eq.{command_id}", "limit": "1"},
+    ) or []
+    if not rows:
+        raise HTTPException(status_code=404, detail="Hermes command not found")
+    row = rows[0]
+    return {
+        "status": "ok",
+        "command_id": command_id,
+        "delivery_status": row.get("status"),
+        "provider_message_id": row.get("provider_message_id"),
+        "last_error": row.get("last_error"),
+        "attempts": row.get("attempts"),
+    }
 
 
 @app.get("/whatsapp/webhook")

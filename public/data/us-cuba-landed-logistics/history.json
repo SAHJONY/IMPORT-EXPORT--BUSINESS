@@ -1,6 +1,126 @@
 {
-  "updatedAt": "2026-09-13T21:08:37.750Z",
+  "updatedAt": "2026-09-16T17:18:15.295Z",
   "snapshots": [
+    {
+      "generatedAt": "2026-09-16T17:18:15.295Z",
+      "summary": {
+        "candidates": 0,
+        "verifiedLandedCost": 0,
+        "partiallyVerified": 0,
+        "blocked": 0,
+        "quoteReady": 0
+      },
+      "labels": [],
+      "candidates": []
+    },
+    {
+      "generatedAt": "2026-09-16T12:09:59.944Z",
+      "summary": {
+        "candidates": 0,
+        "verifiedLandedCost": 0,
+        "partiallyVerified": 0,
+        "blocked": 0,
+        "quoteReady": 0
+      },
+      "labels": [],
+      "candidates": []
+    },
+    {
+      "generatedAt": "2026-09-16T05:20:33.472Z",
+      "summary": {
+        "candidates": 0,
+        "verifiedLandedCost": 0,
+        "partiallyVerified": 0,
+        "blocked": 0,
+        "quoteReady": 0
+      },
+      "labels": [],
+      "candidates": []
+    },
+    {
+      "generatedAt": "2026-09-15T21:47:22.610Z",
+      "summary": {
+        "candidates": 0,
+        "verifiedLandedCost": 0,
+        "partiallyVerified": 0,
+        "blocked": 0,
+        "quoteReady": 0
+      },
+      "labels": [],
+      "candidates": []
+    },
+    {
+      "generatedAt": "2026-09-15T17:18:51.486Z",
+      "summary": {
+        "candidates": 0,
+        "verifiedLandedCost": 0,
+        "partiallyVerified": 0,
+        "blocked": 0,
+        "quoteReady": 0
+      },
+      "labels": [],
+      "candidates": []
+    },
+    {
+      "generatedAt": "2026-09-15T12:12:34.240Z",
+      "summary": {
+        "candidates": 0,
+        "verifiedLandedCost": 0,
+        "partiallyVerified": 0,
+        "blocked": 0,
+        "quoteReady": 0
+      },
+      "labels": [],
+      "candidates": []
+    },
+    {
+      "generatedAt": "2026-09-15T05:27:06.569Z",
+      "summary": {
+        "candidates": 0,
+        "verifiedLandedCost": 0,
+        "partiallyVerified": 0,
+        "blocked": 0,
+        "quoteReady": 0
+      },
+      "labels": [],
+      "candidates": []
+    },
+    {
+      "generatedAt": "2026-09-14T22:06:50.888Z",
+      "summary": {
+        "candidates": 0,
+        "verifiedLandedCost": 0,
+        "partiallyVerified": 0,
+        "blocked": 0,
+        "quoteReady": 0
+      },
+      "labels": [],
+      "candidates": []
+    },
+    {
+      "generatedAt": "2026-09-14T13:23:20.478Z",
+      "summary": {
+        "candidates": 0,
+        "verifiedLandedCost": 0,
+        "partiallyVerified": 0,
+        "blocked": 0,
+        "quoteReady": 0
+      },
+      "labels": [],
+      "candidates": []
+    },
+    {
+      "generatedAt": "2026-09-14T05:29:45.237Z",
+      "summary": {
+        "candidates": 0,
+        "verifiedLandedCost": 0,
+        "partiallyVerified": 0,
+        "blocked": 0,
+        "quoteReady": 0
+      },
+      "labels": [],
+      "candidates": []
+    },
     {
       "generatedAt": "2026-09-13T21:08:37.750Z",
       "summary": {

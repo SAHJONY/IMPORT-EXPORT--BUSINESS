@@ -39,7 +39,10 @@ function checkLanguageRuntime(){
     ["u.searchParams.set('lang',marker)",'explicit locale propagation'],
     ["baseLocale(target)==='en'?'English':'Original'",'English restore state'],
     ["if(sameLanguage(target,sourceLocale))",'native source restore path'],
-    ["if(!sameLanguage(active,sourceLocale)&&!busy)",'observer reversal guard']
+    ["if(!sameLanguage(active,sourceLocale)&&!busy)",'observer reversal guard'],
+    ["characterData:true",'dynamic React text observation'],
+    ["propagateForms",'GET form locale propagation'],
+    ["sahjony:localechange",'React/static locale event bridge']
   ];
   for(const [needle,label] of required)text.includes(needle)?pass(`Runtime supports ${label}`):fail(`Runtime missing ${label}`);
   if(/else\s+u\.searchParams\.delete\(['"]lang['"]\)/.test(text))fail('Non-Spanish locale still deletes lang override; explicit English would regress on geo-default pages');
@@ -50,13 +53,16 @@ function checkHtmlCoverage(){
   const files=[];
   if(exists('index.html'))files.push('index.html');
   const dir=path.join(root,'public');
-  if(fs.existsSync(dir))for(const entry of fs.readdirSync(dir,{withFileTypes:true}))if(entry.isFile()&&entry.name.toLowerCase().endsWith('.html'))files.push(`public/${entry.name}`);
+  function walk(current){for(const entry of fs.readdirSync(current,{withFileTypes:true})){const full=path.join(current,entry.name);if(entry.isDirectory())walk(full);else if(entry.isFile()&&entry.name.toLowerCase().endsWith('.html'))files.push(path.relative(root,full));}}
+  if(fs.existsSync(dir))walk(dir);
   for(const file of files){const text=read(file);if(!/<html\b[^>]*\blang=["'][^"']+["']/i.test(text))fail(`Missing html lang attribute: ${file}`);if(!/src=["']\/global-language\.js["']/i.test(text))fail(`Missing global language runtime: ${file}`)}
   if(!errors.some(e=>e.includes('html lang')||e.includes('global language runtime')))pass(`Locale runtime coverage verified across ${files.length} HTML entry pages`);
 }
 
 function checkNativeI18n(){
-  if(!exists('src/i18n.ts'))fail('Native React i18n bootstrap missing: src/i18n.ts');else{const text=read('src/i18n.ts');for(const needle of ['i18next','react-i18next','sahjony.locale','URLSearchParams'])text.includes(needle)?pass(`Native i18n includes ${needle}`):fail(`Native i18n missing ${needle}`)}
+  if(!exists('src/i18n.ts'))fail('Native React i18n bootstrap missing: src/i18n.ts');else{const text=read('src/i18n.ts');for(const needle of ['i18next','react-i18next','sahjony.locale','URLSearchParams','sahjony:localechange','changeLanguage'])text.includes(needle)?pass(`Native i18n includes ${needle}`):fail(`Native i18n missing ${needle}`)}
+  if(!exists('index.html'))fail('React entry missing: index.html');else{const text=read('index.html');text.includes('data-source-locale="en-US"')?pass('React entry declares canonical English source locale'):fail('React entry must declare data-source-locale="en-US" for application-wide Spanish translation')}
+  if(!exists('src/App.tsx'))fail('React app missing: src/App.tsx');else{const text=read('src/App.tsx');text.includes('localizedPath')&&text.includes("sahjony.locale")?pass('SPA navigation preserves active locale'):fail('SPA navigation does not preserve active locale')}
   if(!exists('package.json'))return fail('package.json missing');
   const pkg=JSON.parse(read('package.json'));
   if(pkg.dependencies?.i18next&&pkg.dependencies?.['react-i18next'])pass('Native i18n dependencies installed');else fail('i18next/react-i18next dependencies missing');

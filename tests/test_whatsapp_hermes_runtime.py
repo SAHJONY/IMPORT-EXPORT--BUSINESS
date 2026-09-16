@@ -9,8 +9,8 @@ def test_inbound_uses_sofia_hermes_runtime(monkeypatch):
     async def fake_owner(_phone): return False
     async def fake_upsert(*args, **kwargs): return "lead_test"
     async def fake_event(*args, **kwargs): return None
-    async def fake_generate(text, contact_name, owner_context=False):
-        calls["generate"] = (text, contact_name, owner_context)
+    async def fake_generate(text, contact_name, owner_context=False, sender_phone=None):
+        calls["generate"] = (text, contact_name, owner_context, sender_phone)
         return "Hermes/Sofia reply"
     async def fake_send(cfg, **kwargs):
         calls["send"] = kwargs
@@ -28,6 +28,6 @@ def test_inbound_uses_sofia_hermes_runtime(monkeypatch):
 
     asyncio.run(wa._process_inbound({}, phone="+15551234567", message_id="m1", message_type="text", text="Necesito aceite", contact_name="Cliente"))
 
-    assert calls["generate"] == ("Necesito aceite", "Cliente", False)
+    assert calls["generate"] == ("Necesito aceite", "Cliente", False, "15551234567")
     assert calls["send"]["body"] == "Hermes/Sofia reply"
     assert calls["send"]["lead_id"] == "lead_test"
