@@ -14,9 +14,11 @@ def _now() -> str:
 
 async def _recent_lessons(limit: int = 20) -> list[dict[str, Any]]:
     try:
+        # Consume both the adaptive operating lessons and the self-improvement
+        # loop's owner-correction lessons so corrections durably change behavior.
         return await get_backend().select(
             "business_events",
-            params={"source_type":"eq.sofia_adaptive_intelligence","order":"created_at.desc","limit":str(limit)},
+            params={"source_type":"in.(sofia_adaptive_intelligence,sofia_self_improvement)","order":"created_at.desc","limit":str(limit)},
         ) or []
     except Exception:
         return []
