@@ -352,11 +352,17 @@ async def public_intake(p:IntakeIn):
         await backend.insert('customer_accounts',{'customer_id':customer_id,'legal_name':p.legal_name,'trade_name':p.trade_name,'contact_name':p.contact_name,'email':email,'phone':p.phone,'country_code':(p.country_code or '').upper() or None,'website':p.website,'status':'PROSPECT','sales_status':'REPLIED','source':'WEB','created_at':ts,'updated_at':ts})
     intake_id=f'int_{secrets.token_urlsafe(10)}'
     row={'intake_id':intake_id,'customer_id':customer_id,'product_need':p.product_need,'specifications':p.specifications,'quantity':p.quantity,'target_budget':p.target_budget,'currency':p.currency.upper(),'destination_country':p.destination_country.upper(),'target_delivery_date':p.target_delivery_date,'preferred_incoterm':p.preferred_incoterm,'notes':p.notes,'status':'NEW','qualification_status':'PENDING','created_at':ts,'updated_at':ts}
+    # Sofia auto-assign: intakes arriving via the WhatsApp concierge
+    # (utm_medium=sofia, case-insensitive) are assigned to the 'sofia'
+    # employee queue so her employee-scoped reads (X-Employee-Id: sofia)
+    # can see the leads she logs. All other intakes are unchanged.
+    if (p.utm_medium or '').strip().lower()=='sofia':
+        row['assigned_employee_id']='sofia'
     await backend.insert('customer_trade_intakes',row)
     # First-touch attribution: captured client-side only, never invented here.
     first_touch={k:v for k,v in {'utm_source':p.utm_source,'utm_medium':p.utm_medium,'utm_campaign':p.utm_campaign,'referrer':p.referrer}.items() if v}
     first_touch['lead_type']=(p.lead_type or 'RFQ').upper()
-    await audit({'role':'customer','id':customer_id},'intake_created','Customer submitted a new trade sourcing request',customer_id,intake_id,{'first_touch':first_touch})
+    await audit({'role':'customer','id':customer_id},'intake_created','Customer submitted a new trade sourcing request',customer_id,intake_id,{'first_touch':first_touch,'assigned_employee_id':row.get('assigned_employee_id')})
     # Bridge: mirror into the owner Qualification Queue (trade_rfq_intakes).
     # Best-effort only — the canonical intake above is authoritative and a
     # bridge failure must never block a real customer submission.
