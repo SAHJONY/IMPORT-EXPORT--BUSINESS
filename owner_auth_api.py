@@ -135,13 +135,16 @@ def _owner_session_payload(authorization: str | None) -> dict[str, Any]:
                     claims={**raw, **claims}
             except Exception:
                 pass
-        if str(claims.get("aal") or "aal1").lower()!="aal2":
+        aal2=str(claims.get("aal") or "aal1").lower()=="aal2"
+        # AAL2 is required only when the owner MFA policy is enabled; the
+        # session is otherwise valid at the policy's assurance level.
+        if owner_mfa_required() and not aal2:
             raise HTTPException(status_code=403,detail="Owner MFA is not yet verified at AAL2")
         return {
             "email": email,
             "scope": "owner:full",
             "identity_provider": "supabase_auth",
-            "mfa_verified": True,
+            "mfa_verified": aal2 or not owner_mfa_required(),
             "exp": claims.get("exp"),
             "sub": claims.get("sub"),
         }
@@ -378,7 +381,7 @@ def owner_login(payload: OwnerLoginRequest):
 @app.get("/owner-auth/session")
 def owner_session(authorization: str | None=Header(None,alias="Authorization")):
     payload=_owner_session_payload(authorization)
-    return {"status":"authenticated","role":"owner","email":payload.get("email"),"scope":payload.get("scope","owner:full"),"identity_provider":payload.get("identity_provider","supabase_auth"),"mfa_verified":payload.get("mfa_verified") is True,"expires_at":payload.get("exp")}
+    return {"status":"authenticated","role":"owner","email":payload.get("email"),"scope":payload.get("scope","owner:full"),"identity_provider":payload.get("identity_provider","supabase_auth"),"mfa_required":owner_mfa_required(),"mfa_verified":payload.get("mfa_verified") is True,"expires_at":payload.get("exp")}
 
 @app.get("/owner-auth/data/datasets")
 def owner_data_datasets(authorization: str | None=Header(None,alias="Authorization")):
