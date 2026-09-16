@@ -1,0 +1,369 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+    <meta name="robots" content="noindex,nofollow,noarchive" />
+    <title>Sign in</title>
+    <style>
+      :root {
+        --bg: #060b12;
+        --panel: #0b1622;
+        --line: rgba(255, 255, 255, 0.1);
+        --text: #eef4fa;
+        --muted: #8fa5b8;
+        --accent: #7fd7f7;
+        --green: #78efb8;
+        --red: #ff8991;
+      }
+      * { box-sizing: border-box; }
+      html { -webkit-text-size-adjust: 100%; background: var(--bg); }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        min-height: 100dvh;
+        display: grid;
+        place-items: center;
+        padding: 24px;
+        background: var(--bg);
+        color: var(--text);
+        font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+      .card {
+        width: min(420px, 100%);
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        padding: 36px 32px;
+      }
+      .card h1 {
+        font-size: 22px;
+        margin: 0 0 6px;
+        letter-spacing: -0.02em;
+      }
+      .card > p {
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 1.55;
+        margin: 0 0 24px;
+      }
+      .field { margin-bottom: 14px; }
+      .field label {
+        display: block;
+        font-size: 10px;
+        font-weight: 800;
+        letter-spacing: 0.12em;
+        color: var(--muted);
+        margin-bottom: 7px;
+      }
+      .field input {
+        width: 100%;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: #07121c;
+        color: var(--text);
+        padding: 13px 14px;
+        font: inherit;
+        min-height: 48px;
+      }
+      .field input:focus {
+        outline: none;
+        border-color: rgba(127, 215, 247, 0.5);
+        box-shadow: 0 0 0 3px rgba(127, 215, 247, 0.08);
+      }
+      .submit, .secondary {
+        width: 100%;
+        border: 0;
+        border-radius: 10px;
+        padding: 13px 16px;
+        min-height: 48px;
+        font-weight: 800;
+        font-size: 14px;
+        cursor: pointer;
+      }
+      .submit { background: var(--accent); color: #04141d; }
+      .submit:disabled, .secondary:disabled { opacity: 0.55; cursor: default; }
+      .secondary {
+        margin-top: 10px;
+        background: #102233;
+        color: #cfe2f2;
+        border: 1px solid var(--line);
+      }
+      .status {
+        min-height: 20px;
+        margin-top: 16px;
+        font-size: 12px;
+        line-height: 1.5;
+        color: var(--muted);
+      }
+      .status.ok { color: var(--green); }
+      .status.bad { color: #ffc0c4; }
+      .hidden { display: none !important; }
+      .mfa-panel {
+        margin-top: 18px;
+        padding: 16px;
+        border: 1px solid rgba(127, 215, 247, 0.22);
+        border-radius: 12px;
+        background: #081522;
+      }
+      .mfa-panel h2 { margin: 0 0 8px; font-size: 17px; }
+      .mfa-panel p { color: var(--muted); font-size: 12px; line-height: 1.55; }
+      .hint { font-size: 11px; color: var(--muted); line-height: 1.5; margin-top: 10px; }
+      .qr {
+        display: block;
+        width: min(220px, 100%);
+        margin: 12px auto;
+        background: #fff;
+        border-radius: 10px;
+        padding: 8px;
+      }
+      .secret {
+        word-break: break-all;
+        color: #d8ecf7;
+        background: #04101a;
+        border: 1px solid var(--line);
+        padding: 10px;
+        border-radius: 8px;
+        font-size: 12px;
+        margin: 10px 0;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="card">
+      <h1>Sign in</h1>
+      <p>Authorized access only. All sign-in attempts are subject to owner verification and MFA policy.</p>
+      <form id="login">
+        <div class="field">
+          <label for="email">EMAIL</label>
+          <input id="email" type="email" autocomplete="username" placeholder="Owner email" required />
+        </div>
+        <div class="field">
+          <label for="password">PASSWORD</label>
+          <input id="password" type="password" required minlength="8" maxlength="256" autocomplete="current-password" placeholder="Password" />
+        </div>
+        <button id="passwordSubmit" class="submit" type="submit">Continue</button>
+      </form>
+      <button id="resetPassword" class="secondary" type="button">Recover / re-link Authenticator</button>
+      <div id="mfaPanel" class="mfa-panel hidden">
+        <h2 id="mfaTitle">Secure your account</h2>
+        <p id="mfaInstructions"></p>
+        <img id="qr" class="qr hidden" alt="Authenticator QR code" />
+        <div id="secretWrap" class="hidden">
+          <div class="hint">If you cannot scan the QR code, enter this secret manually in your Authenticator app:</div>
+          <div id="secret" class="secret"></div>
+        </div>
+        <div class="field">
+          <label for="mfa">AUTHENTICATOR CODE</label>
+          <input id="mfa" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" minlength="6" maxlength="6" placeholder="6-digit code" />
+        </div>
+        <button id="verifyMfa" class="submit" type="button">Verify MFA</button>
+      </div>
+      <div id="recoveryPanel" class="mfa-panel hidden">
+        <h2>Create a new password</h2>
+        <p>This recovery session is verified by Supabase. Choose a strong password, then return to sign in.</p>
+        <div class="field">
+          <label for="newPassword">NEW PASSWORD</label>
+          <input id="newPassword" type="password" minlength="12" maxlength="256" autocomplete="new-password" placeholder="New password" />
+        </div>
+        <button id="savePassword" class="submit" type="button">Save new password</button>
+      </div>
+      <div id="status" class="status" role="status"></div>
+    </main>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script>
+      const SUPABASE_URL = "https://qprlbmcoksrpuvodxjtt.supabase.co";
+      const SUPABASE_KEY = "sb_publishable_-I-dlfNYk4byxK5WQKuqlQ_WIAGkuA-";
+      const initialAuthFragment = location.hash;
+      const requestedNext =
+        new URLSearchParams(location.search).get("next") || "/owner/dashboard";
+      const ownerNext =
+        /^\/owner(?:\/|$)/.test(requestedNext) &&
+        !requestedNext.startsWith("//")
+          ? requestedNext
+          : "/owner/dashboard";
+      const sb = window.supabase?.createClient
+        ? window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
+            auth: {
+              persistSession: true,
+              autoRefreshToken: true,
+              detectSessionInUrl: true,
+            },
+          })
+        : null;
+      const form = document.getElementById("login"),
+        status = document.getElementById("status"),
+        password = document.getElementById("password"),
+        email = document.getElementById("email"),
+        mfa = document.getElementById("mfa"),
+        mfaPanel = document.getElementById("mfaPanel"),
+        mfaTitle = document.getElementById("mfaTitle"),
+        mfaInstructions = document.getElementById("mfaInstructions"),
+        qr = document.getElementById("qr"),
+        secret = document.getElementById("secret"),
+        secretWrap = document.getElementById("secretWrap"),
+        verifyMfa = document.getElementById("verifyMfa"),
+        resetPassword = document.getElementById("resetPassword"),
+        recoveryPanel = document.getElementById("recoveryPanel"),
+        newPassword = document.getElementById("newPassword"),
+        savePassword = document.getElementById("savePassword");
+      function setStatus(text, type = "") {
+        status.className = "status" + (type ? " " + type : "");
+        status.textContent = text;
+      }
+      async function authenticateOwner(mfaCode = "") {
+        const response = await fetch("/owner-auth/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          cache: "no-store",
+          body: JSON.stringify({
+            email: email.value.trim().toLowerCase(),
+            password: password.value,
+            mfa_code: mfaCode || null,
+          }),
+        });
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          const detail = typeof body.detail === "string"
+            ? body.detail
+            : "Authentication failed.";
+          throw new Error(detail);
+        }
+        if (!body.token) throw new Error("Session was not issued.");
+        sessionStorage.setItem("sahjony.owner.token", body.token);
+        password.value = "";
+        mfa.value = "";
+        setStatus(
+          body.mfa_verified
+            ? "Identity and MFA verified. Opening…"
+            : "Identity verified. Opening…",
+          "ok",
+        );
+        location.assign(ownerNext);
+      }
+      async function signInPassword() {
+        let policy = {};
+        try {
+          const health = await fetch("/owner-auth/health", { cache: "no-store" });
+          if (health.ok) policy = await health.json().catch(() => ({}));
+        } catch {}
+        if (policy.mfa_required) {
+          mfaTitle.textContent = "Verify your Authenticator";
+          mfaInstructions.textContent =
+            "Enter the current 6-digit code from the Authenticator linked to this account.";
+          qr.classList.add("hidden");
+          secretWrap.classList.add("hidden");
+          mfaPanel.classList.remove("hidden");
+          setStatus("MFA is required. Enter your Authenticator code to continue.");
+          mfa.focus();
+          return;
+        }
+        await authenticateOwner();
+      }
+      async function validateExisting() {
+        const token = sessionStorage.getItem("sahjony.owner.token");
+        if (token) {
+          try {
+            const r = await fetch("/owner-auth/session", {
+              headers: { Authorization: "Bearer " + token },
+              cache: "no-store",
+            });
+            if (r.ok) {
+              setStatus("Session active. Opening…", "ok");
+              location.replace(ownerNext);
+              return;
+            }
+            sessionStorage.removeItem("sahjony.owner.token");
+          } catch {}
+        }
+        if (initialAuthFragment.includes("type=recovery")) {
+          recoveryPanel.classList.remove("hidden");
+          form.classList.add("hidden");
+          resetPassword.classList.add("hidden");
+          setStatus("Recovery link verified. Create your new password.", "ok");
+        }
+      }
+      form.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        mfaPanel.classList.add("hidden");
+        setStatus("Authenticating…");
+        try {
+          await signInPassword();
+        } catch (err) {
+          setStatus(err?.message || "Unable to authenticate.", "bad");
+        }
+      });
+      verifyMfa.addEventListener("click", async () => {
+        const code = mfa.value.trim();
+        if (!/^\d{6}$/.test(code)) {
+          setStatus("Enter the current 6-digit code from your Authenticator app.", "bad");
+          return;
+        }
+        verifyMfa.disabled = true;
+        setStatus("Verifying MFA…");
+        try {
+          await authenticateOwner(code);
+        } catch (err) {
+          setStatus(err?.message || "MFA verification failed.", "bad");
+          mfa.value = "";
+          mfa.focus();
+        } finally {
+          verifyMfa.disabled = false;
+        }
+      });
+      resetPassword.addEventListener("click", async () => {
+        const recoveryEmail = email.value.trim().toLowerCase();
+        if (!recoveryEmail || !email.validity.valid) {
+          setStatus("Enter the authorized owner email first.", "bad");
+          email.focus();
+          return;
+        }
+        resetPassword.disabled = true;
+        setStatus("Requesting a secure recovery email from Supabase…");
+        try {
+          const response = await fetch("/owner-auth/recovery/request", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ email: recoveryEmail }),
+          });
+          const body = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(body.detail || "Unable to start recovery.");
+          setStatus(
+            body.detail || "Recovery email sent. Open only the newest message and follow its link.",
+            "ok",
+          );
+        } catch (err) {
+          setStatus(err?.message || "Unable to send recovery email.", "bad");
+        } finally {
+          resetPassword.disabled = false;
+        }
+      });
+      savePassword.addEventListener("click", async () => {
+        const next = newPassword.value;
+        if (next.length < 12) {
+          setStatus("Use a password with at least 12 characters.", "bad");
+          return;
+        }
+        savePassword.disabled = true;
+        setStatus("Saving your new password securely…");
+        try {
+          if (!sb) {
+            throw new Error("The secure recovery library did not load. Refresh the page or use the newest recovery email.");
+          }
+          const r = await sb.auth.updateUser({ password: next });
+          if (r.error) throw r.error;
+          newPassword.value = "";
+          recoveryPanel.classList.add("hidden");
+          form.classList.remove("hidden");
+          resetPassword.classList.remove("hidden");
+          setStatus("Password saved. Sign in now.", "ok");
+        } catch (err) {
+          setStatus(err?.message || "Unable to update password.", "bad");
+        } finally {
+          savePassword.disabled = false;
+        }
+      });
+      validateExisting();
+    </script>
+  </body>
+</html>
