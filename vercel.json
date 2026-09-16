@@ -10,6 +10,10 @@
     {
       "path": "/crm/sofia-deal-match/cron",
       "schedule": "15 11 * * *"
+    },
+    {
+      "path": "/document-storage/scan-sweep",
+      "schedule": "0 * * * *"
     }
   ],
   "headers": [
