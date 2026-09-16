@@ -28,6 +28,8 @@ jobs:
       USER: root
       PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
     steps:
+      - uses: actions/checkout@v4
+
       - name: Prepare SSH
         shell: bash
         run: |
@@ -37,6 +39,15 @@ jobs:
           printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/sofia-self-heal
           chmod 600 ~/.ssh/sofia-self-heal
           ssh-keygen -y -f ~/.ssh/sofia-self-heal >/dev/null
+
+      - name: Stage read-only CRM bridge doctor
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile openclaw/hostinger-24x7/sahjony-crm-bridge.py
+          opts=(-o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -i ~/.ssh/sofia-self-heal)
+          scp "${opts[@]}" openclaw/hostinger-24x7/sahjony-crm-bridge.py "$USER@$HOST:/tmp/sahjony-crm-bridge.new"
+          ssh "${opts[@]}" "$USER@$HOST" 'python3 -m py_compile /tmp/sahjony-crm-bridge.new && install -m 700 /tmp/sahjony-crm-bridge.new /usr/local/sbin/sahjony-crm-bridge && rm -f /tmp/sahjony-crm-bridge.new && echo SOFIA_CRM_DOCTOR_READ_ONLY_INSTALLED=1'
 
       - name: Diagnose and self-heal Sofia runtime
         shell: bash
@@ -52,11 +63,12 @@ jobs:
 
           echo SOFIA_SELF_HEAL_START=1
 
-          if ! systemctl is-active --quiet openclaw-gateway.service; then
-            systemctl restart openclaw-gateway.service
-            repaired=1
-            sleep 12
-            echo SOFIA_GATEWAY_RESTARTED=1
+          # Hermes is the current WhatsApp transport. This self-heal workflow must
+          # never reactivate a deliberately disabled customer messaging runtime.
+          if systemctl --user is-active --quiet hermes-gateway.service; then
+            echo SOFIA_HERMES_GATEWAY_ACTIVE=1
+          else
+            echo SOFIA_HERMES_GATEWAY_INACTIVE_FAIL_CLOSED=1
           fi
 
           if ! systemctl is-active --quiet sahjony-crm-bridge.timer; then
@@ -65,21 +77,22 @@ jobs:
             echo SOFIA_CRM_TIMER_RECOVERED=1
           fi
 
+          # The OpenClaw skill mirror is legacy compatibility only. Hermes does
+          # not depend on it, so absence must not trigger recovery or a restart.
           if [[ -f "$SKILL" ]]; then
             if ! grep -q '^description:' "$SKILL"; then
-              echo SOFIA_SKILL_METADATA_INVALID=1 >&2
-              exit 20
-            fi
-            install -d -m 700 /root/.openclaw/skills/whatsapp-crm-bridge
-            if [[ ! -f "$ROOT_SKILL" ]] || ! cmp -s "$SKILL" "$ROOT_SKILL"; then
-              cp "$SKILL" "$ROOT_SKILL"
-              chmod 600 "$ROOT_SKILL"
-              repaired=1
-              echo SOFIA_SKILL_RUNTIME_RESYNCED=1
+              echo SOFIA_LEGACY_SKILL_METADATA_INVALID=1 >&2
+            else
+              install -d -m 700 /root/.openclaw/skills/whatsapp-crm-bridge
+              if [[ ! -f "$ROOT_SKILL" ]] || ! cmp -s "$SKILL" "$ROOT_SKILL"; then
+                cp "$SKILL" "$ROOT_SKILL"
+                chmod 600 "$ROOT_SKILL"
+                repaired=1
+                echo SOFIA_LEGACY_SKILL_RUNTIME_RESYNCED=1
+              fi
             fi
           else
-            echo SOFIA_SKILL_MISSING=1 >&2
-            exit 21
+            echo SOFIA_LEGACY_SKILL_ABSENT=1
           fi
 
           if [[ -x "$BRIDGE" ]]; then
@@ -92,52 +105,70 @@ jobs:
           raise SystemExit(0 if ok else 1)
           PY
             then
+              # Do not flush queued work automatically while WhatsApp transport is
+              # fail-closed. Preserve the backlog for deterministic reconciliation.
               systemctl restart sahjony-crm-bridge.timer || true
               sleep 3
-              $BRIDGE flush || true
               repaired=1
-              echo SOFIA_CRM_BRIDGE_RECOVERY_ATTEMPTED=1
+              echo SOFIA_CRM_BRIDGE_TIMER_RECOVERY_ATTEMPTED=1
+              echo SOFIA_CRM_BACKLOG_PRESERVED_FAIL_CLOSED=1
             fi
           else
             echo SOFIA_CRM_BRIDGE_BINARY_MISSING=1 >&2
             exit 22
           fi
 
+          # Legacy OpenClaw state may remain for forensic/CRM compatibility, but
+          # it is no longer an availability gate and must not be restarted here.
           if [[ -f "$CANON" ]]; then
-            OPENCLAW_CONFIG="$CANON" openclaw config validate --json >/tmp/sofia-config-validate.json
-            python3 - <<'PY'
-          import json
-          d=json.load(open('/tmp/sofia-config-validate.json'))
-          if d.get('valid') is False or d.get('ok') is False: raise SystemExit(1)
-          print('SOFIA_OPENCLAW_CONFIG_VALID=1')
-          PY
+            echo SOFIA_LEGACY_OPENCLAW_STATE_PRESENT=1
           else
-            echo SOFIA_CANONICAL_CONFIG_MISSING=1 >&2
-            exit 23
+            echo SOFIA_LEGACY_OPENCLAW_STATE_ABSENT=1
           fi
 
-          if ! journalctl -u openclaw-gateway.service --since '-12 minutes' --no-pager | grep -q 'Listening for WhatsApp inbound messages'; then
-            systemctl restart openclaw-gateway.service
-            repaired=1
-            sleep 14
-            echo SOFIA_WHATSAPP_LISTENER_RECOVERY_ATTEMPTED=1
-          fi
-
-          systemctl is-active --quiet openclaw-gateway.service
           systemctl is-active --quiet sahjony-crm-bridge.timer
-          journalctl -u openclaw-gateway.service --since '-5 minutes' --no-pager | grep -q 'Listening for WhatsApp inbound messages'
+          hermes_state="$(systemctl --user is-active hermes-gateway.service 2>/dev/null || true)"
+          echo "SOFIA_HERMES_GATEWAY_STATE=${hermes_state:-unknown}"
+          if [[ "$hermes_state" != active ]]; then
+            echo SOFIA_WHATSAPP_TRANSPORT_FAIL_CLOSED=1
+          fi
 
-          final_doctor="$($BRIDGE doctor)"
-          python3 - "$final_doctor" <<'PY'
+          final_doctor=''
+          crm_ok=false
+          for attempt in 1 2 3; do
+            final_doctor="$($BRIDGE doctor || true)"
+            if python3 - "$final_doctor" <<'PY'
+          import json,sys
+          try: d=json.loads(sys.argv[1])
+          except Exception: raise SystemExit(1)
+          raise SystemExit(0 if d.get('status')=='ok' and (d.get('health') or {}).get('status')=='ok' else 1)
+          PY
+            then
+              crm_ok=true
+              break
+            fi
+            sleep $((attempt*2))
+          done
+          python3 - "$final_doctor" "$crm_ok" <<'PY'
           import json,sys
           d=json.loads(sys.argv[1])
-          if d.get('status')!='ok' or (d.get('health') or {}).get('status')!='ok': raise SystemExit(1)
-          if d.get('pending_count',0) < 0: raise SystemExit(1)
-          print('SOFIA_CRM_BRIDGE_HEALTHY=1')
+          ok=sys.argv[2]=='true'
+          h=d.get('health') or {}
+          q=d.get('queue') or {}
+          print('SOFIA_CRM_HEALTH_STATUS='+str(h.get('status') or 'unknown'))
+          print('SOFIA_CRM_BACKEND_REACHABLE='+str(h.get('backend_reachable')).lower())
+          print('SOFIA_CRM_HEALTH_ERROR='+str(h.get('error') or 'none'))
           print('SOFIA_QUEUE_PENDING='+str(d.get('pending_count',0)))
+          print('SOFIA_QUEUE_ACTIONS='+json.dumps(q.get('actions') or {}, sort_keys=True, separators=(',',':')))
+          print('SOFIA_QUEUE_OLDEST='+str(q.get('oldest') or 'none'))
+          print('SOFIA_QUEUE_NEWEST='+str(q.get('newest') or 'none'))
+          print('SOFIA_QUEUE_MALFORMED='+str(q.get('malformed',0)))
+          if d.get('pending_count',0) < 0: raise SystemExit(1)
+          if not ok: raise SystemExit(1)
+          print('SOFIA_CRM_BRIDGE_HEALTHY=1')
           PY
 
-          echo SOFIA_WHATSAPP_LISTENING=1
+          echo SOFIA_SELF_HEAL_CONTROL_PLANE_HEALTHY=1
           echo SOFIA_SELF_HEAL_REPAIRED=$repaired
           echo SAHJONY_SOFIA_SELF_HEAL_HEALTHY=1
           REMOTE

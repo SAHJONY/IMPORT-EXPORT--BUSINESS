@@ -315,17 +315,46 @@ def write_status(data: dict[str, Any]) -> None:
     os.chmod(path, 0o600)
 
 
+def queue_census() -> dict[str, Any]:
+    path = queue_file()
+    actions: dict[str, int] = {}
+    oldest = None
+    newest = None
+    malformed = 0
+    if path.exists():
+        for line in path.read_text(encoding="utf-8", errors="ignore").splitlines():
+            if not line.strip():
+                continue
+            try:
+                item = json.loads(line)
+            except Exception:
+                malformed += 1
+                continue
+            if not isinstance(item, dict):
+                malformed += 1
+                continue
+            action = str(item.get("action") or "unknown")
+            actions[action] = actions.get(action, 0) + 1
+            ts = str(item.get("queued_at") or "")
+            if ts:
+                oldest = ts if oldest is None or ts < oldest else oldest
+                newest = ts if newest is None or ts > newest else newest
+    return {"pending_count": sum(actions.values()), "actions": actions, "malformed": malformed, "oldest": oldest, "newest": newest}
+
+
 def doctor() -> dict[str, Any]:
-    flush = flush_queue()
+    # Health checks are intentionally read-only. Queue delivery is explicit via `flush`.
+    queue = queue_census()
     try:
         health = perform("health", None, queue_on_failure=False)
     except Exception as exc:
         health = {"status": "degraded", "error": str(exc).split(":", 1)[0]}
     result = {
-        "status": "ok" if health.get("status") == "ok" and flush.get("remaining", 0) == 0 else "degraded",
+        "status": "ok" if health.get("status") == "ok" else "degraded",
         "health": health,
-        "queue": flush,
-        "pending_count": pending_count(),
+        "queue": queue,
+        "pending_count": queue.get("pending_count", 0),
+        "queue_delivery": "manual_only",
     }
     write_status(result)
     return result

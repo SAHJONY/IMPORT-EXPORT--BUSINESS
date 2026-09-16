@@ -26,21 +26,29 @@ jobs:
         run: |
           set -euo pipefail
           BODY="$(curl -fsS --retry 3 --retry-delay 5 --max-time 30 https://www.sahjony.com/whatsapp/health || true)"
-          printf '%s\n' "$BODY" | jq '{status,provider,send_ready,gateway_connected,heartbeat_fresh,hostinger_independent_runtime,hostinger_openclaw,recovery_issues,backlog_recovery}' 2>/dev/null || true
+          printf '%s\n' "$BODY" | jq '{status,provider,send_ready,webhook_ready,ai_auto_reply_enabled,hostinger_independent_runtime,recovery_status,backlog_recovery,secrets_exposed}' 2>/dev/null || true
 
-          # Fortune-500 readiness gate: transport presence alone is NOT healthy.
-          # Require the authoritative Hostinger/OpenClaw provider, a live gateway,
-          # fresh heartbeat, and actual outbound send readiness.
+          # Hermes is the current transport. A deliberately disabled messaging
+          # runtime is healthy only as a fail-closed containment state; it is not
+          # transaction-ready. This prevents the watchdog from attempting to revive it.
           if jq -e '
-            (.status == "ok") and
-            (.provider == "hostinger_openclaw") and
-            ((.gateway_connected // .hostinger_openclaw.connected // false) == true) and
-            ((.heartbeat_fresh // .hostinger_openclaw.heartbeat_fresh // false) == true) and
-            ((.send_ready // false) == true)
+            (.provider == "hermes_agent") and
+            (.send_ready == true) and
+            (.webhook_ready == true)
           ' >/dev/null 2>&1 <<<"$BODY"; then
             echo 'healthy=true' >> "$GITHUB_OUTPUT"
+            echo 'mode=transaction_ready' >> "$GITHUB_OUTPUT"
+          elif jq -e '
+            (.provider == "hermes_agent") and
+            (.send_ready == false) and
+            (.ai_auto_reply_enabled == false) and
+            ((.secrets_exposed // false) == false)
+          ' >/dev/null 2>&1 <<<"$BODY"; then
+            echo 'healthy=true' >> "$GITHUB_OUTPUT"
+            echo 'mode=fail_closed' >> "$GITHUB_OUTPUT"
           else
             echo 'healthy=false' >> "$GITHUB_OUTPUT"
+            echo 'mode=degraded_uncontained' >> "$GITHUB_OUTPUT"
           fi
 
       - name: Open durable incident when Hostinger WhatsApp is degraded
@@ -48,7 +56,7 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const title = 'Hostinger OpenClaw WhatsApp runtime degraded';
+            const title = 'Hostinger Hermes WhatsApp runtime degraded';
             const existing = await github.rest.issues.listForRepo({owner: context.repo.owner, repo: context.repo.repo, state: 'open', labels: 'whatsapp-recovery'});
             if (!existing.data.some(i => i.title === title)) {
               await github.rest.issues.create({
@@ -56,6 +64,6 @@ jobs:
                 repo: context.repo.repo,
                 title,
                 labels: ['whatsapp-recovery'],
-                body: 'Automated watchdog detected that Hostinger WhatsApp is not transaction-ready. Health now requires provider=hostinger_openclaw, gateway connected, fresh heartbeat, and send_ready=true. Transport connectivity alone is not considered healthy. Check OpenClaw model authentication (OpenAI), outbound send path, and runtime state. Anthropic remains disabled. No secrets were exposed.'
+                body: 'Automated watchdog detected an uncontained Hermes WhatsApp degradation. Fail-closed is accepted only when provider=hermes_agent, send_ready=false, ai_auto_reply_enabled=false, and secrets_exposed is false. The watchdog does not restart or re-enable deliberately disabled messaging. Inspect Hermes transport, queue state, and security controls before any release.'
               });
             }
