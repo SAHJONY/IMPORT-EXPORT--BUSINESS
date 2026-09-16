@@ -13,7 +13,7 @@
     },
     {
       "path": "/document-storage/scan-sweep",
-      "schedule": "0 * * * *"
+      "schedule": "0 3 * * *"
     }
   ],
   "headers": [
