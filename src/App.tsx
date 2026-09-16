@@ -113,7 +113,7 @@ function PublicSite(){
  const facts=[['PRODUCT','Defined need'],['QUANTITY','Commercial volume'],['DESTINATION','Named corridor'],['TIMING','Required window']];
  return <div className="public-site institutional-public cinematic-trade-os">
   <div className="signal-strip"><span><i/>GLOBAL TRADE NETWORK</span><strong>Global sourcing · Supplier verification · Managed trade</strong><span>SAHJONY LLC · UNITED STATES</span></div>
-  <header className="public-nav cinematic-nav"><Brand ownerShortcut/><nav className="public-links" aria-label="Primary navigation"><a className="text-link" href="#demand">Demand</a><a className="text-link" href="#sourcing">Sourcing</a><a className="text-link" href="#control">Control</a><a className="text-link" href="/marketplace">Marketplace</a><a className="text-link" href="/suppliers">Suppliers</a><a className="text-link" href="/supplier-commercial-terms">Supplier terms</a><a className="text-link" href="/trust-center.html">How we verify</a><a className="text-link" href="tel:+17132948801">Call trade desk · +1 713-294-8801</a><a className="primary-link" href="#inquiry">Request a quote <span aria-hidden="true">↗</span></a></nav></header>
+  <header className="public-nav cinematic-nav"><Brand ownerShortcut/><nav className="public-links" aria-label="Primary navigation"><a className="text-link" href="#demand">Demand</a><a className="text-link" href="#sourcing">Sourcing</a><a className="text-link" href="#control">Control</a><a className="text-link" href="/marketplace">Marketplace</a><a className="text-link" href="/suppliers">Suppliers</a><a className="text-link" href="/supplier-commercial-terms">Supplier terms</a><a className="text-link" href="/trust-center.html">How we verify</a><a className="text-link" href="tel:+12816628581">Call trade desk · +1 281-662-8581</a><a className="primary-link" href="#inquiry">Request a quote <span aria-hidden="true">↗</span></a></nav></header>
   <main>
    <section className="cinematic-chapter chapter-hero" data-cinematic>
     <div className="chapter-media hero-media" data-cinematic-media/>
@@ -122,7 +122,7 @@ function PublicSite(){
      <div className="chapter-index" data-cinematic-reveal><span>Start</span></div>
      <h1 data-cinematic-reveal>Global trade.<br/><em>Under control.</em></h1>
      <p data-cinematic-reveal>SAHJONY LLC helps businesses find qualified suppliers. SAHJONY is a Houston-based managed sourcing desk: we compare real quotes on price, lead time and terms, and coordinate compliance and delivery — you approve every step.</p>
-     <div className="chapter-actions" data-cinematic-reveal><a className="primary-link large" href="#inquiry">Request a quote ↗</a><a className="quiet-link" href="tel:+17132948801">Talk to the trade desk · +1 713-294-8801</a><a className="quiet-link" href="mailto:ventas@sahjony.com?subject=Callback%20request">Request a callback</a><a className="quiet-link" href="https://wa.me/12816628581">Talk to us on WhatsApp</a><a className="quiet-link" href="/suppliers">I sell / manufacture → Supplier Center</a></div>
+     <div className="chapter-actions" data-cinematic-reveal><a className="primary-link large" href="#inquiry">Request a quote ↗</a><a className="quiet-link" href="tel:+12816628581">Talk to the trade desk · +1 281-662-8581</a><a className="quiet-link" href="mailto:ventas@sahjony.com?subject=Callback%20request">Request a callback</a><a className="quiet-link" href="https://wa.me/12816628581">Talk to us on WhatsApp</a><a className="quiet-link" href="/suppliers">I sell / manufacture → Supplier Center</a></div>
     </div>
     <div className="scroll-cue" data-float><span>SCROLL</span><i/></div>
    </section>
@@ -181,7 +181,7 @@ function PublicSite(){
     </div>
    </section>
   </main>
-  <footer><span>© SAHJONY LLC · Global Trade Operating System</span><nav aria-label="Footer navigation"><a href="/global-sourcing">Global sourcing</a><a href="/partners">Partners</a><a href="/marketplace">Marketplace</a><a href="tel:+17132948801">+1 713-294-8801</a></nav><span>www.sahjony.com</span></footer>
+  <footer><span>© SAHJONY LLC · Global Trade Operating System</span><nav aria-label="Footer navigation"><a href="/global-sourcing">Global sourcing</a><a href="/partners">Partners</a><a href="/marketplace">Marketplace</a><a href="tel:+12816628581">+1 281-662-8581</a></nav><span>www.sahjony.com</span></footer>
  </div>
 }
 
