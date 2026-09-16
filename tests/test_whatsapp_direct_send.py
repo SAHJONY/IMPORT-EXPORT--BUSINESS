@@ -36,6 +36,17 @@ def test_direct_send_status_route_exists():
     assert "_verify_hermes_signature(b\"\", x_sahjony_timestamp, x_sahjony_signature)" in route
 
 
+def test_direct_send_routes_registered_on_production_api():
+    # Production serves /whatsapp/* from whatsapp_cloud_primary_api.py (vercel.json
+    # routes /whatsapp(.*) there). Endpoints defined only in whatsapp_api.py 404
+    # until registered here — this test guards that wiring.
+    source = (ROOT / "whatsapp_cloud_primary_api.py").read_text(encoding="utf-8")
+    assert "hermes_outbox_enqueue," in source  # imported from whatsapp_api
+    assert "hermes_outbox_status," in source
+    assert 'app.add_api_route("/whatsapp/hermes/outbox/enqueue", hermes_outbox_enqueue, methods=["POST"])' in source
+    assert 'app.add_api_route("/whatsapp/hermes/outbox/status", hermes_outbox_status, methods=["GET"])' in source
+
+
 def test_direct_send_workflow_is_governed():
     wf = (ROOT / ".github/workflows/hostinger-hermes-whatsapp-send.yml").read_text(encoding="utf-8")
     # Dry-run is the default; live sends need an explicit flip.

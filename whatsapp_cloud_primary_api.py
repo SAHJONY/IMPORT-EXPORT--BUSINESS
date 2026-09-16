@@ -21,6 +21,8 @@ from whatsapp_api import (
     hermes_heartbeat,
     hermes_outbox,
     hermes_outbox_ack,
+    hermes_outbox_enqueue,
+    hermes_outbox_status,
     whatsapp_embedded_signup_exchange,
     whatsapp_setup_save,
     whatsapp_setup_manual,
@@ -57,6 +59,8 @@ app.add_api_route("/whatsapp/hermes/heartbeat", hermes_heartbeat, methods=["POST
 app.add_api_route("/whatsapp/hermes/events", hermes_event, methods=["POST"])
 app.add_api_route("/whatsapp/hermes/outbox", hermes_outbox, methods=["GET"])
 app.add_api_route("/whatsapp/hermes/outbox/ack", hermes_outbox_ack, methods=["POST"])
+app.add_api_route("/whatsapp/hermes/outbox/enqueue", hermes_outbox_enqueue, methods=["POST"])
+app.add_api_route("/whatsapp/hermes/outbox/status", hermes_outbox_status, methods=["GET"])
 app.include_router(crm_bridge_router)
 app.include_router(agentmail_router)
 
