@@ -347,6 +347,14 @@
       "dest": "/start.html"
     },
     {
+      "src": "/actions",
+      "dest": "/actions.html"
+    },
+    {
+      "src": "/government-contracting",
+      "dest": "/government-contracting.html"
+    },
+    {
       "src": "/how-it-works",
       "dest": "/customer-guide.html"
     },
@@ -493,6 +501,34 @@
     {
       "src": "/owner/cuba-mipymes",
       "dest": "/owner-cuba-mipymes.html"
+    },
+    {
+      "src": "/owner/crm-hub",
+      "dest": "/owner-crm-hub.html"
+    },
+    {
+      "src": "/owner/contacts",
+      "dest": "/owner-contacts.html"
+    },
+    {
+      "src": "/owner/external-prospects",
+      "dest": "/owner-external-prospects.html"
+    },
+    {
+      "src": "/owner/google-contacts",
+      "dest": "/owner-google-contacts.html"
+    },
+    {
+      "src": "/owner/records",
+      "dest": "/owner-records.html"
+    },
+    {
+      "src": "/owner/cuba-communications",
+      "dest": "/owner-cuba-communications.html"
+    },
+    {
+      "src": "/owner/cuba-import-segmentation",
+      "dest": "/owner-cuba-import-segmentation.html"
     },
     {
       "src": "/owner/telegram",

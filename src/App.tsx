@@ -119,19 +119,19 @@ function PublicSite(){
     <div className="chapter-media hero-media" data-cinematic-media/>
     <div className="chapter-shade"/>
     <div className="chapter-content hero-chapter-copy">
-     <div className="chapter-index" data-cinematic-reveal><span>01 / 06</span><i/> START</div>
+     <div className="chapter-index" data-cinematic-reveal><span>Start</span></div>
      <h1 data-cinematic-reveal>Global trade.<br/><em>Under control.</em></h1>
      <p data-cinematic-reveal>SAHJONY LLC helps businesses find qualified suppliers. SAHJONY is a Houston-based managed sourcing desk: we compare real quotes on price, lead time and terms, and coordinate compliance and delivery — you approve every step.</p>
      <div className="chapter-actions" data-cinematic-reveal><a className="primary-link large" href="#inquiry">Request a quote ↗</a><a className="quiet-link" href="tel:+17132948801">Talk to the trade desk · +1 713-294-8801</a><a className="quiet-link" href="mailto:ventas@sahjony.com?subject=Callback%20request">Request a callback</a><a className="quiet-link" href="https://wa.me/12816628581">Talk to us on WhatsApp</a><a className="quiet-link" href="/suppliers">I sell / manufacture → Supplier Center</a></div>
     </div>
-    <div className="scroll-cue" data-float><span>SCROLL TO MOVE FORWARD</span><i/></div>
+    <div className="scroll-cue" data-float><span>SCROLL</span><i/></div>
    </section>
 
    <section id="demand" className="cinematic-chapter split-chapter demand-chapter" data-cinematic>
     <div className="chapter-media manufacturing-media" data-cinematic-media/>
     <div className="chapter-shade"/>
     <div className="chapter-content split-copy">
-     <div className="chapter-index" data-cinematic-reveal><span>02 / 06</span><i/> WHAT YOU NEED</div>
+     <div className="chapter-index" data-cinematic-reveal><span>Your need</span></div>
      <h2 data-cinematic-reveal>Every movement starts with precise demand.</h2>
      <p data-cinematic-reveal>Product, volume, destination and timing become one qualified operating record before sourcing begins.</p>
      <div className="demand-facts" data-cinematic-reveal>{facts.map(([a,b],i)=><article key={a}><small>{String(i+1).padStart(2,'0')} · {a}</small><strong>{b}</strong></article>)}</div>
@@ -142,7 +142,7 @@ function PublicSite(){
     <div className="chapter-media logistics-media" data-cinematic-media/>
     <div className="chapter-shade"/>
     <div className="chapter-content core-copy">
-     <div className="chapter-index" data-cinematic-reveal><span>03 / 06</span><i/> SUPPLIER SEARCH</div>
+     <div className="chapter-index" data-cinematic-reveal><span>Supplier search</span></div>
      <h2 data-cinematic-reveal>Source the world.<br/>Compare what matters.</h2>
      <div className="floating-callouts" data-cinematic-reveal><article data-float><small>SUPPLIER</small><strong>Identity verified</strong><span>KYB · capacity · origin</span></article><article data-float><small>COMMERCIAL</small><strong>Terms compared</strong><span>MOQ · Incoterms · lead time</span></article><article data-float><small>ECONOMICS</small><strong>Landed path</strong><span>Cost · freight · protected margin</span></article></div>
     </div>
@@ -153,7 +153,7 @@ function PublicSite(){
    <section id="control" className="cinematic-chapter control-chapter" data-cinematic>
     <div className="control-grid" data-cinematic-media/>
     <div className="chapter-content control-copy">
-     <div className="chapter-index" data-cinematic-reveal><span>04 / 06</span><i/> VERIFICATION</div>
+     <div className="chapter-index" data-cinematic-reveal><span>Verification</span></div>
      <h2 data-cinematic-reveal>The release is earned by evidence.</h2>
      <p data-cinematic-reveal>SAHJONY holds each transaction at the right gate until counterparty, product, corridor, payment and documents are ready.</p>
      <div className="control-rail" data-cinematic-reveal>{['KYB','HTS / ECCN','SANCTIONS','TERMS','DOCUMENTS','PAYMENT'].map((x,i)=><span key={x}><i className={i<4?'ready':''}/>{x}</span>)}</div>
@@ -165,7 +165,7 @@ function PublicSite(){
     <div className="chapter-media energy-media" data-cinematic-media/>
     <div className="chapter-shade"/>
     <div className="chapter-content execution-copy">
-     <div className="chapter-index" data-cinematic-reveal><span>05 / 06</span><i/> COORDINATION</div>
+     <div className="chapter-index" data-cinematic-reveal><span>Coordination</span></div>
      <h2 data-cinematic-reveal>Origin to destination.<br/>One visible path.</h2>
      <p data-cinematic-reveal>Factory, freight, port, vessel, customs and delivery remain linked to the same commercial truth.</p>
      <div className="execution-route" data-cinematic-reveal><span>ORIGIN</span><i/><span>SAHJONY CONTROL</span><i/><span>DESTINATION</span></div>
@@ -176,7 +176,7 @@ function PublicSite(){
     <div className="chapter-media finale-media" data-cinematic-media/>
     <div className="chapter-shade"/>
     <div className="chapter-content finale-grid">
-     <div><div className="chapter-index" data-cinematic-reveal><span>06 / 06</span><i/> CONTACT & NEXT STEP</div><h2 data-cinematic-reveal>Tell SAHJONY what needs to move across borders.</h2><p data-cinematic-reveal>Submit the commercial need. The system creates the controlled path.</p></div>
+     <div><div className="chapter-index" data-cinematic-reveal><span>Contact us</span></div><h2 data-cinematic-reveal>Tell SAHJONY what needs to move across borders.</h2><p data-cinematic-reveal>Submit the commercial need. The system creates the controlled path.</p></div>
      <PublicRfqForm/>
     </div>
    </section>
