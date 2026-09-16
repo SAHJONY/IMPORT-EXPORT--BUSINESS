@@ -47,6 +47,12 @@ class PartnerApplicationIn(BaseModel):
     payment_method_note: str | None = Field(default=None, max_length=1200)
     accepts_terms: bool
     website: str | None = None
+    # First-touch attribution (captured client-side, never invented server-side)
+    utm_source: str | None = Field(default=None, max_length=200)
+    utm_medium: str | None = Field(default=None, max_length=200)
+    utm_campaign: str | None = Field(default=None, max_length=200)
+    referrer: str | None = Field(default=None, max_length=500)
+    first_touch_source: str | None = Field(default=None, max_length=200)
 
 
 class ReferralIn(BaseModel):
@@ -98,6 +104,14 @@ async def apply(p: PartnerApplicationIn):
     partner_id = f'cpr_{secrets.token_urlsafe(8)}'
     referral_token = secrets.token_urlsafe(24)
     ts = now()
+    # First-touch attribution: captured client-side only, never invented here.
+    first_touch = {k: v for k, v in {
+        'utm_source': p.utm_source,
+        'utm_medium': p.utm_medium,
+        'utm_campaign': p.utm_campaign,
+        'referrer': p.referrer,
+        'first_touch_source': p.first_touch_source,
+    }.items() if v}
     row = {
         'partner_id':partner_id,
         'full_name':p.full_name.strip(),
@@ -112,6 +126,11 @@ async def apply(p: PartnerApplicationIn):
         'status':'APPLIED',
         'referral_token_hash':token_hash(referral_token),
         'automatic_commission_payout':False,
+        'utm_source':p.utm_source,
+        'utm_medium':p.utm_medium,
+        'utm_campaign':p.utm_campaign,
+        'referrer':p.referrer,
+        'first_touch_source':p.first_touch_source,
         'created_at':ts,
         'updated_at':ts,
     }
