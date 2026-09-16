@@ -88,3 +88,68 @@ def test_blocks_recipient_rate_limit(monkeypatch):
     with pytest.raises(HTTPException) as exc:
         asyncio.run(wa._assert_compliant_session_outbound("+15551234567"))
     assert exc.value.status_code == 429
+
+
+class OwnerSessionBackend:
+    def __init__(self):
+        self.inserted = []
+
+    async def insert(self, table, row):
+        self.inserted.append((table, dict(row)))
+
+    async def select(self, table, *, params=None):
+        return []
+
+
+def _hermes_request(payload):
+    import json
+
+    from starlette.requests import Request
+
+    body = json.dumps(payload).encode("utf-8")
+
+    async def receive():
+        return {"type": "http.request", "body": body, "more_body": False}
+
+    return Request({"type": "http", "method": "POST", "headers": []}, receive)
+
+
+def _run_owner_event(monkeypatch, backend, direction):
+    async def fake_owner(phone):
+        return True
+
+    monkeypatch.setattr(wa, "get_backend", lambda: backend)
+    monkeypatch.setattr(wa, "_is_owner_whatsapp", fake_owner)
+    monkeypatch.setattr(wa, "_verify_hermes_signature", lambda raw, ts, sig: None)
+    payload = {
+        "event_id": "evt_owner_1",
+        "direction": direction,
+        "message_id": "wamid_owner_1",
+        "sender_id": "+12816628581",
+        "recipient_id": "+12816628581",
+        "content": "hola, prueba",
+        "message_type": "text",
+        "contact_name": "Juan",
+    }
+    return asyncio.run(wa.hermes_event(_hermes_request(payload), None, None))
+
+
+def test_owner_private_inbound_records_verified_session(monkeypatch):
+    backend = OwnerSessionBackend()
+    result = _run_owner_event(monkeypatch, backend, "inbound")
+    assert result["status"] == "accepted_owner_private"
+    session_rows = [row for table, row in backend.inserted if table == "whatsapp_messages"]
+    assert len(session_rows) == 1
+    assert session_rows[0]["direction"] == "inbound"
+    assert session_rows[0]["phone"] == "12816628581"
+    private_rows = [row for table, row in backend.inserted if table == "business_events"]
+    assert len(private_rows) == 1
+    assert private_rows[0]["event_type"] == "owner_private_message"
+
+
+def test_owner_private_outbound_does_not_create_session(monkeypatch):
+    backend = OwnerSessionBackend()
+    result = _run_owner_event(monkeypatch, backend, "outbound")
+    assert result["status"] == "accepted_owner_private"
+    session_rows = [row for table, row in backend.inserted if table == "whatsapp_messages"]
+    assert session_rows == []
