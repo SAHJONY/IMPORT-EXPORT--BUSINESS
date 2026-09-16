@@ -25,12 +25,27 @@ DIRECT_MAIL_DELIVERY_CONFIGURED = bool(
 # Verified department inboxes, confirmed configured by the owner (2026-09-16).
 # These match the addresses published on the public site. Any department can be
 # given a real inbox with an EMAIL_<KEY> env var (e.g. EMAIL_SOURCING); an
-# explicit env value marks that department verified. Departments without a
-# verified inbox carry no invented address — their email stays empty and inbound
-# routing falls back to the authenticated operational mailbox.
+# explicit env value marks that department verified. Departments with an
+# assigned address but unconfirmed mailbox hosting carry the address with
+# verified=false and must not be used as From senders until confirmed.
 VERIFIED_DEPARTMENT_EMAILS = {
     "sales": "ventas@sahjony.com",
     "cuba": "cuba@sahjony.com",
+}
+
+# Owner-approved standard inboxes for the worldwide business (2026-09-16).
+# Addresses assigned; mailbox hosting pending owner confirmation.
+PENDING_DEPARTMENT_EMAILS = {
+    "sourcing": "sourcing@sahjony.com",
+    "operations": "operations@sahjony.com",
+    "compliance": "compliance@sahjony.com",
+    "finance": "finance@sahjony.com",
+    "logistics": "logistics@sahjony.com",
+    "customer_success": "customersuccess@sahjony.com",
+    "partnerships": "partnerships@sahjony.com",
+    "marketing": "marketing@sahjony.com",
+    "energy": "energy@sahjony.com",
+    "executive": "executive@sahjony.com",
 }
 
 _DEPARTMENT_DEFS = [
@@ -55,6 +70,8 @@ def _department_entry(key: str, name: str, function: str) -> Dict:
         return {"key": key, "name": name, "email": env_value, "verified": True, "inbox": OPERATIONAL_MAILBOX, "function": function}
     if key in VERIFIED_DEPARTMENT_EMAILS:
         return {"key": key, "name": name, "email": VERIFIED_DEPARTMENT_EMAILS[key], "verified": True, "inbox": OPERATIONAL_MAILBOX, "function": function}
+    if key in PENDING_DEPARTMENT_EMAILS:
+        return {"key": key, "name": name, "email": PENDING_DEPARTMENT_EMAILS[key], "verified": False, "inbox": OPERATIONAL_MAILBOX, "function": function}
     return {"key": key, "name": name, "email": "", "verified": False, "inbox": OPERATIONAL_MAILBOX, "function": function}
 
 
