@@ -1,0 +1,11 @@
+{
+  "name": "sahjony-sofia-realtime-voice",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "openai": "^6.0.0"
+  }
+}
