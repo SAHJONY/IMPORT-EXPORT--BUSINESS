@@ -1,0 +1,127 @@
+name: Hostinger Hermes Vercel Gateway Stage
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: audit | smoke | stage
+        required: true
+        default: audit
+        type: choice
+        options: [audit, smoke, stage]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hostinger-vm-767852-mutation
+  cancel-in-progress: false
+
+jobs:
+  stage:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      HOST: '69.62.68.67'
+      SSH_USER: root
+      PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+      AI_GATEWAY_API_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
+      MODE: ${{ inputs.mode }}
+      ECONOMY_MODEL: inclusionai/ling-3.0-flash-vl-free
+      ESCALATION_MODEL: openai/gpt-6-astra
+    steps:
+      - name: Prepare SSH
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${PRIVATE_KEY:-}"
+          test -n "${AI_GATEWAY_API_KEY:-}"
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/hostinger-hermes-vercel
+          chmod 600 ~/.ssh/hostinger-hermes-vercel
+          ssh-keygen -y -f ~/.ssh/hostinger-hermes-vercel >/dev/null
+
+      - name: Audit fail-closed state
+        shell: bash
+        run: |
+          set -euo pipefail
+          opts=(-o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=12 -i ~/.ssh/hostinger-hermes-vercel)
+          ssh "${opts[@]}" "$SSH_USER@$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          state=$(systemctl --user is-active hermes-gateway.service 2>/dev/null || true)
+          outbox=$(systemctl is-active sahjony-hermes-outbox.service 2>/dev/null || true)
+          enabled=$(systemctl is-enabled sahjony-hermes-outbox.service 2>/dev/null || true)
+          echo HERMES_GATEWAY_STATE=${state:-unknown}
+          echo OUTBOX_STATE=${outbox:-unknown}
+          echo OUTBOX_ENABLED=${enabled:-unknown}
+          if [[ "$state" == active ]]; then
+            echo HERMES_ACTIVE_STAGE_ABORT=1 >&2
+            exit 40
+          fi
+          if [[ "$outbox" == active ]]; then
+            echo OUTBOX_ACTIVE_STAGE_ABORT=1 >&2
+            exit 41
+          fi
+          echo FAIL_CLOSED_PRECONDITION=PASS
+          REMOTE
+
+      - name: Smoke native Hermes AI Gateway path
+        if: ${{ inputs.mode == 'smoke' || inputs.mode == 'stage' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          opts=(-o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=12 -i ~/.ssh/hostinger-hermes-vercel)
+          printf '%s' "$AI_GATEWAY_API_KEY" > "$RUNNER_TEMP/ai-gateway-key"
+          chmod 600 "$RUNNER_TEMP/ai-gateway-key"
+          scp "${opts[@]}" "$RUNNER_TEMP/ai-gateway-key" "$SSH_USER@$HOST:/root/.ai-gateway-key-hermes"
+          ssh "${opts[@]}" "$SSH_USER@$HOST" "ECONOMY_MODEL='$ECONOMY_MODEL' bash -s" <<'REMOTE'
+          set -euo pipefail
+          trap 'rm -f /root/.ai-gateway-key-hermes /tmp/hermes-ai-gateway-smoke.txt' EXIT
+          export AI_GATEWAY_API_KEY="$(cat /root/.ai-gateway-key-hermes)"
+          HPY=/root/.hermes/hermes-agent/venv/bin/python
+          timeout 90 "$HPY" -m hermes_cli.main --provider ai-gateway -m "$ECONOMY_MODEL" -z 'Reply with exactly HERMES_GATEWAY_OK' > /tmp/hermes-ai-gateway-smoke.txt 2>&1 || {
+            tail -40 /tmp/hermes-ai-gateway-smoke.txt | sed -E 's/(key|token|secret)[=:][^ ]+/\1=<redacted>/Ig' >&2
+            exit 42
+          }
+          grep -q 'HERMES_GATEWAY_OK' /tmp/hermes-ai-gateway-smoke.txt
+          echo HERMES_NATIVE_AI_GATEWAY_SMOKE=PASS
+          echo WHATSAPP_RUNTIME_MUTATED=0
+          echo OUTBOX_RUNTIME_MUTATED=0
+          REMOTE
+          rm -f "$RUNNER_TEMP/ai-gateway-key"
+
+      - name: Stage inactive activation package
+        if: ${{ inputs.mode == 'stage' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          opts=(-o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=12 -i ~/.ssh/hostinger-hermes-vercel)
+          printf '%s' "$AI_GATEWAY_API_KEY" > "$RUNNER_TEMP/ai-gateway-key"
+          chmod 600 "$RUNNER_TEMP/ai-gateway-key"
+          scp "${opts[@]}" "$RUNNER_TEMP/ai-gateway-key" "$SSH_USER@$HOST:/root/.ai-gateway-key-hermes-stage"
+          ssh "${opts[@]}" "$SSH_USER@$HOST" "ECONOMY_MODEL='$ECONOMY_MODEL' ESCALATION_MODEL='$ESCALATION_MODEL' bash -s" <<'REMOTE'
+          set -euo pipefail
+          install -d -m 700 /root/.hermes/staged/vercel-ai-gateway
+          install -m 600 /root/.ai-gateway-key-hermes-stage /root/.hermes/staged/vercel-ai-gateway/AI_GATEWAY_API_KEY
+          rm -f /root/.ai-gateway-key-hermes-stage
+          cat > /root/.hermes/staged/vercel-ai-gateway/policy.env <<EOF
+AI_GATEWAY_BASE_URL=https://ai-gateway.vercel.sh/v1
+SOFIA_ECONOMY_MODEL=$ECONOMY_MODEL
+SOFIA_PAID_ESCALATION_MODEL=$ESCALATION_MODEL
+SOFIA_PAID_ESCALATION_AUTOMATIC=false
+EOF
+          chmod 600 /root/.hermes/staged/vercel-ai-gateway/policy.env
+          sha256sum /root/.hermes/staged/vercel-ai-gateway/policy.env > /root/.hermes/staged/vercel-ai-gateway/policy.env.sha256
+          chmod 600 /root/.hermes/staged/vercel-ai-gateway/policy.env.sha256
+          echo HERMES_AI_GATEWAY_STAGE=PASS
+          echo ACTIVE_CONFIG_CHANGED=0
+          echo SYSTEMD_CHANGED=0
+          echo HERMES_RESTARTED=0
+          echo WHATSAPP_REACTIVATED=0
+          REMOTE
+          rm -f "$RUNNER_TEMP/ai-gateway-key"
+
+      - name: Cleanup SSH
+        if: always()
+        shell: bash
+        run: rm -f ~/.ssh/hostinger-hermes-vercel "$RUNNER_TEMP/ai-gateway-key"

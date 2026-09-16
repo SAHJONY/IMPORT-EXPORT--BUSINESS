@@ -8,7 +8,7 @@ on:
         required: true
         default: audit
         type: choice
-        options: [audit, stage, cutover, retire-openclaw, pair-terminal]
+        options: [audit, ai-gateway-smoke, stage, cutover, retire-openclaw, pair-terminal]
 
 concurrency:
   group: hostinger-vm-767852-mutation
@@ -39,6 +39,42 @@ jobs:
           done
           echo HOSTINGER_SSH_UNAVAILABLE=1 >&2
           exit 3
+      - name: AI Gateway smoke from Hostinger without starting Hermes
+        if: ${{ inputs.mode == 'ai-gateway-smoke' }}
+        env:
+          AI_GATEWAY_API_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "${AI_GATEWAY_API_KEY:-}" ]] || { echo AI_GATEWAY_API_KEY_MISSING=1 >&2; exit 2; }
+          opts=(-o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=12 -i ~/.ssh/hostinger-hermes-model)
+          printf '%s' "$AI_GATEWAY_API_KEY" > "$RUNNER_TEMP/ai-gateway-key"
+          chmod 600 "$RUNNER_TEMP/ai-gateway-key"
+          scp "${opts[@]}" "$RUNNER_TEMP/ai-gateway-key" "$SSH_USER@$HOST:/root/.ai-gateway-key-smoke"
+          ssh "${opts[@]}" "$SSH_USER@$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          trap 'rm -f /root/.ai-gateway-key-smoke /tmp/ai-gateway-smoke.json' EXIT
+          systemctl --user is-active --quiet hermes-gateway.service && { echo HERMES_UNEXPECTEDLY_ACTIVE=1 >&2; exit 30; } || true
+          systemctl --user is-active --quiet sahjony-hermes-outbox.service && { echo OUTBOX_UNEXPECTEDLY_ACTIVE=1 >&2; exit 31; } || true
+          key="$(tr -d '\r\n' </root/.ai-gateway-key-smoke)"
+          code="$(curl -sS -o /tmp/ai-gateway-smoke.json -w '%{http_code}' --connect-timeout 10 --max-time 90 \
+            https://ai-gateway.vercel.sh/v1/chat/completions \
+            -H "Authorization: Bearer $key" -H 'Content-Type: application/json' \
+            --data '{"model":"inclusionai/ling-3.0-flash-vl-free","messages":[{"role":"user","content":"Reply with exactly OK"}],"max_tokens":8,"stream":false}')"
+          echo AI_GATEWAY_HOSTINGER_HTTP="$code"
+          [[ "$code" == 200 ]] || exit 32
+          python3 - <<'PY2'
+import json
+d=json.load(open('/tmp/ai-gateway-smoke.json'))
+print('AI_GATEWAY_HOSTINGER_MODEL='+str(d.get('model','unknown')))
+print('AI_GATEWAY_HOSTINGER_RESPONSE_PRESENT='+str(bool((d.get('choices') or [{}])[0].get('message',{}).get('content'))).lower())
+PY2
+          echo HERMES_RUNTIME_MUTATED=0
+          echo WHATSAPP_RUNTIME_MUTATED=0
+          echo OUTBOX_RUNTIME_MUTATED=0
+          echo FAIL_CLOSED_PRESERVED=1
+          REMOTE
+
       - name: Audit Hostinger runtime
         shell: bash
         run: |
