@@ -1,8 +1,10 @@
-"""SAHJONY Social Inbox API — read-only owner view of ingested social items.
+"""SAHJONY Social Inbox API — owner view + ingest endpoint for social items.
 
-Items are written by the `facebook_ingest.py` scheduled job into the
-`sahjony_trade_records` logical table `social_inbox_items`. This module
-exposes them to the owner CRM hub. No writes, no Facebook mutations here.
+Items are collected by the `facebook_ingest.py` scheduled job (which runs where
+Juan's Facebook session lives but has no database credentials) and delivered
+here by the owner's authenticated browser session. This module upserts them
+into the `sahjony_trade_records` logical table `social_inbox_items` and exposes
+them to the owner CRM hub. No Facebook mutations anywhere in this module.
 """
 
 from __future__ import annotations
@@ -10,19 +12,27 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import FastAPI, Header, HTTPException, Query
+from fastapi import FastAPI, Header, HTTPException, Query, Request
 
 from auth import verify_owner_token
 from insforge_backend import get_backend
 
 app = FastAPI(
     title="SAHJONY Social Inbox",
-    version="1.0.0",
+    version="1.1.0",
     docs_url=None,
     redoc_url=None,
 )
 
 TABLE = "social_inbox_items"
+MAX_INGEST_ITEMS = 500
+TEXT_LIMIT = 2000
+
+# Fields the ingest endpoint accepts per item; anything else is dropped.
+ITEM_FIELDS = (
+    "platform", "external_id", "permalink", "author_name", "created_at",
+    "text", "item_type", "source", "parent_external_id", "synced_at",
+)
 
 
 def _now_iso() -> str:
@@ -78,3 +88,75 @@ async def items(
             "synced_at": r.get("synced_at", ""),
         })
     return {"status": "ok", "count": len(items_out), "items": items_out, "read_at": _now_iso()}
+
+
+def _clean_item(raw: Any) -> dict[str, Any] | None:
+    """Validate + sanitize one ingested item. Returns None if unusable."""
+    if not isinstance(raw, dict):
+        return None
+    external_id = str(raw.get("external_id") or "").strip()
+    if not external_id or len(external_id) > 200:
+        return None
+    source = str(raw.get("source") or "").strip()
+    if source not in ("page", "profile", "group", "messenger"):
+        return None
+    item_type = str(raw.get("item_type") or "").strip()
+    if item_type not in ("post", "comment", "message"):
+        return None
+    cleaned: dict[str, Any] = {}
+    for field in ITEM_FIELDS:
+        value = raw.get(field)
+        if value is None:
+            cleaned[field] = ""
+        elif field == "text" and isinstance(value, str):
+            cleaned[field] = value[:TEXT_LIMIT]
+        elif isinstance(value, str):
+            cleaned[field] = value[:500]
+        else:
+            cleaned[field] = value
+    cleaned["external_id"] = external_id
+    cleaned["source"] = source
+    cleaned["item_type"] = item_type
+    if not cleaned.get("platform"):
+        cleaned["platform"] = "facebook"
+    if not cleaned.get("synced_at"):
+        cleaned["synced_at"] = _now_iso()
+    return cleaned
+
+
+@app.post("/crm/social-inbox/ingest")
+async def ingest(
+    request: Request,
+    x_role: str | None = Header(None, alias="X-Role"),
+    authorization: str | None = Header(None, alias="Authorization"),
+) -> dict[str, Any]:
+    """Owner-authenticated upsert of normalized social items.
+
+    Body: {"items": [...]} or a raw JSON array. Dedupe is on
+    `external_id` via the backend's (logical_table, record_key) upsert,
+    so re-delivery never duplicates. This endpoint never touches Facebook.
+    """
+    _auth_owner(x_role, authorization)
+    try:
+        payload = await request.json()
+    except Exception:
+        raise HTTPException(400, "Body must be JSON")
+    raw_items = payload.get("items") if isinstance(payload, dict) else payload
+    if not isinstance(raw_items, list):
+        raise HTTPException(400, "Body must be {\"items\": [...]} or a JSON array")
+    if len(raw_items) > MAX_INGEST_ITEMS:
+        raise HTTPException(400, f"Too many items (max {MAX_INGEST_ITEMS})")
+    cleaned = [c for c in (_clean_item(r) for r in raw_items) if c]
+    rejected = len(raw_items) - len(cleaned)
+    inserted = 0
+    if cleaned:
+        await get_backend().insert(TABLE, cleaned)
+        inserted = len(cleaned)
+    return {
+        "status": "ok",
+        "received": len(raw_items),
+        "upserted": inserted,
+        "rejected": rejected,
+        "table": TABLE,
+        "ingested_at": _now_iso(),
+    }
