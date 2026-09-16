@@ -1,0 +1,145 @@
+name: Hostinger Hermes Native Bridge Recovery
+on:
+  push:
+    branches: [ops/hostinger-native-bridge-recovery-20260909]
+    paths: [.github/workflows/hostinger-hermes-native-bridge-recovery.yml]
+permissions:
+  contents: read
+concurrency:
+  group: hostinger-vm-767852-mutation
+  cancel-in-progress: false
+jobs:
+  recover:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      HOST: 69.62.68.67
+      SSH_USER: root
+      PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Prepare existing SSH credential
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$PRIVATE_KEY"
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/key
+          chmod 600 ~/.ssh/key
+      - name: Preserve sessions and recover only an absent native bridge
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 -i ~/.ssh/key "$SSH_USER@$HOST" 'python3 -' <<'PY'
+          import glob, json, os, subprocess, time, urllib.request
+          from datetime import datetime, timezone
+
+          def bridge_processes():
+              result = []
+              for entry in glob.glob('/proc/[0-9]*/cmdline'):
+                  try:
+                      args = open(entry, 'rb').read().split(b'\0')
+                  except OSError:
+                      continue
+                  if any(b'/whatsapp-bridge/bridge.js' in arg for arg in args):
+                      result.append(int(entry.split('/')[2]))
+              return result
+
+          def health():
+              try:
+                  with urllib.request.urlopen('http://127.0.0.1:3000/health', timeout=5) as response:
+                      data = json.load(response)
+                  if not isinstance(data, dict):
+                      return {'reachable': True, 'connected': False, 'schema': 'non_object'}
+                  return {
+                      'reachable': True,
+                      'connected': data.get('status') == 'connected',
+                      'ready': data.get('ready') is True,
+                      'status': str(data.get('status') or '')[:40],
+                      'keys': sorted(data),
+                  }
+              except Exception as exc:
+                  return {'reachable': False, 'connected': False, 'error_type': type(exc).__name__}
+
+          print('AUDIT_UTC=' + datetime.now(timezone.utc).isoformat(), flush=True)
+          state = subprocess.run(['systemctl', '--user', 'is-active', 'hermes-gateway.service'], capture_output=True, text=True)
+          print('HERMES_GATEWAY=' + state.stdout.strip(), flush=True)
+          before = bridge_processes()
+          print('WHATSAPP_PROCESS_COUNT_BEFORE=' + str(len(before)), flush=True)
+          print('BRIDGE_HEALTH_BEFORE=' + json.dumps(health()), flush=True)
+          session = '/root/.hermes/platforms/whatsapp/session/creds.json'
+          session_present = os.path.isfile(session) and os.path.getsize(session) > 0
+          print('EXISTING_SESSION_PRESENT=' + str(session_present).lower(), flush=True)
+          archives = glob.glob('/root/sahjony-cutover-backups/openclaw-state-*.tgz')
+          print('ROLLBACK_ARCHIVE_COUNT=' + str(len(archives)), flush=True)
+          print('ROLLBACK_ARCHIVE_RESTORABILITY=unverified', flush=True)
+          print('GATEWAY_RESTARTS=0', flush=True)
+          import re
+          logs = subprocess.run(
+              ['journalctl', '--user', '-u', 'hermes-gateway.service', '--since', '-10 minutes', '--no-pager'],
+              capture_output=True, text=True, timeout=20).stdout
+          markers = ['whatsapp', 'bridge', 'disabled', 'not configured', 'logged out', 'logout',
+                     '401', '403', '515', 'connection closed', 'connection failure',
+                     'Traceback', 'ModuleNotFoundError', 'ImportError', 'SyntaxError',
+                     'PermissionError', 'ENOENT', 'EADDRINUSE', 'Cannot find module',
+                     'QR', 'pairing', 'session', 'restart', 'failed', 'error']
+          print('JOURNAL_MARKER_COUNTS=' + json.dumps({m: logs.lower().count(m.lower()) for m in markers}), flush=True)
+          missing = re.findall(r"(?:No module named|Cannot find module) ['\"]([A-Za-z0-9_./@-]+)['\"]", logs)
+          print('MISSING_MODULES=' + json.dumps(sorted(set(missing))), flush=True)
+          locations = re.findall(r'File "([^"]+)", line ([0-9]+)', logs)
+          print('TRACEBACK_LOCATIONS=' + json.dumps([(os.path.basename(p), n) for p, n in locations][-25:]), flush=True)
+          exceptions = re.findall(r'\\b([A-Za-z]+(?:Error|Exception)):', logs)
+          print('EXCEPTION_TYPES=' + json.dumps(sorted(set(exceptions))), flush=True)
+          runtime = '/root/.hermes/hermes-agent'
+          module = runtime + '/gateway/platforms/whatsapp.py'
+          if os.path.isfile(module):
+              source = open(module).read()
+              env_names = re.findall(r'(?:getenv|environ.get)\\(["\']([A-Z0-9_]+)', source)
+              print('WHATSAPP_CODE_ENV_NAMES=' + json.dumps(sorted(set(env_names))), flush=True)
+          try:
+              cfg_path = '/root/.hermes/config.yaml'
+              cfg_code = "import json,yaml; d=yaml.safe_load(open('/root/.hermes/config.yaml')) or {}; p=d.get('platforms') or {}; w=p.get('whatsapp') or {}; print(json.dumps({'root_keys':sorted(d),'platform_keys':sorted(p) if isinstance(p,dict) else [],'whatsapp_keys':sorted(w) if isinstance(w,dict) else [],'whatsapp_enabled':w.get('enabled') if isinstance(w,dict) else None}))"
+              cfg = subprocess.run([runtime + '/venv/bin/python', '-c', cfg_code],capture_output=True,text=True,timeout=10)
+              print('CONFIG_SHAPE=' + (cfg.stdout.strip() if cfg.returncode == 0 else 'unavailable'), flush=True)
+          except Exception as exc:
+              print('CONFIG_SHAPE_ERROR=' + type(exc).__name__, flush=True)
+          bridge_log = '/root/.hermes/platforms/whatsapp/bridge.log'
+          if os.path.isfile(bridge_log):
+              with open(bridge_log, 'rb') as stream:
+                  stream.seek(max(0, os.fstat(stream.fileno()).st_size - 40000))
+                  recent = stream.read().decode(errors='replace')
+              events = ['logged out', 'loggedOut', 'badSession', 'restartRequired', 'connectionLost',
+                        'connection closed', 'connection failure', 'QR', 'pairing', '401', '403',
+                        '408', '428', '440', '500', '503', '515', 'ECONNREFUSED', 'ENOTFOUND',
+                        'ETIMEDOUT', 'connected', 'disconnected']
+              print('BRIDGE_LOG_MARKER_COUNTS=' + json.dumps({m:recent.lower().count(m.lower()) for m in events}), flush=True)
+          # Print only infrastructure-related journal lines, never message/session payloads.
+          safe_lines = []
+          for line in logs.splitlines():
+              if not re.search(r'whatsapp.*(?:failed|error|connect|bridge)|(?:failed|error).*whatsapp', line, re.I):
+                  continue
+              if re.search(r'payload|body|received message|incoming message|token|secret|password|authorization|qr code',line,re.I):
+                  continue
+              line = re.sub(r'\\b\\d{6,}\\b', '[NUMBER]', line)
+              line = re.sub(r'(?i)https?://\\S+', '[URL]', line)
+              safe_lines.append(line[:350])
+          print('WHATSAPP_STARTUP_DIAGNOSTICS=' + json.dumps(safe_lines[-12:]), flush=True)
+          bridge_source = '/root/.hermes/hermes-agent/scripts/whatsapp-bridge/bridge.js'
+          if os.path.isfile(bridge_source):
+              source = open(bridge_source).read()
+              begin = source.find("app.get('/health'")
+              print('HEALTH_HANDLER_SOURCE=' + json.dumps(source[begin:begin+900] if begin >= 0 else 'not_found'), flush=True)
+          after = bridge_processes()
+          status = health()
+          print('WHATSAPP_PROCESS_COUNT_AFTER=' + str(len(after)), flush=True)
+          print('BRIDGE_HEALTH_AFTER=' + json.dumps(status), flush=True)
+          print('SESSION_RESET_OR_CREDENTIAL_MIGRATION=false', flush=True)
+          print('MESSAGES_SENT_BY_RECOVERY=0', flush=True)
+          if not after or not status.get('connected'):
+              print('RECOVERY_RESULT=not_verified', flush=True)
+              raise SystemExit(4)
+          print('RECOVERY_RESULT=bridge_connected_e2e_still_required', flush=True)
+          PY
+      - name: Cleanup runner credential
+        if: always()
+        shell: bash
+        run: rm -f ~/.ssh/key
