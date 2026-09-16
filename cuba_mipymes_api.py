@@ -39,7 +39,7 @@ async def rows():
  return out
 async def paged_private_rows(limit:int,offset:int,q:str|None=None,province_filter:str|None=None):
  u,k=cfg(); h={'apikey':k,'Authorization':f'Bearer {k}','Accept':'application/json','Prefer':'count=exact'}
- params={'logical_table':'eq.external_trade_prospects','data->>actor_type':'in.(MIPYME_PRIVADA,EMPRESA_PRIVADA,OTHER_NON_STATE_VERIFIED)','select':'record_key,data,public_email,public_phone,buyer_contact,contact_source_name,contact_source_url,contact_verified_at','order':'record_key.asc','limit':str(limit),'offset':str(offset)}
+ params={'logical_table':'eq.external_trade_prospects','data->>actor_type':'in.(MIPYME_PRIVADA,EMPRESA_PRIVADA,OTHER_NON_STATE_VERIFIED)','select':'record_key,data','order':'record_key.asc','limit':str(limit),'offset':str(offset)}
  if q:
   term=re.sub(r'[^0-9A-Za-zÁÉÍÓÚÜÑáéíóúüñ .&@+-]+',' ',q).strip()[:120]
   if term: params['or']=f'(data->>buyer_company.ilike.*{term}*,data->>company_name.ilike.*{term}*,data->>business_name.ilike.*{term}*,data->>primary_activity.ilike.*{term}*)'
@@ -192,38 +192,51 @@ async def list_records(limit:int=Query(100,ge=1,le=250),offset:int=Query(0,ge=0)
  out.sort(key=lambda x:str(x.get('buyer_company') or '').casefold())
  return {'status':'ok','count':len(out),'total':total,'limit':limit,'offset':offset,'has_more':offset+limit<total,'records':out,'classification':'RESEARCH / VERIFIED PUBLIC SOURCE','notice':'Registry-only records are not active buyers or RFQs without independent demand evidence.'}
 MAX_CONTACT_ITEMS=100
-PHONE_RE=re.compile(r'^[\d\s+\-()/]{6,20}$')
+PHONE_RE=re.compile(r'^[\d\s+\-()/]{6,40}$')
 def _auth_owner(x_role,authorization):
  if x_role!='owner':raise HTTPException(403,'Owner role required')
  if not authorization or not authorization.startswith('Bearer '):raise HTTPException(401,'Missing Authorization')
  if not verify_owner_token(authorization.removeprefix('Bearer ').strip()):raise HTTPException(403,'Invalid owner credential')
 def _clean_contact_item(raw,idx):
- if not isinstance(raw,dict):return None,{'index':idx,'error':'Item must be an object'}
+ if not isinstance(raw,dict):return None,None,{'index':idx,'error':'Item must be an object'}
  rk=str(raw.get('record_key') or '').strip()[:200]
  email=str(raw.get('public_email') or '').strip()[:320]
  phone=str(raw.get('public_phone') or '').strip()[:40]
  src_name=str(raw.get('contact_source_name') or '').strip()[:500]
  src_url=str(raw.get('contact_source_url') or '').strip()[:500]
- if not rk:return None,{'index':idx,'error':'record_key is required'}
- if not email and not phone:return None,{'index':idx,'error':'At least one of public_email or public_phone is required'}
- if email and '@' not in email:return None,{'index':idx,'error':'public_email must contain @'}
- if phone and not PHONE_RE.match(phone):return None,{'index':idx,'error':'public_phone must be 6-20 chars of digits, spaces, +, -, /, ( or )'}
+ if not rk:return None,None,{'index':idx,'error':'record_key is required'}
+ if not email and not phone:return None,None,{'index':idx,'error':'At least one of public_email or public_phone is required'}
+ if email and '@' not in email:return None,None,{'index':idx,'error':'public_email must contain @'}
+ if phone and not PHONE_RE.match(phone):return None,None,{'index':idx,'error':'public_phone must be 6-40 chars of digits, spaces, +, -, /, ( or )'}
  now=datetime.now(timezone.utc).isoformat()
- row={'logical_table':'external_trade_prospects','organization_id':ORG,'record_key':rk,'buyer_contact':phone or email,'contact_verified_at':now,'updated_at':now}
- if email:row['public_email']=email
- if phone:row['public_phone']=phone
- if src_name:row['contact_source_name']=src_name
- if src_url:row['contact_source_url']=src_url
- return row,None
+ fields={'buyer_contact':phone or email,'contact_verified_at':now,'updated_at':now}
+ if email:fields['public_email']=email
+ if phone:fields['public_phone']=phone
+ if src_name:fields['contact_source_name']=src_name
+ if src_url:fields['contact_source_url']=src_url
+ return rk,fields,None
+async def _fetch_existing_rows(keys):
+ # Read current rows so contact fields merge into the existing data JSON
+ # instead of replacing it. Only touches columns known to exist.
+ if not keys:return {}
+ u,k=cfg(); h={'apikey':k,'Authorization':f'Bearer {k}','Accept':'application/json'}
+ quoted=','.join('"'+kk.replace('"','""')+'"' for kk in keys)
+ params={'logical_table':'eq.external_trade_prospects','record_key':f'in.({quoted})','select':'record_key,data','limit':str(len(keys))}
+ out={}
+ async with httpx.AsyncClient(timeout=30) as c:
+  r=await c.get(f'{u}/rest/v1/sahjony_trade_records',headers=h,params=params); r.raise_for_status()
+  for row in (r.json() if r.content else []):
+   if isinstance(row.get('data'),dict):out[str(row.get('record_key'))]=row
+ return out
 @app.post('/crm/cuba-mipymes/contact-update')
 async def contact_update(request:Request,x_role:str|None=Header(None,alias='X-Role'),authorization:str|None=Header(None,alias='Authorization')):
  """Owner-authenticated write of verified contact info onto CRM records.
 
  Body: {"items":[{"record_key":str,"public_email":str|None,"public_phone":str|None,"contact_source_name":str,"contact_source_url":str}]}.
- Only writes the contact columns supplied in each item via the merge-duplicates
- upsert; all other columns are preserved. Never invents contact data — the
- endpoint only persists what it is given. Invalid items are rejected with
- per-item errors; one bad item never fails the whole batch.
+ Contact fields merge into each record's existing data JSON — every other
+ field is preserved and no table schema change is required. Invalid items are
+ rejected with per-item errors; one bad item never fails the whole batch.
+ Never invents contact data — the endpoint only persists what it is given.
  """
  _auth_owner(x_role,authorization)
  try:payload=await request.json()
@@ -231,11 +244,21 @@ async def contact_update(request:Request,x_role:str|None=Header(None,alias='X-Ro
  raw_items=payload.get('items') if isinstance(payload,dict) else None
  if not isinstance(raw_items,list):raise HTTPException(400,'Body must be {"items": [...]}')
  if len(raw_items)>MAX_CONTACT_ITEMS:raise HTTPException(400,f'Too many items (max {MAX_CONTACT_ITEMS})')
- rows=[];errors=[]
+ cleaned=[];errors=[]
  for idx,raw in enumerate(raw_items):
-  row,err=_clean_contact_item(raw,idx)
+  rk,fields,err=_clean_contact_item(raw,idx)
   if err:errors.append(err)
-  else:rows.append(row)
+  else:cleaned.append((rk,fields))
  updated=0
- if rows:updated=await upsert(rows)
+ if cleaned:
+  try:existing=await _fetch_existing_rows([rk for rk,_ in cleaned])
+  except Exception as e:raise HTTPException(502,f'Could not read existing CRM rows: {e}')
+  merged=[]
+  for rk,fields in cleaned:
+   data=dict((existing.get(rk) or {}).get('data') or {})
+   data.update(fields)
+   merged.append({'logical_table':'external_trade_prospects','record_key':rk,'data':data})
+  missing=[rk for rk,_ in cleaned if rk not in existing]
+  if missing:raise HTTPException(404,f'record_key not found: {missing[:5]}')
+  updated=await upsert(merged)
  return {'status':'ok','received':len(raw_items),'updated':updated,'rejected':len(errors),'errors':errors}
