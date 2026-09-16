@@ -53,6 +53,7 @@ def test_supabase_aal2_token_is_accepted_as_canonical_owner_session(monkeypatch)
 
 def test_supabase_aal1_token_is_rejected_for_owner_os(monkeypatch):
     _owner_env(monkeypatch)
+    monkeypatch.setenv("OWNER_MFA_REQUIRED", "true")
     monkeypatch.setattr(api, "decode_supabase_jwt", lambda token: {
         "sub": "owner-user-id", "email": "owner@example.com", "aal": "aal1", "exp": 9999999999
     })
@@ -166,3 +167,92 @@ def test_recovery_reset_rejects_password_only_session(monkeypatch):
         ))
     assert exc.value.status_code == 403
     assert backend.grants[0]["used_at"] is None
+
+
+# --- Policy-aware session validation (OWNER_MFA_REQUIRED=false must not
+# bounce valid owner sessions; AAL2 is enforced only when the policy requires it)
+
+
+def _app_token_no_mfa(secret):
+    import base64
+    import hashlib
+    import hmac
+    import json as _json
+    import time as _time
+
+    now = int(_time.time())
+    payload = {
+        "role": "owner",
+        "email": "owner@example.com",
+        "iat": now,
+        "exp": now + 3600,
+        "scope": "owner:full",
+        "mfa_verified": False,
+        "identity_provider": "supabase_auth",
+    }
+    encoded = base64.urlsafe_b64encode(_json.dumps(payload, separators=(",", ":"), sort_keys=True).encode()).decode().rstrip("=")
+    sig = base64.urlsafe_b64encode(hmac.new(secret.encode(), encoded.encode("ascii"), hashlib.sha256).digest()).decode().rstrip("=")
+    return f"sahjony_owner.{encoded}.{sig}"
+
+
+def test_supabase_aal1_token_accepted_when_mfa_not_required(monkeypatch):
+    _owner_env(monkeypatch)
+    monkeypatch.delenv("OWNER_MFA_REQUIRED", raising=False)
+    monkeypatch.setattr(api, "decode_supabase_jwt", lambda token: {
+        "sub": "owner-user-id", "email": "owner@example.com", "aal": "aal1", "exp": 9999999999
+    })
+    monkeypatch.setattr(api, "_membership", lambda user_id, roles: {"role": "owner"})
+    payload = api._owner_session_payload("Bearer aal1-token")
+    assert payload["scope"] == "owner:full"
+    # Verified at the policy's assurance level (MFA not required).
+    assert payload["mfa_verified"] is True
+
+
+def test_supabase_aal2_token_accepted_when_mfa_not_required(monkeypatch):
+    _owner_env(monkeypatch)
+    monkeypatch.delenv("OWNER_MFA_REQUIRED", raising=False)
+    monkeypatch.setattr(api, "decode_supabase_jwt", lambda token: {
+        "sub": "owner-user-id", "email": "owner@example.com", "aal": "aal2", "exp": 9999999999
+    })
+    monkeypatch.setattr(api, "_membership", lambda user_id, roles: {"role": "owner"})
+    payload = api._owner_session_payload("Bearer aal2-token")
+    assert payload["mfa_verified"] is True
+
+
+def test_app_session_without_mfa_verified_accepted_when_mfa_not_required(monkeypatch):
+    _owner_env(monkeypatch)
+    monkeypatch.delenv("OWNER_MFA_REQUIRED", raising=False)
+    monkeypatch.setenv("OWNER_SESSION_SECRET", "test-session-secret")
+    token = api.issue_owner_session("owner@example.com", mfa_verified=False)
+    payload = api._owner_session_payload("Bearer " + token)
+    assert payload["scope"] == "owner:full"
+    assert payload["mfa_verified"] is False
+
+
+def test_app_session_without_mfa_verified_rejected_when_mfa_required(monkeypatch):
+    _owner_env(monkeypatch)
+    monkeypatch.setenv("OWNER_MFA_REQUIRED", "true")
+    monkeypatch.setenv("OWNER_SESSION_SECRET", "test-session-secret")
+    token = _app_token_no_mfa("test-session-secret")
+    assert api.decode_owner_session(token) is None
+    with pytest.raises(HTTPException) as exc:
+        api._owner_session_payload("Bearer " + token)
+    assert exc.value.status_code == 401
+
+
+def test_owner_session_endpoint_reports_mfa_policy_flag(monkeypatch):
+    _owner_env(monkeypatch)
+    monkeypatch.setenv("OWNER_SESSION_SECRET", "test-session-secret")
+
+    monkeypatch.delenv("OWNER_MFA_REQUIRED", raising=False)
+    token = api.issue_owner_session("owner@example.com", mfa_verified=False)
+    body = api.owner_session("Bearer " + token)
+    assert body["mfa_required"] is False
+    assert body["mfa_verified"] is False
+
+    monkeypatch.setenv("OWNER_MFA_REQUIRED", "true")
+    body = None
+    # Token issued without MFA must not validate once the policy requires it.
+    with pytest.raises(HTTPException) as exc:
+        api.owner_session("Bearer " + token)
+    assert exc.value.status_code == 401
