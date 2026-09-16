@@ -9,8 +9,8 @@ def test_english_home_de_cuba_and_trade_desk_visible():
     app=text('src/App.tsx')
     public=app[app.index('function PublicSite()'):app.index('function PublicRfqForm()')]
     assert 'Cuba Desk' not in public
-    assert 'tel:+17132948801' in public
-    assert 'Call trade desk · +1 713-294-8801' in public
+    assert 'tel:+12816628581' in public
+    assert 'Call trade desk · +1 281-662-8581' in public
     assert 'not a completed deal' in public
     assert '12–14 weeks' in public
 
@@ -32,7 +32,7 @@ def test_marketplace_search_has_real_route_and_explicit_no_match():
     result=text('public/marketplace-search.html')
     assert 'NO VERIFIED PUBLIC MATCH' in result
     assert 'Continue to sourcing request' in result
-    assert 'tel:+17132948801' in result
+    assert 'tel:+12816628581' in result
 
 def test_marketplace_home_uses_real_route():
     public=text('src/App.tsx')[text('src/App.tsx').index('function PublicSite()'):]

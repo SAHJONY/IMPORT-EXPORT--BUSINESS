@@ -18,7 +18,8 @@ def test_about_names_company_leadership_and_avoids_unverified_legal_claims():
     text = read("public/about.html")
     assert "Juan Gonzalez" in text
     assert "Founder &amp; CEO" in text
-    assert "We do not publish an unverified street address, registration number" in text
+    # Standing rule: render NOTHING for address/registration — no disclaimers.
+    assert "We do not publish an unverified street address, registration number" not in text
     assert "/trust-center.html" in text
 
 
