@@ -947,5 +947,5 @@
       "dest": "/index.html"
     }
   ],
-  "ignoreCommand": "git diff --quiet \"$VERCEL_GIT_PREVIOUS_SHA\" HEAD -- . ':(exclude).github/**' ':(exclude)openclaw/**'"
+  "ignoreCommand": "[ -n \"$VERCEL_GIT_PREVIOUS_SHA\" ] && git diff --quiet \"$VERCEL_GIT_PREVIOUS_SHA\" HEAD -- . ':(exclude).github/**' ':(exclude)openclaw/**'"
 }
