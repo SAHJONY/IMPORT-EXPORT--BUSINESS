@@ -22,28 +22,60 @@ DIRECT_MAIL_DELIVERY_CONFIGURED = bool(
 )
 
 
-def _canonical(local_part: str) -> str:
-    return f"{local_part}@{CANONICAL_DOMAIN}"
+# Verified department inboxes, confirmed configured by the owner (2026-09-16).
+# These match the addresses published on the public site. Any department can be
+# given a real inbox with an EMAIL_<KEY> env var (e.g. EMAIL_SOURCING); an
+# explicit env value marks that department verified. Departments with an
+# assigned address but unconfirmed mailbox hosting carry the address with
+# verified=false and must not be used as From senders until confirmed.
+VERIFIED_DEPARTMENT_EMAILS = {
+    "sales": "ventas@sahjony.com",
+    "cuba": "cuba@sahjony.com",
+}
 
+# Owner-approved standard inboxes for the worldwide business (2026-09-16).
+# Addresses assigned; mailbox hosting pending owner confirmation.
+PENDING_DEPARTMENT_EMAILS = {
+    "sourcing": "sourcing@sahjony.com",
+    "operations": "operations@sahjony.com",
+    "compliance": "compliance@sahjony.com",
+    "finance": "finance@sahjony.com",
+    "logistics": "logistics@sahjony.com",
+    "customer_success": "customersuccess@sahjony.com",
+    "partnerships": "partnerships@sahjony.com",
+    "marketing": "marketing@sahjony.com",
+    "energy": "energy@sahjony.com",
+    "executive": "executive@sahjony.com",
+}
 
-def _addr(env_name: str, local_part: str) -> str:
-    return os.getenv(env_name, _canonical(local_part)).strip().lower()
-
-
-DEPARTMENTS: List[Dict[str, str]] = [
-    {"key": "sales", "name": "SAHJONY Global Trade — Sales", "email": _addr("EMAIL_SALES", "sales"), "function": "New customers, quotes, commercial opportunities"},
-    {"key": "sourcing", "name": "SAHJONY Global Trade — Sourcing", "email": _addr("EMAIL_SOURCING", "sourcing"), "function": "Supplier discovery, RFQs, procurement"},
-    {"key": "operations", "name": "SAHJONY Global Trade — Operations", "email": _addr("EMAIL_OPERATIONS", "operations"), "function": "Trade execution, case coordination, milestones"},
-    {"key": "compliance", "name": "SAHJONY Global Trade — Compliance", "email": _addr("EMAIL_COMPLIANCE", "compliance"), "function": "Sanctions, export/import controls, release gates"},
-    {"key": "finance", "name": "SAHJONY Global Trade — Finance", "email": _addr("EMAIL_FINANCE", "finance"), "function": "Invoices, payments, reconciliation"},
-    {"key": "logistics", "name": "SAHJONY Global Trade — Logistics", "email": _addr("EMAIL_LOGISTICS", "logistics"), "function": "Freight, carriers, shipment coordination"},
-    {"key": "customer_success", "name": "SAHJONY Global Trade — Customer Success", "email": _addr("EMAIL_CUSTOMER_SUCCESS", "customersuccess"), "function": "Customer onboarding, service questions, retention, post-sale follow-up"},
-    {"key": "partnerships", "name": "SAHJONY Global Trade — Partnerships", "email": _addr("EMAIL_PARTNERSHIPS", "partnerships"), "function": "Partners, referrals, strategic alliances and channel relationships"},
-    {"key": "marketing", "name": "SAHJONY Global Trade — Marketing", "email": _addr("EMAIL_MARKETING", "marketing"), "function": "Campaigns, media, content, brand and demand generation"},
-    {"key": "energy", "name": "SAHJONY Global Trade — Energy", "email": _addr("EMAIL_ENERGY", "energy"), "function": "Crude, fuels, energy products, origination and energy deal coordination"},
-    {"key": "cuba", "name": "SAHJONY Global Trade — Cuba Trade Desk", "email": _addr("EMAIL_CUBA", "cuba"), "function": "Cuba private-sector, MIPYME, consumer, fuels and corridor communications"},
-    {"key": "executive", "name": "SAHJONY LLC — Executive Office", "email": _addr("EMAIL_EXECUTIVE", "executive"), "function": "Executive escalations, administration, cross-department coordination"},
+_DEPARTMENT_DEFS = [
+    ("sales", "SAHJONY Global Trade — Sales", "New customers, quotes, commercial opportunities"),
+    ("sourcing", "SAHJONY Global Trade — Sourcing", "Supplier discovery, RFQs, procurement"),
+    ("operations", "SAHJONY Global Trade — Operations", "Trade execution, case coordination, milestones"),
+    ("compliance", "SAHJONY Global Trade — Compliance", "Sanctions, export/import controls, release gates"),
+    ("finance", "SAHJONY Global Trade — Finance", "Invoices, payments, reconciliation"),
+    ("logistics", "SAHJONY Global Trade — Logistics", "Freight, carriers, shipment coordination"),
+    ("customer_success", "SAHJONY Global Trade — Customer Success", "Customer onboarding, service questions, retention, post-sale follow-up"),
+    ("partnerships", "SAHJONY Global Trade — Partnerships", "Partners, referrals, strategic alliances and channel relationships"),
+    ("marketing", "SAHJONY Global Trade — Marketing", "Campaigns, media, content, brand and demand generation"),
+    ("energy", "SAHJONY Global Trade — Energy", "Crude, fuels, energy products, origination and energy deal coordination"),
+    ("cuba", "SAHJONY Global Trade — Cuba Trade Desk", "Cuba private-sector, MIPYME, consumer, fuels and corridor communications"),
+    ("executive", "SAHJONY LLC — Executive Office", "Executive escalations, administration, cross-department coordination"),
 ]
+
+
+def _department_entry(key: str, name: str, function: str) -> Dict:
+    env_value = os.getenv(f"EMAIL_{key.upper()}", "").strip().lower()
+    if env_value:
+        return {"key": key, "name": name, "email": env_value, "verified": True, "inbox": OPERATIONAL_MAILBOX, "function": function}
+    if key in VERIFIED_DEPARTMENT_EMAILS:
+        return {"key": key, "name": name, "email": VERIFIED_DEPARTMENT_EMAILS[key], "verified": True, "inbox": OPERATIONAL_MAILBOX, "function": function}
+    if key in PENDING_DEPARTMENT_EMAILS:
+        return {"key": key, "name": name, "email": PENDING_DEPARTMENT_EMAILS[key], "verified": False, "inbox": OPERATIONAL_MAILBOX, "function": function}
+    return {"key": key, "name": name, "email": "", "verified": False, "inbox": OPERATIONAL_MAILBOX, "function": function}
+
+
+DEPARTMENTS: List[Dict] = [_department_entry(key, name, function) for key, name, function in _DEPARTMENT_DEFS]
 
 
 def _mailbox_state() -> dict:
@@ -74,6 +106,7 @@ def email_registry_health():
         "operational_mailbox": _mailbox_state(),
         "departments": len(DEPARTMENTS),
         "active_departments": [d["key"] for d in DEPARTMENTS],
+        "verified_departments": [d["key"] for d in DEPARTMENTS if d.get("verified")],
         "routing_mode": "enterprise department-aware canonical routing with authenticated transport",
     }
 
@@ -99,11 +132,21 @@ def email_configuration():
 
 @app.get("/business-email/departments")
 def email_departments():
+    verified = [d for d in DEPARTMENTS if d.get("verified")]
+    pending = [d for d in DEPARTMENTS if not d.get("verified")]
     return {
         "canonical_domain": CANONICAL_DOMAIN,
         "canonical_website": CANONICAL_WEBSITE,
         "trade_os_url": TRADE_OS_URL,
         "operational_mailbox": _mailbox_state(),
         "departments": DEPARTMENTS,
-        "note": "Canonical enterprise departments are active for agentic routing. Until domain mail hosting is verified, external delivery remains on the authenticated operational mailbox with SAHJONY Global Trade as the customer-facing display identity.",
+        "verified_count": len(verified),
+        "verified_departments": [d["key"] for d in verified],
+        "pending_departments": [d["key"] for d in pending],
+        "note": (
+            "Verified departments carry their owner-confirmed inbox. Departments without a verified "
+            "inbox carry no address and route inbound to the authenticated operational mailbox. "
+            "Until domain mail hosting is verified, external delivery remains on the operational mailbox "
+            "with SAHJONY Global Trade as the customer-facing display identity; never spoof an unverified @sahjony.com From address."
+        ),
     }
