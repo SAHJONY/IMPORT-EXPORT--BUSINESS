@@ -1,0 +1,164 @@
+/* ==========================================================================
+   SAHJONY · Shared design system (Pilar 4 · UI/UX upgrade)
+   One visual language for the public site and the owner dashboard.
+   Brand: navy + gold, B2B professional. Loaded by every public page.
+   Pages keep their local layout CSS; this file provides tokens,
+   components (buttons, forms, cards, states) and accessibility rules.
+   ========================================================================== */
+
+:root{
+  --sj-bg:#050b13;
+  --sj-panel:#0a1a29;
+  --sj-panel2:#10283c;
+  --sj-line:rgba(255,255,255,.11);
+  --sj-text:#f7fbff;
+  --sj-muted:#96acbd;
+  --sj-accent:#5ad8ff;
+  --sj-green:#74efb5;
+  --sj-gold:#e6c675;
+  --sj-danger:#ffadb3;
+  --sj-focus:#8fe3ff;
+  --sj-radius:14px;
+  --sj-font:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  --sj-shadow:0 18px 60px rgba(0,0,0,.35);
+}
+
+/* ---- Base: every page using this sheet shares these ---- */
+body{
+  font-family:var(--sj-font);
+  -webkit-text-size-adjust:100%;
+  text-rendering:optimizeLegibility;
+}
+img,video,svg{max-width:100%;height:auto}
+
+/* Visible keyboard focus everywhere (WCAG 2.4.7) */
+a:focus-visible,button:focus-visible,input:focus-visible,textarea:focus-visible,
+select:focus-visible,summary:focus-visible,[tabindex]:focus-visible{
+  outline:2px solid var(--sj-focus);
+  outline-offset:3px;
+  border-radius:6px;
+}
+
+/* Touch targets: 44px minimum on coarse pointers */
+@media(pointer:coarse){
+  .sj-btn,button,.btn,a.btn{min-height:44px}
+  input,textarea,select{min-height:44px}
+}
+
+/* Skip link for keyboard users */
+.sj-skip{
+  position:absolute;left:-9999px;top:0;z-index:200;
+  background:var(--sj-accent);color:#031018;font-weight:800;
+  padding:12px 16px;border-radius:0 0 10px 0;
+}
+.sj-skip:focus{left:0}
+
+/* ---- Buttons: one language ---- */
+.sj-btn{
+  display:inline-flex;align-items:center;justify-content:center;gap:8px;
+  border:1px solid var(--sj-line);border-radius:12px;
+  background:rgba(255,255,255,.04);color:var(--sj-text);
+  padding:13px 18px;font:inherit;font-weight:800;font-size:14px;
+  cursor:pointer;text-decoration:none;line-height:1.2;
+  transition:transform .15s ease,box-shadow .15s ease,background .15s ease;
+}
+.sj-btn:hover{transform:translateY(-1px);box-shadow:var(--sj-shadow)}
+.sj-btn:active{transform:translateY(0)}
+.sj-btn-primary{
+  background:linear-gradient(135deg,var(--sj-accent),var(--sj-green));
+  color:#031018;border:0;
+}
+.sj-btn-gold{
+  background:linear-gradient(135deg,#f2d78a,var(--sj-gold));
+  color:#231a05;border:0;
+}
+.sj-btn-ghost{background:transparent}
+.sj-btn-block{width:100%}
+.sj-btn[disabled],.sj-btn.is-loading{opacity:.65;cursor:wait;transform:none}
+.sj-btn .sj-spin{
+  width:16px;height:16px;border-radius:50%;flex:0 0 auto;
+  border:2px solid rgba(0,0,0,.25);border-top-color:currentColor;
+  animation:sj-rotate .7s linear infinite;
+}
+@keyframes sj-rotate{to{transform:rotate(360deg)}}
+
+/* ---- Forms: one language ---- */
+.sj-field{display:grid;gap:6px}
+.sj-field>label,.sj-label{
+  font-size:11px;font-weight:800;letter-spacing:.09em;text-transform:uppercase;
+  color:var(--sj-muted);
+}
+.sj-input{
+  width:100%;padding:12px;border-radius:10px;
+  border:1px solid var(--sj-line);background:#06131f;color:var(--sj-text);
+  font:inherit;
+}
+.sj-input::placeholder{color:#5f7688}
+.sj-input[aria-invalid="true"]{border-color:var(--sj-danger)}
+.sj-hint{font-size:11px;color:var(--sj-muted);line-height:1.5}
+.sj-error{font-size:12px;color:var(--sj-danger);line-height:1.5}
+
+/* Status / feedback panel after an action */
+.sj-status{
+  border:1px solid var(--sj-line);border-radius:12px;padding:13px 15px;
+  color:var(--sj-muted);font-size:12.5px;line-height:1.6;background:rgba(255,255,255,.02);
+}
+.sj-status.ok{border-color:rgba(116,239,181,.35);color:#c9f2dd;background:rgba(116,239,181,.05)}
+.sj-status.bad{border-color:rgba(255,173,179,.35);color:#ffc9cd;background:rgba(255,173,179,.05)}
+.sj-status.info{border-color:rgba(90,216,255,.35);color:#cdeffb;background:rgba(90,216,255,.05)}
+.sj-status .sj-ref{font-weight:800;color:var(--sj-text)}
+
+/* ---- Cards ---- */
+.sj-card{
+  border:1px solid var(--sj-line);border-radius:var(--sj-radius);
+  background:linear-gradient(180deg,var(--sj-panel2),var(--sj-panel));
+  padding:20px;
+}
+.sj-card h3{margin:0 0 8px;font-size:16px}
+.sj-card p{margin:0;color:var(--sj-muted);font-size:12.5px;line-height:1.6}
+
+/* ---- Empty & error states: never a blank page ---- */
+.sj-empty,.sj-alert{
+  border-radius:var(--sj-radius);padding:28px 22px;text-align:center;
+  font-size:13px;line-height:1.65;
+}
+.sj-empty{border:1px dashed var(--sj-line);color:var(--sj-muted);background:rgba(255,255,255,.015)}
+.sj-alert{border:1px solid rgba(255,173,179,.3);color:#ffc9cd;background:rgba(255,173,179,.05)}
+.sj-empty b,.sj-alert b{display:block;color:var(--sj-text);font-size:15px;margin-bottom:6px}
+.sj-empty .sj-btn,.sj-alert .sj-btn{margin-top:14px}
+
+/* ---- Trust strip (real values only) ---- */
+.sj-trust{
+  display:flex;flex-wrap:wrap;gap:8px;margin-top:22px;
+}
+.sj-trust span{
+  font-size:11px;color:#c8d6e2;border:1px solid var(--sj-line);
+  border-radius:999px;padding:9px 13px;background:rgba(255,255,255,.025);
+  display:inline-flex;align-items:center;gap:7px;
+}
+
+/* ---- Eyebrow / section rhythm ---- */
+.sj-ey{
+  color:var(--sj-accent);font-size:10px;letter-spacing:.18em;font-weight:900;
+  text-transform:uppercase;
+}
+.sj-lead{color:var(--sj-muted);line-height:1.7;font-size:15px}
+
+/* ---- Reduced motion ---- */
+@media(prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:.001s!important;transition-duration:.001s!important}
+  html{scroll-behavior:auto}
+}
+
+/* ---- Small screens: no horizontal scroll, readable type ---- */
+@media(max-width:560px){
+  body{font-size:15px}
+  .sj-btn{width:100%}
+  .sj-trust span{font-size:10.5px;padding:8px 11px}
+}
+
+/* Visually hidden but available to screen readers */
+.sj-visually-hidden{
+  position:absolute!important;width:1px;height:1px;padding:0;margin:-1px;
+  overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0;
+}

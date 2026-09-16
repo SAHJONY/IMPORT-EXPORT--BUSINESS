@@ -1,34 +1,129 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Import‑Export Business – Ultra Premium Hero</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#050b13">
+  <title>SAHJONY LLC · Global Trade, Sourcing & Managed Import-Export</title>
+  <meta name="description" content="SAHJONY LLC connects qualified business demand with verified suppliers worldwide: sourcing, RFQs, managed trade and Cuba private-sector coordination from Houston, Texas.">
+  <link rel="canonical" href="https://www.sahjony.com/">
+  <link rel="stylesheet" href="/sahjony-design.css">
   <style>
-    html,body{margin:0;padding:0;height:100%;font-family:Arial,Helvetica,sans-serif;overflow:hidden;}
-    .hero{position:relative;width:100%;height:100vh;display:flex;align-items:center;justify-content:center;color:#fff;}
-    .hero video{position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;z-index:-2;}
-    .overlay{position:absolute;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.4);z-index:-1;}
-    .content{text-align:center;z-index:1;}
-    .content h1{font-size:4rem;margin:0;letter-spacing:2px;}
-    .content p{font-size:1.5rem;margin:20px 0;}
-    .actions{display:flex;gap:10px;justify-content:center;flex-wrap:wrap}.cta{display:inline-block;padding:15px 30px;background:#ff6200;border-radius:5px;color:#fff;text-decoration:none;font-size:1.2rem;transition:background .3s;}.cta.secondary{background:rgba(0,0,0,.45);border:1px solid rgba(255,255,255,.5)}
-    .cta:hover{background:#e55300;}.cta.secondary:hover{background:rgba(0,0,0,.7)}
-    @media(max-width:768px){.content h1{font-size:2.5rem;} .content p{font-size:1rem;}}
+    body{margin:0;background:radial-gradient(circle at 12% 0,rgba(90,216,255,.12),transparent 30%),radial-gradient(circle at 88% 6%,rgba(230,198,117,.06),transparent 26%),var(--sj-bg);color:var(--sj-text)}
+    .wrap{max-width:1180px;margin:auto;padding:0 20px}
+    .top{position:sticky;top:0;z-index:20;background:rgba(5,11,19,.92);backdrop-filter:blur(14px);border-bottom:1px solid var(--sj-line)}
+    .topin{max-width:1180px;margin:auto;padding:14px 20px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+    .brand{font-size:12px;letter-spacing:.16em;font-weight:950;color:var(--sj-text);text-decoration:none}
+    .brand small{display:block;font-size:9px;letter-spacing:.22em;color:var(--sj-gold);font-weight:800;margin-top:3px}
+    .nav{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+    .nav a{color:#c9d8e4;text-decoration:none;font-size:12px;font-weight:700;padding:10px 12px;border-radius:999px}
+    .nav a:hover{background:rgba(255,255,255,.06);color:#fff}
+    .nav a.cta{background:linear-gradient(135deg,var(--sj-accent),var(--sj-green));color:#031018}
+    .hero{padding:76px 0 40px;display:grid;grid-template-columns:1.15fr .85fr;gap:34px;align-items:center}
+    .hero h1{font-size:clamp(42px,6vw,78px);line-height:.94;letter-spacing:-.05em;margin:14px 0 18px}
+    .hero h1 em{font-style:normal;color:var(--sj-gold)}
+    .proof{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:26px}
+    .proof div{border:1px solid var(--sj-line);border-radius:12px;padding:14px;background:rgba(255,255,255,.02)}
+    .proof b{display:block;font-size:13px;margin-bottom:4px}
+    .proof span{font-size:11px;color:var(--sj-muted);line-height:1.5}
+    .flow{padding:34px 0}
+    .steps{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:18px}
+    .step{border:1px solid var(--sj-line);border-radius:14px;padding:18px;background:linear-gradient(180deg,var(--sj-panel2),var(--sj-panel))}
+    .step b{font-size:10px;color:var(--sj-gold);letter-spacing:.12em}
+    .step h3{margin:10px 0 6px;font-size:16px}
+    .step p{margin:0;font-size:12px;color:var(--sj-muted);line-height:1.6}
+    .services{padding:34px 0 50px}
+    .svc-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:18px}
+    .svc{border:1px solid var(--sj-line);border-radius:14px;padding:20px;background:rgba(255,255,255,.02);text-decoration:none;color:inherit;display:block}
+    .svc:hover{border-color:rgba(90,216,255,.35)}
+    .svc b{font-size:10px;color:var(--sj-accent);letter-spacing:.14em}
+    .svc h3{margin:10px 0 6px;font-size:17px}
+    .svc p{margin:0;font-size:12.5px;color:var(--sj-muted);line-height:1.6}
+    footer{border-top:1px solid var(--sj-line);padding:26px 0 46px;color:#71879a;font-size:11.5px;line-height:1.7}
+    footer a{color:#a9bfd1}
+    @media(max-width:860px){.hero{grid-template-columns:1fr;padding-top:52px}.steps{grid-template-columns:1fr 1fr}.svc-grid{grid-template-columns:1fr}}
+    @media(max-width:560px){.steps{grid-template-columns:1fr}.proof{grid-template-columns:1fr}.nav{width:100%}.nav a{flex:1;text-align:center}}
   </style>
 </head>
 <body>
-  <section class="hero">
-    <video autoplay muted loop playsinline>
-      <source src="https://assets.mixkit.co/videos/preview/mixkit-planet-rotating-3200-2042-large.mp4" type="video/mp4">
-    </video>
-    <div class="overlay"></div>
-    <div class="content">
-      <h1>Powering Global Trade</h1>
-      <p>Seamless import‑export solutions for any product, any country.</p>
-      <div class="actions"><a href="/owner-login" class="cta">Enter Dashboard</a><a href="/?lang=es" class="cta secondary" data-no-translate="true">Español</a></div>
+<a class="sj-skip" href="#main">Skip to content</a>
+<header class="top">
+  <div class="topin">
+    <a class="brand" href="/">SAHJONY LLC<small>GLOBAL TRADE · HOUSTON</small></a>
+    <nav class="nav" aria-label="Primary">
+      <a href="/start">Request a quote</a>
+      <a href="/marketplace">Marketplace</a>
+      <a href="/partners">Partners</a>
+      <a href="/cuba-private-sector">Cuba desk</a>
+      <a href="/es.html" lang="es">Español</a>
+      <a class="cta" href="/start">Start →</a>
+    </nav>
+  </div>
+</header>
+<main class="wrap" id="main">
+  <section class="hero" aria-labelledby="h1">
+    <div>
+      <div class="sj-ey">SAHJONY LLC · INTERNATIONAL TRADE COORDINATION</div>
+      <h1 id="h1">Source the world. <em>Trade with control.</em></h1>
+      <p class="sj-lead">We connect qualified business demand with suppliers worldwide — product sourcing, quote comparison, documentation, compliance, logistics and managed execution. One commercial desk, clear next steps, evidence at every stage.</p>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:22px">
+        <a class="sj-btn sj-btn-primary" href="/start">Request a quote →</a>
+        <a class="sj-btn" href="/partners">Become a Partner</a>
+        <a class="sj-btn sj-btn-ghost" href="/marketplace">Explore marketplace</a>
+      </div>
+      <div class="sj-trust" aria-label="Company facts">
+        <span>📍 Houston, Texas, USA</span>
+        <span>📞 +1 713-294-8801</span>
+        <span>✉️ ventas@sahjony.com</span>
+        <span>💬 WhatsApp +1 281 662 8581</span>
+      </div>
+    </div>
+    <div class="sj-card" aria-label="Response commitment">
+      <div class="sj-ey">HOW WE RESPOND</div>
+      <h2 style="font-size:22px;margin:12px 0 8px">Every request gets a reference number.</h2>
+      <p class="sj-lead" style="font-size:13.5px">Submit a sourcing request and you receive a tracking reference immediately. Our response target is <strong style="color:var(--sj-text)">24–48 business hours</strong> using your business email or phone/WhatsApp. No purchase obligation is created by requesting.</p>
+      <div class="proof" style="margin-top:18px">
+        <div><b>01 · Request</b><span>Product, quantity, destination, contact.</span></div>
+        <div><b>02 · Qualify</b><span>We clarify specs and commercial terms.</span></div>
+        <div><b>03 · Source</b><span>Supplier discovery and quote comparison.</span></div>
+      </div>
     </div>
   </section>
-  <script src="/global-language.js" defer></script>
+
+  <section class="flow" aria-labelledby="how">
+    <div class="sj-ey">THE PROCESS</div>
+    <h2 id="how" style="font-size:clamp(28px,4vw,46px);letter-spacing:-.04em;margin:10px 0 4px">Clear steps. No theater.</h2>
+    <p class="sj-lead">You do not need to understand sourcing or logistics. Give us the commercial need; we determine the next step and keep you informed.</p>
+    <div class="steps">
+      <div class="step"><b>STEP 1</b><h3>You submit the need</h3><p>Product, quantity, destination and your business contact. Two minutes.</p></div>
+      <div class="step"><b>STEP 2</b><h3>We qualify it</h3><p>Missing specifications, timing and commercial requirements get clarified.</p></div>
+      <div class="step"><b>STEP 3</b><h3>We source</h3><p>Qualified requests move into supplier discovery and quote comparison.</p></div>
+      <div class="step"><b>STEP 4</b><h3>You review the result</h3><p>Compare commercial terms. Nothing binds you until you sign.</p></div>
+    </div>
+  </section>
+
+  <section class="services" aria-labelledby="svc">
+    <div class="sj-ey">WHAT WE DO</div>
+    <h2 id="svc" style="font-size:clamp(28px,4vw,46px);letter-spacing:-.04em;margin:10px 0 4px">Trade services</h2>
+    <div class="svc-grid">
+      <a class="svc" href="/start"><b>SOURCING & RFQ</b><h3>Product sourcing</h3><p>Identify manufacturers, distributors and exporters worldwide; compare real quotes with documented terms.</p></a>
+      <a class="svc" href="/cuba-private-sector"><b>CUBA PRIVATE SECTOR</b><h3>U.S.–Cuba commercial desk</h3><p>Eligible Cuban private businesses get supplier access, compliance review and managed logistics.</p></a>
+      <a class="svc" href="/government-contracting"><b>PUBLIC SECTOR</b><h3>Government contracting</h3><p>Structured RFQ intake for institutional and government buyers with documentation support.</p></a>
+      <a class="svc" href="/partners"><b>NETWORK</b><h3>Partner program</h3><p>Register, bring real commercial opportunities, follow qualification — earn when terms are met.</p></a>
+      <a class="svc" href="/suppliers"><b>SUPPLY SIDE</b><h3>Supplier onboarding</h3><p>Manufacturers and exporters: present your catalog and receive qualified demand.</p></a>
+      <a class="svc" href="/trust-center"><b>TRANSPARENCY</b><h3>Trust center</h3><p>Our public operating standards: verification, evidence policy, privacy and commercial controls.</p></a>
+    </div>
+  </section>
+</main>
+<footer>
+  <div class="wrap">
+    <strong style="color:#c9d8e4">SAHJONY LLC</strong> · Houston, Texas, USA ·
+    <a href="tel:+17132948801">+1 713-294-8801</a> ·
+    <a href="mailto:ventas@sahjony.com">ventas@sahjony.com</a><br>
+    <a href="/trust-center">Trust center</a> · <a href="/about">About</a> · <a href="/how-it-works">How it works</a> · <a href="/es.html" lang="es">Español</a><br>
+    <span>Requesting a quote creates no purchase or payment obligation.</span>
+  </div>
+</footer>
+<script src="/global-language.js" defer></script>
 </body>
 </html>
