@@ -1245,6 +1245,83 @@ async def hermes_outbox_ack(
     return {"status": "accepted", "command_id": ack.command_id, "delivery_status": ack.status}
 
 
+class HermesDirectSend(BaseModel):
+    recipient: str = Field(min_length=8, max_length=20)
+    body: str = Field(min_length=1, max_length=1000)
+
+
+@app.post("/whatsapp/hermes/outbox/enqueue")
+async def hermes_outbox_enqueue(
+    request: Request,
+    x_sahjony_timestamp: str | None = Header(None, alias="X-SAHJONY-Timestamp"),
+    x_sahjony_signature: str | None = Header(None, alias="X-SAHJONY-Signature"),
+) -> dict[str, Any]:
+    """Owner-governed direct WhatsApp send. Enqueues exactly one message for the Hermes outbox worker.
+
+    Governance: the only caller is the `Hostinger Hermes WhatsApp Direct Send`
+    workflow, which Juan dispatches explicitly per message (one recipient, one
+    text per dispatch, dry-run by default). Cold-recipient ban risk is surfaced
+    to the owner before every live dispatch — never sent silently.
+    """
+    raw = await request.body()
+    _verify_hermes_signature(raw, x_sahjony_timestamp, x_sahjony_signature)
+    try:
+        payload = HermesDirectSend.model_validate_json(raw)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Invalid direct-send payload") from exc
+    digits = "".join(ch for ch in payload.recipient if ch.isdigit())
+    if not 8 <= len(digits) <= 15:
+        raise HTTPException(status_code=400, detail="Recipient must be 8-15 digits")
+    command_id = f"wad_{secrets.token_urlsafe(18)}"
+    ts = _now()
+    await get_backend().insert("whatsapp_openclaw_outbox", {
+        "command_id": command_id,
+        "channel": "whatsapp",
+        "account_id": "default",
+        "recipient": digits,
+        "body": payload.body,
+        "preview_url": False,
+        "lead_id": None,
+        "customer_id": None,
+        "source_url": f"owner:direct-send:{command_id}",
+        "release_mode": "customer_service_window",
+        "status": "queued",
+        "attempts": 0,
+        "lease_token": None,
+        "lease_expires_at": None,
+        "provider_message_id": None,
+        "last_error": None,
+        "created_at": ts,
+        "updated_at": ts,
+    })
+    return {"status": "queued", "command_id": command_id, "recipient": digits}
+
+
+@app.get("/whatsapp/hermes/outbox/status")
+async def hermes_outbox_status(
+    command_id: str = Query(min_length=3, max_length=256),
+    x_sahjony_timestamp: str | None = Header(None, alias="X-SAHJONY-Timestamp"),
+    x_sahjony_signature: str | None = Header(None, alias="X-SAHJONY-Signature"),
+) -> dict[str, Any]:
+    """Delivery status for one outbox command (polled by the direct-send workflow)."""
+    _verify_hermes_signature(b"", x_sahjony_timestamp, x_sahjony_signature)
+    rows = await get_backend().select(
+        "whatsapp_openclaw_outbox",
+        params={"command_id": f"eq.{command_id}", "limit": "1"},
+    ) or []
+    if not rows:
+        raise HTTPException(status_code=404, detail="Hermes command not found")
+    row = rows[0]
+    return {
+        "status": "ok",
+        "command_id": command_id,
+        "delivery_status": row.get("status"),
+        "provider_message_id": row.get("provider_message_id"),
+        "last_error": row.get("last_error"),
+        "attempts": row.get("attempts"),
+    }
+
+
 @app.get("/whatsapp/webhook")
 async def whatsapp_webhook_verify(
     hub_mode: str | None = Query(None, alias="hub.mode"),

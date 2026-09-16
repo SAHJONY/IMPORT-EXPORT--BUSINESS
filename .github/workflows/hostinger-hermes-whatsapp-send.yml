@@ -1,0 +1,129 @@
+name: Hostinger Hermes WhatsApp Direct Send
+
+# Owner-governed direct WhatsApp send. Juan dispatches this explicitly per message:
+# exactly one recipient and one text per dispatch, dry-run by default.
+# Cold-recipient ban risk is printed before every live dispatch — never sent silently.
+# The message is enqueued to the Hermes outbox; the VPS outbox worker delivers it
+# through the native transport and ACKs the delivery status back.
+
+on:
+  workflow_dispatch:
+    inputs:
+      to:
+        description: Recipient phone in international digits only (e.g. 5358477839 for Cuba +53 58477839)
+        required: true
+        type: string
+      message:
+        description: Message text (1-1000 chars, plain text)
+        required: true
+        type: string
+      dry_run:
+        description: Validate only — do not send
+        required: true
+        default: 'true'
+        type: choice
+        options:
+          - 'true'
+          - 'false'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hermes-whatsapp-direct-send
+  cancel-in-progress: false
+
+jobs:
+  send:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      APP_URL: https://www.sahjony.com
+BRIDGE_SECRET: <redacted>
+      INPUT_TO: ${{ inputs.to }}
+      INPUT_DRY_RUN: ${{ inputs.dry_run }}
+    steps:
+      - name: Validate inputs and show ban-risk notice
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os, sys
+          digits = ''.join(ch for ch in os.environ['INPUT_TO'] if ch.isdigit())
+          if not 8 <= len(digits) <= 15:
+              print(f'INVALID_RECIPIENT len={len(digits)}', flush=True); sys.exit(2)
+          print(f'RECIPIENT_DIGITS={digits}', flush=True)
+          print(f'DRY_RUN={os.environ["INPUT_DRY_RUN"]}', flush=True)
+          PY
+          echo "INPUT_MESSAGE<<EOF" >> "$GITHUB_ENV"
+          printf '%s\n' "${{ inputs.message }}" >> "$GITHUB_ENV"
+          echo "EOF" >> "$GITHUB_ENV"
+
+      - name: Enqueue and track delivery
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib, hmac, json, os, sys, time, urllib.request, urllib.error
+
+          base = os.environ['APP_URL'].rstrip('/')
+secret=<redacted>
+          if len(secret) < 24:
+              print('BRIDGE_SECRET_MISSING', flush=True); sys.exit(2)
+
+          digits = ''.join(ch for ch in os.environ['INPUT_TO'] if ch.isdigit())
+          body = os.environ['INPUT_MESSAGE']
+          if not (1 <= len(body) <= 1000):
+              print(f'INVALID_MESSAGE_LEN={len(body)}', flush=True); sys.exit(3)
+          dry = os.environ['INPUT_DRY_RUN'] == 'true'
+
+          print('NOTICE: sending a first-contact message to a new number can trigger WhatsApp spam detection and risk the business number. Dispatching this workflow is the owner accepting that risk.', flush=True)
+          print(f'DIRECT_SEND to={digits} chars={len(body)} dry_run={dry}', flush=True)
+          if dry:
+              print('DRY_RUN_OK=no message enqueued', flush=True)
+              sys.exit(0)
+
+          def signed_headers(raw: bytes):
+              ts = str(int(time.time()))
+              sig = 'sha256=' + hmac.new(secret.encode(), ts.encode() + b'.' + raw, hashlib.sha256).hexdigest()
+              return {'X-SAHJONY-Timestamp': ts, 'X-SAHJONY-Signature': sig}
+
+          def post(path, payload):
+              raw = json.dumps(payload, separators=(',', ':')).encode()
+              req = urllib.request.Request(base + path, data=raw, method='POST',
+                  headers={'Accept': 'application/json', 'Content-Type': 'application/json', **signed_headers(raw)})
+              try:
+                  with urllib.request.urlopen(req, timeout=30) as r:
+                      return r.status, json.loads(r.read().decode() or '{}')
+              except urllib.error.HTTPError as e:
+                  return e.code, {'error': e.read().decode()[:300]}
+
+          def get_status(command_id):
+              path = f'/whatsapp/hermes/outbox/status?command_id={command_id}'
+              req = urllib.request.Request(base + path, method='GET',
+                  headers={'Accept': 'application/json', **signed_headers(b'')})
+              try:
+                  with urllib.request.urlopen(req, timeout=20) as r:
+                      return json.loads(r.read().decode() or '{}')
+              except Exception as e:
+                  return {'status': 'poll_error', 'error': str(e)[:200]}
+
+          code, resp = post('/whatsapp/hermes/outbox/enqueue', {'recipient': digits, 'body': body})
+          print(f'ENQUEUE_HTTP={code}', flush=True)
+          if code != 200 or resp.get('status') != 'queued':
+              print('ENQUEUE_FAILED ' + json.dumps(resp)[:500], flush=True); sys.exit(4)
+          command_id = resp['command_id']
+          print(f'COMMAND_ID={command_id}', flush=True)
+
+          final = {}
+          for i in range(12):
+              time.sleep(10)
+              final = get_status(command_id)
+              ds = final.get('delivery_status')
+              print(f'POLL_{i} delivery_status={ds}', flush=True)
+              if ds in ('sent', 'failed', 'needs_review'):
+                  break
+          print('DELIVERY=' + json.dumps({k: final.get(k) for k in ('delivery_status', 'provider_message_id', 'last_error', 'attempts')}), flush=True)
+          if final.get('delivery_status') != 'sent':
+              print('DIRECT_SEND_NOT_CONFIRMED', flush=True); sys.exit(5)
+          print('DIRECT_SEND_CONFIRMED', flush=True)
+          PY
