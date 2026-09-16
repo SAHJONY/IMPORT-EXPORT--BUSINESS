@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex,nofollow,noarchive">
+<title>Social Inbox Ingest — Owner</title>
+<script src="/global-language.js"></script>
+<style>
+  body{font-family:system-ui,-apple-system,sans-serif;max-width:720px;margin:2rem auto;padding:0 1rem;color:#1a1a1a;background:#f7f5f0}
+  h1{font-size:1.25rem;color:#0f2a4a}
+  p{font-size:.9rem;color:#444}
+  textarea{width:100%;min-height:220px;font-family:ui-monospace,monospace;font-size:.75rem;padding:.75rem;border:1px solid #ccc;border-radius:8px}
+  button{background:#0f2a4a;color:#fff;border:0;border-radius:8px;padding:.7rem 1.4rem;font-size:1rem;cursor:pointer;margin-top:.75rem}
+  button:disabled{opacity:.5;cursor:wait}
+  #result{margin-top:1rem;padding:.9rem;border-radius:8px;font-size:.9rem;display:none}
+  #result.ok{display:block;background:#e7f4ea;border:1px solid #9ccc9c}
+  #result.err{display:block;background:#fdecea;border:1px solid #e5a49c}
+  .hint{font-size:.8rem;color:#777;margin-top:.5rem}
+</style>
+</head>
+<body>
+<script>
+(function(){var t=sessionStorage.getItem('sahjony.owner.token');if(!t){location.replace('/owner-login?next='+encodeURIComponent(location.pathname));}})();
+</script>
+<h1>Social Inbox — Ingest</h1>
+<p>Owner-only transport for the scheduled Facebook sync. Paste the normalized items JSON
+(from <code>facebook_ingest.py --outbox</code>) and ingest. Items upsert on
+<code>external_id</code>, so re-delivery never duplicates. This page never touches Facebook.</p>
+<textarea id="payload" placeholder='{"items": [...]}  or  [...]'></textarea>
+<br>
+<button id="go">Ingest items</button>
+<div id="result"></div>
+<p class="hint">Not linked from any public page. noindex.</p>
+<script>
+(function(){
+  var box=document.getElementById('result'), btn=document.getElementById('go'), ta=document.getElementById('payload');
+  btn.addEventListener('click',function(){
+    var token=sessionStorage.getItem('sahjony.owner.token');
+    if(!token){location.replace('/owner-login?next='+encodeURIComponent(location.pathname));return;}
+    var raw=ta.value.trim();
+    if(!raw){box.className='err';box.textContent='Paste the items JSON first.';return;}
+    var body;
+    try{ body=JSON.parse(raw); }catch(e){box.className='err';box.textContent='Invalid JSON: '+e.message;return;}
+    if(body && !Array.isArray(body) && !Array.isArray(body.items)){box.className='err';box.textContent='Expected {"items": [...]} or a JSON array.';return;}
+    btn.disabled=true;box.className='';box.style.display='block';box.textContent='Ingesting…';
+    fetch('/crm/social-inbox/ingest',{method:'POST',headers:{'Content-Type':'application/json','X-Role':'owner','Authorization':'Bearer '+token},body:JSON.stringify(body && body.items?body:{items:body})})
+      .then(function(r){return r.json().then(function(j){return {ok:r.ok,j:j};});})
+      .then(function(res){
+        btn.disabled=false;
+        if(res.ok&&res.j.status==='ok'){box.className='ok';box.textContent='Done — received '+res.j.received+', upserted '+res.j.upserted+', rejected '+res.j.rejected+'.';}
+        else{box.className='err';box.textContent='Ingest failed: '+(res.j.detail||res.j.message||JSON.stringify(res.j));}
+      })
+      .catch(function(e){btn.disabled=false;box.className='err';box.textContent='Request failed: '+e.message;});
+  });
+})();
+</script>
+</body>
+</html>
