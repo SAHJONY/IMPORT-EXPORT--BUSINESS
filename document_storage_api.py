@@ -175,14 +175,67 @@ async def scan_result(document_id: str, payload: ScanResult, x_scan_secret: str 
     if not rows:
         raise HTTPException(404, "Document not found")
     doc = rows[0]
+    guard = _scan_callback_guard(doc.get("malware_scan_status"), payload.status)
+    if guard == "ignore_idempotent":
+        return {"document_id": document_id, "storage_status": doc.get("storage_status"),
+                "malware_scan_status": doc.get("malware_scan_status"), "idempotent": True}
+    if guard == "ignore_illegal":
+        await storage_event(document_id, {"role": "system", "id": payload.provider}, "scan_callback_rejected", doc,
+                            f"Illegal state transition rejected: {doc.get('malware_scan_status')} <- {payload.status}")
+        return {"document_id": document_id, "storage_status": doc.get("storage_status"),
+                "malware_scan_status": doc.get("malware_scan_status"), "rejected": True}
     storage_status = "clean" if payload.status == "clean" else "quarantined" if payload.status == "infected" else "scan_pending"
-    values = {"malware_scan_status": payload.status, "malware_scan_provider": payload.provider, "malware_scan_reference": payload.reference, "storage_status": storage_status, "updated_at": now()}
+    values = {"malware_scan_status": payload.status, "malware_scan_provider": payload.provider, "malware_scan_reference": payload.reference, "storage_status": storage_status, "scan_locked_at": None, "scan_lock_token": None, "updated_at": now()}
     await get_backend().patch("trade_documents", values, params={"document_id": f"eq.{document_id}"})
     doc.update(values)
     await storage_event(document_id, {"role": "system", "id": payload.provider}, "scan_result", doc, payload.detail)
     if payload.status == "infected":
         await storage_event(document_id, {"role": "system", "id": payload.provider}, "quarantined", doc, "Malware scan detected unsafe content")
     return {"document_id": document_id, "storage_status": storage_status, "malware_scan_status": payload.status}
+
+
+def _scan_callback_guard(current_status: str | None, payload_status: str) -> str:
+    """Decide whether a scan-result callback may apply.
+
+    Returns:
+      "apply"            — transition is legal; apply it.
+      "ignore_idempotent" — duplicate callback for an already-terminal state; no-op.
+      "ignore_illegal"   — transition would weaken a terminal state; reject it.
+
+    Terminal states (`clean`, `quarantined`) are sticky: a provider `error` may
+    never move a clean document back to `scan_pending`, and a `clean` callback
+    may never un-quarantine an infected document. Clearing a stuck lease is the
+    worker's/sweeper's job, not the callback's.
+    """
+    current = current_status or ""
+    if payload_status == "clean" and current == "clean":
+        return "ignore_idempotent"
+    if payload_status == "infected" and current == "quarantined":
+        return "ignore_idempotent"
+    if payload_status == "error" and current in {"clean", "quarantined"}:
+        return "ignore_illegal"
+    if payload_status == "clean" and current == "quarantined":
+        return "ignore_illegal"
+    return "apply"
+
+
+def _owner_or_cron(authorization: str | None) -> str:
+    supplied = authorization.removeprefix("Bearer ").strip() if authorization and authorization.startswith("Bearer ") else ""
+    cron_secret = os.getenv("CRON_SECRET", "").strip()
+    if cron_secret and supplied and secrets.compare_digest(supplied, cron_secret):
+        return "vercel_cron"
+    if supplied and verify_owner_token(supplied):
+        return "owner"
+    raise HTTPException(403, "Invalid credential")
+
+
+@app.get("/document-storage/scan-sweep")
+async def scan_sweep(authorization: str | None = Header(None, alias="Authorization")):
+    """Vercel cron (hourly): release stuck `scanning` leases back to `pending`."""
+    actor = _owner_or_cron(authorization)
+    from malware_scan_worker import sweep_stuck_scans
+    result = await sweep_stuck_scans()
+    return {**result, "triggered_by": actor}
 
 
 @app.patch("/document-storage/{document_id}/retention")
