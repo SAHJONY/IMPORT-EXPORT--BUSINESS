@@ -347,6 +347,14 @@
       "dest": "/start.html"
     },
     {
+      "src": "/actions",
+      "dest": "/actions.html"
+    },
+    {
+      "src": "/government-contracting",
+      "dest": "/government-contracting.html"
+    },
+    {
       "src": "/how-it-works",
       "dest": "/customer-guide.html"
     },
