@@ -1,0 +1,98 @@
+name: Hostinger WhatsApp Bridge Wire-Up
+
+# One-time (or repeat-safe) wiring that makes the Hostinger VPS the direct
+# WhatsApp API for outbound sends, independent of Vercel:
+#   1. Writes SAHJONY_APP_BRIDGE_SECRET (from repo secrets, never logged) into
+#      the VPS fallback env file used by sahjony-fallback-whatsapp.service
+#   2. Ensures WHATSAPP_AUTOMATION_ENABLED=true in that env file
+#   3. Restarts sahjony-fallback-whatsapp.service (port 8102, behind nginx /whatsapp/)
+#   4. Smoke-tests the signed outbox endpoints through http://69.62.68.67
+#
+# Owner-gated: Juan dispatches explicitly. Does NOT touch the live Hermes
+# gateway units, /root/.hermes, or /opt/sahjony-hermes — only the fallback
+# FastAPI service and its env file.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hostinger-whatsapp-wire-bridge
+  cancel-in-progress: false
+
+jobs:
+  wire:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      VPS_HOST: 69.62.68.67
+      VPS_USER: root
+    steps:
+      - name: Wire bridge secret and restart WhatsApp API on VPS
+        env:
+          SSH_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+          BRIDGE_SECRET: ${{ secrets.BRIDGE_SECRET }}
+        run: |
+          set -euo pipefail
+          if [ "${#BRIDGE_SECRET}" -lt 24 ]; then
+            echo "BRIDGE_SECRET missing or too short in repo secrets"; exit 2
+          fi
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/vps-key
+          chmod 600 ~/.ssh/vps-key
+          SSH="ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=15 -i ~/.ssh/vps-key"
+          # Copy the secret as a file so its value never appears in any command line or log.
+          printf '%s' "$BRIDGE_SECRET" > /tmp/bridge_secret_src
+          chmod 600 /tmp/bridge_secret_src
+          scp -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            -o ConnectTimeout=15 -i ~/.ssh/vps-key /tmp/bridge_secret_src "$VPS_USER@$VPS_HOST:/tmp/bridge_secret_incoming"
+          shred -u /tmp/bridge_secret_src
+          $SSH "$VPS_USER@$VPS_HOST" 'bash -s' <<'VPS_EOF'
+          set -euo pipefail
+          SECRET="$(cat /tmp/bridge_secret_incoming)"
+          shred -u /tmp/bridge_secret_incoming
+          if [ "${#SECRET}" -lt 24 ]; then echo "SECRET_TOO_SHORT"; exit 2; fi
+          ENV_FILE=/etc/sahjony-fallback/import-export.env
+          cp "$ENV_FILE" "$ENV_FILE.bak.$(date +%Y%m%d%H%M%S)"
+          grep -v -e '^SAHJONY_APP_BRIDGE_SECRET=' -e '^WHATSAPP_AUTOMATION_ENABLED=' "$ENV_FILE" > "$ENV_FILE.tmp" || true
+          printf 'SAHJONY_APP_BRIDGE_SECRET=%s\n' "$SECRET" >> "$ENV_FILE.tmp"
+          printf 'WHATSAPP_AUTOMATION_ENABLED=true\n' >> "$ENV_FILE.tmp"
+          chmod 600 "$ENV_FILE.tmp"
+          mv "$ENV_FILE.tmp" "$ENV_FILE"
+          unset SECRET
+          systemctl restart sahjony-fallback-whatsapp.service
+          sleep 6
+          systemctl is-active sahjony-fallback-whatsapp.service
+          echo WIRE_OK
+          VPS_EOF
+          rm -f ~/.ssh/vps-key
+
+      - name: Smoke-test direct Hostinger outbox API
+        env:
+          BRIDGE_SECRET: ${{ secrets.BRIDGE_SECRET }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib, hmac, json, os, time, urllib.request, urllib.error
+          base = 'http://69.62.68.67'
+          key = os.environ['BRIDGE_SECRET']
+          def signed_headers(raw: bytes):
+              ts = str(int(time.time()))
+              sig = 'sha256=' + hmac.new(key.encode(), ts.encode() + b'.' + raw, hashlib.sha256).hexdigest()
+              return {'X-SAHJONY-Timestamp': ts, 'X-SAHJONY-Signature': sig}
+          # status endpoint with a probe command_id: proves signature verification works on the VPS
+          req = urllib.request.Request(base + '/whatsapp/hermes/outbox/status?command_id=probe', method='GET',
+              headers={'Accept': 'application/json', **signed_headers(b'')})
+          try:
+              with urllib.request.urlopen(req, timeout=20) as r:
+                  body = json.loads(r.read().decode() or '{}')
+              print(f'STATUS_HTTP={r.status}')
+              print('STATUS_BODY=' + json.dumps(body)[:300])
+              if body.get('detail') == 'Hermes application bridge is not configured':
+                  print('SMOKE_FAIL=bridge still not configured'); raise SystemExit(1)
+              print('SMOKE_OK=direct Hostinger outbox API is live and signature verifies')
+          except urllib.error.HTTPError as e:
+              print(f'STATUS_HTTP={e.code} SMOKE_FAIL'); raise SystemExit(1)
+          PY
