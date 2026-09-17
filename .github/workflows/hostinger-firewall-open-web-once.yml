@@ -1,0 +1,55 @@
+name: Hostinger Firewall Open Web Once
+
+# One-shot: open inbound TCP/80 and TCP/443 on the Hostinger panel firewall
+# attached to the VPS (the panel firewall was allowing only TCP/22, which
+# blocked all public web traffic even though ufw and nginx were fine).
+# Idempotent: skips rules that already exist, then syncs and verifies.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  HOSTINGER_API_BASE: "https://developers.hostinger.com"
+  VM_ID: "767852"
+  FIREWALL_ID: "354542"
+
+jobs:
+  open-web:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Add TCP 80/443 accept rules and sync firewall
+        env:
+          API_TOKEN: ${{ secrets.HOSTINGER_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ -n "$API_TOKEN" ]] || { echo "HOSTINGER_API_TOKEN missing" >&2; exit 2; }
+          api_root="$HOSTINGER_API_BASE/api/vps/v1"
+          auth="Authorization: Bearer $API_TOKEN"
+          fw_id="$FIREWALL_ID"
+
+          firewall="$(curl --fail --silent --show-error -H "$auth" "$api_root/firewall/$fw_id")"
+          for port in 80 443; do
+            if jq -e --arg p "$port" \
+              '(.rules // []) | any(((.protocol | ascii_upcase) == "TCP") and (.port == $p) and (.source == "any"))' \
+              <<<"$firewall" >/dev/null; then
+              echo "rule TCP/$port already present, skipping"
+            else
+              echo "adding rule TCP/$port"
+              curl --fail --silent --show-error --request POST \
+                -H "$auth" -H 'Content-Type: application/json' \
+                --data "{\"protocol\":\"TCP\",\"port\":\"$port\",\"source\":\"any\",\"source_detail\":\"any\"}" \
+                "$api_root/firewall/$fw_id/rules" >/dev/null
+            fi
+          done
+
+          echo "syncing firewall $fw_id to VM $VM_ID"
+          curl --fail --silent --show-error --request POST \
+            -H "$auth" "$api_root/firewall/$fw_id/sync/$VM_ID" >/dev/null
+
+          echo "final rules:"
+          curl --fail --silent --show-error -H "$auth" "$api_root/firewall/$fw_id" \
+            | jq -r '.rules[] | "  \(.action) \(.protocol)/\(.port) from \(.source)"'
