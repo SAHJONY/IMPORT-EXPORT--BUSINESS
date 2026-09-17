@@ -187,6 +187,13 @@ async def run_sales_turn(
     owner_context: bool = False,
     listing: dict[str, Any] | None = None,
     verified_amounts: list[Any] | None = None,
+    # import_export: True when verified supplier/freight/compliance evidence
+    # exists for this turn's claims; False fails definitive trade claims.
+    has_verified_trade_evidence: bool | None = None,
+    # my_cuba_cash: names of verified providers for this customer.
+    verified_providers: list[str] | None = None,
+    # my_cuba_cash: True only after the first real sends validate demand.
+    concierge_available: bool = False,
 ) -> dict[str, Any]:
     """Run one perceive → reason → act → reflect cycle.
 
@@ -268,13 +275,28 @@ async def run_sales_turn(
     }
 
     # -- ACT --------------------------------------------------------------
-    # Escalation check: explicit triggers supplied by the caller surface
-    # here; the loop itself escalates on guardrail failure below.
+    # Escalation check: playbook triggers surface here per track; the loop
+    # itself escalates on guardrail failure below. Live tracks
+    # (import_export, my_cuba_cash) get the same treatment as the
+    # branch-gated car_sales track.
     escalate_trigger: str | None = None
-    if track == TRACK_CAR_SALES and _asks_legality(effective_text):
-        escalate_trigger = "legality_question"
-    if track == TRACK_CAR_SALES and _asks_shipping(effective_text):
-        escalate_trigger = "cross_border_shipping"
+    if track == TRACK_IMPORT_EXPORT:
+        if _asks_cuba_legality(effective_text):
+            escalate_trigger = "cuba_legality"
+        elif _signals_compliance(effective_text):
+            escalate_trigger = "compliance_flag"
+    elif track == TRACK_MY_CUBA_CASH:
+        if _signals_fraud(effective_text):
+            escalate_trigger = "fraud_signal"
+        elif _requests_custody(effective_text):
+            escalate_trigger = "custody_request"
+        elif _asks_sanctions(effective_text):
+            escalate_trigger = "sanctions_question"
+    elif track == TRACK_CAR_SALES:
+        if _asks_legality(effective_text):
+            escalate_trigger = "legality_question"
+        elif _asks_shipping(effective_text):
+            escalate_trigger = "cross_border_shipping"
 
     if escalate_trigger:
         brief = build_owner_brief(
@@ -321,12 +343,15 @@ async def run_sales_turn(
         listing=listing,
         verified_amounts=verified_amounts,
         is_first_substantive=not (profile.get("outbound_count") or 0),
+        has_verified_trade_evidence=has_verified_trade_evidence,
+        verified_providers=verified_providers,
+        concierge_available=concierge_available,
     )
     audit["guards"] = guards
     if not guards["ok"]:
         brief = build_owner_brief(
             business=track if track in (TRACK_IMPORT_EXPORT, TRACK_MY_CUBA_CASH, TRACK_CAR_SALES) else TRACK_IMPORT_EXPORT,
-            trigger=_guard_trigger(track),
+            trigger=_guard_trigger(track, guards["violations"]),
             profile=profile if profile.get("business") == track else None,
             customer_ask=effective_text,
             contact_name=contact_name,
@@ -420,7 +445,83 @@ def _asks_shipping(text: str) -> bool:
     )
 
 
-def _guard_trigger(track: str) -> str:
+def _signals_compliance(text: str) -> bool:
+    """Sanctions/customs/restricted-goods signals (import/export)."""
+    t = (text or "").lower()
+    return any(
+        kw in t
+        for kw in (
+            "sancion", "sanction", "embargo", "ofac", "lista negra",
+            "blacklist", "mercancia restringida", "restricted goods",
+            "licencia de exportacion", "export license",
+        )
+    )
+
+
+def _asks_cuba_legality(text: str) -> bool:
+    """Cuba-specific legality question (import/export)."""
+    t = (text or "").lower()
+    return "cuba" in t and any(
+        kw in t
+        for kw in (
+            "legal", "ilegal", "aduana", "customs", "sancion", "sanction",
+            "se puede", "puedo importar", "can i import",
+        )
+    )
+
+
+def _signals_fraud(text: str) -> bool:
+    """Chargeback/impersonation/coercion signals (MY CUBA CASH)."""
+    t = (text or "").lower()
+    return any(
+        kw in t
+        for kw in (
+            "chargeback", "contracargo", "me estan obligando", "coercion",
+            "suplantacion", "impersonation", "me hackearon", "estafa",
+        )
+    )
+
+
+def _requests_custody(text: str) -> bool:
+    """Customer asks Sofia to hold/receive/forward money (MY CUBA CASH)."""
+    t = (text or "").lower()
+    return any(
+        kw in t
+        for kw in (
+            "guarda mi dinero", "guardar mi dinero", "guardame el dinero",
+            "hold my money", "recibe el dinero por mi",
+            "recibir el dinero por mi", "receive it for me",
+            "reenvia mi dinero", "forward my money",
+            "te mando el dinero a ti", "te transfiero a ti",
+        )
+    )
+
+
+def _asks_sanctions(text: str) -> bool:
+    """US-corridor/sanctions question (MY CUBA CASH)."""
+    t = (text or "").lower()
+    return any(
+        kw in t
+        for kw in (
+            "sancion", "sanction", "ofac", "corredor eeuu", "us corridor",
+        )
+    )
+
+
+def _guard_trigger(track: str, violations: list[str] | None = None) -> str:
+    """Map a guardrail failure to the playbook trigger it belongs to.
+
+    The dominant violation kind wins, so a below-floor quote escalates as
+    below_floor_offer (not a generic fee dispute) and a custody offer as
+    custody_request.
+    """
+    joined = " ".join(violations or []).lower()
+    if "below seller floor" in joined:
+        return "below_floor_offer" if track == TRACK_CAR_SALES else "price_acceptance"
+    if "custody" in joined:
+        return "custody_request"
+    if "legal/customs determination" in joined:
+        return "cuba_legality" if track == TRACK_IMPORT_EXPORT else "legality_question"
     if track == TRACK_CAR_SALES:
         return "fee_dispute"
     if track == TRACK_IMPORT_EXPORT:

@@ -48,7 +48,7 @@ Inbound WhatsApp turn
 
 | Module | What it adds |
 |---|---|
-| `sofia_sales_playbooks.py` | Full-funnel playbooks per track: stages, qualification questions, matching rules, day 1/3/7/14 cadence, dormant-revival triggers, exact escalation triggers. Car playbook mirrors `agent/car_sales_agent.py` (ai-car-sales-machine, branch `build/car-sales-v1`). |
+| `sofia_sales_playbooks.py` | Full-funnel playbooks per track with equal rigor: per-field qualification questions (ES/EN), track-specific minimum viable qualification, matching rules, day 1/3/7/14 cadence, dormant-revival triggers, exact escalation triggers. import_export mirrors `sofia_agentic_sales_os.py` (RFQ bar = product/specification/quantity/destination/delivery_timeline; authority lanes; broker positioning). my_cuba_cash mirrors `sofia_my_cuba_cash_track.py` (Tier 1/2/3 autonomy, published fee schedule imported from the track block so it can never drift, zero-custody line, beta framing, topic boundaries). Car playbook mirrors `agent/car_sales_agent.py` (ai-car-sales-machine, branch `build/car-sales-v1`). |
 | `sofia_customer_360.py` | One unified profile per contact **per business**, built from whatsapp_messages + whatsapp_leads + business_events. Every field cites its source turn. Businesses never cross-file (see below). |
 | `sofia_negotiation_guards.py` | Deterministic outbound validation: no below-floor quotes, no invented amounts, no purchase commitments, no legal/customs determinations, no fake action claims, broker disclosure on first car reply. Fail → escalate, never send. |
 | `sofia_escalation.py` | One-screen owner briefs (who / what they want / deal value / what Sofia tried / exactly what she needs). Recorded to the owner-visible queue; never messaged to the customer. |
@@ -112,6 +112,28 @@ assert should_use_360()
 print(resolve_loop_track("busco un carro toyota corolla"))
 # {'track': 'car_sales', 'source': 'car_signals_flag_gated', ...}
 ```
+
+## Negotiation guardrails per business
+
+`sofia_negotiation_guards.py::validate_outbound` runs track-scoped checks:
+
+- **import_export** — no invented suppliers/prices/freight/availability/compliance clearance (definitive trade claims fail without verified evidence); broker positioning (never the end buyer, no buyer-LOI language); binding actions (quotes, price acceptance, contracts, WON) need Juan.
+- **my_cuba_cash** — only the published fee schedule may be quoted; concierge tier not offered/mentioned until first real sends validate demand; 1.75% business tier never framed as an outbound-payment solution; no invented providers/rates; zero custody always; beta framing (no launched/full-service claims).
+- **car_sales** — never below seller floor; broker disclosure in the first substantive reply; never commit Juan to buy/pay/sign.
+- **All tracks** — no legal/customs determinations; no invented amounts; no claims that an external action already happened.
+
+Guard failures escalate with the violation mapped to the right playbook
+trigger (below-floor → `below_floor_offer`, custody offer → `custody_request`,
+legal determination → `cuba_legality`/`legality_question`).
+
+## Live-track escalation wiring
+
+The loop escalates on inbound signals for the live tracks, same as cars:
+import_export → `cuba_legality` (Cuba-specific legality questions),
+`compliance_flag` (sanctions/customs/restricted-goods signals);
+my_cuba_cash → `fraud_signal`, `custody_request`, `sanctions_question`
+(US corridor). Follow-up drafts are drafts-only for all three tracks and
+never re-ask facts already in the 360 profile.
 
 ## Open decisions for Juan
 

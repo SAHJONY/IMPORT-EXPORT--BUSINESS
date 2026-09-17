@@ -26,6 +26,20 @@ from __future__ import annotations
 
 from typing import Any
 
+# Fee schedule + announcements live in the authoritative track block —
+# imported here so the playbook can never drift from the published figures.
+# (sofia_my_cuba_cash_track.py is pure constants; no heavy imports.)
+from sofia_my_cuba_cash_track import (
+    FEE_BUSINESS,
+    FEE_CONCIERGE,
+    FEE_FAMILY,
+    FEE_MARKETPLACE,
+    FEE_PILOT,
+    TRACK_ANNOUNCEMENT_IMPORT_EXPORT,
+    TRACK_ANNOUNCEMENT_MY_CUBA_CASH,
+    ZERO_CUSTODY_LINE,
+)
+
 TRACK_IMPORT_EXPORT = "import_export"
 TRACK_MY_CUBA_CASH = "my_cuba_cash"
 TRACK_CAR_SALES = "car_sales"
@@ -150,6 +164,153 @@ CAR_SELLER_QUESTIONS = {
 }
 
 # ---------------------------------------------------------------------------
+# import_export qualification — mirrors sofia_agentic_sales_os.py
+# ---------------------------------------------------------------------------
+
+# REQUIRED_TRADE_FIELDS in the sales OS. The RFQ minimum below mirrors the
+# OS's rfq_fields (product, specification, quantity, destination,
+# delivery_timeline): Sofia may not move to RFQ_READY without all five.
+IMPORT_EXPORT_FIELDS = [
+    "product", "specification", "quantity", "origin",
+    "destination", "delivery_timeline", "target_budget",
+]
+IMPORT_EXPORT_RFQ_MINIMUM = [
+    "product", "specification", "quantity", "destination", "delivery_timeline",
+]
+
+IMPORT_EXPORT_QUESTIONS = {
+    "es": {
+        "product": "¿Qué producto necesitas?",
+        "specification": "¿Qué especificaciones debe cumplir el producto?",
+        "quantity": "¿Qué cantidad o volumen necesitas?",
+        "origin": "¿Desde qué país prefieres importar?",
+        "destination": "¿A qué país o ciudad va la mercancía?",
+        "delivery_timeline": "¿Para cuándo lo necesitas?",
+        "target_budget": "¿Tienes un presupuesto objetivo?",
+    },
+    "en": {
+        "product": "What product do you need?",
+        "specification": "What specifications must the product meet?",
+        "quantity": "What quantity or volume do you need?",
+        "origin": "Which country would you like to import from?",
+        "destination": "Which country or city is the cargo going to?",
+        "delivery_timeline": "When do you need it delivered?",
+        "target_budget": "Do you have a target budget?",
+    },
+}
+
+# Authority lanes mirror sofia_agentic_sales_os.py (BINDING_ACTIONS,
+# PROHIBITED_ACTIONS and the _next_actions lane mapping). The playbook names
+# them; the OS enforces them.
+IMPORT_EXPORT_AUTHORITY_LANES = {
+    "autonomous": (
+        "answer_and_qualify", "progressive_discovery", "prepare_rfq",
+        "compare_verified_offers", "advance_negotiation",
+    ),
+    "owner_approval": (
+        "release_quote", "accept_price", "grant_credit", "sign_contract",
+        "change_beneficiary", "release_payment", "release_shipment",
+        "clear_compliance", "mark_won",
+    ),
+    "prohibited": (
+        "fabricate_evidence", "bypass_consent", "bypass_compliance",
+        "bulk_unsolicited_outreach", "impersonate_human",
+    ),
+}
+
+IMPORT_EXPORT_TOPIC_BOUNDARY = (
+    "NEVER discuss remittances, money-send fees, divisas transfers, "
+    "Western Union / Cubamax / Fonmoney, or the MIPYME divisas pilot. "
+    "If the customer asks about sending money to Cuba, hand off once: "
+    "'Te atiendo por MY CUBA CASH (envíos de dinero a Cuba).'"
+)
+
+# ---------------------------------------------------------------------------
+# my_cuba_cash qualification — mirrors sofia_my_cuba_cash_track.py
+# ---------------------------------------------------------------------------
+
+MY_CUBA_CASH_FIELDS = [
+    "send_amount", "recipient_name", "recipient_location",
+    "delivery_method", "timeline",
+]
+# Minimum viable: Sofia cannot do anything useful without the amount and
+# where it goes.
+MY_CUBA_CASH_MINIMUM = ["send_amount", "recipient_location"]
+
+MY_CUBA_CASH_QUESTIONS = {
+    "es": {
+        "send_amount": "¿Qué monto quieres enviar?",
+        "recipient_name": "¿A nombre de quién es el envío?",
+        "recipient_location": "¿En qué ciudad de Cuba recibe?",
+        "delivery_method": "¿Cómo prefieres que le llegue el dinero?",
+        "timeline": "¿Para cuándo lo necesitas?",
+    },
+    "en": {
+        "send_amount": "How much do you want to send?",
+        "recipient_name": "Who is the recipient?",
+        "recipient_location": "Which city in Cuba will they receive in?",
+        "delivery_method": "How should the money reach them?",
+        "timeline": "When do you need it sent?",
+    },
+}
+
+# Published fee schedule — the ONLY figures Sofia may quote. Imported from
+# the track block (approved 2026-09-16); repeated here for playbook readers.
+MY_CUBA_CASH_FEE_SCHEDULE = {
+    "family": FEE_FAMILY,            # 1.25% (mínimo $1, máximo $12)
+    "business": FEE_BUSINESS,        # 1.75% — NEVER framed as an
+                                     # outbound-payment solution (US-linked
+                                     # business payments blocked pending
+                                     # qualified sanctions counsel)
+    "marketplace": FEE_MARKETPLACE,  # 2.50% (la paga el vendedor)
+    "concierge": FEE_CONCIERGE,      # $4 fijo — offer ONLY after the first
+                                     # real sends validate demand; until
+                                     # then, do NOT offer or mention it
+    "mipyme_divisas_pilot": FEE_PILOT,  # $25 por pago coordinado; 3 cupos;
+                                        # requisitos: licencia de importación
+                                        # directa en mano o en trámite,
+                                        # proveedor identificado, disposición
+                                        # a documentar
+}
+
+# Tier 1/2/3 autonomy rules, mirroring MY_CUBA_CASH_SYSTEM_BLOCK.
+MY_CUBA_CASH_TIERS = {
+    "tier1_auto_reply": (
+        "Greetings and how MY CUBA CASH works (a comparison + coordination "
+        "layer for sending value to Cuba, currently in beta). The published "
+        "fee schedule ONLY. Pointers to community group guides and rules. "
+        "'We're looking into it' acknowledgments with a real follow-up time."
+    ),
+    "tier2_draft_only": (
+        "'Which provider is best for my case' / corridor advice; transfer "
+        "complaints; pricing beyond the published schedule or discounts; "
+        "gestoría/accountant partnerships; anything mentioning regulators, "
+        "lawyers, or legal interpretation. Draft for owner review; tell the "
+        "customer their request is being reviewed with a real follow-up time."
+    ),
+    "tier3_escalate_immediately": (
+        "Legal threats, fraud accusations, chargebacks/disputes; US-corridor "
+        "or sanctions questions; custody requests (holding, receiving, or "
+        "forwarding money) — decline with the zero-custody line; requests "
+        "for credentials, IDs, or personal data; press/media inquiries. "
+        "Do not answer substantively; escalate at once."
+    ),
+}
+
+MY_CUBA_CASH_TOPIC_BOUNDARY = (
+    "NEVER discuss sourcing, suppliers, freight, importing or exporting "
+    "goods, customs brokerage for merchandise, or the SAHJONY "
+    "partner/referral program. If the customer asks about those, hand off "
+    "once: 'Te paso con el equipo de comercio internacional…'"
+)
+
+MY_CUBA_CASH_BETA_FRAMING = (
+    "A comparison + coordination layer for sending value to Cuba, currently "
+    "in beta. Never claim launched/full-service status, invented providers, "
+    "rates, timelines, metrics, or capabilities."
+)
+
+# ---------------------------------------------------------------------------
 # Playbook definitions
 # ---------------------------------------------------------------------------
 
@@ -220,27 +381,43 @@ PLAYBOOKS: dict[str, dict[str, Any]] = {
     TRACK_IMPORT_EXPORT: {
         "track": TRACK_IMPORT_EXPORT,
         "business_name": "SAHJONY Global Trade",
+        "identity": "Sofia · SAHJONY Global Trade",
         "status": "live",
         "stages": (
             "NEW", "ENGAGED", "QUALIFYING", "QUALIFIED", "RFQ_READY",
             "SOURCING", "QUOTED", "NEGOTIATING", "PENDING_JUAN",
             "WON", "LOST", "OPTED_OUT",
         ),
-        "qualification_fields": [
-            "product", "specification", "quantity", "origin",
-            "destination", "delivery_timeline", "target_budget",
-        ],
+        "qualification_fields": IMPORT_EXPORT_FIELDS,
+        # Minimum viable = the sales OS's RFQ completeness bar. Sofia may not
+        # move a deal to RFQ_READY without all five.
+        "minimum": IMPORT_EXPORT_RFQ_MINIMUM,
+        "qualification_questions": IMPORT_EXPORT_QUESTIONS,
+        # Authority lanes mirror sofia_agentic_sales_os.py; the OS enforces.
+        "authority_lanes": IMPORT_EXPORT_AUTHORITY_LANES,
+        "topic_boundary": IMPORT_EXPORT_TOPIC_BOUNDARY,
+        "track_announcement": TRACK_ANNOUNCEMENT_IMPORT_EXPORT,
         "matching_rules": (
             "Recommendations require verified supplier evidence: supplier, "
             "freight, compliance and landed-cost evidence normalized. "
-            "Without verified evidence, cap progression at RFQ_READY.",
+            "Without verified evidence, cap progression at RFQ_READY. "
+            "Never invent suppliers, prices, freight rates, availability, "
+            "or compliance clearance."
+        ),
+        "broker_positioning": (
+            "SAHJONY is a business broker for a fee — never the end buyer. "
+            "No buyer-LOI language, no purchase commitments, no holding "
+            "title or principal funds. Seller paper carries "
+            "fee-protection/non-circumvention framing."
         ),
         "followup_cadence_days": FOLLOWUP_CADENCE_DAYS,
         "dormant_after_days": DORMANT_AFTER_DAYS,
         "negotiation": (
             "Formal quotes, price commitments, credit terms, contracts and "
             "WON status require verified evidence and Juan's approval. "
-            "Non-binding objection handling may continue.",
+            "Non-binding objection handling may continue. Never invent a "
+            "price, supplier, freight rate, or compliance clearance to keep "
+            "a negotiation moving."
         ),
         "escalation_triggers": (
             {
@@ -263,30 +440,50 @@ PLAYBOOKS: dict[str, dict[str, Any]] = {
                 "when": "Customer asks about Cuba sanctions/customs legality for a specific shipment.",
                 "brief": "Cuba legality question. General guidance only; transaction-specific clearance is Juan's.",
             },
+            {
+                "trigger": "partner_program_interest",
+                "when": "Customer asks about the SAHJONY partner/referral program.",
+                "brief": "Partner-program interest. Route to the Partner Center; Juan owns the relationship.",
+            },
         ),
     },
     TRACK_MY_CUBA_CASH: {
         "track": TRACK_MY_CUBA_CASH,
         "business_name": "MY CUBA CASH",
+        "identity": "Sofia · MY CUBA CASH",
         "status": "live",
         "stages": (
             "NEW", "ENGAGED", "QUALIFYING", "QUALIFIED",
             "INTAKE_STARTED", "PENDING_JUAN", "COMPLETED", "LOST", "OPTED_OUT",
         ),
-        "qualification_fields": [
-            "send_amount", "recipient_name", "recipient_location",
-            "delivery_method", "timeline",
-        ],
+        "qualification_fields": MY_CUBA_CASH_FIELDS,
+        # Minimum viable: Sofia cannot do anything useful without the amount
+        # and where it goes.
+        "minimum": MY_CUBA_CASH_MINIMUM,
+        "qualification_questions": MY_CUBA_CASH_QUESTIONS,
+        # Tier 1/2/3 autonomy, mirroring MY_CUBA_CASH_SYSTEM_BLOCK.
+        "tiers": MY_CUBA_CASH_TIERS,
+        "topic_boundary": MY_CUBA_CASH_TOPIC_BOUNDARY,
+        "track_announcement": TRACK_ANNOUNCEMENT_MY_CUBA_CASH,
+        # The ONLY figures Sofia may quote (approved 2026-09-16).
+        "fee_schedule": MY_CUBA_CASH_FEE_SCHEDULE,
+        "beta_framing": MY_CUBA_CASH_BETA_FRAMING,
+        "zero_custody_line": ZERO_CUSTODY_LINE,
         "matching_rules": (
             "Use ONLY verified intake records from mycubacash.com for a "
-            "sender's number. Never invent amounts, statuses, or timelines. "
-            "Intake lookup failures are reported plainly, never papered over.",
+            "sender's number. Never invent amounts, statuses, timelines, "
+            "providers, or rates. Intake lookup failures are reported "
+            "plainly, never papered over. Update intents must resolve to a "
+            "single intake; ambiguity escalates."
         ),
         "followup_cadence_days": FOLLOWUP_CADENCE_DAYS,
         "dormant_after_days": DORMANT_AFTER_DAYS,
         "negotiation": (
             "No price negotiation: fees are the published schedule. "
-            "Never promise transfer timelines beyond what verified records show.",
+            "Never promise transfer timelines beyond what verified records "
+            "show. Never present the 1.75% business tier as an "
+            "outbound-payment solution. Never offer or mention the "
+            "concierge tier until the first real sends validate demand."
         ),
         "escalation_triggers": (
             {
@@ -303,6 +500,21 @@ PLAYBOOKS: dict[str, dict[str, Any]] = {
                 "trigger": "fraud_signal",
                 "when": "Chargeback, impersonation, or coercion signals appear.",
                 "brief": "Possible fraud signal. Freeze the flow and brief Juan immediately.",
+            },
+            {
+                "trigger": "custody_request",
+                "when": "Customer asks Sofia to hold, receive, or forward money.",
+                "brief": "Custody request. Decline with the zero-custody line and escalate; MY CUBA CASH never touches money.",
+            },
+            {
+                "trigger": "sanctions_question",
+                "when": "Customer asks about the US corridor, sanctions, or legal interpretation of a transfer.",
+                "brief": "Sanctions/legal question. Sofia must not interpret; Juan decides with qualified counsel.",
+            },
+            {
+                "trigger": "concierge_inquiry",
+                "when": "Customer asks about the concierge tier before the first real sends validate demand.",
+                "brief": "Concierge inquiry. Do NOT offer or mention it; Juan decides whether demand is validated.",
             },
         ),
     },
@@ -327,6 +539,10 @@ def next_qualification_question(track: str, state: dict[str, Any], language: str
 
     Car sales mirrors ai-car-sales-machine: buyer minimum = budget + timeline;
     seller intake is complete only with asking_price + fee_agreement.
+    import_export mirrors the sales OS RFQ bar; my_cuba_cash mirrors the
+    concierge intake. Every track has per-field questions in ES/EN (the
+    MY CUBA CASH track additionally mirrors EN/FR/PT via the runtime's
+    language layer).
     """
     book = get_playbook(track)
     lang = language if language in ("es", "en") else "es"
@@ -343,8 +559,11 @@ def next_qualification_question(track: str, state: dict[str, Any], language: str
             if not state.get(field):
                 return questions[field]
         return None
+    questions = book.get("qualification_questions", {}).get(lang, {})
     for field in book["qualification_fields"]:
         if not state.get(field):
+            if field in questions:
+                return questions[field]
             # Generic, non-invented prompt for the missing field.
             label = field.replace("_", " ")
             if lang == "es":
@@ -354,15 +573,21 @@ def next_qualification_question(track: str, state: dict[str, Any], language: str
 
 
 def is_minimum_qualified(track: str, state: dict[str, Any]) -> bool:
-    """True when the track's minimum viable qualification is met."""
+    """True when the track's minimum viable qualification is met.
+
+    import_export: the sales OS RFQ bar (product, specification, quantity,
+    destination, delivery_timeline). my_cuba_cash: send_amount +
+    recipient_location. car_sales: buyer budget + timeline; seller
+    asking_price + fee_agreement.
+    """
     book = get_playbook(track)
     if track == TRACK_CAR_SALES:
         role = state.get("role") or ("seller" if state.get("is_seller") else "buyer")
         if role == "seller":
             return bool(state.get("asking_price") and state.get("fee_agreement"))
         return all(state.get(f) for f in book["buyer_minimum"])
-    fields = book["qualification_fields"]
-    return all(state.get(f) for f in fields[:3])
+    minimum = book.get("minimum") or book["qualification_fields"][:3]
+    return all(state.get(f) for f in minimum)
 
 
 def escalation_triggers(track: str) -> tuple[dict[str, Any], ...]:

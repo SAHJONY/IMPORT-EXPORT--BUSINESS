@@ -166,7 +166,10 @@ def _build_draft(
             )
     else:
         reason = f"cadence day {cadence_day} ({days_quiet}d since last touch)"
-        question = next_qualification_question(business, {}, language)
+        # Ask the next question Sofia does NOT already know the answer to:
+        # the profile's preferences carry already-captured facts.
+        known_state = dict(profile.get("preferences") or {})
+        question = next_qualification_question(business, known_state, language)
         if language == "es":
             text = (
                 f"Hola, soy Sofía de SAHJONY. Solo paso a seguir con tu solicitud{about}. "

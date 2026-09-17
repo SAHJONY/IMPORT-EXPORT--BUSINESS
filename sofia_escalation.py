@@ -30,10 +30,13 @@ from sofia_sales_playbooks import TRACKS, escalation_triggers
 
 PRIORITY_BY_TRIGGER = {
     "fraud_signal": "critical",
+    "custody_request": "critical",
     "below_floor_offer": "high",
     "hot_lead": "high",
     "price_acceptance": "high",
     "compliance_flag": "high",
+    "sanctions_question": "high",
+    "rfq_complete": "high",
 }
 
 
