@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import secrets
 from datetime import datetime, timezone
 from typing import Any
@@ -21,6 +22,7 @@ from sofia_track_classifier import (
     TRACK_IMPORT_EXPORT,
     TRACK_MY_CUBA_CASH,
     classify_track,
+    detect_language,
 )
 from sofia_my_cuba_cash_track import (
     IMPORT_EXPORT_TRACK_GUARD,
@@ -338,6 +340,46 @@ async def _resolve_business_track(
     return {"action": "continue", "prompt_addition": addition, "audit": audit}
 
 
+LANGUAGE_NAMES = {"es": "Spanish", "en": "English", "fr": "French", "pt": "Portuguese"}
+
+
+def detect_reply_language(text: str, transcript: str = "") -> str:
+    """Language code Sofia must reply in.
+
+    The latest customer message wins. A very short message ("ok", "sí",
+    "gracias") inherits the conversation's language from the transcript.
+    Defaults to 'es'.
+    """
+    lang = detect_language(text)
+    words = re.findall(r"[a-zA-Z\u00e0-\u00ff]+", text or "")
+    if len(words) < 2 and transcript.strip():
+        for line in reversed(transcript.splitlines()):
+            if line.startswith("customer:"):
+                tail = line[len("customer:"):].strip()
+                if tail:
+                    lang = detect_language(tail)
+                break
+    return lang
+
+
+def reply_language_name(text: str, transcript: str = "") -> str:
+    """Human language name for the reply-language directive."""
+    return LANGUAGE_NAMES.get(detect_reply_language(text, transcript), "Spanish")
+
+
+def language_rule(text: str, transcript: str = "") -> str:
+    """Top-priority system-prompt block forcing Sofia to answer in the
+    customer's language. The model otherwise defaults to English."""
+    name = reply_language_name(text, transcript)
+    return (
+        "LANGUAGE RULE — HIGHEST PRIORITY, OVERRIDES ALL OTHER STYLE GUIDANCE:\n"
+        f"- The customer's latest message is in {name.upper()}.\n"
+        f"- Write your ENTIRE reply in {name}. Every word, including greetings and closings.\n"
+        "- Do NOT reply in English when the customer wrote in another language.\n"
+        "- If the customer mixes languages, use the language of their latest message.\n"
+    )
+
+
 async def generate_sofia_reply(
     text: str,
     contact_name: str | None,
@@ -404,6 +446,7 @@ async def generate_sofia_reply(
                 "source_states": {"owner_report": {"state": "RUNTIME_ERROR", "error_class": type(exc).__name__}},
             }
     system = build_sofia_prompt(memory)
+    system = language_rule(text, transcript) + "\n" + system
     system += "\n\n" + adaptive
     system += "\n\nYou are Sofía Smith, SAHJONY GLOBAL TRADING's Executive Manager, Executive Assistant and AI Commercial Executive. Communicate naturally and professionally. Never falsely claim to be a physical human being. If identity or automation is directly asked about, answer truthfully and briefly, then continue helping."
     track_resolution = await _resolve_business_track(
@@ -489,7 +532,8 @@ WHATSAPP HUMAN CONVERSATION RULES
     user = (
         f"Latest customer message:\n{text[:5000]}\n\n"
         f"Recent conversation:\n{transcript[-18000:]}\n\n"
-        "Write only Sofía's next WhatsApp message. No analysis, private reasoning, labels, or internal metadata."
+        "Write only Sofía's next WhatsApp message. No analysis, private reasoning, labels, or internal metadata.\n"
+        f"Reply in {reply_language_name(text, transcript)}."
     )
 
     try:
