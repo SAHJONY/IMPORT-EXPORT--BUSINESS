@@ -28,7 +28,7 @@ env:
   VM_ID: '767852'
   HOST: '69.62.68.67'
   SSH_USER: root
-  KIT_BRANCH: ops/vps-fallback-host
+  KIT_BRANCH: main
 
 jobs:
   setup:
