@@ -276,9 +276,9 @@ ufw status 2>/dev/null | grep -q "Status: active" && { ufw allow 80/tcp >/dev/nu
 
 # ---------------------------------------------------------------- nightly sync
 step "Nightly sync (keeps fallback fresh from main)"
-cp "$(dirname "$0")/sync.sh" "$FALLBACK_ROOT/sync.sh" 2>/dev/null || curl -fsSL -o "$FALLBACK_ROOT/sync.sh" https://raw.githubusercontent.com/SAHJONY/IMPORT-EXPORT--BUSINESS/ops/vps-fallback-host/ops/vps-fallback/sync.sh
+cp "$(dirname "$0")/sync.sh" "$FALLBACK_ROOT/sync.sh" 2>/dev/null || curl -fsSL -o "$FALLBACK_ROOT/sync.sh" https://raw.githubusercontent.com/SAHJONY/IMPORT-EXPORT--BUSINESS/main/ops/vps-fallback/sync.sh
 chmod +x "$FALLBACK_ROOT/sync.sh"
-(crontab -l 2>/dev/null | grep -v "sahjony-fallback/sync.sh"; echo "0 4 * * * $FALLBACK_ROOT/sync.sh >> /var/log/sahjony-fallback-sync.log 2>&1") | crontab -
+{ crontab -l 2>/dev/null | grep -v "sahjony-fallback/sync.sh" || true; echo "0 4 * * * $FALLBACK_ROOT/sync.sh >> /var/log/sahjony-fallback-sync.log 2>&1"; } | crontab -
 pass "sync cron installed (daily 04:00)"
 
 # ---------------------------------------------------------------- verify
