@@ -208,6 +208,10 @@
     {
       "src": "payment_api.py",
       "use": "@vercel/python"
+    },
+    {
+      "src": "envios_api.py",
+      "use": "@vercel/python"
     }
   ],
   "routes": [
@@ -682,6 +686,14 @@
     {
       "src": "/cuba-partners-api(.*)",
       "dest": "cuba_partner_api.py"
+    },
+    {
+      "src": "/envios",
+      "dest": "/envios.html"
+    },
+    {
+      "src": "/envios-api(.*)",
+      "dest": "envios_api.py"
     },
     {
       "src": "/cuba-mipymes-api(.*)",
