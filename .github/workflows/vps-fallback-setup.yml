@@ -48,5 +48,5 @@ jobs:
           chmod 600 ~/.ssh/fallback-key
           ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
               -o ConnectTimeout=15 -i ~/.ssh/fallback-key "$SSH_USER@$HOST" \
-              "curl -sSL https://raw.githubusercontent.com/SAHJONY/IMPORT-EXPORT--BUSINESS/${KIT_BRANCH}/ops/vps-fallback/setup.sh | bash"
+              "curl -sSL https://raw.githubusercontent.com/SAHJONY/IMPORT-EXPORT--BUSINESS/${KIT_BRANCH}/ops/vps-fallback/setup.sh?run=${GITHUB_RUN_ID} | bash"
           echo "FALLBACK_SETUP_SSH_DONE=1"
