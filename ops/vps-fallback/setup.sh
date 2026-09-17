@@ -288,7 +288,7 @@ check() { # check <label> <url>
   code="$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 -H "Host: $3" "http://127.0.0.1:$2$4" 2>/dev/null || echo 000)"
   echo "    [$code] $1"
 }
-check "import/export API (unified)"  8101 www.sahjony.com "/api/health"
+check "import/export API (unified)"  8101 www.sahjony.com "/health"
 check "import/export API (whatsapp)" 8102 www.sahjony.com "/whatsapp/health"
 check "MY CUBA CASH"                 8103 mycubacash.com "/api/health"
 check "nginx static (sahjony)"       80   www.sahjony.com "/suppliers-es.html"
