@@ -5,6 +5,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Any, Literal
@@ -575,6 +576,113 @@ async def _register_inbound_message(
         pass
 
 
+# ---------------------------------------------------------------------------
+# Inbound media ingest (Sofia's "eyes")
+# ---------------------------------------------------------------------------
+# The Hermes gateway delivers inbound media either as raw bytes or as a
+# fetchable URL inside HermesBridgeEvent.media[]. register_inbound_media
+# persists the metadata (tolerant: a missing whatsapp_media table never breaks
+# the flow) and spools the bytes to disk so the Sofia runtime can evaluate
+# them in the same turn. It never inspects gateway internals.
+SOFIA_MEDIA_SPOOL_DIR = os.getenv("SOFIA_MEDIA_SPOOL_DIR", "/tmp/sofia_media")
+
+_MEDIA_KIND_EXT = {"image": "jpg", "video": "mp4"}
+
+
+def _safe_media_filename(message_id: str, ext: str) -> str:
+    safe = re.sub(r"[^A-Za-z0-9_-]", "_", message_id or "media")[:80] or "media"
+    return f"{safe}.{ext}"
+
+
+async def register_inbound_media(
+    *,
+    message_id: str | None,
+    phone: str | None,
+    media_kind: str,
+    mime_type: str | None = None,
+    media_bytes: bytes | None = None,
+    media_url: str | None = None,
+    caption: str = "",
+) -> dict[str, Any]:
+    """Register one inbound media attachment (photo or video).
+
+    Accepts raw bytes or a fetchable URL. Returns a dict with ok, message_id,
+    media_kind, byte_size, media_ref (spooled file path, when bytes are
+    available), metadata_stored, and reason on failure. Never raises.
+    """
+    from sofia_media_evaluator import MAX_MEDIA_BYTES
+
+    kind = (media_kind or "").strip().lower()
+    result: dict[str, Any] = {
+        "ok": False,
+        "message_id": message_id,
+        "media_kind": kind,
+        "byte_size": 0,
+        "media_ref": None,
+        "metadata_stored": False,
+        "reason": "",
+    }
+    if kind not in ("image", "video"):
+        result["reason"] = "unsupported_media_kind"
+        return result
+
+    data = media_bytes
+    if data is None and media_url:
+        try:
+            async with httpx.AsyncClient(timeout=30) as client:
+                resp = await client.get(media_url, follow_redirects=True)
+            if resp.status_code < 400 and resp.content:
+                data = resp.content
+            else:
+                result["reason"] = f"media_fetch_http_{resp.status_code}"
+                return result
+        except Exception as exc:
+            result["reason"] = f"media_fetch_error:{type(exc).__name__}"
+            return result
+    if not data:
+        result["reason"] = "no_media_bytes"
+        return result
+    if len(data) > MAX_MEDIA_BYTES:
+        result["reason"] = "too_large"
+        return result
+
+    result["byte_size"] = len(data)
+    try:
+        os.makedirs(SOFIA_MEDIA_SPOOL_DIR, exist_ok=True)
+        path = os.path.join(
+            SOFIA_MEDIA_SPOOL_DIR,
+            _safe_media_filename(message_id or f"wam_{secrets.token_urlsafe(8)}", _MEDIA_KIND_EXT[kind]),
+        )
+        with open(path, "wb") as fh:
+            fh.write(data)
+        result["media_ref"] = path
+    except Exception as exc:
+        result["reason"] = f"spool_error:{type(exc).__name__}"
+        return result
+
+    try:
+        await get_backend().insert("whatsapp_media", {
+            "media_id": f"wam_{secrets.token_urlsafe(16)}",
+            "message_id": message_id,
+            "phone": phone,
+            "media_kind": kind,
+            "mime_type": mime_type,
+            "byte_size": len(data),
+            "caption": (caption or "")[:1000],
+            "storage": "spool",
+            "media_ref": result["media_ref"],
+            "received_at": _now(),
+        })
+        result["metadata_stored"] = True
+    except Exception:
+        # Tolerant: the whatsapp_media table may not exist yet. The bytes are
+        # still spooled and the registration dict carries the metadata.
+        result["metadata_stored"] = False
+
+    result["ok"] = True
+    return result
+
+
 async def _upsert_whatsapp_lead(phone: str, text: str, contact_name: str | None, *, opted_out: bool = False) -> str:
     lead_id = "wa_" + hashlib.sha256(phone.encode("utf-8")).hexdigest()[:24]
     try:
@@ -763,6 +871,7 @@ async def _process_inbound(
     message_type: str,
     text: str,
     contact_name: str | None,
+    media: list[dict[str, Any]] | None = None,
 ) -> None:
     try:
         clean_phone = _normalize_phone(phone or "") if phone else ""
@@ -774,7 +883,9 @@ async def _process_inbound(
     opted_out = bool(text and _opt_out(text))
     lead_id = await _upsert_whatsapp_lead(clean_phone, text, contact_name, opted_out=opted_out) if clean_phone else None
     await _record_inbound_event(clean_phone or phone, message_id, text, message_type, lead_id)
-    if not clean_phone or message_type != "text":
+    media_items = [m for m in (media or []) if isinstance(m, dict)][:5]
+    has_media = bool(media_items) and message_type in ("image", "video")
+    if not clean_phone or (message_type != "text" and not has_media):
         return
     if opted_out:
         try:
@@ -788,6 +899,19 @@ async def _process_inbound(
         except Exception:
             pass
         return
+    media_registrations: list[dict[str, Any]] = []
+    if has_media:
+        for item in media_items:
+            kind = str(item.get("kind") or message_type or "").lower()
+            reg = await register_inbound_media(
+                message_id=message_id,
+                phone=clean_phone or phone,
+                media_kind=kind,
+                mime_type=item.get("mime_type"),
+                media_url=item.get("url") or item.get("media_url"),
+                caption=str(item.get("caption") or ""),
+            )
+            media_registrations.append(reg)
     cognition_ready = hermes_configured() or _openai_ready()
     if not (_ai_auto_reply_enabled() and cognition_ready and _send_ready(cfg)):
         return
@@ -795,6 +919,7 @@ async def _process_inbound(
         text, contact_name,
         owner_context=await _is_owner_whatsapp(phone),
         sender_phone=clean_phone or None,
+        media=media_registrations or None,
     )
     if not reply:
         return
@@ -1110,6 +1235,23 @@ async def hermes_event(
             lead_id,
             provider="hermes_whatsapp",
         )
+        # Register any media the Hermes gateway attached to this event so the
+        # Sofia runtime (or a later evaluation pass) can see what the customer
+        # sent. Tolerant by design: gateway field shapes vary.
+        for item in (event.media or [])[:5]:
+            if not isinstance(item, dict):
+                continue
+            kind = str(item.get("kind") or item.get("type") or event.message_type or "").lower()
+            raw_bytes = item.get("bytes") or item.get("data")
+            await register_inbound_media(
+                message_id=message_id,
+                phone=normalized_phone or phone,
+                media_kind=kind,
+                mime_type=item.get("mime_type"),
+                media_bytes=base64.b64decode(raw_bytes) if isinstance(raw_bytes, str) and raw_bytes else None,
+                media_url=item.get("url") or item.get("media_url"),
+                caption=str(item.get("caption") or ""),
+            )
     return {"status": "accepted", "event_id": event.event_id, "message_id": message_id}
 
 
@@ -1322,6 +1464,73 @@ async def hermes_outbox_status(
     }
 
 
+class MediaEvaluateRequest(BaseModel):
+    message_id: str = Field(min_length=1, max_length=512)
+    track: str = Field(default="ask", max_length=40)
+    user_text: str = Field(default="", max_length=4000)
+    language: str = Field(default="es", max_length=8)
+
+
+@app.post("/whatsapp/media/evaluate")
+async def whatsapp_media_evaluate(body: MediaEvaluateRequest) -> dict[str, Any]:
+    """Evaluate spooled media for one inbound message (internal use).
+
+    The Hermes gateway (or ops) calls this after delivering media bytes/URL via
+    register_inbound_media. Returns the vision evaluation dict — ok with the
+    summary, or ok=False with an honest reason. Never fabricates an evaluation.
+    """
+    from sofia_media_evaluator import evaluate_media, vision_configured
+
+    if not vision_configured():
+        return {"ok": False, "reason": "vision_not_configured",
+                "message_id": body.message_id}
+    rows: list[dict[str, Any]] = []
+    try:
+        rows = await get_backend().select(
+            "whatsapp_media", params={"message_id": f"eq.{body.message_id}", "limit": "10"}
+        ) or []
+    except Exception:
+        rows = []
+    if not rows:
+        # Fall back to the spool directory directly (metadata table optional).
+        candidates = []
+        try:
+            for name in os.listdir(SOFIA_MEDIA_SPOOL_DIR):
+                if name.startswith(re.sub(r"[^A-Za-z0-9_-]", "_", body.message_id)[:80]):
+                    candidates.append(os.path.join(SOFIA_MEDIA_SPOOL_DIR, name))
+        except OSError:
+            candidates = []
+        if not candidates:
+            return {"ok": False, "reason": "media_not_found", "message_id": body.message_id}
+        rows = [{"media_ref": candidates[0], "media_kind": "image",
+                 "message_id": body.message_id}]
+    results = []
+    for row in rows[:5]:
+        ref = row.get("media_ref")
+        data = None
+        try:
+            if ref and os.path.exists(ref):
+                with open(ref, "rb") as fh:
+                    data = fh.read()
+        except OSError:
+            data = None
+        if not data:
+            results.append({"ok": False, "reason": "media_bytes_unavailable"})
+            continue
+        try:
+            ev = await evaluate_media(
+                media_bytes=data,
+                media_kind=str(row.get("media_kind") or "image"),
+                track=body.track,
+                user_text=body.user_text,
+                language=body.language,
+            )
+        except Exception as exc:
+            ev = {"ok": False, "reason": f"evaluator_error:{type(exc).__name__}"}
+        results.append(ev)
+    return {"ok": True, "message_id": body.message_id, "evaluations": results}
+
+
 @app.get("/whatsapp/webhook")
 async def whatsapp_webhook_verify(
     hub_mode: str | None = Query(None, alias="hub.mode"),
@@ -1395,6 +1604,20 @@ async def whatsapp_webhook_receive(
                 else:
                     text = f"[{msg_type} received]"
                 contact_name = contacts.get(phone or "") or None
+                # Meta Cloud media objects carry only a media id at webhook time;
+                # the bytes/URL lookup is a documented follow-up (see
+                # docs/sofia-media-vision.md). Pass the descriptor through so the
+                # ingest path records the attempt honestly.
+                media_items: list[dict[str, Any]] = []
+                if msg_type in ("image", "video"):
+                    mobj = msg.get(msg_type) or {}
+                    if isinstance(mobj, dict):
+                        media_items.append({
+                            "kind": msg_type,
+                            "mime_type": mobj.get("mime_type"),
+                            "media_id": mobj.get("id"),
+                            "caption": mobj.get("caption") or "",
+                        })
                 await _register_inbound_message(
                     phone=phone,
                     message_id=msg_id,
@@ -1410,6 +1633,7 @@ async def whatsapp_webhook_receive(
                     message_type=msg_type,
                     text=text,
                     contact_name=contact_name,
+                    media=media_items or None,
                 )
                 accepted += 1
     return {

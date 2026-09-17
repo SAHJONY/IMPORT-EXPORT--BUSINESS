@@ -16,6 +16,7 @@ from sofia_agentic_sales_os import orchestrate_sales_turn
 from sofia_hermes_nim_brain import generate as hermes_generate
 from sofia_hermes_nim_brain import configured as hermes_configured
 from sofia_hermes_nim_brain import model_name as hermes_model_name
+from sofia_media_evaluator import evaluate_media
 from sofia_human_conversation_engine import build_sofia_prompt
 from sofia_track_classifier import (
     TRACK_ASK,
@@ -380,11 +381,107 @@ def language_rule(text: str, transcript: str = "") -> str:
     )
 
 
+def _build_media_evidence_block(evaluations: list[dict[str, Any]], language: str) -> str:
+    """Build the MEDIA EVIDENCE prompt block from vision evaluations.
+
+    Pure function (no I/O) so it is unit-testable. `language` is the reply
+    language code ('es' default).
+    """
+    lang_name = {"es": "Spanish", "en": "English"}.get(language, "Spanish")
+    lines = [
+        "MEDIA EVIDENCE — the customer sent photo(s)/video with this turn. "
+        "Sofia's vision evaluation of what she actually saw (describe only what "
+        "is stated below; never claim more than the evaluation supports):",
+    ]
+    for idx, ev in enumerate(evaluations, 1):
+        if not ev.get("ok"):
+            lines.append(
+                f"- Attachment {idx}: could NOT be analyzed "
+                f"(reason: {ev.get('reason', 'unknown')})."
+            )
+            continue
+        kind = ev.get("media_kind", "image")
+        frames = ev.get("frames_evaluated", 1)
+        lines.append(f"- Attachment {idx} ({kind}, {frames} frame(s) evaluated):")
+        lines.append(f"  Summary: {ev.get('summary', '')}")
+        if ev.get("condition_notes"):
+            lines.append(f"  Condition: {ev.get('condition_notes')}")
+        for flag in ev.get("red_flags") or []:
+            lines.append(f"  Red flag: {flag}")
+        if ev.get("deal_relevance"):
+            lines.append(f"  Deal relevance: {ev.get('deal_relevance')}")
+        for lim in ev.get("limitations") or []:
+            lines.append(f"  Limitation: {lim}")
+    lines.append(
+        "REPLY GUIDANCE FOR THE MEDIA:\n"
+        "- Reference what you saw naturally, e.g. \"Veo en las fotos que...\" / "
+        "\"I can see in the photos that...\". Keep it short and phone-readable.\n"
+        "- If the customer asked a direct question about the media, answer it from "
+        "the evaluation above.\n"
+        "- Never present the evaluation as a binding certification — the caveat in "
+        "each summary applies.\n"
+        f"- For any attachment that failed: tell the customer honestly in {lang_name} "
+        "that you received the photo/video but could not analyze it right now, "
+        "and ask what they would like you to look at."
+    )
+    return "\n".join(lines)
+
+
+async def _evaluate_turn_media(
+    media: list[dict[str, Any]] | None,
+    *,
+    track: str,
+    text: str,
+    language: str,
+) -> list[dict[str, Any]]:
+    """Run the vision evaluator over one turn's registered media attachments.
+
+    `media` holds registration dicts from whatsapp_api.register_inbound_media.
+    Never raises; every attachment yields an evaluation dict (ok or honest failure).
+    """
+    evaluations: list[dict[str, Any]] = []
+    for item in (media or [])[:5]:
+        if not isinstance(item, dict) or not item.get("ok"):
+            reason = item.get("reason", "media_unavailable") if isinstance(item, dict) else "media_unavailable"
+            evaluations.append({"ok": False, "reason": reason, "summary": "", "details": [],
+                                "condition_notes": "", "red_flags": [], "deal_relevance": "",
+                                "limitations": [reason]})
+            continue
+        data: bytes | None = None
+        ref = item.get("media_ref")
+        try:
+            if ref and os.path.exists(ref):
+                with open(ref, "rb") as fh:
+                    data = fh.read()
+        except Exception:
+            data = None
+        if not data:
+            evaluations.append({"ok": False, "reason": "media_bytes_unavailable", "summary": "",
+                                "details": [], "condition_notes": "", "red_flags": [],
+                                "deal_relevance": "", "limitations": ["media_bytes_unavailable"]})
+            continue
+        try:
+            ev = await evaluate_media(
+                media_bytes=data,
+                media_kind=str(item.get("media_kind") or "image"),
+                track=track,
+                user_text=text,
+                language=language,
+            )
+        except Exception as exc:
+            ev = {"ok": False, "reason": f"evaluator_error:{type(exc).__name__}", "summary": "",
+                  "details": [], "condition_notes": "", "red_flags": [], "deal_relevance": "",
+                  "limitations": [f"evaluator_error:{type(exc).__name__}"]}
+        evaluations.append(ev)
+    return evaluations
+
+
 async def generate_sofia_reply(
     text: str,
     contact_name: str | None,
     owner_context: bool = False,
     sender_phone: str | None = None,
+    media: list[dict[str, Any]] | None = None,
 ) -> str:
     if not hermes_configured() and not os.getenv("OPENAI_API_KEY", "").strip():
         return ""
@@ -457,7 +554,24 @@ async def generate_sofia_reply(
         owner_context=owner_context,
     )
     track_audit: dict[str, Any] = dict(track_resolution.get("audit") or {})
-    if track_resolution.get("action") == "short_circuit":
+    # --- Media vision: a turn that carries photos/video gets a reply that
+    # references what Sofia actually saw, not a blind generic question. ------
+    media_block = ""
+    if media and not owner_context:
+        reply_lang = detect_reply_language(text, transcript)
+        evaluations = await _evaluate_turn_media(
+            media,
+            track=str(track_audit.get("business_track") or "ask"),
+            text=text,
+            language=reply_lang,
+        )
+        if evaluations:
+            media_block = _build_media_evidence_block(evaluations, reply_lang)
+            track_audit["media_evaluated"] = sum(1 for e in evaluations if e.get("ok"))
+            track_audit["media_failed"] = sum(1 for e in evaluations if not e.get("ok"))
+    if media_block:
+        system += "\n\n" + media_block
+    if track_resolution.get("action") == "short_circuit" and not media_block:
         await _audit(lead_id, "sofia_track_clarification", {
             "summary": "Sofia answered deterministically for an ambiguous business track",
             **track_audit,
@@ -565,6 +679,8 @@ WHATSAPP HUMAN CONVERSATION RULES
             "classification_confidence": track_audit.get("classification_confidence"),
             "classification_signals": track_audit.get("classification_signals"),
             "cubacash_update": track_audit.get("cubacash_update"),
+            "media_evaluated": track_audit.get("media_evaluated", 0),
+            "media_failed": track_audit.get("media_failed", 0),
             "agentic_sales_plan": sales_plan,
             "hermes_style_agentic_loop": True,
             "max_new_questions": 2,
