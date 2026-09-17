@@ -84,7 +84,7 @@ jobs:
               return {'X-SAHJONY-Timestamp': ts, 'X-SAHJONY-Signature': sig}
           # status endpoint with a probe command_id: proves signature verification works on the VPS
           req = urllib.request.Request(base + '/whatsapp/hermes/outbox/status?command_id=probe', method='GET',
-              headers={'Accept': 'application/json', **signed_headers(b'')})
+              headers={'Accept': 'application/json', 'Host': 'sahjony.com', **signed_headers(b'')})
           try:
               with urllib.request.urlopen(req, timeout=20) as r:
                   body = json.loads(r.read().decode() or '{}')

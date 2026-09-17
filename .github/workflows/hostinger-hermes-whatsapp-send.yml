@@ -71,6 +71,8 @@ jobs:
           import hashlib, hmac, json, os, sys, time, urllib.request, urllib.error
 
           base = os.environ['APP_URL'].rstrip('/')
+          # Direct-IP hits need the vhost header: nginx only routes /whatsapp/ for sahjony.com/www.sahjony.com
+          vhost = {'Host': 'sahjony.com'} if '69.62.68.67' in base else {}
           bridge_key = os.environ.get('BRIDGE_SECRET', '')
           if len(bridge_key) < 24:
               print('BRIDGE_SECRET_MISSING', flush=True); sys.exit(2)
@@ -95,7 +97,7 @@ jobs:
           def post(path, payload):
               raw = json.dumps(payload, separators=(',', ':')).encode()
               req = urllib.request.Request(base + path, data=raw, method='POST',
-                  headers={'Accept': 'application/json', 'Content-Type': 'application/json', **signed_headers(raw)})
+                  headers={'Accept': 'application/json', 'Content-Type': 'application/json', **signed_headers(raw), **vhost})
               try:
                   with urllib.request.urlopen(req, timeout=30) as r:
                       return r.status, json.loads(r.read().decode() or '{}')
@@ -105,7 +107,7 @@ jobs:
           def get_status(command_id):
               path = f'/whatsapp/hermes/outbox/status?command_id={command_id}'
               req = urllib.request.Request(base + path, method='GET',
-                  headers={'Accept': 'application/json', **signed_headers(b'')})
+                  headers={'Accept': 'application/json', **signed_headers(b''), **vhost})
               try:
                   with urllib.request.urlopen(req, timeout=20) as r:
                       return json.loads(r.read().decode() or '{}')
