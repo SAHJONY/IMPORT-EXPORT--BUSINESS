@@ -33,7 +33,7 @@ jobs:
       - name: Wire bridge secret and restart WhatsApp API on VPS
         env:
           SSH_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
-          BRIDGE_SECRET: ${{ secrets.BRIDGE_SECRET }}
+          BRIDGE_SECRET: ${{ secrets.SAHJONY_APP_BRIDGE_SECRET || secrets.OPENCLAW_APP_BRIDGE_SECRET }}
         run: |
           set -euo pipefail
           if [ "${#BRIDGE_SECRET}" -lt 24 ]; then
@@ -71,7 +71,7 @@ jobs:
 
       - name: Smoke-test direct Hostinger outbox API
         env:
-          BRIDGE_SECRET: ${{ secrets.BRIDGE_SECRET }}
+          BRIDGE_SECRET: ${{ secrets.SAHJONY_APP_BRIDGE_SECRET || secrets.OPENCLAW_APP_BRIDGE_SECRET }}
         run: |
           set -euo pipefail
           python3 - <<'PY'
