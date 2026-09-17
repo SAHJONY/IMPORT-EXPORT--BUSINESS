@@ -25,6 +25,11 @@ on:
         options:
           - 'true'
           - 'false'
+      app_url:
+        description: Base URL for the Hermes outbox API (direct Hostinger, bypasses Vercel)
+        required: false
+        default: 'http://69.62.68.67'
+        type: string
 
 permissions:
   contents: read
@@ -38,7 +43,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     env:
-      APP_URL: https://www.sahjony.com
+      APP_URL: ${{ inputs.app_url }}
       BRIDGE_SECRET: ${{ secrets.SAHJONY_APP_BRIDGE_SECRET || secrets.OPENCLAW_APP_BRIDGE_SECRET }}
       INPUT_TO: ${{ inputs.to }}
       INPUT_DRY_RUN: ${{ inputs.dry_run }}
