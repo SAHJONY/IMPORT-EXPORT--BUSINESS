@@ -34,6 +34,8 @@ jobs:
         env:
           SSH_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
           BRIDGE_SECRET: ${{ secrets.SAHJONY_APP_BRIDGE_SECRET || secrets.OPENCLAW_APP_BRIDGE_SECRET }}
+          SUPABASE_URL: ${{ secrets.VPS_SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.VPS_SUPABASE_SERVICE_ROLE_KEY }}
         run: |
           set -euo pipefail
           if [ "${#BRIDGE_SECRET}" -lt 24 ]; then
@@ -49,6 +51,19 @@ jobs:
           scp -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
             -o ConnectTimeout=15 -i ~/.ssh/vps-key /tmp/bridge_secret_src "$VPS_USER@$VPS_HOST:/tmp/bridge_secret_incoming"
           shred -u /tmp/bridge_secret_src
+          # Supabase backend for the outbox (fail-closed if absent). Values travel as files, never echoed.
+          if [ -n "${SUPABASE_URL:-}" ] && [ -n "${SUPABASE_KEY:-}" ] && [[ "$SUPABASE_URL" == https://* ]] && [ "${#SUPABASE_KEY}" -ge 20 ]; then
+            printf '%s' "$SUPABASE_URL" > /tmp/supabase_url_src; chmod 600 /tmp/supabase_url_src
+            printf '%s' "$SUPABASE_KEY" > /tmp/supabase_key_src; chmod 600 /tmp/supabase_key_src
+            scp -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+              -o ConnectTimeout=15 -i ~/.ssh/vps-key /tmp/supabase_url_src "$VPS_USER@$VPS_HOST:/tmp/supabase_url_incoming"
+            scp -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+              -o ConnectTimeout=15 -i ~/.ssh/vps-key /tmp/supabase_key_src "$VPS_USER@$VPS_HOST:/tmp/supabase_key_incoming"
+            shred -u /tmp/supabase_url_src /tmp/supabase_key_src
+          else
+            echo "SUPABASE_WIRED=skipped (VPS_SUPABASE_* secrets not set or invalid; backend stays unconfigured)"
+          fi
+          unset SUPABASE_URL SUPABASE_KEY
           $SSH "$VPS_USER@$VPS_HOST" 'bash -s' <<'VPS_EOF'
           set -euo pipefail
           SECRET="$(cat /tmp/bridge_secret_incoming)"
@@ -59,6 +74,16 @@ jobs:
           grep -v -e '^SAHJONY_APP_BRIDGE_SECRET=' -e '^WHATSAPP_AUTOMATION_ENABLED=' "$ENV_FILE" > "$ENV_FILE.tmp" || true
           printf 'SAHJONY_APP_BRIDGE_SECRET=%s\n' "$SECRET" >> "$ENV_FILE.tmp"
           printf 'WHATSAPP_AUTOMATION_ENABLED=true\n' >> "$ENV_FILE.tmp"
+          if [ -f /tmp/supabase_url_incoming ] && [ -f /tmp/supabase_key_incoming ]; then
+            SUPA_URL=$(cat /tmp/supabase_url_incoming); shred -u /tmp/supabase_url_incoming
+            SUPA_KEY=$(cat /tmp/supabase_key_incoming); shred -u /tmp/supabase_key_incoming
+            grep -v -e '^SUPABASE_URL=' -e '^SUPABASE_SERVICE_ROLE_KEY=' "$ENV_FILE.tmp" > "$ENV_FILE.tmp2" || true
+            mv "$ENV_FILE.tmp2" "$ENV_FILE.tmp"
+            printf 'SUPABASE_URL=%s\n' "$SUPA_URL" >> "$ENV_FILE.tmp"
+            printf 'SUPABASE_SERVICE_ROLE_KEY=%s\n' "$SUPA_KEY" >> "$ENV_FILE.tmp"
+            unset SUPA_URL SUPA_KEY
+            echo "SUPABASE_WIRED=yes (values not shown)"
+          fi
           chmod 600 "$ENV_FILE.tmp"
           mv "$ENV_FILE.tmp" "$ENV_FILE"
           unset SECRET
@@ -72,6 +97,8 @@ jobs:
       - name: Smoke-test direct Hostinger outbox API
         env:
           BRIDGE_SECRET: ${{ secrets.SAHJONY_APP_BRIDGE_SECRET || secrets.OPENCLAW_APP_BRIDGE_SECRET }}
+          SUPABASE_URL: ${{ secrets.VPS_SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.VPS_SUPABASE_SERVICE_ROLE_KEY }}
         run: |
           set -euo pipefail
           python3 - <<'PY'
@@ -94,5 +121,10 @@ jobs:
                   print('SMOKE_FAIL=bridge still not configured'); raise SystemExit(1)
               print('SMOKE_OK=direct Hostinger outbox API is live and signature verifies')
           except urllib.error.HTTPError as e:
-              print(f'STATUS_HTTP={e.code} SMOKE_FAIL'); raise SystemExit(1)
+              ebody = e.read().decode('utf-8', 'replace')[:300]
+              print(f'STATUS_HTTP={e.code}')
+              if e.code == 500 and 'durable backend' in ebody:
+                  print('SMOKE_BACKEND_MISSING=bridge wired and signature verifies, but Supabase backend not configured (needs VPS_SUPABASE_URL + VPS_SUPABASE_SERVICE_ROLE_KEY repo secrets)')
+                  raise SystemExit(3)
+              print(f'SMOKE_FAIL body={ebody}'); raise SystemExit(1)
           PY
