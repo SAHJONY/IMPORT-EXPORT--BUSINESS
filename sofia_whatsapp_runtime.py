@@ -591,3 +591,103 @@ WHATSAPP HUMAN CONVERSATION RULES
             metadata={"lead_id": lead_id, "error_type": type(exc).__name__},
         )
         return str(sales.get("draft_reply") or "")[:4096]
+# ---------------------------------------------------------------------------
+# Voice turns (Sofia's ears + voice). See docs/sofia-voice.md.
+# ---------------------------------------------------------------------------
+
+VOICE_INBOUND_MEDIUM = "voice"
+TEXT_INBOUND_MEDIUM = "text"
+
+_VOICE_TRANSCRIPTION_FAILED = {
+    "es": ("Perdona, no pude escuchar bien tu nota de voz. "
+           "¿Puedes escribirme o enviarla de nuevo?"),
+    "en": ("Sorry, I couldn't hear your voice note clearly. "
+           "Could you type it or send it again?"),
+}
+
+
+def should_reply_with_voice(
+    *,
+    inbound_medium: str,
+    reply_text: str,
+    tts_enabled: bool = True,
+) -> bool:
+    """Voice-mirror policy: reply with voice when the user sent a voice note.
+
+    Pure function — no I/O. Long replies stay text (see MAX_VOICE_CHARS in
+    sofia_voice_outbox); the transcript/history always keeps the text.
+    """
+    if inbound_medium != VOICE_INBOUND_MEDIUM:
+        return False
+    if not tts_enabled:
+        return False
+    text = (reply_text or "").strip()
+    if not text:
+        return False
+    try:
+        from sofia_voice_outbox import MAX_VOICE_CHARS
+    except Exception:
+        MAX_VOICE_CHARS = 900
+    return len(text) <= MAX_VOICE_CHARS
+
+
+async def generate_sofia_reply_for_audio(
+    audio_bytes: bytes,
+    contact_name: str | None,
+    *,
+    sender_phone: str | None = None,
+    mime_hint: str = "audio/ogg",
+    owner_context: bool = False,
+) -> dict:
+    """Handle one inbound WhatsApp voice note end to end.
+
+    1. Transcribe with local faster-whisper (sofia_voice_inbox).
+    2. Feed the TEXT through the normal pipeline (classifier → brain).
+    3. Mirror the medium: voice reply when the user sent voice (and the
+       reply fits the voice cap).
+
+    Returns ``{"reply_text", "reply_audio" (bytes|None), "audio_mime",
+    "reply_language", "inbound_medium", "transcription"}``. The caller stores
+    ``reply_text`` in whatsapp_messages so transcript/history stay text.
+    Never raises — worst case returns a text apology.
+    """
+    from sofia_voice_inbox import transcribe_audio
+    from sofia_voice_outbox import synthesize_speech, tts_configured
+
+    transcription = await transcribe_audio(audio_bytes, mime_hint=mime_hint)
+    if not transcription.get("ok"):
+        language = "es"  # Cuba market default; nothing was understood to detect from
+        reply_text = _VOICE_TRANSCRIPTION_FAILED[language]
+        return {
+            "reply_text": reply_text,
+            "reply_audio": None,
+            "audio_mime": None,
+            "reply_language": language,
+            "inbound_medium": VOICE_INBOUND_MEDIUM,
+            "transcription": transcription,
+        }
+
+    text = str(transcription.get("text") or "").strip()
+    reply_text = await generate_sofia_reply(
+        text, contact_name, owner_context=owner_context, sender_phone=sender_phone,
+    )
+    language = detect_reply_language(reply_text or text, "")
+    reply_audio = None
+    audio_mime = None
+    if should_reply_with_voice(
+        inbound_medium=VOICE_INBOUND_MEDIUM,
+        reply_text=reply_text,
+        tts_enabled=tts_configured(),
+    ):
+        synthesis = await synthesize_speech(reply_text, language=language)
+        if synthesis.get("ok"):
+            reply_audio = synthesis["audio_bytes"]
+            audio_mime = synthesis["mime"]
+    return {
+        "reply_text": reply_text,
+        "reply_audio": reply_audio,
+        "audio_mime": audio_mime,
+        "reply_language": language,
+        "inbound_medium": VOICE_INBOUND_MEDIUM,
+        "transcription": transcription,
+    }

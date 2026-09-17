@@ -575,6 +575,75 @@ async def _register_inbound_message(
         pass
 
 
+# ---------------------------------------------------------------------------
+# Inbound audio ingest (Sofia's "ears")
+# ---------------------------------------------------------------------------
+# The Hermes gateway delivers an inbound voice note either as raw bytes or as
+# a fetchable URL. register_inbound_audio() accepts both, records the turn in
+# whatsapp_messages with message_type="audio" (the TEXT column always holds
+# the transcription, or a placeholder when transcription failed, so
+# transcript/history stay readable), and returns what the runtime needs.
+# It never inspects gateway internals.
+#
+# MERGE NOTE: branch build/sofia-media-vision adds register_inbound_media()
+# in this same area of whatsapp_api.py. The two functions are independent
+# (different names, different message_type); merge media-vision first, then
+# this branch — no conflicts expected beyond adjacent placement.
+
+
+async def register_inbound_audio(
+    *,
+    phone: str | None,
+    message_id: str | None = None,
+    contact_name: str | None = None,
+    audio_bytes: bytes | None = None,
+    audio_url: str | None = None,
+    mime_hint: str = "audio/ogg",
+    provider: str = "meta_whatsapp_cloud",
+) -> dict:
+    """Register one inbound WhatsApp voice note and transcribe it.
+
+    Returns ``{"ok", "message_id", "transcription" (sofia_voice_inbox result),
+    "reason"}``. Never raises. The audio bytes themselves are NOT persisted —
+    the gateway passes them through at processing time; only the
+    transcription is stored, keeping whatsapp_messages text-searchable.
+    """
+    from sofia_voice_inbox import transcribe_audio
+
+    result: dict = {"ok": False, "message_id": message_id, "transcription": None, "reason": ""}
+    data = audio_bytes
+    if data is None and audio_url:
+        try:
+            async with httpx.AsyncClient(timeout=30) as client:
+                resp = await client.get(audio_url, follow_redirects=True)
+            if resp.status_code < 400 and resp.content:
+                data = resp.content
+            else:
+                result["reason"] = f"audio_fetch_http_{resp.status_code}"
+                return result
+        except Exception as exc:
+            result["reason"] = f"audio_fetch_error:{type(exc).__name__}"
+            return result
+    if not data:
+        result["reason"] = "no_audio_bytes"
+        return result
+
+    transcription = await transcribe_audio(data, mime_hint=mime_hint)
+    result["transcription"] = transcription
+    text = (transcription.get("text") or "").strip() if transcription.get("ok") else ""
+    stored_text = text if text else "[nota de voz — no se pudo transcribir]"
+    await _register_inbound_message(
+        phone=phone,
+        message_id=message_id,
+        message_type="audio",
+        text=stored_text,
+        contact_name=contact_name,
+        provider=provider,
+    )
+    result["ok"] = True
+    return result
+
+
 async def _upsert_whatsapp_lead(phone: str, text: str, contact_name: str | None, *, opted_out: bool = False) -> str:
     lead_id = "wa_" + hashlib.sha256(phone.encode("utf-8")).hexdigest()[:24]
     try:
