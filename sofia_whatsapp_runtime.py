@@ -16,6 +16,7 @@ from sofia_agentic_sales_os import orchestrate_sales_turn
 from sofia_hermes_nim_brain import generate as hermes_generate
 from sofia_hermes_nim_brain import configured as hermes_configured
 from sofia_hermes_nim_brain import model_name as hermes_model_name
+from sofia_media_evaluator import evaluate_media
 from sofia_human_conversation_engine import build_sofia_prompt
 from sofia_track_classifier import (
     TRACK_ASK,
@@ -380,12 +381,131 @@ def language_rule(text: str, transcript: str = "") -> str:
     )
 
 
+def _build_media_evidence_block(evaluations: list[dict[str, Any]], language: str) -> str:
+    """Build the MEDIA EVIDENCE prompt block from vision evaluations.
+
+    Pure function (no I/O) so it is unit-testable. `language` is the reply
+    language code ('es' default).
+    """
+    lang_name = {"es": "Spanish", "en": "English"}.get(language, "Spanish")
+    lines = [
+        "MEDIA EVIDENCE — the customer sent photo(s)/video with this turn. "
+        "Sofia's vision evaluation of what she actually saw (describe only what "
+        "is stated below; never claim more than the evaluation supports):",
+    ]
+    for idx, ev in enumerate(evaluations, 1):
+        if not ev.get("ok"):
+            lines.append(
+                f"- Attachment {idx}: could NOT be analyzed "
+                f"(reason: {ev.get('reason', 'unknown')})."
+            )
+            continue
+        kind = ev.get("media_kind", "image")
+        frames = ev.get("frames_evaluated", 1)
+        lines.append(f"- Attachment {idx} ({kind}, {frames} frame(s) evaluated):")
+        lines.append(f"  Summary: {ev.get('summary', '')}")
+        if ev.get("condition_notes"):
+            lines.append(f"  Condition: {ev.get('condition_notes')}")
+        for flag in ev.get("red_flags") or []:
+            lines.append(f"  Red flag: {flag}")
+        if ev.get("deal_relevance"):
+            lines.append(f"  Deal relevance: {ev.get('deal_relevance')}")
+        for lim in ev.get("limitations") or []:
+            lines.append(f"  Limitation: {lim}")
+    lines.append(
+        "REPLY GUIDANCE FOR THE MEDIA:\n"
+        "- Reference what you saw naturally, e.g. \"Veo en las fotos que...\" / "
+        "\"I can see in the photos that...\". Keep it short and phone-readable.\n"
+        "- If the customer asked a direct question about the media, answer it from "
+        "the evaluation above.\n"
+        "- Never present the evaluation as a binding certification — the caveat in "
+        "each summary applies.\n"
+        f"- For any attachment that failed: tell the customer honestly in {lang_name} "
+        "that you received the photo/video but could not analyze it right now, "
+        "and ask what they would like you to look at."
+    )
+    return "\n".join(lines)
+
+
+async def _evaluate_turn_media(
+    media: list[dict[str, Any]] | None,
+    *,
+    track: str,
+    text: str,
+    language: str,
+) -> list[dict[str, Any]]:
+    """Run the vision evaluator over one turn's registered media attachments.
+
+    `media` holds registration dicts from whatsapp_api.register_inbound_media.
+    Never raises; every attachment yields an evaluation dict (ok or honest failure).
+    """
+    evaluations: list[dict[str, Any]] = []
+    for item in (media or [])[:5]:
+        if not isinstance(item, dict) or not item.get("ok"):
+            reason = item.get("reason", "media_unavailable") if isinstance(item, dict) else "media_unavailable"
+            evaluations.append({"ok": False, "reason": reason, "summary": "", "details": [],
+                                "condition_notes": "", "red_flags": [], "deal_relevance": "",
+                                "limitations": [reason]})
+            continue
+        data: bytes | None = None
+        ref = item.get("media_ref")
+        try:
+            if ref and os.path.exists(ref):
+                with open(ref, "rb") as fh:
+                    data = fh.read()
+        except Exception:
+            data = None
+        if not data:
+            evaluations.append({"ok": False, "reason": "media_bytes_unavailable", "summary": "",
+                                "details": [], "condition_notes": "", "red_flags": [],
+                                "deal_relevance": "", "limitations": ["media_bytes_unavailable"]})
+            continue
+        try:
+            ev = await evaluate_media(
+                media_bytes=data,
+                media_kind=str(item.get("media_kind") or "image"),
+                track=track,
+                user_text=text,
+                language=language,
+            )
+        except Exception as exc:
+            ev = {"ok": False, "reason": f"evaluator_error:{type(exc).__name__}", "summary": "",
+                  "details": [], "condition_notes": "", "red_flags": [], "deal_relevance": "",
+                  "limitations": [f"evaluator_error:{type(exc).__name__}"]}
+        evaluations.append(ev)
+    return evaluations
+
+
 async def generate_sofia_reply(
     text: str,
     contact_name: str | None,
     owner_context: bool = False,
     sender_phone: str | None = None,
+    media: list[dict[str, Any]] | None = None,
 ) -> str:
+    # --- 360° salesperson loop (feature-flagged; default OFF) ----------------
+    # SOFIA_360_SALESPERSON=1 routes customer turns through sofia_sales_loop's
+    # perceive→reason→act→reflect cycle. Live activation needs Juan's explicit
+    # approval; with the flag off the pipeline below is byte-for-byte unchanged.
+    try:
+        from sofia_sales_loop import run_sales_turn, should_use_360
+
+        _use_360 = should_use_360(owner_context=owner_context)
+    except Exception:
+        _use_360 = False
+    if _use_360:
+        try:
+            loop_result = await run_sales_turn(
+                text=text,
+                contact_name=contact_name,
+                sender_phone=sender_phone,
+                owner_context=owner_context,
+                media_items=media,
+            )
+            return str(loop_result.get("reply") or "")
+        except Exception:
+            pass  # fall through to the standard pipeline
+
     if not hermes_configured() and not os.getenv("OPENAI_API_KEY", "").strip():
         return ""
 
@@ -457,7 +577,24 @@ async def generate_sofia_reply(
         owner_context=owner_context,
     )
     track_audit: dict[str, Any] = dict(track_resolution.get("audit") or {})
-    if track_resolution.get("action") == "short_circuit":
+    # --- Media vision: a turn that carries photos/video gets a reply that
+    # references what Sofia actually saw, not a blind generic question. ------
+    media_block = ""
+    if media and not owner_context:
+        reply_lang = detect_reply_language(text, transcript)
+        evaluations = await _evaluate_turn_media(
+            media,
+            track=str(track_audit.get("business_track") or "ask"),
+            text=text,
+            language=reply_lang,
+        )
+        if evaluations:
+            media_block = _build_media_evidence_block(evaluations, reply_lang)
+            track_audit["media_evaluated"] = sum(1 for e in evaluations if e.get("ok"))
+            track_audit["media_failed"] = sum(1 for e in evaluations if not e.get("ok"))
+    if media_block:
+        system += "\n\n" + media_block
+    if track_resolution.get("action") == "short_circuit" and not media_block:
         await _audit(lead_id, "sofia_track_clarification", {
             "summary": "Sofia answered deterministically for an ambiguous business track",
             **track_audit,
@@ -565,6 +702,8 @@ WHATSAPP HUMAN CONVERSATION RULES
             "classification_confidence": track_audit.get("classification_confidence"),
             "classification_signals": track_audit.get("classification_signals"),
             "cubacash_update": track_audit.get("cubacash_update"),
+            "media_evaluated": track_audit.get("media_evaluated", 0),
+            "media_failed": track_audit.get("media_failed", 0),
             "agentic_sales_plan": sales_plan,
             "hermes_style_agentic_loop": True,
             "max_new_questions": 2,
@@ -591,3 +730,105 @@ WHATSAPP HUMAN CONVERSATION RULES
             metadata={"lead_id": lead_id, "error_type": type(exc).__name__},
         )
         return str(sales.get("draft_reply") or "")[:4096]
+
+
+# ---------------------------------------------------------------------------
+# Voice turns (Sofia's ears + voice). See docs/sofia-voice.md.
+# ---------------------------------------------------------------------------
+
+VOICE_INBOUND_MEDIUM = "voice"
+TEXT_INBOUND_MEDIUM = "text"
+
+_VOICE_TRANSCRIPTION_FAILED = {
+    "es": ("Perdona, no pude escuchar bien tu nota de voz. "
+           "¿Puedes escribirme o enviarla de nuevo?"),
+    "en": ("Sorry, I couldn't hear your voice note clearly. "
+           "Could you type it or send it again?"),
+}
+
+
+def should_reply_with_voice(
+    *,
+    inbound_medium: str,
+    reply_text: str,
+    tts_enabled: bool = True,
+) -> bool:
+    """Voice-mirror policy: reply with voice when the user sent a voice note.
+
+    Pure function — no I/O. Long replies stay text (see MAX_VOICE_CHARS in
+    sofia_voice_outbox); the transcript/history always keeps the text.
+    """
+    if inbound_medium != VOICE_INBOUND_MEDIUM:
+        return False
+    if not tts_enabled:
+        return False
+    text = (reply_text or "").strip()
+    if not text:
+        return False
+    try:
+        from sofia_voice_outbox import MAX_VOICE_CHARS
+    except Exception:
+        MAX_VOICE_CHARS = 900
+    return len(text) <= MAX_VOICE_CHARS
+
+
+async def generate_sofia_reply_for_audio(
+    audio_bytes: bytes,
+    contact_name: str | None,
+    *,
+    sender_phone: str | None = None,
+    mime_hint: str = "audio/ogg",
+    owner_context: bool = False,
+) -> dict:
+    """Handle one inbound WhatsApp voice note end to end.
+
+    1. Transcribe with local faster-whisper (sofia_voice_inbox).
+    2. Feed the TEXT through the normal pipeline (classifier → brain).
+    3. Mirror the medium: voice reply when the user sent voice (and the
+       reply fits the voice cap).
+
+    Returns ``{"reply_text", "reply_audio" (bytes|None), "audio_mime",
+    "reply_language", "inbound_medium", "transcription"}``. The caller stores
+    ``reply_text`` in whatsapp_messages so transcript/history stay text.
+    Never raises — worst case returns a text apology.
+    """
+    from sofia_voice_inbox import transcribe_audio
+    from sofia_voice_outbox import synthesize_speech, tts_configured
+
+    transcription = await transcribe_audio(audio_bytes, mime_hint=mime_hint)
+    if not transcription.get("ok"):
+        language = "es"  # Cuba market default; nothing was understood to detect from
+        reply_text = _VOICE_TRANSCRIPTION_FAILED[language]
+        return {
+            "reply_text": reply_text,
+            "reply_audio": None,
+            "audio_mime": None,
+            "reply_language": language,
+            "inbound_medium": VOICE_INBOUND_MEDIUM,
+            "transcription": transcription,
+        }
+
+    text = str(transcription.get("text") or "").strip()
+    reply_text = await generate_sofia_reply(
+        text, contact_name, owner_context=owner_context, sender_phone=sender_phone,
+    )
+    language = detect_reply_language(reply_text or text, "")
+    reply_audio = None
+    audio_mime = None
+    if should_reply_with_voice(
+        inbound_medium=VOICE_INBOUND_MEDIUM,
+        reply_text=reply_text,
+        tts_enabled=tts_configured(),
+    ):
+        synthesis = await synthesize_speech(reply_text, language=language)
+        if synthesis.get("ok"):
+            reply_audio = synthesis["audio_bytes"]
+            audio_mime = synthesis["mime"]
+    return {
+        "reply_text": reply_text,
+        "reply_audio": reply_audio,
+        "audio_mime": audio_mime,
+        "reply_language": language,
+        "inbound_medium": VOICE_INBOUND_MEDIUM,
+        "transcription": transcription,
+    }
