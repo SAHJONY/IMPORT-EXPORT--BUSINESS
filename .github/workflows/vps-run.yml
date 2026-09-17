@@ -1,0 +1,55 @@
+name: VPS Run Command
+
+# General-purpose root command runner for the Hostinger VPS (69.62.68.67).
+# Dispatch with confirm=YES and the command to run. Output streams to the
+# workflow log. The VPS login shell is zsh — quote URLs with query strings.
+#
+# NEVER use this to touch the live WhatsApp gateway:
+#   /root/.hermes, /opt/sahjony-hermes, hermes systemd units.
+# The fallback host lives under /opt/sahjony-fallback and
+# /etc/sahjony-fallback (systemd units sahjony-fallback-*).
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: "Type YES to run the command on the VPS as root"
+        required: true
+        default: "NO"
+      command:
+        description: "Shell command to run as root on the VPS"
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hostinger-vm-767852-mutation
+  cancel-in-progress: false
+
+env:
+  VM_ID: '767852'
+  HOST: '69.62.68.67'
+  SSH_USER: root
+
+jobs:
+  run:
+    if: ${{ inputs.confirm == 'YES' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      SSH_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+      VPS_COMMAND: ${{ inputs.command }}
+    steps:
+      - name: Run command on VPS
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "$SSH_KEY" ]] || { echo "HOSTINGER_SSH_PRIVATE_KEY secret missing" >&2; exit 1; }
+          [[ -n "$VPS_COMMAND" ]] || { echo "empty command" >&2; exit 1; }
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/vps-key
+          chmod 600 ~/.ssh/vps-key
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            -o ConnectTimeout=15 -i ~/.ssh/vps-key "$SSH_USER@$HOST" "$VPS_COMMAND"
+          echo "VPS_RUN_EXIT=$?"
