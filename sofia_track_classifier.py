@@ -193,6 +193,14 @@ def normalize(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
+def detect_language(text: str) -> str:
+    """Public language detector for reply-language selection.
+
+    Returns 'es' | 'en' | 'fr' | 'pt'. Defaults to 'es' (core customer base).
+    """
+    return _detect_language(normalize(text or ""))
+
+
 def _detect_language(normalized: str) -> str:
     """Crude language detection for the clarifying question. Defaults to es."""
     words = set(re.findall(r"[a-z]+", normalized))
