@@ -156,6 +156,21 @@ EOF
   chmod 600 "$ENV_DIR/cubacash.env"
 fi
 
+# Validate every required key so missing values surface instead of failing silently
+CC_REQUIRED="SOFIA_SECRET SUPABASE_SERVICE_ROLE_KEY SOFIA_INGEST_SECRET TELEGRAM_CHANNEL_ID TELEGRAM_BOT_TOKEN NEXT_PUBLIC_SUPABASE_URL NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY SANCTIONS_PROVIDER"
+CC_MISSING=""
+for k in $CC_REQUIRED; do
+  if ! grep -q "^${k}=[^[:space:]]" "$ENV_DIR/cubacash.env" 2>/dev/null; then
+    CC_MISSING="$CC_MISSING $k"
+  fi
+done
+if [[ -n "$CC_MISSING" ]]; then
+  warn "cubacash.env missing values:$CC_MISSING"
+  warn "  -> Telegram features off without TELEGRAM_*; privileged intake ops limited"
+  warn "     without SUPABASE_SERVICE_ROLE_KEY; Sofia auth uses fallback-only secrets"
+  warn "     unless SOFIA_SECRET / SOFIA_INGEST_SECRET match production."
+fi
+
 # NEXT_PUBLIC_* vars are inlined at build time — only build when they are set
 if grep -q "^NEXT_PUBLIC_SUPABASE_URL=$" "$ENV_DIR/cubacash.env"; then
   warn "cubacash.env secrets not filled yet — Next.js build skipped."
