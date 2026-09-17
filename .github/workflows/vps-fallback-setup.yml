@@ -46,7 +46,16 @@ jobs:
           mkdir -p ~/.ssh && chmod 700 ~/.ssh
           printf '%s\n' "$SSH_KEY" > ~/.ssh/fallback-key
           chmod 600 ~/.ssh/fallback-key
-          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-              -o ConnectTimeout=15 -i ~/.ssh/fallback-key "$SSH_USER@$HOST" \
-              "curl -sSL https://raw.githubusercontent.com/SAHJONY/IMPORT-EXPORT--BUSINESS/${KIT_BRANCH}/ops/vps-fallback/setup.sh?run=${GITHUB_RUN_ID} | bash"
-          echo "FALLBACK_SETUP_SSH_DONE=1"
+          SSH="ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=15 -i ~/.ssh/fallback-key $SSH_USER@$HOST"
+          # NOTE: the VPS login shell is zsh — the URL is single-quoted so the
+          # ?cachebust query string is not glob-expanded.
+          $SSH "curl -sSL 'https://raw.githubusercontent.com/SAHJONY/IMPORT-EXPORT--BUSINESS/${KIT_BRANCH}/ops/vps-fallback/setup.sh?run=${GITHUB_RUN_ID}' | bash"
+          echo "SETUP_SSH_EXIT=$?"
+          # Independent verification: the setup must have actually run.
+          $SSH "set -e
+            systemctl is-active sahjony-fallback-unified
+            systemctl is-active sahjony-fallback-whatsapp
+            nginx -t
+            test -f /opt/sahjony-fallback/health.json
+            crontab -l | grep -q 'sahjony-fallback/sync.sh'
+            echo FALLBACK_VERIFIED"
