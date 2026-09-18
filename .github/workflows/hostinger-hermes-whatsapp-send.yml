@@ -28,7 +28,7 @@ on:
       app_url:
         description: Base URL for the Hermes outbox API (direct Hostinger, bypasses Vercel)
         required: false
-        default: 'http://69.62.68.67'
+        default: 'https://www.sahjony.com'
         type: string
 
 permissions:
@@ -47,6 +47,7 @@ jobs:
       BRIDGE_SECRET: ${{ secrets.SAHJONY_APP_BRIDGE_SECRET || secrets.OPENCLAW_APP_BRIDGE_SECRET }}
       INPUT_TO: ${{ inputs.to }}
       INPUT_DRY_RUN: ${{ inputs.dry_run }}
+      INPUT_MESSAGE: ${{ inputs.message }}
     steps:
       - name: Validate inputs and show ban-risk notice
         run: |
@@ -59,9 +60,6 @@ jobs:
           print(f'RECIPIENT_DIGITS={digits}', flush=True)
           print(f'DRY_RUN={os.environ["INPUT_DRY_RUN"]}', flush=True)
           PY
-          echo "INPUT_MESSAGE<<EOF" >> "$GITHUB_ENV"
-          printf '%s\n' "${{ inputs.message }}" >> "$GITHUB_ENV"
-          echo "EOF" >> "$GITHUB_ENV"
 
       - name: Enqueue and track delivery
         shell: bash
