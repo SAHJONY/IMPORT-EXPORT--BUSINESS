@@ -44,10 +44,13 @@ jobs:
           rm -f /tmp/sahjony-outbox-secret
           cat > /opt/sahjony/hermes-outbox/worker.py <<'PY'
           #!/usr/bin/env python3
+# NOTE: BASE points at the VPS-local WhatsApp API (127.0.0.1:8102), not the
+# public domain — the public domain may be down (e.g. Vercel 402) while the
+# local API is up. Do not change back to the public URL without a fallback.
           import hashlib, hmac, json, os, time, urllib.request, urllib.error
           from datetime import datetime, timezone
 
-          BASE='https://www.sahjony.com'
+          BASE='http://127.0.0.1:8102'
           SECRET=open('/opt/sahjony/hermes-outbox/bridge.secret').read().strip()
           BRIDGE='http://127.0.0.1:3000'
           GATEWAY='hermes-hostinger'
