@@ -281,6 +281,7 @@ def health() -> dict[str, Any]:
         "sales_intelligence": True,
         "owner_governance": True,
         "binding_actions_owner_controlled": True,
+        "outbound_guard_active": True,
         "private_reasoning_exposed": False,
         "secrets_exposed": False,
         "mandatory_for_whatsapp": enabled,
