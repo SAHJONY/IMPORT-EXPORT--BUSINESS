@@ -1473,7 +1473,12 @@ async def _handle_bridge_message(msg: dict[str, Any]) -> None:
     # Never reply to our own echoes or the owner's messages.
     if msg.get("fromMe") or msg.get("fromOwner"):
         return
-    message_id = str(msg.get("id") or msg.get("messageId") or msg.get("key", {}).get("id") or "")
+    message_id = str(
+        msg.get("id")
+        or msg.get("messageId")
+        or (msg.get("key") or {}).get("id")
+        or ""
+    )
     if message_id and await _message_seen(message_id):
         return
     phone = _bridge_sender_phone(msg)
