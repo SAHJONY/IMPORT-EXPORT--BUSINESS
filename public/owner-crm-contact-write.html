@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="robots" content="noindex,nofollow"><meta name="theme-color" content="#050b12">
+<title>SAHJONY · Escribir contacto CRM</title>
+<style>
+:root{font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#050b12;color:#f8fbff;--panel:#0a1724;--line:rgba(255,255,255,.1);--muted:#94a9b8;--cyan:#58d7ff;--green:#5ce7a5;--gold:#d9b75f;--red:#ff7b86}*{box-sizing:border-box}body{margin:0;background:#050b12;min-height:100vh}.shell{width:min(860px,calc(100% - 22px));margin:11px auto 50px}.top{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 16px;border:1px solid var(--line);border-radius:16px;background:rgba(7,19,30,.94)}.brand strong{font-size:11px;letter-spacing:.15em}.brand small{display:block;color:var(--muted);font-size:9px;margin-top:4px}.top a{color:#e8f7ff;text-decoration:none;font-size:10px}.panel{padding:18px;margin-top:10px;border:1px solid var(--line);border-radius:16px;background:rgba(10,23,36,.95)}.panel h2{font-size:13px;margin:0 0 4px}.panel p{font-size:10px;color:var(--muted);line-height:1.6;margin:6px 0 12px}label{display:block;font-size:9px;font-weight:800;letter-spacing:.08em;color:var(--muted);margin:12px 0 6px}input,textarea{width:100%;border:1px solid var(--line);border-radius:10px;background:#06111b;color:#f5fbff;padding:12px;font:inherit;font-size:12px}textarea{min-height:64px;resize:vertical}.row{display:grid;grid-template-columns:1fr 1fr;gap:10px}.btn{border:0;border-radius:10px;padding:13px 16px;font-weight:900;font-size:11px;cursor:pointer;background:linear-gradient(135deg,var(--cyan),var(--green));color:#031017;margin-top:14px;width:100%}.btn.secondary{background:#10283b;color:#dff6ff;border:1px solid var(--line);width:auto;margin-top:10px}.btn:disabled{opacity:.4}.result{margin-top:12px;padding:12px;border:1px solid var(--line);border-radius:10px;font-size:10px;line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere;display:none}.result.ok{display:block;border-color:rgba(92,231,165,.45)}.result.bad{display:block;border-color:rgba(255,123,134,.5)}.hit{border:1px solid var(--line);border-radius:10px;padding:10px;margin-top:8px;font-size:10px}.hit b{font-size:12px}.hit .meta{color:var(--muted);font-size:9px;margin-top:4px}.hit button{margin-top:8px}.sel{margin-top:10px;padding:10px;border:1px solid rgba(88,215,255,.4);border-radius:10px;font-size:10px;display:none}.notice{margin-top:10px;padding:11px;border:1px solid rgba(217,183,95,.25);border-radius:11px;background:rgba(217,183,95,.05);color:#b7c8d3;font-size:9px;line-height:1.55}@media(max-width:720px){.row{grid-template-columns:1fr}}
+</style><script src="/global-language.js" defer></script>
+</head>
+<body><main class="shell">
+<header class="top"><div class="brand"><strong>SAHJONY GLOBAL TRADE</strong><small>OWNER CRM · ESCRITURA DE CONTACTOS VERIFICADOS</small></div><a href="/owner-cuba-mipymes.html">← CRM</a></header>
+<section class="panel">
+<h2>1 · Buscar registro</h2>
+<p>Busca la empresa por nombre. Solo se escribe el contacto verificado que indiques abajo; ningún otro campo del registro se modifica.</p>
+<label for="q">EMPRESA</label>
+<input id="q" type="search" placeholder="Ej.: Dofleini" autocomplete="off">
+<button id="searchBtn" class="btn secondary" type="button">Buscar</button>
+<div id="hits"></div>
+<div id="selBox" class="sel"></div>
+</section>
+<section class="panel">
+<h2>2 · Contacto verificado</h2>
+<p>Escribe <b>únicamente</b> datos de contacto publicados por la propia empresa o su fuente oficial. Nunca inventes datos.</p>
+<label for="f_email">EMAIL PÚBLICO (opcional)</label>
+<input id="f_email" type="email" placeholder="nombre@empresa.com" autocomplete="off">
+<label for="f_phone">TELÉFONO PÚBLICO (opcional)</label>
+<input id="f_phone" type="tel" placeholder="+53 ..." autocomplete="off">
+<label for="f_srcname">NOMBRE DE LA FUENTE</label>
+<input id="f_srcname" type="text" placeholder="Ej.: Sitio web oficial de la empresa" autocomplete="off">
+<label for="f_srcurl">URL DE LA FUENTE</label>
+<input id="f_srcurl" type="url" placeholder="https://…" autocomplete="off">
+<div class="notice"><b>Regla:</b> se requiere email o teléfono (o ambos). La fuente debe ser la página o perfil controlado por la empresa.</div>
+<button id="writeBtn" class="btn" type="button" disabled>Guardar contacto verificado</button>
+<div id="result" class="result"></div>
+</section>
+</main>
+<script>
+(function(){
+'use strict';
+var token=sessionStorage.getItem('sahjony.owner.token');
+if(!token){location.replace('/owner-login?next='+encodeURIComponent(location.pathname+location.search));return}
+var $=function(id){return document.getElementById(id)},selectedKey=null,selectedName='';
+function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
+function auth(){return {Authorization:'Bearer '+token,'X-Role':'owner'}}
+async function search(){
+ var q=$('q').value.trim();if(!q)return;
+ $('hits').innerHTML='<div class="hit">Buscando…</div>';
+ try{
+  var r=await fetch('/crm/cuba-mipymes/list?limit=10&q='+encodeURIComponent(q),{headers:{Authorization:'Bearer '+token},cache:'no-store'});
+  var j=await r.json();
+  if(r.status===401||r.status===403){sessionStorage.removeItem('sahjony.owner.token');location.replace('/owner-login?next='+encodeURIComponent(location.pathname+location.search));return}
+  if(!r.ok)throw new Error(j.detail||('HTTP '+r.status));
+  var recs=j.records||[];
+  $('hits').innerHTML=recs.length?recs.map(function(x,i){
+   var loc=[x.municipality,x.province].filter(Boolean).join(' · ');
+   var ct=x.public_email||x.public_phone||'sin contacto';
+   return '<div class="hit"><b>'+esc(x.buyer_company||'Empresa')+'</b><div class="meta">'+esc(loc||'Cuba')+' · '+esc(x.product_category||x.product_description||'')+'</div><div class="meta">Contacto actual: '+esc(ct)+'</div><button class="btn secondary" type="button" data-i="'+i+'">Seleccionar</button></div>'
+  }).join(''):'<div class="hit">Sin resultados.</div>';
+  Array.prototype.forEach.call($('hits').querySelectorAll('button[data-i]'),function(b){
+   b.onclick=function(){var x=recs[Number(b.getAttribute('data-i'))];selectedKey=x.record_key;selectedName=x.buyer_company||'Empresa';$('selBox').style.display='block';$('selBox').innerHTML='Seleccionado: <b>'+esc(selectedName)+'</b>';$('writeBtn').disabled=false}
+  });
+ }catch(e){$('hits').innerHTML='<div class="hit">Error: '+esc(e.message)+'</div>'}
+}
+async function write(){
+ if(!selectedKey)return;
+ var email=$('f_email').value.trim(),phone=$('f_phone').value.trim(),srcName=$('f_srcname').value.trim(),srcUrl=$('f_srcurl').value.trim();
+ if(!email&&!phone){show('Indica al menos email o teléfono.',false);return}
+ $('writeBtn').disabled=true;$('writeBtn').textContent='Guardando…';
+ try{
+  var body={items:[{record_key:selectedKey,public_email:email||null,public_phone:phone||null,contact_source_name:srcName,contact_source_url:srcUrl}]};
+  var r=await fetch('/crm/cuba-mipymes/contact-update',{method:'POST',headers:Object.assign({'Content-Type':'application/json'},auth()),body:JSON.stringify(body)});
+  var j=await r.json().catch(function(){return {detail:'Respuesta no JSON (HTTP '+r.status+')'}});
+  if(r.status===401||r.status===403){sessionStorage.removeItem('sahjony.owner.token');location.replace('/owner-login?next='+encodeURIComponent(location.pathname+location.search));return}
+  var ok=r.ok&&j.updated===1&&j.rejected===0;
+  // Read-back: confirm the written fields on the record
+  var rb='';
+  try{
+   var r2=await fetch('/crm/cuba-mipymes/list?limit=5&q='+encodeURIComponent(selectedName),{headers:{Authorization:'Bearer '+token},cache:'no-store'});
+   var j2=await r2.json();var rec=(j2.records||[]).filter(function(x){return x.record_key===selectedKey})[0]||{};
+   rb='\n\nLectura de verificación:\nemail: '+(rec.public_email||'—')+'\nteléfono: '+(rec.public_phone||'—')+'\nfuente: '+(rec.contact_source_name||'—')+'\nurl: '+(rec.contact_source_url||'—')+'\nverificado: '+(rec.contact_verified_at||'—')+'\nprovincia: '+(rec.province||'—')+' (sin cambios)\nactividad: '+((rec.product_category||rec.product_description)||'—')+' (sin cambios)';
+  }catch(e){rb='\n\nNo se pudo releer el registro: '+e.message}
+  show('Empresa: '+selectedName+'\nRespuesta del servidor: '+JSON.stringify(j)+rb,ok&&r.ok);
+ }catch(e){show('Error: '+e.message,false)}
+ $('writeBtn').disabled=false;$('writeBtn').textContent='Guardar contacto verificado';
+}
+function show(msg,ok){var el=$('result');el.className='result '+(ok?'ok':'bad');el.textContent=msg}
+$('searchBtn').onclick=search;
+$('q').addEventListener('keydown',function(e){if(e.key==='Enter')search()});
+$('writeBtn').onclick=write;
+var preset=new URLSearchParams(location.search).get('q');
+if(preset){$('q').value=preset;search()}
+})();
+</script></body></html>
