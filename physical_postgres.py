@@ -23,6 +23,7 @@ _ALLOWED_TABLES = {
     "ledger_entries",
     "payment_reconciliations",
     "beneficiary_change_requests",
+    "envios_intakes",
 }
 
 _READ_ONLY_RELATIONS = {
