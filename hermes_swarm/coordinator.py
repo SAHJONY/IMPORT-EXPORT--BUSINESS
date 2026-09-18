@@ -170,7 +170,7 @@ class SwarmCoordinator:
     MODULE = "hermes"
 
     def __init__(self, audit: AuditLog | None = None) -> None:
-        self.audit = audit or AuditLog()
+        self.audit = audit if audit is not None else AuditLog()
         self.queue = ApprovalQueue(audit=self.audit)
         self.kill_switch = KillSwitch(audit=self.audit)
         self.roster: list[SwarmAgent] = build_roster()
