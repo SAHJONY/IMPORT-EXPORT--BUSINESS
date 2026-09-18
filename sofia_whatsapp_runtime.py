@@ -390,6 +390,18 @@ def language_rule(text: str, transcript: str = "") -> str:
 # passes this deterministic guard before release. Anything that trips the
 # guard is replaced by a short human safe-fallback message — raw model text
 # with internal jargon never reaches WhatsApp.
+#
+# v2 (2026-09-18) — enterprise trust controls:
+#   * Credential-request blocking: Sofia must NEVER ask anyone for secrets
+#     (service-role keys, API keys, passwords, tokens, MFA codes, database
+#     URLs, private keys) over WhatsApp — in any language. Such replies are
+#     replaced by a security-policy fallback, deterministically.
+#   * Secret-echo blocking: a reply that itself contains something shaped
+#     like a secret value (API keys, JWTs, private-key headers) is blocked
+#     so credentials can never leak out through the chat channel.
+#   * Audit trail: every guard decision is appended (best-effort) to a
+#     JSONL audit log. Message content is never logged; the recipient is
+#     recorded as a SHA-256 hash, never in the clear.
 # ---------------------------------------------------------------------------
 
 _INTERNAL_JARGON_PATTERNS = [
@@ -419,6 +431,77 @@ _TRACE_PATTERNS = [
     r"<reasoning>.*?</reasoning>",
     r"\[INTERNAL\].*?\[/INTERNAL\]",
 ]
+
+# --- v2: credential-request blocking -------------------------------------
+# Sofia must NEVER solicit secrets over WhatsApp, in any language. These
+# patterns catch a request verb near a secret noun, plus standalone
+# high-signal credential phrases (e.g. "service-role key").
+_SECRET_REQUEST_VERBS = (
+    r"necesito|env[ií]a(?:me|nos)?|p[áa]sa(?:me|nos)?|comparte|dame|denme|"
+    r"proporci[oó]na(?:me|nos)?|facil[ií]ta(?:me|nos)?|m[áa]nda(?:me|nos)?|"
+    r"send(?:\s+me)?|share|give\s+me|provide(?:\s+me)?|i\s+need"
+)
+_SECRET_NOUNS = (
+    r"service[\s_-]*role(?:\s+key)?|service_role|anon(?:\s+key)?|api[\s_-]*key|"
+    r"contrase[ñn]a|password|clave\s+secreta|clave\s+de\s+acceso|token(?:\s+de\s+acceso)?|"
+    r"credencial(?:es)?|credentials?|database(?:\s+|-)?url|connection\s+string|"
+    r"cadena\s+de\s+conexi[óo]n|private\s+key|llave\s+privada|mfa(?:\s+code)?|"
+    r"c[óo]digo(?:\s+de)?\s+(?:verificaci[óo]n|autenticaci[óo]n|acceso)|"
+    r"verification\s+code|auth\s+code|secret(?:\s+key)?"
+)
+_SECRET_REQUEST_PATTERNS = [
+    # request verb ... secret noun within ~80 chars (either order)
+    rf"(?:{_SECRET_REQUEST_VERBS})[\s\S]{{0,80}}?(?:{_SECRET_NOUNS})",
+    rf"(?:{_SECRET_NOUNS})[\s\S]{{0,80}}?(?:{_SECRET_REQUEST_VERBS})",
+    # standalone high-signal credential phrases, no verb needed
+    r"service[\s_-]*role\s+key",
+    r"\bservice_role\b",
+    r"supabase[\s\S]{0,20}?(?:service|secret)[\s\S]{0,20}?key",
+    r"database\s+password",
+    r"connection\s+string",
+    r"-----BEGIN [A-Z ]*PRIVATE KEY-----",
+]
+
+# --- v2: secret-echo blocking --------------------------------------------
+# If the reply itself carries something shaped like a secret VALUE, block
+# it outright so credentials can never leak through the chat channel.
+_SECRET_ECHO_PATTERNS = [
+    r"\bsk-[A-Za-z0-9]{10,}",
+    r"\bsb_[a-z0-9][a-z0-9\-_]{9,}",
+    r"\beyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}",
+    r"\bxox[bpas]-[A-Za-z0-9\-]{8,}",
+    r"\bghp_[A-Za-z0-9]{20,}",
+    r"\bAKIA[0-9A-Z]{16}\b",
+    r"-----BEGIN [A-Z ]*PRIVATE KEY-----",
+]
+
+_GUARD_VERSION = "2.0"
+_GUARD_AUDIT_ENV = "SOFIA_GUARD_AUDIT_LOG"
+
+# Unicode dashes (e.g. U+2011 non-breaking hyphen) are normalized to ASCII
+# "-" before matching so obfuscated credential phrases still trip the guard.
+_UNICODE_DASHES = re.compile(r"[\u2010\u2011\u2012\u2013\u2014\u2212]")
+
+
+def _normalize_for_guard(reply: str) -> str:
+    return _UNICODE_DASHES.sub("-", reply or "")
+
+
+def _contains_secret_request(reply: str) -> list[str]:
+    hits: list[str] = []
+    normalized = _normalize_for_guard(reply)
+    for pattern in _SECRET_REQUEST_PATTERNS:
+        if re.search(pattern, normalized, re.IGNORECASE | re.DOTALL):
+            hits.append(pattern)
+    return hits
+
+
+def _contains_secret_echo(reply: str) -> list[str]:
+    hits: list[str] = []
+    for pattern in _SECRET_ECHO_PATTERNS:
+        if re.search(pattern, reply):
+            hits.append(pattern)
+    return hits
 
 _ROLE_HINTS = (
     ("supplier", ("vende", "ofrece", "suministra", "proveedor", "supplier", "seller")),
@@ -530,6 +613,77 @@ def _safe_fallback_reply(contact_name: str | None, language: str) -> str:
     return templates.get(language, templates["es"])
 
 
+def _security_fallback_reply(contact_name: str | None, language: str) -> str:
+    """v2: professional security-policy fallback for blocked credential
+    requests or secret echoes. Transparent about the policy, human in tone."""
+    name = f" {contact_name.strip()}" if contact_name and contact_name.strip() else ""
+    templates = {
+        "es": (
+            f"Hola{name}, soy Sofía de SAHJONY. Por política de seguridad, "
+            f"nunca solicito ni comparto claves, tokens o contraseñas por "
+            f"WhatsApp. ¿En qué más le puedo ayudar?"
+        ),
+        "en": (
+            f"Hi{name}, this is Sofia from SAHJONY. As a security policy, I "
+            f"never ask for or share keys, tokens, or passwords over WhatsApp. "
+            f"How else can I help?"
+        ),
+        "fr": (
+            f"Bonjour{name}, ici Sofia de SAHJONY. Par politique de sécurité, "
+            f"je ne demande ni ne partage jamais de clés, jetons ou mots de "
+            f"passe sur WhatsApp. Comment puis-je aider autrement?"
+        ),
+        "pt": (
+            f"Olá{name}, aqui é a Sofia da SAHJONY. Por política de segurança, "
+            f"nunca solicito nem compartilho chaves, tokens ou senhas pelo "
+            f"WhatsApp. Como mais posso ajudar?"
+        ),
+    }
+    return templates.get(language, templates["es"])
+
+
+def _audit_guard_decision(
+    *,
+    sender_phone: str | None,
+    blocked: bool,
+    block_reason: str,
+    jargon_hits: list[str],
+    known_fact_questions_dropped: int,
+    excess_questions_dropped: int,
+    fallback_used: bool,
+) -> None:
+    """v2: best-effort JSONL audit of every guard decision.
+
+    Never logs message content. The recipient is stored as a SHA-256 hash,
+    never in the clear. Logging failures must never break the reply path.
+    """
+    try:
+        log_path = os.getenv(_GUARD_AUDIT_ENV, "").strip() or os.path.join(
+            os.path.dirname(os.path.abspath(__file__)),
+            "sofia-outbound-guard-audit.jsonl",
+        )
+        phone_hash = (
+            hashlib.sha256(sender_phone.encode("utf-8")).hexdigest()
+            if sender_phone
+            else None
+        )
+        entry = {
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "guard_version": _GUARD_VERSION,
+            "recipient_sha256": phone_hash,
+            "blocked": blocked,
+            "block_reason": block_reason,
+            "jargon_hits": jargon_hits,
+            "known_fact_questions_dropped": known_fact_questions_dropped,
+            "excess_questions_dropped": excess_questions_dropped,
+            "fallback_used": fallback_used,
+        }
+        with open(log_path, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+
+
 def apply_outbound_guard(
     reply: str,
     *,
@@ -542,12 +696,19 @@ def apply_outbound_guard(
     """Deterministic outbound guard. Returns (releasable_reply, guard_report).
 
     Blocked replies are replaced by a short human safe-fallback message;
-    internal jargon, reasoning traces, and structured blobs never go out.
+    internal jargon, reasoning traces, structured blobs, credential requests,
+    and secret echoes never go out. v2 adds enterprise trust controls:
+    credential-request blocking, secret-echo blocking, and a JSONL audit
+    trail of every decision.
     """
     report: dict[str, Any] = {
         "guard_active": True,
+        "guard_version": _GUARD_VERSION,
         "blocked": False,
+        "block_reason": "",
         "jargon_hits": [],
+        "secret_request_hits": [],
+        "secret_echo_hits": [],
         "traces_stripped": False,
         "known_fact_questions_dropped": 0,
         "excess_questions_dropped": 0,
@@ -557,19 +718,79 @@ def apply_outbound_guard(
     if candidate != (reply or ""):
         report["traces_stripped"] = True
 
+    # v2: secret echo — highest severity, the reply itself carries a secret.
+    echo_hits = _contains_secret_echo(candidate)
+    if echo_hits:
+        report["blocked"] = True
+        report["block_reason"] = "secret_echo"
+        report["secret_echo_hits"] = echo_hits
+        report["fallback_used"] = True
+        final = _security_fallback_reply(contact_name, language)
+        _audit_guard_decision(
+            sender_phone=None,
+            blocked=True,
+            block_reason="secret_echo",
+            jargon_hits=[],
+            known_fact_questions_dropped=0,
+            excess_questions_dropped=0,
+            fallback_used=True,
+        )
+        return final, report
+
+    # v2: credential request — Sofia never solicits secrets over WhatsApp.
+    secret_hits = _contains_secret_request(candidate)
+    if secret_hits:
+        report["blocked"] = True
+        report["block_reason"] = "secret_request"
+        report["secret_request_hits"] = secret_hits
+        report["fallback_used"] = True
+        final = _security_fallback_reply(contact_name, language)
+        _audit_guard_decision(
+            sender_phone=None,
+            blocked=True,
+            block_reason="secret_request",
+            jargon_hits=[],
+            known_fact_questions_dropped=0,
+            excess_questions_dropped=0,
+            fallback_used=True,
+        )
+        return final, report
+
     hits = _contains_internal_jargon(candidate)
     if hits:
         report["blocked"] = True
+        report["block_reason"] = "internal_jargon"
         report["jargon_hits"] = hits
         report["fallback_used"] = True
-        return _safe_fallback_reply(contact_name, language), report
+        final = _safe_fallback_reply(contact_name, language)
+        _audit_guard_decision(
+            sender_phone=None,
+            blocked=True,
+            block_reason="internal_jargon",
+            jargon_hits=hits,
+            known_fact_questions_dropped=0,
+            excess_questions_dropped=0,
+            fallback_used=True,
+        )
+        return final, report
 
     stripped = candidate.strip()
     if not stripped or (stripped.startswith("{") and stripped.endswith("}")):
         report["blocked"] = True
+        report["block_reason"] = "empty_or_structured"
         report["fallback_used"] = True
         report["empty_or_structured"] = True
-        return _safe_fallback_reply(contact_name, language), report
+        final = _safe_fallback_reply(contact_name, language)
+        _audit_guard_decision(
+            sender_phone=None,
+            blocked=True,
+            block_reason="empty_or_structured",
+            jargon_hits=[],
+            known_fact_questions_dropped=0,
+            excess_questions_dropped=0,
+            fallback_used=True,
+        )
+        return final, report
 
     cleaned, dropped = _drop_known_fact_questions(candidate, memory)
     report["known_fact_questions_dropped"] = dropped
@@ -577,8 +798,28 @@ def apply_outbound_guard(
     report["excess_questions_dropped"] = excess
     if not cleaned.strip():
         report["blocked"] = True
+        report["block_reason"] = "empty_after_cleanup"
         report["fallback_used"] = True
-        return _safe_fallback_reply(contact_name, language), report
+        final = _safe_fallback_reply(contact_name, language)
+        _audit_guard_decision(
+            sender_phone=None,
+            blocked=True,
+            block_reason="empty_after_cleanup",
+            jargon_hits=[],
+            known_fact_questions_dropped=dropped,
+            excess_questions_dropped=excess,
+            fallback_used=True,
+        )
+        return final, report
+    _audit_guard_decision(
+        sender_phone=None,
+        blocked=False,
+        block_reason="",
+        jargon_hits=[],
+        known_fact_questions_dropped=dropped,
+        excess_questions_dropped=excess,
+        fallback_used=False,
+    )
     return cleaned, report
 
 
