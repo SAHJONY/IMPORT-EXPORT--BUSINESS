@@ -19,6 +19,7 @@ const ownerPages={
   '/owner/cuba-consumers':'/owner-cuba-consumers.html',
   '/owner/cuba-energy':'/owner-cuba-energy.html',
   '/owner/cuba-fuels':'/owner-cuba-fuels.html',
+  '/owner/cuba-vehicles':'/owner-cuba-vehicles.html',
   '/owner/energy':'/owner-energy-hub.html'
 };
 

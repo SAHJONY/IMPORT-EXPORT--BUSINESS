@@ -55,6 +55,7 @@ verifyOwnerRoute('/owner/energy/providers','/owner-energy-providers.html','Energ
 verifyOwnerRoute('/owner/energy/compliance','/owner-energy-compliance.html','Energy Compliance');
 verifyOwnerRoute('/owner/cuba-energy','/owner-cuba-energy.html','Cuba Energy Desk');
 verifyOwnerRoute('/owner/cuba-fuels','/owner-cuba-fuels.html','Cuba Private Sector Fuels Desk');
+verifyOwnerRoute('/owner/cuba-vehicles','/owner-cuba-vehicles.html','Cuba Vehicle Export Department');
 verifyOwnerRoute('/owner/cuba-consumers','/owner-cuba-consumers.html','Cuba Individual Consumers CRM');
 verifyOwnerRoute('/owner/cuba-partners','/owner-cuba-partners.html','Cuba Partner Command Center');
 

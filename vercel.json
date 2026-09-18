@@ -644,6 +644,10 @@
       "dest": "/owner-cuba-logistics.html"
     },
     {
+      "src": "/owner/cuba-vehicles",
+      "dest": "/owner-cuba-vehicles.html"
+    },
+    {
       "src": "/owner/cuba/consumers",
       "dest": "/owner-cuba-consumers.html"
     },
