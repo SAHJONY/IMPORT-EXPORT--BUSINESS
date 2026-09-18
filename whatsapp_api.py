@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 import hmac
@@ -1419,3 +1420,109 @@ async def whatsapp_webhook_receive(
         "status_updates_recorded": status_updates,
         "background_ai_processing": accepted > 0 and _ai_auto_reply_enabled(),
     }
+
+
+# ---------------------------------------------------------------------------
+# Sofia Bridge Poller — the real Sofia, directly connected to WhatsApp.
+#
+# The Hermes bridge exposes GET /messages, which drains its inbound queue.
+# This background loop polls it, feeds each inbound message through the
+# Sofia engine (generate_sofia_reply: conversation history + CRM + sales
+# intelligence + human-tone rules + deterministic outbound guard), and
+# queues the reply in the Hermes outbox. The outbox worker delivers it via
+# the bridge. The gateway agent does not reply — Sofia is the sole brain.
+# ---------------------------------------------------------------------------
+
+_SOFIA_BRIDGE_MESSAGES_URL = os.getenv("SOFIA_BRIDGE_MESSAGES_URL", "http://127.0.0.1:3000/messages")
+_bridge_poller_task: "asyncio.Task | None" = None
+
+
+def _bridge_poller_enabled() -> bool:
+    return os.getenv("SOFIA_BRIDGE_POLLER_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
+
+
+async def _fetch_bridge_messages() -> list[dict[str, Any]]:
+    try:
+        async with httpx.AsyncClient(timeout=12) as client:
+            resp = await client.get(_SOFIA_BRIDGE_MESSAGES_URL)
+        if resp.status_code != 200:
+            return []
+        data = resp.json()
+        return data if isinstance(data, list) else []
+    except Exception:
+        return []
+
+
+def _bridge_sender_phone(msg: dict[str, Any]) -> str:
+    """Best-effort dialable phone digits from a bridge event."""
+    for key in ("senderId", "chatId", "sender", "from"):
+        raw = str(msg.get(key) or "")
+        if not raw or raw.endswith("@g.us") or "status" in raw:
+            continue
+        digits = "".join(ch for ch in raw if ch.isdigit())
+        if 8 <= len(digits) <= 15:
+            return digits
+    return ""
+
+
+async def _handle_bridge_message(msg: dict[str, Any]) -> None:
+    body = str(msg.get("body") or msg.get("text") or "").strip()
+    if not body:
+        return
+    body = body[:4000]
+    # Never reply to our own echoes or the owner's messages.
+    if msg.get("fromMe") or msg.get("fromOwner"):
+        return
+    message_id = str(msg.get("id") or msg.get("messageId") or msg.get("key", {}).get("id") or "")
+    if message_id and await _message_seen(message_id):
+        return
+    phone = _bridge_sender_phone(msg)
+    if not phone:
+        return
+    if await _is_owner_whatsapp(phone):
+        return
+    try:
+        clean_phone = _normalize_phone(phone)
+    except HTTPException:
+        clean_phone = ""
+    if _opt_out(body):
+        return
+    contact_name = str(msg.get("senderName") or msg.get("pushName") or msg.get("contactName") or "") or None
+    lead_id = await _upsert_whatsapp_lead(clean_phone, body, contact_name) if clean_phone else None
+    await _record_inbound_event(
+        clean_phone or phone, message_id or None, body, "text", lead_id, provider="hermes_whatsapp"
+    )
+    # The real Sofia brain.
+    try:
+        reply = await generate_sofia_reply(body, contact_name, sender_phone=clean_phone or None)
+    except Exception:
+        return
+    if not reply or not reply.strip():
+        return
+    # Queue for the Hermes outbox worker — the bridge delivers it.
+    try:
+        await _enqueue_hermes_message(
+            WhatsAppSend(to=clean_phone or phone, body=reply.strip()[:4096], lead_id=lead_id)
+        )
+    except Exception:
+        pass
+
+
+async def _sofia_bridge_poller() -> None:
+    await asyncio.sleep(15)  # let the app finish starting
+    while True:
+        try:
+            messages = await _fetch_bridge_messages()
+            for msg in messages:
+                if isinstance(msg, dict):
+                    await _handle_bridge_message(msg)
+        except Exception:
+            pass
+        await asyncio.sleep(5)
+
+
+@app.on_event("startup")
+async def _start_sofia_bridge_poller() -> None:
+    global _bridge_poller_task
+    if _bridge_poller_enabled() and _bridge_poller_task is None:
+        _bridge_poller_task = asyncio.create_task(_sofia_bridge_poller())
