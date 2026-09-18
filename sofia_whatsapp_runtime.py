@@ -380,14 +380,217 @@ def language_rule(text: str, transcript: str = "") -> str:
     )
 
 
-async def generate_sofia_reply(
+# ---------------------------------------------------------------------------
+# OUTBOUND GUARD — permanent fix for internal-text exposure (2026-09-18)
+#
+# The model occasionally emits infrastructure vocabulary ("endpoints",
+# "modo degradado", "plataforma canónica"), unrendered template markers,
+# reasoning traces, reverses buyer/seller roles, or re-asks known facts.
+# Prompt instructions alone did not prevent it, so every outbound reply now
+# passes this deterministic guard before release. Anything that trips the
+# guard is replaced by a short human safe-fallback message — raw model text
+# with internal jargon never reaches WhatsApp.
+# ---------------------------------------------------------------------------
+
+_INTERNAL_JARGON_PATTERNS = [
+    r"endpoint",
+    r"modo\s+degradado",
+    r"\bdegraded\b",
+    r"plataforma\s+can[oó]nica",
+    r"\bcanonical\b",
+    r"razonamiento\s+interno",
+    r"internal\s+reasoning",
+    r"an[áa]lisis\s+interno",
+    r"como\s+(un\s+)?modelo\s+de\s+(lenguaje|ia)",
+    r"as\s+an?\s+ai\s+language\s+model",
+    r"mis\s+instrucciones",
+    r"system\s+prompt",
+    r"prompt\s+interno",
+    r"\btokens?\b",
+    r"\bnvidia\b",
+    r"gpt-oss",
+    r"hermes\s+agent",
+    r"\bopenclaw\b",
+    r"\{\{\s*[a-zA-Z_][a-zA-Z0-9_]*\s*\}\}",
+]
+
+_TRACE_PATTERNS = [
+    r"<think>.*?</think>",
+    r"<reasoning>.*?</reasoning>",
+    r"\[INTERNAL\].*?\[/INTERNAL\]",
+]
+
+_ROLE_HINTS = (
+    ("supplier", ("vende", "ofrece", "suministra", "proveedor", "supplier", "seller")),
+    ("buyer", ("busca", "necesita", "compra", "quiere comprar", "buyer", "customer")),
+    ("gestor", ("gestor", "intermediario", "broker", "conecta")),
+    ("partner", ("partner", "socio", "red de")),
+)
+
+
+def _contains_internal_jargon(reply: str) -> list[str]:
+    hits: list[str] = []
+    for pattern in _INTERNAL_JARGON_PATTERNS:
+        if re.search(pattern, reply, re.IGNORECASE | re.DOTALL):
+            hits.append(pattern)
+    return hits
+
+
+def _strip_reasoning_traces(reply: str) -> str:
+    clean = reply
+    for pattern in _TRACE_PATTERNS:
+        clean = re.sub(pattern, "", clean, flags=re.IGNORECASE | re.DOTALL).strip()
+    return clean
+
+
+def _reply_questions(reply: str) -> list[str]:
+    return [q.strip() for q in re.findall(r"([^.!?\n]*\?)", reply) if q.strip()]
+
+
+def _known_fact_values(memory: dict[str, Any] | None) -> list[str]:
+    values: list[str] = []
+    known = (memory or {}).get("known") or {}
+
+    def _collect(value: Any) -> None:
+        if isinstance(value, str) and len(value.strip()) >= 3:
+            values.append(value.strip().lower())
+        elif isinstance(value, (list, tuple)):
+            for item in value:
+                _collect(item)
+        elif isinstance(value, dict):
+            for item in value.values():
+                _collect(item)
+
+    _collect(known)
+    return values
+
+
+def _drop_known_fact_questions(reply: str, memory: dict[str, Any] | None) -> tuple[str, int]:
+    questions = _reply_questions(reply)
+    if not questions:
+        return reply, 0
+    known_values = _known_fact_values(memory)
+    known = (memory or {}).get("known") or {}
+    known_keys = [str(k).strip().lower() for k in known.keys() if len(str(k).strip()) >= 3]
+    known_terms = known_values + known_keys
+    dropped = 0
+    clean = reply
+    for question in questions:
+        if any(term in question.lower() for term in known_terms):
+            clean = clean.replace(question, "").strip()
+            dropped += 1
+    clean = re.sub(r"\n{3,}", "\n\n", clean).strip()
+    return clean, dropped
+
+
+def _cap_questions(reply: str, limit: int = 2) -> tuple[str, int]:
+    questions = _reply_questions(reply)
+    if len(questions) <= limit:
+        return reply, 0
+    clean = reply
+    removed = 0
+    for question in questions[limit:]:
+        clean = clean.replace(question, "").strip()
+        removed += 1
+    clean = re.sub(r"[ \t]+\n", "\n", clean)
+    clean = re.sub(r"\n{3,}", "\n\n", clean).strip()
+    return clean, removed
+
+
+def _infer_contact_role(
+    memory: dict[str, Any] | None,
+    sales: dict[str, Any] | None,
+    text: str,
+) -> str | None:
+    known = (memory or {}).get("known") or {}
+    for key in ("role", "contact_role", "rol", "tipo_contacto"):
+        value = str(known.get(key) or "").strip().lower()
+        if value:
+            return value
+    haystack = " ".join([
+        text or "",
+        str((sales or {}).get("interpreted_buyer_requirement") or ""),
+        str((sales or {}).get("next_best_action") or ""),
+        json.dumps(known, ensure_ascii=False),
+    ]).lower()
+    for role, hints in _ROLE_HINTS:
+        if any(hint in haystack for hint in hints):
+            return role
+    return None
+
+
+def _safe_fallback_reply(contact_name: str | None, language: str) -> str:
+    name = f" {contact_name.strip()}" if contact_name and contact_name.strip() else ""
+    templates = {
+        "es": f"Hola{name}, soy Sofía de SAHJONY. Disculpe el mensaje anterior. ¿En qué le puedo ayudar?",
+        "en": f"Hi{name}, this is Sofia from SAHJONY. Sorry about the previous message. How can I help?",
+        "fr": f"Bonjour{name}, ici Sofia de SAHJONY. Désolée pour le message précédent. Comment puis-je aider?",
+        "pt": f"Olá{name}, aqui é a Sofia da SAHJONY. Desculpe a mensagem anterior. Como posso ajudar?",
+    }
+    return templates.get(language, templates["es"])
+
+
+def apply_outbound_guard(
+    reply: str,
+    *,
+    memory: dict[str, Any] | None,
+    sales: dict[str, Any] | None,
+    text: str,
+    contact_name: str | None,
+    language: str,
+) -> tuple[str, dict[str, Any]]:
+    """Deterministic outbound guard. Returns (releasable_reply, guard_report).
+
+    Blocked replies are replaced by a short human safe-fallback message;
+    internal jargon, reasoning traces, and structured blobs never go out.
+    """
+    report: dict[str, Any] = {
+        "guard_active": True,
+        "blocked": False,
+        "jargon_hits": [],
+        "traces_stripped": False,
+        "known_fact_questions_dropped": 0,
+        "excess_questions_dropped": 0,
+        "fallback_used": False,
+    }
+    candidate = _strip_reasoning_traces(reply or "")
+    if candidate != (reply or ""):
+        report["traces_stripped"] = True
+
+    hits = _contains_internal_jargon(candidate)
+    if hits:
+        report["blocked"] = True
+        report["jargon_hits"] = hits
+        report["fallback_used"] = True
+        return _safe_fallback_reply(contact_name, language), report
+
+    stripped = candidate.strip()
+    if not stripped or (stripped.startswith("{") and stripped.endswith("}")):
+        report["blocked"] = True
+        report["fallback_used"] = True
+        report["empty_or_structured"] = True
+        return _safe_fallback_reply(contact_name, language), report
+
+    cleaned, dropped = _drop_known_fact_questions(candidate, memory)
+    report["known_fact_questions_dropped"] = dropped
+    cleaned, excess = _cap_questions(cleaned, limit=2)
+    report["excess_questions_dropped"] = excess
+    if not cleaned.strip():
+        report["blocked"] = True
+        report["fallback_used"] = True
+        return _safe_fallback_reply(contact_name, language), report
+    return cleaned, report
+
+
+async def _generate_sofia_reply_unguarded(
     text: str,
     contact_name: str | None,
     owner_context: bool = False,
     sender_phone: str | None = None,
-) -> str:
+    _guard_ctx: dict[str, Any] | None = None,
+) -> tuple[str, dict[str, Any]]:
     if not hermes_configured() and not os.getenv("OPENAI_API_KEY", "").strip():
-        return ""
+        return "", (_guard_ctx if _guard_ctx is not None else {})
 
     phone, lead_id, lead = await _find_current_contact(text, contact_name)
     history = await _history(phone)
@@ -432,6 +635,13 @@ async def generate_sofia_reply(
         sales_intelligence=sales,
         crm_context=crm_context,
     )
+    if _guard_ctx is not None:
+        _guard_ctx.update(
+            memory=memory,
+            sales=sales,
+            lead_id=lead_id,
+            language=detect_reply_language(text, transcript),
+        )
 
     knowledge = await build_business_knowledge(text, crm_context)
     adaptive = await adaptive_context(contact_name)
@@ -462,7 +672,7 @@ async def generate_sofia_reply(
             "summary": "Sofia answered deterministically for an ambiguous business track",
             **track_audit,
         })
-        return str(track_resolution.get("reply") or "")[:4096]
+        return str(track_resolution.get("reply") or "")[:4096], (_guard_ctx if _guard_ctx is not None else {})
     system += str(track_resolution.get("prompt_addition") or "")
     if owner_context:
         system += "\n\nOWNER EXECUTIVE MODE\n- The current sender is the authenticated SAHJONY owner. Treat this as an internal executive request, not a customer sales intake.\n- Never ask the owner to export/upload CRM data as the first response. Use the connected SAHJONY source snapshot supplied below first.\n- Distinguish verified zero from unknown/unreadable. Never convert source failure into zero.\n- If one source is unavailable, give the best partial report from healthy sources and isolate the blocker.\n- Do not fabricate cash, revenue, profit, invoices, payments, opportunities, shipments, or system health.\n- Only ask the owner for something when it is genuinely owner-only and cannot be resolved from connected systems."
@@ -529,6 +739,14 @@ WHATSAPP HUMAN CONVERSATION RULES
 - Optimize for legitimate customer value, trust, conversion quality, evidence completeness and durable margin.
 """
 
+    contact_role = _infer_contact_role(memory, sales, text)
+    if contact_role:
+        system += (
+            "\n\nVERIFIED CONTACT ROLE: " + contact_role + ". "
+            "Treat the contact as this role for the entire conversation. "
+            "Never reverse buyer and seller."
+        )
+
     user = (
         f"Latest customer message:\n{text[:5000]}\n\n"
         f"Recent conversation:\n{transcript[-18000:]}\n\n"
@@ -549,7 +767,7 @@ WHATSAPP HUMAN CONVERSATION RULES
                 signal="reply_primary_failure",
                 metadata={"lead_id": lead_id},
             )
-            return str(sales.get("draft_reply") or "")[:4096]
+            return str(sales.get("draft_reply") or "")[:4096], (_guard_ctx if _guard_ctx is not None else {})
 
         reply = reply[:4096]
         await _audit(lead_id, "sofia_reply_generated", {
@@ -569,19 +787,19 @@ WHATSAPP HUMAN CONVERSATION RULES
             "hermes_style_agentic_loop": True,
             "max_new_questions": 2,
             "identity_policy": "truthful_digital_representative",
-            "private_reasoning_exposed": False,
+            "outbound_guard": "pending_wrapper_verification",
         })
         await record_lesson(
             lesson="Successful Sofía response used the Hermes-style cognition loop with durable relationship memory, CRM context, progressive discovery and guarded executive autonomy.",
             signal="reply_success",
             metadata={"lead_id": lead_id, "reply_chars": len(reply), "model": hermes_model_name() if hermes_configured() else "fallback"},
         )
-        return reply
+        return reply, (_guard_ctx if _guard_ctx is not None else {})
     except Exception as exc:
         try:
             fallback, _ = await _openai_fallback(system, user)
             if fallback:
-                return fallback[:4096]
+                return fallback[:4096], (_guard_ctx if _guard_ctx is not None else {})
         except Exception:
             pass
         await _audit(lead_id, "sofia_reply_failure", {"summary": type(exc).__name__})
@@ -590,4 +808,35 @@ WHATSAPP HUMAN CONVERSATION RULES
             signal="reply_primary_failure",
             metadata={"lead_id": lead_id, "error_type": type(exc).__name__},
         )
-        return str(sales.get("draft_reply") or "")[:4096]
+        return str(sales.get("draft_reply") or "")[:4096], (_guard_ctx if _guard_ctx is not None else {})
+
+
+async def generate_sofia_reply(
+    text: str,
+    contact_name: str | None,
+    owner_context: bool = False,
+    sender_phone: str | None = None,
+) -> str:
+    """Public entry point. Every generated reply passes the deterministic
+    outbound guard before release — internal jargon, reasoning traces, and
+    structured blobs are blocked and replaced by a human safe-fallback."""
+    guard_ctx: dict[str, Any] = {}
+    reply, guard_ctx = await _generate_sofia_reply_unguarded(
+        text, contact_name, owner_context, sender_phone, guard_ctx
+    )
+    language = guard_ctx.get("language") or detect_reply_language(text, "")
+    clean, report = apply_outbound_guard(
+        reply,
+        memory=guard_ctx.get("memory"),
+        sales=guard_ctx.get("sales"),
+        text=text,
+        contact_name=contact_name,
+        language=language,
+    )
+    await _audit(guard_ctx.get("lead_id"), "sofia_outbound_guard", {
+        "summary": "Outbound guard verdict on generated WhatsApp reply",
+        **report,
+        "private_reasoning_exposed": False,
+        "reply_chars": len(clean),
+    })
+    return clean
