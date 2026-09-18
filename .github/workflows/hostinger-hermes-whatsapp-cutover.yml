@@ -64,11 +64,11 @@ jobs:
           echo AI_GATEWAY_HOSTINGER_HTTP="$code"
           [[ "$code" == 200 ]] || exit 32
           python3 - <<'PY2'
-import json
-d=json.load(open('/tmp/ai-gateway-smoke.json'))
-print('AI_GATEWAY_HOSTINGER_MODEL='+str(d.get('model','unknown')))
-print('AI_GATEWAY_HOSTINGER_RESPONSE_PRESENT='+str(bool((d.get('choices') or [{}])[0].get('message',{}).get('content'))).lower())
-PY2
+           import json
+           d=json.load(open('/tmp/ai-gateway-smoke.json'))
+           print('AI_GATEWAY_HOSTINGER_MODEL='+str(d.get('model','unknown')))
+           print('AI_GATEWAY_HOSTINGER_RESPONSE_PRESENT='+str(bool((d.get('choices') or [{}])[0].get('message',{}).get('content'))).lower())
+           PY2
           echo HERMES_RUNTIME_MUTATED=0
           echo WHATSAPP_RUNTIME_MUTATED=0
           echo OUTBOX_RUNTIME_MUTATED=0
