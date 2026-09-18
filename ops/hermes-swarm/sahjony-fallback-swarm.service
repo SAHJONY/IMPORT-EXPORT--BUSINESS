@@ -1,0 +1,19 @@
+[Unit]
+Description=SAHJONY Hermes Agent Swarm (read + draft, never send)
+Documentation=https://github.com/SAHJONY/IMPORT-EXPORT--BUSINESS
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/sahjony-fallback/hermes-swarm
+ExecStart=/usr/bin/python3 /opt/sahjony-fallback/hermes-swarm/swarm_runner.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+# Runs ALONGSIDE the Hermes transport, never inside it.
+# Never touches /root/.hermes, /opt/sahjony-hermes, or hermes units.
+
+[Install]
+WantedBy=multi-user.target
