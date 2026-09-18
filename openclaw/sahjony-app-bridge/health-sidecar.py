@@ -123,8 +123,8 @@ def signed_post(secret: str, payload: dict[str, object]) -> tuple[int, str]:
         headers={
             "Accept": "application/json",
             "Content-Type": "application/json",
-            "X-SAHJONY-Timestamp": timestamp,
-            "X-SAHJONY-Signature": f"sha256={digest}",
+            "X-Bridge-Timestamp": timestamp,
+            "X-Bridge-Signature": f"sha256={digest}",
             "User-Agent": "SAHJONY-OpenClaw-Health-Sidecar/2.2",
         },
     )

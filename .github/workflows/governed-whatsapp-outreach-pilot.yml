@@ -70,7 +70,7 @@ jobs:
                   headers={
                       'Accept':'application/json',
                       'Content-Type':'application/json',
-                      'X-SAHJONY-Timestamp':ts,
+                      'X-Bridge-Timestamp':ts,
                       'X-SAHJONY-Nonce':nonce,
                       'X-SAHJONY-CRM-Signature':sig,
                       'User-Agent':'SAHJONY-Governed-Outreach-Pilot/1.0',
@@ -113,7 +113,7 @@ jobs:
               sig='sha256='+hmac.new(secret.encode(),material,hashlib.sha256).hexdigest()
               req=urllib.request.Request(base+path,data=raw,method='POST',headers={
                   'Accept':'application/json','Content-Type':'application/json',
-                  'X-SAHJONY-Timestamp':ts,'X-SAHJONY-Nonce':nonce,'X-SAHJONY-CRM-Signature':sig,
+                  'X-Bridge-Timestamp':ts,'X-SAHJONY-Nonce':nonce,'X-SAHJONY-CRM-Signature':sig,
                   'User-Agent':'SAHJONY-Governed-Outreach-Pilot/1.0',
               })
               with urllib.request.urlopen(req,timeout=30) as r: return json.load(r)
