@@ -807,7 +807,7 @@ async def owner_update_report() -> dict[str, Any]:
 @router.get("/whatsapp/crm/health")
 async def crm_health(
     request: Request,
-    x_sahjony_timestamp: str | None = Header(None, alias="X-SAHJONY-Timestamp"),
+    x_sahjony_timestamp: str | None = Header(None, alias="X-Bridge-Timestamp"),
     x_sahjony_nonce: str | None = Header(None, alias="X-SAHJONY-Nonce"),
     x_sahjony_crm_signature: str | None = Header(None, alias="X-SAHJONY-CRM-Signature"),
 ) -> dict[str, Any]:
@@ -818,7 +818,7 @@ async def crm_health(
 @router.get("/whatsapp/crm/owner-report")
 async def crm_owner_report(
     request: Request,
-    x_sahjony_timestamp: str | None = Header(None, alias="X-SAHJONY-Timestamp"),
+    x_sahjony_timestamp: str | None = Header(None, alias="X-Bridge-Timestamp"),
     x_sahjony_nonce: str | None = Header(None, alias="X-SAHJONY-Nonce"),
     x_sahjony_crm_signature: str | None = Header(None, alias="X-SAHJONY-CRM-Signature"),
 ) -> dict[str, Any]:
@@ -829,7 +829,7 @@ async def crm_owner_report(
 @router.post("/whatsapp/crm/contact")
 async def crm_contact(
     request: Request,
-    x_sahjony_timestamp: str | None = Header(None, alias="X-SAHJONY-Timestamp"),
+    x_sahjony_timestamp: str | None = Header(None, alias="X-Bridge-Timestamp"),
     x_sahjony_nonce: str | None = Header(None, alias="X-SAHJONY-Nonce"),
     x_sahjony_crm_signature: str | None = Header(None, alias="X-SAHJONY-CRM-Signature"),
 ) -> dict[str, Any]:
@@ -845,7 +845,7 @@ async def crm_contact(
 @router.post("/whatsapp/crm/sync")
 async def crm_sync(
     request: Request,
-    x_sahjony_timestamp: str | None = Header(None, alias="X-SAHJONY-Timestamp"),
+    x_sahjony_timestamp: str | None = Header(None, alias="X-Bridge-Timestamp"),
     x_sahjony_nonce: str | None = Header(None, alias="X-SAHJONY-Nonce"),
     x_sahjony_crm_signature: str | None = Header(None, alias="X-SAHJONY-CRM-Signature"),
 ) -> dict[str, Any]:
@@ -861,7 +861,7 @@ async def crm_sync(
 @router.post("/whatsapp/crm/note")
 async def crm_note(
     request: Request,
-    x_sahjony_timestamp: str | None = Header(None, alias="X-SAHJONY-Timestamp"),
+    x_sahjony_timestamp: str | None = Header(None, alias="X-Bridge-Timestamp"),
     x_sahjony_nonce: str | None = Header(None, alias="X-SAHJONY-Nonce"),
     x_sahjony_crm_signature: str | None = Header(None, alias="X-SAHJONY-CRM-Signature"),
 ) -> dict[str, Any]:
@@ -877,7 +877,7 @@ async def crm_note(
 @router.post("/whatsapp/crm/outreach-pilot")
 async def crm_outreach_pilot(
     request: Request,
-    x_sahjony_timestamp: str | None = Header(None, alias="X-SAHJONY-Timestamp"),
+    x_sahjony_timestamp: str | None = Header(None, alias="X-Bridge-Timestamp"),
     x_sahjony_nonce: str | None = Header(None, alias="X-SAHJONY-Nonce"),
     x_sahjony_crm_signature: str | None = Header(None, alias="X-SAHJONY-CRM-Signature"),
 ) -> dict[str, Any]:
@@ -893,7 +893,7 @@ async def crm_outreach_pilot(
 @router.post("/whatsapp/crm/rfq-outreach")
 async def crm_rfq_outreach(
     request: Request,
-    x_sahjony_timestamp: str | None = Header(None, alias="X-SAHJONY-Timestamp"),
+    x_sahjony_timestamp: str | None = Header(None, alias="X-Bridge-Timestamp"),
     x_sahjony_nonce: str | None = Header(None, alias="X-SAHJONY-Nonce"),
     x_sahjony_crm_signature: str | None = Header(None, alias="X-SAHJONY-CRM-Signature"),
 ) -> dict[str, Any]:
@@ -909,7 +909,7 @@ async def crm_rfq_outreach(
 @router.post("/whatsapp/crm/outreach-pilot/status")
 async def crm_outreach_pilot_status(
     request: Request,
-    x_sahjony_timestamp: str | None = Header(None, alias="X-SAHJONY-Timestamp"),
+    x_sahjony_timestamp: str | None = Header(None, alias="X-Bridge-Timestamp"),
     x_sahjony_nonce: str | None = Header(None, alias="X-SAHJONY-Nonce"),
     x_sahjony_crm_signature: str | None = Header(None, alias="X-SAHJONY-CRM-Signature"),
 ) -> dict[str, Any]:
@@ -925,7 +925,7 @@ async def crm_outreach_pilot_status(
 @router.post("/whatsapp/crm/intake")
 async def crm_intake(
     request: Request,
-    x_sahjony_timestamp: str | None = Header(None, alias="X-SAHJONY-Timestamp"),
+    x_sahjony_timestamp: str | None = Header(None, alias="X-Bridge-Timestamp"),
     x_sahjony_nonce: str | None = Header(None, alias="X-SAHJONY-Nonce"),
     x_sahjony_crm_signature: str | None = Header(None, alias="X-SAHJONY-CRM-Signature"),
 ) -> dict[str, Any]:

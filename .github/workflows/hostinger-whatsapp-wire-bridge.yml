@@ -108,7 +108,7 @@ jobs:
           def signed_headers(raw: bytes):
               ts = str(int(time.time()))
               sig = 'sha256=' + hmac.new(key.encode(), ts.encode() + b'.' + raw, hashlib.sha256).hexdigest()
-              return {'X-SAHJONY-Timestamp': ts, 'X-SAHJONY-Signature': sig}
+              return {'X-Bridge-Timestamp': ts, 'X-Bridge-Signature': sig}
           # status endpoint with a probe command_id: proves signature verification works on the VPS
           req = urllib.request.Request(base + '/whatsapp/hermes/outbox/status?command_id=probe', method='GET',
               headers={'Accept': 'application/json', 'Host': 'sahjony.com', **signed_headers(b'')})

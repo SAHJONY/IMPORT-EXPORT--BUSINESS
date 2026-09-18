@@ -152,7 +152,7 @@ def request_json(method: str, path: str, payload: dict[str, Any] | None = None) 
     secret = bridge_secret()
     headers = {
         "Accept": "application/json",
-        "X-SAHJONY-Timestamp": timestamp,
+        "X-Bridge-Timestamp": timestamp,
         "X-SAHJONY-Nonce": nonce,
         "X-SAHJONY-CRM-Signature": signature(
             secret,

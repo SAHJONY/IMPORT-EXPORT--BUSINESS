@@ -59,7 +59,7 @@ jobs:
           def signed_headers(raw=b''):
               ts=str(int(time.time()))
               sig='sha256='+hmac.new(SECRET.encode(), ts.encode()+b'.'+raw, hashlib.sha256).hexdigest()
-              return {'X-SAHJONY-Timestamp':ts,'X-SAHJONY-Signature':sig}
+              return {'X-Bridge-Timestamp':ts,'X-Bridge-Signature':sig}
 
           def json_request(url, method='GET', payload=None, headers=None, timeout=20):
               raw=b'' if payload is None else json.dumps(payload,separators=(',',':')).encode()

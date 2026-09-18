@@ -1016,8 +1016,8 @@ async def whatsapp_send(payload: WhatsAppSend, authorization: str | None = Heade
 @app.post("/whatsapp/hermes/heartbeat")
 async def hermes_heartbeat(
     request: Request,
-    x_sahjony_timestamp: str | None = Header(None, alias="X-SAHJONY-Timestamp"),
-    x_sahjony_signature: str | None = Header(None, alias="X-SAHJONY-Signature"),
+    x_sahjony_timestamp: str | None = Header(None, alias="X-Bridge-Timestamp"),
+    x_sahjony_signature: str | None = Header(None, alias="X-Bridge-Signature"),
 ) -> dict[str, Any]:
     raw = await request.body()
     _verify_hermes_signature(raw, x_sahjony_timestamp, x_sahjony_signature)
@@ -1042,8 +1042,8 @@ async def hermes_heartbeat(
 @app.post("/whatsapp/hermes/events")
 async def hermes_event(
     request: Request,
-    x_sahjony_timestamp: str | None = Header(None, alias="X-SAHJONY-Timestamp"),
-    x_sahjony_signature: str | None = Header(None, alias="X-SAHJONY-Signature"),
+    x_sahjony_timestamp: str | None = Header(None, alias="X-Bridge-Timestamp"),
+    x_sahjony_signature: str | None = Header(None, alias="X-Bridge-Signature"),
 ) -> dict[str, Any]:
     raw = await request.body()
     _verify_hermes_signature(raw, x_sahjony_timestamp, x_sahjony_signature)
@@ -1117,8 +1117,8 @@ async def hermes_event(
 @app.get("/whatsapp/hermes/outbox")
 async def hermes_outbox(
     limit: int = Query(10, ge=1, le=25),
-    x_sahjony_timestamp: str | None = Header(None, alias="X-SAHJONY-Timestamp"),
-    x_sahjony_signature: str | None = Header(None, alias="X-SAHJONY-Signature"),
+    x_sahjony_timestamp: str | None = Header(None, alias="X-Bridge-Timestamp"),
+    x_sahjony_signature: str | None = Header(None, alias="X-Bridge-Signature"),
 ) -> dict[str, Any]:
     _verify_hermes_signature(b"", x_sahjony_timestamp, x_sahjony_signature)
     # The durable backend stores logical rows in JSON. Ordering by data->>created_at
@@ -1202,8 +1202,8 @@ async def hermes_outbox(
 @app.post("/whatsapp/hermes/outbox/ack")
 async def hermes_outbox_ack(
     request: Request,
-    x_sahjony_timestamp: str | None = Header(None, alias="X-SAHJONY-Timestamp"),
-    x_sahjony_signature: str | None = Header(None, alias="X-SAHJONY-Signature"),
+    x_sahjony_timestamp: str | None = Header(None, alias="X-Bridge-Timestamp"),
+    x_sahjony_signature: str | None = Header(None, alias="X-Bridge-Signature"),
 ) -> dict[str, Any]:
     raw = await request.body()
     _verify_hermes_signature(raw, x_sahjony_timestamp, x_sahjony_signature)
@@ -1254,8 +1254,8 @@ class HermesDirectSend(BaseModel):
 @app.post("/whatsapp/hermes/outbox/enqueue")
 async def hermes_outbox_enqueue(
     request: Request,
-    x_sahjony_timestamp: str | None = Header(None, alias="X-SAHJONY-Timestamp"),
-    x_sahjony_signature: str | None = Header(None, alias="X-SAHJONY-Signature"),
+    x_sahjony_timestamp: str | None = Header(None, alias="X-Bridge-Timestamp"),
+    x_sahjony_signature: str | None = Header(None, alias="X-Bridge-Signature"),
 ) -> dict[str, Any]:
     """Owner-governed direct WhatsApp send. Enqueues exactly one message for the Hermes outbox worker.
 
@@ -1301,8 +1301,8 @@ async def hermes_outbox_enqueue(
 @app.get("/whatsapp/hermes/outbox/status")
 async def hermes_outbox_status(
     command_id: str = Query(min_length=3, max_length=256),
-    x_sahjony_timestamp: str | None = Header(None, alias="X-SAHJONY-Timestamp"),
-    x_sahjony_signature: str | None = Header(None, alias="X-SAHJONY-Signature"),
+    x_sahjony_timestamp: str | None = Header(None, alias="X-Bridge-Timestamp"),
+    x_sahjony_signature: str | None = Header(None, alias="X-Bridge-Signature"),
 ) -> dict[str, Any]:
     """Delivery status for one outbox command (polled by the direct-send workflow)."""
     _verify_hermes_signature(b"", x_sahjony_timestamp, x_sahjony_signature)
