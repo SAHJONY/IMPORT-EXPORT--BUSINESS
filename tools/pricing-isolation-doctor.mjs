@@ -7,7 +7,8 @@ const pricing=read('pricing_engine.py');
 const pricingApi=read('pricing_api.py');
 const consumer=read('cuba_consumer_marketplace_api.py');
 const publicConsumer=read('public/cuba-individual-consumers.html').toLowerCase();
-const business=read('public/landing.html').toLowerCase();
+// SAHJONY-SPANISH-PRIMARY: public/landing.html was pruned 2026-09-18; the business public UI is now the React SPA homepage.
+const business=read('index.html').toLowerCase();
 const cfg=JSON.parse(read('vercel.json'));
 
 const requiredPricing=[

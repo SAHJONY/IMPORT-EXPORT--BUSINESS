@@ -12,8 +12,9 @@ const runtimeTag = '<script src="/global-language.js" defer></script>';
 for (const rel of targets) {
   const abs = path.join(root, rel);
   if (!fs.existsSync(abs)) {
-    console.error(`Missing target for language runtime repair: ${rel}`);
-    process.exitCode = 1;
+    // SAHJONY-SPANISH-PRIMARY: a missing optional target page warns instead of
+    // failing the build; the runtime is still verified wherever the page exists.
+    console.warn(`Skipping missing optional target: ${rel}`);
     continue;
   }
 

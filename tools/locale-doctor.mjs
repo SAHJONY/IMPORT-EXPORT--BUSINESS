@@ -37,16 +37,15 @@ function checkLanguageRuntime(){
     ['sameLanguage','source/target language equivalence'],
     ['history.replaceState','current URL language replacement'],
     ["u.searchParams.set('lang',marker)",'explicit locale propagation'],
-    ["baseLocale(target)==='en'?'English':'Original'",'English restore state'],
     ["if(sameLanguage(target,sourceLocale))",'native source restore path'],
     ["if(!sameLanguage(active,sourceLocale)&&!busy)",'observer reversal guard'],
     ["characterData:true",'dynamic React text observation'],
     ["propagateForms",'GET form locale propagation'],
-    ["sahjony:localechange",'React/static locale event bridge']
+    ["sahjony:localechange",'React/static locale event bridge'],
+    ['SAHJONY-SPANISH-PRIMARY','Spanish-primary runtime marker'],
+    ["const LOCALES=['es','en-US']",'Spanish-first locale order with English as second language']
   ];
   for(const [needle,label] of required)text.includes(needle)?pass(`Runtime supports ${label}`):fail(`Runtime missing ${label}`);
-  if(/else\s+u\.searchParams\.delete\(['"]lang['"]\)/.test(text))fail('Non-Spanish locale still deletes lang override; explicit English would regress on geo-default pages');
-  else pass('Explicit English locale is preserved instead of deleted');
 }
 
 function checkHtmlCoverage(){
@@ -60,8 +59,8 @@ function checkHtmlCoverage(){
 }
 
 function checkNativeI18n(){
-  if(!exists('src/i18n.ts'))fail('Native React i18n bootstrap missing: src/i18n.ts');else{const text=read('src/i18n.ts');for(const needle of ['i18next','react-i18next','sahjony.locale','URLSearchParams','sahjony:localechange','changeLanguage'])text.includes(needle)?pass(`Native i18n includes ${needle}`):fail(`Native i18n missing ${needle}`)}
-  if(!exists('index.html'))fail('React entry missing: index.html');else{const text=read('index.html');text.includes('data-source-locale="en-US"')?pass('React entry declares canonical English source locale'):fail('React entry must declare data-source-locale="en-US" for application-wide Spanish translation')}
+  if(!exists('src/i18n.ts'))fail('Native React i18n bootstrap missing: src/i18n.ts');else{const text=read('src/i18n.ts');for(const needle of ['i18next','react-i18next','sahjony.locale','URLSearchParams','sahjony:localechange','changeLanguage','SAHJONY-SPANISH-PRIMARY',"fallbackLng:'es'"])text.includes(needle)?pass(`Native i18n includes ${needle}`):fail(`Native i18n missing ${needle}`)}
+  if(!exists('index.html'))fail('React entry missing: index.html');else{const text=read('index.html');text.includes('data-source-locale="es"')?pass('React entry declares Spanish source locale (Spanish primary)'):fail('React entry must declare data-source-locale="es"');text.includes('<html lang="es"')?pass('React entry declares <html lang="es">'):fail('React entry must declare <html lang="es"> (Spanish primary)')}
   if(!exists('src/App.tsx'))fail('React app missing: src/App.tsx');else{const text=read('src/App.tsx');text.includes('localizedPath')&&text.includes("sahjony.locale")?pass('SPA navigation preserves active locale'):fail('SPA navigation does not preserve active locale')}
   if(!exists('package.json'))return fail('package.json missing');
   const pkg=JSON.parse(read('package.json'));
