@@ -1,4 +1,58 @@
-{"+17865868555": {"name": "Pablo (New850)", "never": "Never treat him as a buyer or seller of goods. Address Marisleivy separately when the message is for her.", "role": "client", "role_description": "CLIENT of the New850 credit-repair pilot (wife Marisleivy is reached through this same number; keep their cases separate). WE provide the service."}, "+5351857601": {"name": "Maceo Saray", "never": "Never offer to sell her anything. Never ask what product she sells (known: Coamo 900 ml cooking oil). Never treat her as a buyer: never ask for billing/invoicing data, payment method, or what quantity SHE wants to acquire.", "role": "seller", "role_description": "SELLER of Coamo 900 ml cooking oil (containers). WE (SAHJONY/Juan) are the BUYER."}, "+5352985393": {"name": "Rosmel", "never": "Never treat him as a buyer or seller. Coordinate as a partner.", "role": "partner", "role_description": "PARTNER: car gestor in Cuba; also sources flour buyers (panaderias, dulcerias, MIPYMEs). He works WITH us, not as a buyer or seller."}, "+5354887819": {"name": "Rastra contact (Contramaestre)", "never": "Never treat them as a buyer or seller of goods. Ask about availability, capacity, and price for the transport service.", "role": "service_provider", "role_description": "SERVICE PROVIDER: trucking/rastra transport (e.g. moving containers to Contramaestre). WE (SAHJONY/Juan) are the CLIENT hiring the service."}, "+5358477839": {"name": "Flour seller (La Habana)", "never": "Never ask for quantity SHE wants to acquire, her billing/invoicing data (razon social, NIT/CIF, domicilio), or her payment method. Never send her a purchase-order intake. When she quotes a price, respond as the buyer: acknowledge, ask about stock/availability, or negotiate.", "role": "seller", "role_description": "SELLER of Turkish wheat flour, 50 kg sacks, pickup in Boyeros, La Habana. WE (SAHJONY/Juan) are the BUYER."}, "+5358672157": {"name": "Loydis", "never": "Never offer to sell her anything. Never treat her as a buyer: never ask for billing/invoicing data, payment method, or what quantity SHE wants to acquire.", "role": "seller", "role_description": "SELLER of SUNCAR 600W solar panels in La Habana. WE (SAHJONY/Juan) are the BUYER."},
- "+5358080856": {"name": "Claudia (Taga Infinity)", "never": "Never treat her as a buyer. Never ask what quantity SHE wants to acquire, her billing/invoicing data (razon social, NIT/CIF, domicilio), or her payment method. Juan is sourcing fuel FROM her — she is the SELLER. Never mention any other contact, product, or price from another conversation thread in her chat.", "role": "seller", "role_description": "SELLER of fuel (gasoline in isotanks, US origin, to Mariel). WE (SAHJONY/Juan) are the BUYER sourcing product."},
- "+5358477839": {"name": "Wholesaler (La Habana) — flour & fine salt", "never": "Never ask for quantity SHE wants to acquire, her billing/invoicing data (razon social, NIT/CIF, domicilio), or her payment method. Never send her a purchase-order intake. When she quotes a price, respond as the buyer: acknowledge, ask about stock/availability, or negotiate. She sells TWO product lines — Turkish wheat flour (50 kg sacks) and fine salt (100 lb sacks): keep them separate, never mix their prices, quantities, or availability between them. Never mention any other contact, product, or price from another conversation thread in her chat.", "role": "seller", "role_description": "SELLER (La Habana), two product lines: (1) Turkish wheat flour, 50 kg sacks, pickup in Boyeros; (2) fine salt, 100 lb sacks, 9,500 CUP cash / 12,500 CUP transfer. WE (SAHJONY/Juan) are the BUYER."},
- "+5355581654": {"name": "Camion VP020 (freight)", "never": "Never treat them as a buyer or seller of goods. Ask only about freight rates, availability, and capacity for the transport service. Never mention any other contact, product, or price from another conversation thread in their chat.", "role": "service_provider", "role_description": "SERVICE PROVIDER: freight trucking (camion VP020) for merchandise/equipment/materials transport in Cuba. WE (SAHJONY/Juan) are the CLIENT requesting rates."}, "_comment": "Contact role registry for Sofia WhatsApp. Keyed by E.164 phone. The runtime injects the matching entry into the system prompt so the bot NEVER reverses buyer/seller roles. Update when new contacts are added."}
+{
+  "+17865868555": {
+    "name": "Pablo (New850)",
+    "never": "Never treat him as a buyer or seller of goods. Address Marisleivy separately when the message is for her.",
+    "role": "client",
+    "role_description": "CLIENT of the New850 credit-repair pilot (wife Marisleivy is reached through this same number; keep their cases separate). WE provide the service."
+  },
+  "+5351857601": {
+    "name": "Maceo Saray",
+    "never": "Never offer to sell her anything. Never ask what product she sells (known: Coamo 900 ml cooking oil). Never treat her as a buyer: never ask for billing/invoicing data, payment method, or what quantity SHE wants to acquire.",
+    "role": "seller",
+    "role_description": "SELLER of Coamo 900 ml cooking oil (containers). WE (SAHJONY/Juan) are the BUYER.",
+    "language": "es"
+  },
+  "+5352985393": {
+    "name": "Rosmel",
+    "never": "Never treat him as a buyer or seller. Coordinate as a partner.",
+    "role": "partner",
+    "role_description": "PARTNER: car gestor in Cuba; also sources flour buyers (panaderias, dulcerias, MIPYMEs). He works WITH us, not as a buyer or seller.",
+    "language": "es"
+  },
+  "+5354887819": {
+    "name": "Rastra contact (Contramaestre)",
+    "never": "Never treat them as a buyer or seller of goods. Ask about availability, capacity, and price for the transport service.",
+    "role": "service_provider",
+    "role_description": "SERVICE PROVIDER: trucking/rastra transport (e.g. moving containers to Contramaestre). WE (SAHJONY/Juan) are the CLIENT hiring the service.",
+    "language": "es"
+  },
+  "+5358477839": {
+    "name": "Wholesaler (La Habana) — flour & fine salt",
+    "never": "Never ask for quantity SHE wants to acquire, her billing/invoicing data (razon social, NIT/CIF, domicilio), or her payment method. Never send her a purchase-order intake. When she quotes a price, respond as the buyer: acknowledge, ask about stock/availability, or negotiate. She sells TWO product lines — Turkish wheat flour (50 kg sacks) and fine salt (100 lb sacks): keep them separate, never mix their prices, quantities, or availability between them. Never mention any other contact, product, or price from another conversation thread in her chat.",
+    "role": "seller",
+    "role_description": "SELLER (La Habana), two product lines: (1) Turkish wheat flour, 50 kg sacks, pickup in Boyeros; (2) fine salt, 100 lb sacks, 9,500 CUP cash / 12,500 CUP transfer. WE (SAHJONY/Juan) are the BUYER.",
+    "language": "es"
+  },
+  "+5358672157": {
+    "name": "Loydis",
+    "never": "Never offer to sell her anything. Never treat her as a buyer: never ask for billing/invoicing data, payment method, or what quantity SHE wants to acquire.",
+    "role": "seller",
+    "role_description": "SELLER of SUNCAR 600W solar panels in La Habana. WE (SAHJONY/Juan) are the BUYER.",
+    "language": "es"
+  },
+  "+5358080856": {
+    "name": "Claudia (Taga Infinity)",
+    "never": "Never treat her as a buyer. Never ask what quantity SHE wants to acquire, her billing/invoicing data (razon social, NIT/CIF, domicilio), or her payment method. Juan is sourcing fuel FROM her — she is the SELLER. Never mention any other contact, product, or price from another conversation thread in her chat.",
+    "role": "seller",
+    "role_description": "SELLER of fuel (gasoline in isotanks, US origin, to Mariel). WE (SAHJONY/Juan) are the BUYER sourcing product.",
+    "language": "es"
+  },
+  "+5355581654": {
+    "name": "Camion VP020 (freight)",
+    "never": "Never treat them as a buyer or seller of goods. Ask only about freight rates, availability, and capacity for the transport service. Never mention any other contact, product, or price from another conversation thread in their chat.",
+    "role": "service_provider",
+    "role_description": "SERVICE PROVIDER: freight trucking (camion VP020) for merchandise/equipment/materials transport in Cuba. WE (SAHJONY/Juan) are the CLIENT requesting rates.",
+    "language": "es"
+  },
+  "_comment": "Contact role registry for Sofia WhatsApp. Keyed by E.164 phone. The runtime injects the matching entry into the system prompt so the bot NEVER reverses buyer/seller roles. Update when new contacts are added."
+}

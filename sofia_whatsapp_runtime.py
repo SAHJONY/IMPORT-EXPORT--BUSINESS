@@ -343,13 +343,30 @@ async def _resolve_business_track(
 LANGUAGE_NAMES = {"es": "Spanish", "en": "English", "fr": "French", "pt": "Portuguese"}
 
 
-def detect_reply_language(text: str, transcript: str = "") -> str:
+def _is_cuba_number(sender_phone: str | None) -> bool:
+    """True for Cuban phone numbers (+53...).
+
+    Standing owner rule (2026-09-19): ALL Cuba customers on WhatsApp are
+    ALWAYS communicated with in Spanish — every message, reply, and
+    follow-up. No exceptions.
+    """
+    if not sender_phone:
+        return False
+    digits = "".join(ch for ch in sender_phone if ch.isdigit())
+    return digits.startswith("53")
+
+
+def detect_reply_language(text: str, transcript: str = "", sender_phone: str | None = None) -> str:
     """Language code Sofia must reply in.
 
-    The latest customer message wins. A very short message ("ok", "sí",
-    "gracias") inherits the conversation's language from the transcript.
+    Standing owner rule: Cuba customers (+53 numbers) ALWAYS get Spanish,
+    no exceptions — even if they write in English or mix languages.
+    Otherwise the latest customer message wins. A very short message ("ok",
+    "sí", "gracias") inherits the conversation's language from the transcript.
     Defaults to 'es'.
     """
+    if _is_cuba_number(sender_phone):
+        return "es"
     lang = detect_language(text)
     words = re.findall(r"[a-zA-Z\u00e0-\u00ff]+", text or "")
     if len(words) < 2 and transcript.strip():
@@ -362,14 +379,26 @@ def detect_reply_language(text: str, transcript: str = "") -> str:
     return lang
 
 
-def reply_language_name(text: str, transcript: str = "") -> str:
+def reply_language_name(text: str, transcript: str = "", sender_phone: str | None = None) -> str:
     """Human language name for the reply-language directive."""
-    return LANGUAGE_NAMES.get(detect_reply_language(text, transcript), "Spanish")
+    return LANGUAGE_NAMES.get(detect_reply_language(text, transcript, sender_phone), "Spanish")
 
 
-def language_rule(text: str, transcript: str = "") -> str:
+def language_rule(text: str, transcript: str = "", sender_phone: str | None = None) -> str:
     """Top-priority system-prompt block forcing Sofia to answer in the
-    customer's language. The model otherwise defaults to English."""
+    customer's language. The model otherwise defaults to English.
+
+    Standing owner rule (2026-09-19): every Cuba WhatsApp customer (+53)
+    is ALWAYS answered in Spanish, even if they write in English.
+    """
+    if _is_cuba_number(sender_phone):
+        return (
+            "LANGUAGE RULE — HIGHEST PRIORITY, OVERRIDES ALL OTHER STYLE GUIDANCE:\n"
+            "- This contact is a CUBA customer (Cuban +53 phone number). STANDING OWNER RULE: "
+            "ALWAYS communicate with Cuba customers in SPANISH. No exceptions.\n"
+            "- Write your ENTIRE reply in Spanish. Every word, including greetings and closings.\n"
+            "- Even if the customer writes in English or mixes languages, reply in Spanish.\n"
+        )
     name = reply_language_name(text, transcript)
     return (
         "LANGUAGE RULE — HIGHEST PRIORITY, OVERRIDES ALL OTHER STYLE GUIDANCE:\n"
@@ -870,6 +899,12 @@ def _contact_role_block(sender_phone: str | None) -> str:
     name = entry.get("name", "this contact")
     role_description = entry.get("role_description", "")
     never = entry.get("never", "")
+    lang_line = ""
+    if entry.get("language") == "es":
+        lang_line = (
+            "- STANDING OWNER RULE: this is a Cuba customer — ALWAYS reply in Spanish, "
+            "every word, no exceptions, even if they write in English.\n"
+        )
     return (
         "\n\nCONTACT ROLE — HARD RULE, READ FIRST\n"
         f"- This WhatsApp contact is {name} ({e164}).\n"
@@ -877,6 +912,7 @@ def _contact_role_block(sender_phone: str | None) -> str:
         "- NEVER reverse the roles. NEVER treat a seller as a buyer, a buyer as a seller, "
         "or a service provider as either.\n"
         f"- {never}\n"
+        f"{lang_line}"
         "- Keep every reply consistent with this role. One short, human message."
     )
 
@@ -939,7 +975,7 @@ async def _generate_sofia_reply_unguarded(
             memory=memory,
             sales=sales,
             lead_id=lead_id,
-            language=detect_reply_language(text, transcript),
+            language=detect_reply_language(text, transcript, sender_phone),
         )
 
     knowledge = await build_business_knowledge(text, crm_context)
@@ -955,7 +991,7 @@ async def _generate_sofia_reply_unguarded(
                 "source_states": {"owner_report": {"state": "RUNTIME_ERROR", "error_class": type(exc).__name__}},
             }
     system = build_sofia_prompt(memory)
-    system = language_rule(text, transcript) + "\n" + system
+    system = language_rule(text, transcript, sender_phone) + "\n" + system
     system += "\n\n" + adaptive
     system += "\n\nYou are Sofía Smith, SAHJONY GLOBAL TRADING's Executive Manager, Executive Assistant and AI Commercial Executive. Communicate naturally and professionally. Never falsely claim to be a physical human being. If identity or automation is directly asked about, answer truthfully and briefly, then continue helping."
     track_resolution = await _resolve_business_track(
@@ -1051,7 +1087,7 @@ WHATSAPP HUMAN CONVERSATION RULES
         f"Latest customer message:\n{text[:5000]}\n\n"
         f"Recent conversation:\n{transcript[-18000:]}\n\n"
         "Write only Sofía's next WhatsApp message. No analysis, private reasoning, labels, or internal metadata.\n"
-        f"Reply in {reply_language_name(text, transcript)}."
+        f"Reply in {reply_language_name(text, transcript, sender_phone)}."
     )
 
     try:
@@ -1124,7 +1160,7 @@ async def generate_sofia_reply(
     reply, guard_ctx = await _generate_sofia_reply_unguarded(
         text, contact_name, owner_context, sender_phone, guard_ctx
     )
-    language = guard_ctx.get("language") or detect_reply_language(text, "")
+    language = guard_ctx.get("language") or detect_reply_language(text, "", sender_phone)
     clean, report = apply_outbound_guard(
         reply,
         memory=guard_ctx.get("memory"),
