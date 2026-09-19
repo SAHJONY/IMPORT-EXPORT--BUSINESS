@@ -1,19 +1,24 @@
 import i18n from 'i18next';
 import {initReactI18next} from 'react-i18next';
 
+// SAHJONY-SPANISH-PRIMARY: Spanish is the primary and default language;
+// English is the second language. Both locales are kept and the language
+// selector stays in the UI (Spanish first / default).
 const STORAGE='sahjony.locale';
 const QUERY='lang';
 
 function normalizeLocale(value:string|null|undefined):'en-US'|'es' {
   const raw=String(value||'').trim().replace('_','-').toLowerCase();
-  return raw==='es'||raw.startsWith('es-')?'es':'en-US';
+  if(raw==='es'||raw.startsWith('es-'))return 'es';
+  if(raw==='en'||raw.startsWith('en-'))return 'en-US';
+  return 'es';
 }
 
 const params=new URLSearchParams(window.location.search);
 const requestedRaw=params.get(QUERY)||params.get('locale');
 const storedRaw=localStorage.getItem(STORAGE);
-const browserRaw=navigator.language||'en-US';
-const initialLocale=normalizeLocale(requestedRaw||storedRaw||browserRaw);
+// Spanish default: only an explicit query param or stored preference selects English.
+const initialLocale=normalizeLocale(requestedRaw||storedRaw);
 const initialLanguage=initialLocale==='es'?'es':'en';
 
 export const resources={
@@ -44,7 +49,7 @@ export const resources={
 i18n.use(initReactI18next).init({
   resources,
   lng:initialLanguage,
-  fallbackLng:'en',
+  fallbackLng:'es',
   supportedLngs:['en','es'],
   interpolation:{escapeValue:false},
   returnNull:false

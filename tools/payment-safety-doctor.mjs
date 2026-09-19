@@ -8,7 +8,8 @@ const api=read('payment_api.py');
 const physical=read('physical_postgres.py');
 const ownerPage=read('public/owner-payments.html');
 const consumer=read('public/cuba-individual-consumers.html').toLowerCase();
-const business=read('public/landing.html').toLowerCase();
+// SAHJONY-SPANISH-PRIMARY: public/landing.html was pruned 2026-09-18; the business public UI is now the React SPA homepage.
+const business=read('index.html').toLowerCase();
 const cfg=JSON.parse(read('vercel.json'));
 
 const requiredEngine=[

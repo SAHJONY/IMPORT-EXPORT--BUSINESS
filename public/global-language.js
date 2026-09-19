@@ -6,13 +6,15 @@
   const UI_TRANSLATE='/ui-language/translate-batch';
   const UI_GEO='/ui-language/geo';
   const RTL=new Set(['ar','fa','he','ur','ps','sd','ug','yi']);
-  const LOCALES=['en-US','es'];
+  /* SAHJONY-SPANISH-PRIMARY: Spanish first/default, English second. */
+  const LOCALES=['es','en-US'];
   const SKIP_TAGS=new Set(['SCRIPT','STYLE','NOSCRIPT','CODE','PRE','TEXTAREA']);
   const originalText=new WeakMap();
   const originalAttrs=new WeakMap();
   const cache=new Map();
   let busy=false;
   let active='';
+  let originalTitle='';
   let observerTimer=null;
 
   function normalizeLocale(value){
@@ -83,7 +85,7 @@
     });
     return items;
   }
-  function restore(){const walker=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT);let node;while((node=walker.nextNode()))if(originalText.has(node))node.nodeValue=originalText.get(node);document.querySelectorAll('*').forEach(el=>{const map=originalAttrs.get(el);if(map)for(const [key,value] of Object.entries(map))el.setAttribute(key,value);if(el.tagName==='OPTION'&&originalText.has(el))el.textContent=originalText.get(el)})}
+  function restore(){if(originalTitle)document.title=originalTitle;const walker=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT);let node;while((node=walker.nextNode()))if(originalText.has(node))node.nodeValue=originalText.get(node);document.querySelectorAll('*').forEach(el=>{const map=originalAttrs.get(el);if(map)for(const [key,value] of Object.entries(map))el.setAttribute(key,value);if(el.tagName==='OPTION'&&originalText.has(el))el.textContent=originalText.get(el)})}
   function state(kind,label){const root=document.querySelector('.sahjony-language');if(!root)return;root.dataset.state=kind;const small=root.querySelector('small');if(small)small.textContent=label||''}
   const ES_FALLBACK={'/marketplace':'/es','/industrial-marketplace.html':'/es','/marketplace-search.html':'/es','/partners':'/es','/partners.html':'/es','/how-it-works':'/es','/customer-guide':'/es','/customer-guide.html':'/es','/global-sourcing':'/es','/global-sourcing.html':'/es','/suppliers':'/es/suppliers','/suppliers.html':'/es/suppliers','/supplier-commercial-terms':'/es/supplier-commercial-terms','/supplier-commercial-terms.html':'/es/supplier-commercial-terms','/supplier-cuba-terms':'/es/supplier-cuba-terms','/customer-payments':'/es/customer-payments','/lead-scout':'/es','/government-contracting':'/es'};
   function spanishFallback(target){
@@ -121,7 +123,7 @@
     active=target;if(persist){setStored(target);rewriteUrl(target)}propagateNavigation(target);announceLocale(target);
     if(sameLanguage(target,sourceLocale)){restore();applyDirection(target);state('ok',baseLocale(target)==='en'?'English':'Original');return}
     busy=true;state('busy',baseLocale(target)==='es'?'Traduciendo…':'Translating…');
-    try{restore();const items=collect();const chunks=[];let chunk=[],chars=0;for(const item of items){const size=item.text.length;if(chunk.length&&(chunk.length>=20||chars+size>4500)){chunks.push(chunk);chunk=[];chars=0}chunk.push(item);chars+=size}if(chunk.length)chunks.push(chunk);const results=await Promise.all(chunks.map(current=>translateBatch(current.map(item=>item.text),target)));results.forEach((payload,chunkIndex)=>{const current=chunks[chunkIndex];payload.translations.forEach((entry,index)=>{const item=current[index];if(!item)return;const value=entry.text||item.text;if(item.kind==='text')item.node.nodeValue=value;else if(item.kind==='attr')item.el.setAttribute(item.attr,value);else if(item.kind==='option')item.el.textContent=value})});applyDirection(target);state('ok',target);propagateNavigation(target);announceLocale(target)}catch(error){const fallback=spanishFallback(target);if(fallback){try{setStored('es')}catch{}location.assign(fallback);return}restore();applyDirection(sourceLocale);state('error',baseLocale(target)==='es'?'Traducción no disponible':'Translation unavailable');console.warn('SAHJONY language layer:',error)}finally{busy=false}
+    try{restore();const items=collect();const chunks=[];let chunk=[],chars=0;for(const item of items){const size=item.text.length;if(chunk.length&&(chunk.length>=20||chars+size>4500)){chunks.push(chunk);chunk=[];chars=0}chunk.push(item);chars+=size}if(chunk.length)chunks.push(chunk);const results=await Promise.all(chunks.map(current=>translateBatch(current.map(item=>item.text),target)));results.forEach((payload,chunkIndex)=>{const current=chunks[chunkIndex];payload.translations.forEach((entry,index)=>{const item=current[index];if(!item)return;const value=entry.text||item.text;if(item.kind==='text')item.node.nodeValue=value;else if(item.kind==='attr')item.el.setAttribute(item.attr,value);else if(item.kind==='option')item.el.textContent=value})});if(!originalTitle)originalTitle=document.title||'';if(meaningful(originalTitle)){try{const titlePayload=await translateBatch([originalTitle.trim()],target);const titleText=(titlePayload.translations||[])[0];if(titleText&&titleText.text)document.title=titleText.text}catch(titleError){console.warn('SAHJONY language layer (title):',titleError&&titleError.message)}}applyDirection(target);state('ok',target);propagateNavigation(target);announceLocale(target)}catch(error){const fallback=spanishFallback(target);if(fallback){try{setStored('es')}catch{}location.assign(fallback);return}restore();applyDirection(sourceLocale);state('error',baseLocale(target)==='es'?'Traducción no disponible':'Translation unavailable');console.warn('SAHJONY language layer:',error)}finally{busy=false}
   }
   async function geoDefault(){try{const r=await fetch(UI_GEO,{cache:'no-store'});if(!r.ok)return '';const j=await r.json();return normalizeLocale(j.default_locale||'')}catch{return ''}}
   function mountSelector(){
@@ -135,7 +137,7 @@
     select.addEventListener('change',()=>applyLanguage(select.value,{persist:true}));root.querySelector('button').addEventListener('click',()=>{select.value=sourceLocale;applyLanguage(sourceLocale,{persist:true})});return select;
   }
   async function boot(){
-    const select=mountSelector();const requested=requestedLocale();const stored=storedLocale();const nativeSpanish=(location.pathname.replace(/\/+$/,'')||'/').startsWith('/es');const geo=!requested&&!stored&&!nativeSpanish?await geoDefault():'';active=requested||(nativeSpanish?sourceLocale:(stored||geo||sourceLocale));
+    const select=mountSelector();const requested=requestedLocale();const stored=storedLocale();/* SAHJONY-SPANISH-PRIMARY: Spanish default unless explicitly overridden. */active=requested||stored||'es';
     if(select){if(!LOCALES.includes(active))LOCALES.push(active);if(!Array.from(select.options).some(option=>option.value===active)){const option=document.createElement('option');option.value=active;option.textContent=active;select.appendChild(option)}select.value=active}
     setStored(active);rewriteUrl(active);propagateNavigation(active);announceLocale(active);await applyLanguage(active,{persist:false});
     const observer=new MutationObserver(records=>{if(!sameLanguage(active,sourceLocale)&&!busy){if(records.every(record=>record.target.closest?.('.sahjony-language')))return;clearTimeout(observerTimer);observerTimer=setTimeout(()=>applyLanguage(active,{persist:false}),350)}});observer.observe(document.body,{childList:true,characterData:true,subtree:true});
