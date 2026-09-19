@@ -823,6 +823,51 @@ def apply_outbound_guard(
     return cleaned, report
 
 
+_CONTACT_ROLES_CACHE: dict[str, Any] | None = None
+
+
+def _load_contact_roles() -> dict[str, Any]:
+    """Load the contact role registry (phone -> role). Cached; never breaks the reply path."""
+    global _CONTACT_ROLES_CACHE
+    if _CONTACT_ROLES_CACHE is not None:
+        return _CONTACT_ROLES_CACHE
+    try:
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "contact_roles.json")
+        with open(path, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+        _CONTACT_ROLES_CACHE = {k: v for k, v in data.items() if k.startswith("+")}
+    except Exception:
+        _CONTACT_ROLES_CACHE = {}
+    return _CONTACT_ROLES_CACHE
+
+
+def _contact_role_block(sender_phone: str | None) -> str:
+    """Build the hard CONTACT ROLE prompt block for a known sender.
+
+    This is the permanent fix for buyer/seller role reversal: the bot is told,
+    on every turn, exactly who is selling and who is buying for this contact.
+    Returns "" for unknown senders (no behavior change).
+    """
+    if not sender_phone:
+        return ""
+    e164 = sender_phone if sender_phone.startswith("+") else f"+{sender_phone}"
+    entry = _load_contact_roles().get(e164)
+    if not entry:
+        return ""
+    name = entry.get("name", "this contact")
+    role_description = entry.get("role_description", "")
+    never = entry.get("never", "")
+    return (
+        "\n\nCONTACT ROLE — HARD RULE, READ FIRST\n"
+        f"- This WhatsApp contact is {name} ({e164}).\n"
+        f"- {role_description}\n"
+        "- NEVER reverse the roles. NEVER treat a seller as a buyer, a buyer as a seller, "
+        "or a service provider as either.\n"
+        f"- {never}\n"
+        "- Keep every reply consistent with this role. One short, human message."
+    )
+
+
 async def _generate_sofia_reply_unguarded(
     text: str,
     contact_name: str | None,
@@ -915,6 +960,7 @@ async def _generate_sofia_reply_unguarded(
         })
         return str(track_resolution.get("reply") or "")[:4096], (_guard_ctx if _guard_ctx is not None else {})
     system += str(track_resolution.get("prompt_addition") or "")
+    system += _contact_role_block(sender_phone)
     if owner_context:
         system += "\n\nOWNER EXECUTIVE MODE\n- The current sender is the authenticated SAHJONY owner. Treat this as an internal executive request, not a customer sales intake.\n- Never ask the owner to export/upload CRM data as the first response. Use the connected SAHJONY source snapshot supplied below first.\n- Distinguish verified zero from unknown/unreadable. Never convert source failure into zero.\n- If one source is unavailable, give the best partial report from healthy sources and isolate the blocker.\n- Do not fabricate cash, revenue, profit, invoices, payments, opportunities, shipments, or system health.\n- Only ask the owner for something when it is genuinely owner-only and cannot be resolved from connected systems."
         system += "\n\nLIVE OWNER SOURCE SNAPSHOT\n" + json.dumps(owner_report or {}, ensure_ascii=False, default=str)[:30000]
