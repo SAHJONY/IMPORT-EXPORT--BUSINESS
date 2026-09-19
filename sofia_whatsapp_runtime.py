@@ -842,18 +842,31 @@ def _load_contact_roles() -> dict[str, Any]:
 
 
 def _contact_role_block(sender_phone: str | None) -> str:
-    """Build the hard CONTACT ROLE prompt block for a known sender.
+    """Build the hard CONTACT ROLE prompt block for the sender.
 
-    This is the permanent fix for buyer/seller role reversal: the bot is told,
-    on every turn, exactly who is selling and who is buying for this contact.
-    Returns "" for unknown senders (no behavior change).
+    Permanent fix for buyer/seller role reversal: the bot is told, on every
+    turn, exactly who is selling and who is buying for this contact.
+    For UNKNOWN senders (not in the registry) it returns a strict
+    do-not-assume block instead of nothing — the bot must never invent
+    a role, never send a purchase-order intake, and never pitch.
     """
     if not sender_phone:
         return ""
     e164 = sender_phone if sender_phone.startswith("+") else f"+{sender_phone}"
     entry = _load_contact_roles().get(e164)
     if not entry:
-        return ""
+        return (
+            "\n\nCONTACT ROLE — UNKNOWN SENDER, DO NOT ASSUME\n"
+            f"- This WhatsApp contact ({e164}) is NOT in the contact registry. "
+            "You do NOT know whether they are a buyer, a seller, or a service provider.\n"
+            "- NEVER assume a role. NEVER send a purchase-order intake: do NOT ask for "
+            "billing/invoicing data (razon social, NIT/CIF, domicilio) or payment method. "
+            "NEVER pitch products or offer to sell.\n"
+            "- Reply helpfully to what they actually said, in one short human message. "
+            "If their role is unclear, ask ONE clarifying question "
+            "(e.g. \"¿En qué le puedo ayudar?\").\n"
+            "- Do not invent their business, products, prices, or intent."
+        )
     name = entry.get("name", "this contact")
     role_description = entry.get("role_description", "")
     never = entry.get("never", "")
