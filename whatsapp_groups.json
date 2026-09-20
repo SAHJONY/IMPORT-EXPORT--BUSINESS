@@ -48,6 +48,20 @@
       "admin_verified_at": null,
       "admin_verified_by": null,
       "notes": "Juan's family group (11 members). Recruitment message for the Cuba sales team. JID pending discovery — populate after Sofia is added to the group and first activity is observed. Added 2026-09-20 per Juan."
+    },
+    {
+      "admin_status": "unknown",
+      "admin_verified_at": null,
+      "admin_verified_by": null,
+      "agent": "Ingrid",
+      "agent_phone": "5353010757",
+      "alias": "ingrid-ventas-cuba",
+      "jid": null,
+      "language": "es",
+      "name": "SAHJONY • Ventas – Ingrid",
+      "notes": "Ingrid (Juan's niece) sales group. She is creating it with Sofia as admin (2026-09-20 per Juan). JID pending discovery — populate before first group send.",
+      "purpose": "sales",
+      "region": "cuba"
     }
   ],
   "version": 1
