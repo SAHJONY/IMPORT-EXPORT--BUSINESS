@@ -19,6 +19,8 @@ from whatsapp_api import (
     _webhook_ready,
     hermes_event,
     hermes_heartbeat,
+    hermes_groups_activity,
+    hermes_groups_list,
     hermes_outbox,
     hermes_outbox_ack,
     hermes_outbox_enqueue,
@@ -61,6 +63,8 @@ app.add_api_route("/whatsapp/hermes/outbox", hermes_outbox, methods=["GET"])
 app.add_api_route("/whatsapp/hermes/outbox/ack", hermes_outbox_ack, methods=["POST"])
 app.add_api_route("/whatsapp/hermes/outbox/enqueue", hermes_outbox_enqueue, methods=["POST"])
 app.add_api_route("/whatsapp/hermes/outbox/status", hermes_outbox_status, methods=["GET"])
+app.add_api_route("/whatsapp/hermes/groups", hermes_groups_list, methods=["GET"])
+app.add_api_route("/whatsapp/hermes/groups/activity", hermes_groups_activity, methods=["GET"])
 app.include_router(crm_bridge_router)
 app.include_router(agentmail_router)
 

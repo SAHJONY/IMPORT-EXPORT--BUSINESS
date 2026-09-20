@@ -44,9 +44,9 @@ jobs:
           rm -f /tmp/sahjony-outbox-secret
           cat > /opt/sahjony/hermes-outbox/worker.py <<'PY'
           #!/usr/bin/env python3
-# NOTE: BASE points at the VPS-local WhatsApp API (127.0.0.1:8102), not the
-# public domain — the public domain may be down (e.g. Vercel 402) while the
-# local API is up. Do not change back to the public URL without a fallback.
+          # NOTE: BASE points at the VPS-local WhatsApp API (127.0.0.1:8102), not the
+          # public domain — the public domain may be down (e.g. Vercel 402) while the
+          # local API is up. Do not change back to the public URL without a fallback.
           import hashlib, hmac, json, os, time, urllib.request, urllib.error
           from datetime import datetime, timezone
 
@@ -98,10 +98,22 @@ jobs:
           def send_local(cmd):
               if str(cmd.get('release_mode') or '') != 'customer_service_window':
                   raise RuntimeError('compliance_release_missing')
-              recipient=''.join(ch for ch in str(cmd.get('recipient') or '') if ch.isdigit())
-              if not recipient: raise RuntimeError('invalid recipient')
               body=str(cmd.get('body') or '')[:4096]
-              candidates=[recipient+'@s.whatsapp.net',recipient]
+              if str(cmd.get('recipient_type') or '') == 'group':
+                  # Group send: address the @g.us JID verbatim. Never append
+                  # @s.whatsapp.net / @c.us to a group JID.
+                  group_jid=str(cmd.get('group_jid') or '').strip()
+                  if not group_jid:
+                      raw=str(cmd.get('recipient') or '')
+                      group_jid=raw[len('group:'):] if raw.startswith('group:') else ''
+                  local, _, domain=group_jid.rpartition('@')
+                  if domain != 'g.us' or not local.isdigit() or not local:
+                      raise RuntimeError('invalid group_jid')
+                  candidates=[group_jid]
+              else:
+                  recipient=''.join(ch for ch in str(cmd.get('recipient') or '') if ch.isdigit())
+                  if not recipient: raise RuntimeError('invalid recipient')
+                  candidates=[recipient+'@s.whatsapp.net',recipient]
               last=None
               for chat in candidates:
                   try:
