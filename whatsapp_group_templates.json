@@ -1,1 +1,32 @@
-{"description":"Pre-approved verbatim message templates the 24/7 group watch loop may post WITHOUT per-message approval (Tier 1 autonomy). Rules: (1) every template is approved word-for-word by Juan via pull request; (2) the loop posts the template text EXACTLY — no edits, no additions; (3) anything not matching a template verbatim escalates to Juan as a draft (Tier 2). Placeholders like {name} are filled only with the values listed in \"allowed_fill\".","templates":[{"allowed_fill":["name"],"id":"ack-question","text":"Hola {name}, gracias por escribir. Te respondo por privado en un momento 🙏","use":"Acknowledge a question publicly, move detail to 1:1."},{"allowed_fill":[],"example":true,"id":"example-restock","text":"EXAMPLE TEMPLATE — do not use. Buenos días, ya tenemos stock de [producto]. Escríbanme por privado para coordinar.","use":"Schema example only."}],"version":1}
+{
+  "description": "Pre-approved verbatim message templates the 24/7 group watch loop may post WITHOUT per-message approval (Tier 1 autonomy). Rules: (1) every template is approved word-for-word by Juan via pull request; (2) the loop posts the template text EXACTLY — no edits, no additions; (3) anything not matching a template verbatim escalates to Juan as a draft (Tier 2). Placeholders like {name} are filled only with the values listed in \"allowed_fill\".",
+  "templates": [
+    {
+      "id": "ack-question",
+      "text": "Hola {name}, gracias por escribir. Te respondo por privado en un momento 🙏",
+      "use": "Acknowledge a question publicly, move detail to 1:1.",
+      "allowed_fill": [
+        "name"
+      ]
+    },
+    {
+      "id": "oferta-dia",
+      "text": "Buenos días ☀️ Oferta de hoy: {producto} a {precio}. Cantidad limitada. Escríbanme por privado para apartar el suyo.",
+      "use": "Daily offer post. Prices only from the approved price list (below competition).",
+      "allowed_fill": [
+        "producto",
+        "precio"
+      ]
+    },
+    {
+      "id": "aviso-entrega",
+      "text": "Ya llegó {producto} ✅ Pueden pasar a recoger a partir de {hora}. Los espero.",
+      "use": "Delivery arrival notice posted by Sofia or the salesperson.",
+      "allowed_fill": [
+        "producto",
+        "hora"
+      ]
+    }
+  ],
+  "version": 1
+}
