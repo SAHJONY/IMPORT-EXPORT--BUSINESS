@@ -4,6 +4,7 @@ import path from 'node:path';
 const root = process.cwd();
 const targets = [
   'public/owner-cuba-mipymes.html',
+  'public/owner-firma-legal.html',
   'public/agency-command-center.html',
 ];
 const runtimePattern = /src=["']\/global-language\.js["']/i;
