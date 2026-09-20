@@ -1189,6 +1189,8 @@ async def hermes_outbox(
             "command_id": claimed["command_id"],
             "account_id": claimed.get("account_id") or "default",
             "recipient": claimed["recipient"],
+            "recipient_type": claimed.get("recipient_type") or "individual",
+            "group_jid": claimed.get("group_jid"),
             "body": claimed["body"],
             "lease_token": lease_token,
             "lease_expires_at": lease_expires_at,
