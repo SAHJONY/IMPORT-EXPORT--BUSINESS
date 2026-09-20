@@ -1,0 +1,121 @@
+name: CRM Supabase Rewire
+
+# One-time (repeat-safe) wiring that reconnects the Cuba MIPYME CRM to its
+# canonical Supabase project (qprlbmcoksrpuvodxjtt, holds the ~11,808 records).
+#
+# Background: the Sep 17 Vercel bypass moved /crm/* to the VPS unified service
+# (port 8101), which reads SUPABASE_URL from the shared
+# /etc/sahjony-fallback/import-export.env. The Sep 18 WhatsApp bridge wire-up
+# pointed that shared file at the WhatsApp project (vanlhcrrygfevawiqvwi),
+# which holds zero MIPYME rows — so the CRM API returns total=0.
+#
+# This workflow:
+#   1. Splits the env: unified service gets its own /etc/sahjony-fallback/unified.env
+#      pointed at the canonical project (secret travels as an scp'd file, never
+#      in a command line or log — same pattern as hostinger-whatsapp-wire-bridge.yml)
+#   2. Leaves the shared import-export.env untouched, so the WhatsApp service
+#      (port 8102) keeps its working backend
+#   3. Restarts sahjony-fallback-unified.service via a systemd drop-in override
+#   4. Smoke-tests https://www.sahjony.com/crm/cuba-mipymes/list for total > 0
+#
+# Owner-gated: Juan dispatches explicitly with confirm=YES.
+# Prerequisites (Juan sets these in repo Settings > Secrets and variables > Actions):
+#   VPS_CRM_SUPABASE_SERVICE_ROLE_KEY = service_role key of the canonical
+#     Supabase project (Supabase dashboard > that project > Project Settings > API)
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: "Type YES to rewire the CRM database on the VPS"
+        required: true
+        default: "NO"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hostinger-vm-767852-mutation
+  cancel-in-progress: false
+
+env:
+  VM_ID: '767852'
+  VPS_HOST: '69.62.68.67'
+  VPS_USER: root
+  CRM_SUPABASE_URL: 'https://qprlbmcoksrpuvodxjtt.supabase.co'
+
+jobs:
+  rewire:
+    if: ${{ inputs.confirm == 'YES' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Rewire CRM database on VPS
+        env:
+          SSH_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+          CRM_SUPABASE_KEY: ${{ secrets.VPS_CRM_SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          set -euo pipefail
+          [[ -n "$SSH_KEY" ]] || { echo "HOSTINGER_SSH_PRIVATE_KEY secret missing" >&2; exit 1; }
+          [[ "$CRM_SUPABASE_URL" == https://*.supabase.co ]] || { echo "bad canonical URL" >&2; exit 1; }
+          [[ "${#CRM_SUPABASE_KEY}" -ge 20 ]] || { echo "VPS_CRM_SUPABASE_SERVICE_ROLE_KEY missing or too short — Juan must add it in repo Settings > Secrets and variables > Actions" >&2; exit 1; }
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/vps-key
+          chmod 600 ~/.ssh/vps-key
+          SSH="ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=15 -i ~/.ssh/vps-key"
+          SCP="scp -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=15 -i ~/.ssh/vps-key"
+          # Secret travels as a file so its value never appears in any command line or log.
+          printf '%s' "$CRM_SUPABASE_URL" > /tmp/crm_url_src; chmod 600 /tmp/crm_url_src
+          printf '%s' "$CRM_SUPABASE_KEY" > /tmp/crm_key_src; chmod 600 /tmp/crm_key_src
+          $SCP /tmp/crm_url_src "$VPS_USER@$VPS_HOST:/tmp/crm_url_incoming"
+          $SCP /tmp/crm_key_src "$VPS_USER@$VPS_HOST:/tmp/crm_key_incoming"
+          shred -u /tmp/crm_url_src /tmp/crm_key_src
+          unset CRM_SUPABASE_KEY
+          $SSH "$VPS_USER@$VPS_HOST" 'bash -s' <<'VPS_EOF'
+          set -euo pipefail
+          CRM_URL="$(cat /tmp/crm_url_incoming)"; shred -u /tmp/crm_url_incoming
+          CRM_KEY="$(cat /tmp/crm_key_incoming)"; shred -u /tmp/crm_key_incoming
+          [[ "$CRM_URL" == https://*.supabase.co ]] || { echo "BAD_URL"; exit 2; }
+          [[ "${#CRM_KEY}" -ge 20 ]] || { echo "BAD_KEY"; exit 2; }
+          SRC=/etc/sahjony-fallback/import-export.env
+          DST=/etc/sahjony-fallback/unified.env
+          mkdir -p /root/env-backups
+          cp "$SRC" "/root/env-backups/import-export.env.pre-crm-rewire-$(date +%Y%m%d%H%M%S)"
+          # unified.env = full copy of the shared env with ONLY the Supabase pair swapped
+          grep -v -e '^SUPABASE_URL=' -e '^SUPABASE_SERVICE_ROLE_KEY=' "$SRC" > "$DST.tmp" || true
+          printf 'SUPABASE_URL=%s\n' "$CRM_URL" >> "$DST.tmp"
+          printf 'SUPABASE_SERVICE_ROLE_KEY=%s\n' "$CRM_KEY" >> "$DST.tmp"
+          chmod 600 "$DST.tmp"
+          mv "$DST.tmp" "$DST"
+          unset CRM_URL CRM_KEY
+          # Point ONLY the unified service at the new env file (WhatsApp keeps the shared one)
+          mkdir -p /etc/systemd/system/sahjony-fallback-unified.service.d
+          printf '[Service]\nEnvironmentFile=\nEnvironmentFile=/etc/sahjony-fallback/unified.env\n' \
+            > /etc/systemd/system/sahjony-fallback-unified.service.d/supabase-env.conf
+          chmod 644 /etc/systemd/system/sahjony-fallback-unified.service.d/supabase-env.conf
+          systemctl daemon-reload
+          systemctl restart sahjony-fallback-unified.service
+          sleep 8
+          systemctl is-active sahjony-fallback-unified.service
+          echo REWIRE_OK
+          VPS_EOF
+          rm -f ~/.ssh/vps-key
+
+      - name: Smoke-test CRM records
+        run: |
+          set -euo pipefail
+          BODY=""
+          for i in 1 2 3 4 5 6; do
+            if BODY=$(curl -s --max-time 20 'https://www.sahjony.com/crm/cuba-mipymes/list?limit=1'); then
+              break
+            fi
+            sleep 10
+          done
+          echo "$BODY" | head -c 300; echo
+          TOTAL=$(echo "$BODY" | python3 -c "import json,sys; print(json.load(sys.stdin).get('total','?'))" 2>/dev/null || echo "?")
+          echo "CRM_TOTAL=$TOTAL"
+          if ! [[ "$TOTAL" =~ ^[0-9]+$ ]] || [[ "$TOTAL" -eq 0 ]]; then
+            echo "SMOKE_FAIL: CRM still returns zero records" >&2
+            exit 1
+          fi
+          echo "SMOKE_OK: CRM serving $TOTAL records from the canonical database"
