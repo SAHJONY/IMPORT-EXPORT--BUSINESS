@@ -1247,8 +1247,73 @@ async def hermes_outbox_ack(
 
 
 class HermesDirectSend(BaseModel):
-    recipient: str = Field(min_length=8, max_length=20)
+    recipient: str = Field(min_length=8, max_length=64)
     body: str = Field(min_length=1, max_length=1000)
+
+
+# ---------------------------------------------------------------------------
+# WhatsApp group addressing (feat/whatsapp-group-send).
+#
+# The direct-send path historically accepted only 1:1 phone digits. Groups are
+# addressed explicitly so a group JID can never be mistaken for a phone number:
+#   group:<jid>          e.g. group:120363041234567@g.us
+#   group:alias:<alias>  e.g. group:alias:rosmel-ventas-cuba (resolved via
+#                        whatsapp_groups.json)
+# The outbox worker contract: when recipient_type == "group", the worker MUST
+# send to group_jid verbatim (never append @c.us / @s.whatsapp.net). 1:1 rows
+# keep recipient_type == "individual" and behave exactly as before.
+# ---------------------------------------------------------------------------
+
+_GROUPS_REGISTRY_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "whatsapp_groups.json")
+_groups_registry_cache: dict[str, Any] | None = None
+
+
+def _load_groups_registry() -> dict[str, Any]:
+    global _groups_registry_cache
+    if _groups_registry_cache is None:
+        try:
+            with open(_GROUPS_REGISTRY_PATH, encoding="utf-8") as fh:
+                _groups_registry_cache = json.load(fh)
+        except Exception:
+            _groups_registry_cache = {"version": 1, "groups": []}
+    return _groups_registry_cache
+
+
+def _is_valid_group_jid(value: str) -> bool:
+    """A WhatsApp group JID looks like <digits>@g.us."""
+    if "@" not in value:
+        return False
+    local, _, domain = value.rpartition("@")
+    return domain == "g.us" and local.isdigit() and 5 <= len(local) <= 30
+
+
+def _resolve_group_target(raw_recipient: str) -> tuple[str | None, str | None]:
+    """Return (jid, alias) for a group address, or (None, None) if not a group address.
+
+    Raises HTTPException(400) for malformed group addresses so the caller fails
+    closed instead of misrouting.
+    """
+    text = (raw_recipient or "").strip()
+    if not text.startswith("group:"):
+        return None, None
+    rest = text[len("group:"):]
+    if rest.startswith("alias:"):
+        alias = rest[len("alias:"):].strip().lower()
+        if not alias or len(alias) > 64:
+            raise HTTPException(status_code=400, detail="Invalid group alias")
+        for entry in _load_groups_registry().get("groups", []):
+            if str(entry.get("alias", "")).lower() == alias:
+                jid = entry.get("jid")
+                if not jid or not _is_valid_group_jid(str(jid)):
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Group alias '{alias}' has no valid JID registered",
+                    )
+                return str(jid), alias
+        raise HTTPException(status_code=400, detail=f"Unknown group alias '{alias}'")
+    if not _is_valid_group_jid(rest):
+        raise HTTPException(status_code=400, detail="Invalid group JID; expected <digits>@g.us")
+    return rest, None
 
 
 @app.post("/whatsapp/hermes/outbox/enqueue")
@@ -1270,16 +1335,26 @@ async def hermes_outbox_enqueue(
         payload = HermesDirectSend.model_validate_json(raw)
     except Exception as exc:
         raise HTTPException(status_code=400, detail="Invalid direct-send payload") from exc
-    digits = "".join(ch for ch in payload.recipient if ch.isdigit())
-    if not 8 <= len(digits) <= 15:
-        raise HTTPException(status_code=400, detail="Recipient must be 8-15 digits")
+    group_jid, group_alias = _resolve_group_target(payload.recipient)
+    extra: dict[str, Any] = {}
+    if group_jid is not None:
+        recipient = f"group:{group_jid}"
+        recipient_type = "group"
+        extra = {"recipient_type": recipient_type, "group_jid": group_jid, "group_alias": group_alias}
+    else:
+        digits = "".join(ch for ch in payload.recipient if ch.isdigit())
+        if not 8 <= len(digits) <= 15:
+            raise HTTPException(status_code=400, detail="Recipient must be 8-15 digits")
+        recipient = digits
+        recipient_type = "individual"
+        extra = {"recipient_type": recipient_type}
     command_id = f"wad_{secrets.token_urlsafe(18)}"
     ts = _now()
     await get_backend().insert("whatsapp_openclaw_outbox", {
         "command_id": command_id,
         "channel": "whatsapp",
         "account_id": "default",
-        "recipient": digits,
+        "recipient": recipient,
         "body": payload.body,
         "preview_url": False,
         "lead_id": None,
@@ -1294,8 +1369,10 @@ async def hermes_outbox_enqueue(
         "last_error": None,
         "created_at": ts,
         "updated_at": ts,
+        **extra,
     })
-    return {"status": "queued", "command_id": command_id, "recipient": digits}
+    return {"status": "queued", "command_id": command_id, "recipient": recipient,
+            "recipient_type": recipient_type}
 
 
 @app.get("/whatsapp/hermes/outbox/status")
@@ -1321,6 +1398,86 @@ async def hermes_outbox_status(
         "last_error": row.get("last_error"),
         "attempts": row.get("attempts"),
     }
+
+
+@app.get("/whatsapp/hermes/groups")
+async def hermes_groups_list(
+    x_sahjony_timestamp: str | None = Header(None, alias="X-Bridge-Timestamp"),
+    x_sahjony_signature: str | None = Header(None, alias="X-Bridge-Signature"),
+) -> dict[str, Any]:
+    """List the registered WhatsApp business groups Sofia may publish to.
+
+    Registry source: whatsapp_groups.json (repo root), edited via pull request —
+    Juan approves every registry change. Bridge-signed like the other Hermes
+    owner endpoints; read-only.
+    """
+    _verify_hermes_signature(b"", x_sahjony_timestamp, x_sahjony_signature)
+    registry = _load_groups_registry()
+    groups = []
+    for entry in registry.get("groups", []):
+        groups.append({
+            "alias": entry.get("alias"),
+            "name": entry.get("name"),
+            "jid": entry.get("jid"),
+            "jid_ready": bool(entry.get("jid")) and _is_valid_group_jid(str(entry.get("jid"))),
+            "purpose": entry.get("purpose"),
+            "agent": entry.get("agent"),
+            "agent_phone": entry.get("agent_phone"),
+            "region": entry.get("region"),
+            "language": entry.get("language"),
+            "admin_status": entry.get("admin_status"),
+            "example": bool(entry.get("example")),
+        })
+    return {"status": "ok", "count": len(groups), "groups": groups}
+
+
+def _group_alias_for_jid(jid: str) -> str | None:
+    for entry in _load_groups_registry().get("groups", []):
+        if str(entry.get("jid") or "") == jid:
+            return str(entry.get("alias"))
+    return None
+
+
+@app.get("/whatsapp/hermes/groups/activity")
+async def hermes_groups_activity(
+    alias: str | None = Query(None, max_length=64),
+    limit: int = Query(50, ge=1, le=200),
+    x_sahjony_timestamp: str | None = Header(None, alias="X-Bridge-Timestamp"),
+    x_sahjony_signature: str | None = Header(None, alias="X-Bridge-Signature"),
+) -> dict[str, Any]:
+    """Recent inbound messages observed in WhatsApp groups (record-only feed).
+
+    Source: whatsapp_messages rows whose phone is a @g.us JID, recorded by the
+    Sofia bridge poller (group traffic is never auto-replied). The 24/7 group
+    watch loop polls this endpoint, drafts replies, and escalates per the
+    approval tiers in docs/whatsapp-group-send-design.md. Bridge-signed,
+    read-only. Optional alias filter resolves via whatsapp_groups.json.
+    """
+    _verify_hermes_signature(b"", x_sahjony_timestamp, x_sahjony_signature)
+    jid_filter: str | None = None
+    if alias:
+        jid_filter, _ = _resolve_group_target(f"group:alias:{alias.strip().lower()}")
+    rows = await get_backend().select("whatsapp_messages", params={"limit": str(limit * 4)}) or []
+    items: list[dict[str, Any]] = []
+    for row in rows:
+        phone = str(row.get("phone") or "")
+        if "@g.us" not in phone:
+            continue
+        if jid_filter and phone != jid_filter:
+            continue
+        items.append({
+            "message_id": row.get("message_id"),
+            "group_jid": phone,
+            "group_alias": _group_alias_for_jid(phone),
+            "sender": row.get("contact_name"),
+            "text": str(row.get("text") or "")[:1000],
+            "message_type": row.get("message_type"),
+            "direction": row.get("direction"),
+            "received_at": row.get("received_at"),
+        })
+    items.sort(key=lambda item: str(item.get("received_at") or ""), reverse=True)
+    items = items[:limit]
+    return {"status": "ok", "count": len(items), "messages": items}
 
 
 @app.get("/whatsapp/webhook")
@@ -1453,6 +1610,15 @@ async def _fetch_bridge_messages() -> list[dict[str, Any]]:
         return []
 
 
+def _bridge_group_jid(msg: dict[str, Any]) -> str:
+    """Return the group's @g.us JID from a bridge event, or '' for 1:1 chats."""
+    for key in ("chatId", "senderId", "from"):
+        raw = str(msg.get(key) or "")
+        if raw.endswith("@g.us"):
+            return raw
+    return ""
+
+
 def _bridge_sender_phone(msg: dict[str, Any]) -> str:
     """Best-effort dialable phone digits from a bridge event."""
     for key in ("senderId", "chatId", "sender", "from"):
@@ -1480,6 +1646,26 @@ async def _handle_bridge_message(msg: dict[str, Any]) -> None:
         or ""
     )
     if message_id and await _message_seen(message_id):
+        return
+    group_jid = _bridge_group_jid(msg)
+    if group_jid:
+        # Group traffic is RECORD-ONLY. Sofia never auto-replies inside groups:
+        # the 24/7 group watch loop reads these rows via
+        # GET /whatsapp/hermes/groups/activity, drafts replies, and posts only
+        # owner-approved content. This keeps group sends under the same
+        # per-message approval governance as 1:1 sends.
+        sender_digits = "".join(ch for ch in str(msg.get("senderId") or "") if ch.isdigit())
+        sender_name = str(msg.get("senderName") or msg.get("pushName") or "").strip()
+        contact_label = " · ".join(p for p in (sender_name, sender_digits) if p) or None
+        await _register_inbound_message(
+            phone=group_jid,
+            message_id=message_id or None,
+            message_type="text",
+            text=body,
+            contact_name=contact_label,
+            provider="hermes_whatsapp",
+            direction="inbound",
+        )
         return
     phone = _bridge_sender_phone(msg)
     if not phone:

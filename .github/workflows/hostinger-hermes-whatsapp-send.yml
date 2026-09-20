@@ -1,8 +1,10 @@
 name: Hostinger Hermes WhatsApp Direct Send
 
 # Owner-governed direct WhatsApp send. Juan dispatches this explicitly per message:
-# exactly one recipient and one text per dispatch, dry-run by default.
+# exactly one recipient (one phone OR one group) and one text per dispatch,
+# dry-run by default.
 # Cold-recipient ban risk is printed before every live dispatch — never sent silently.
+# Group sends are visible to every group member: higher report risk than 1:1.
 # The message is enqueued to the Hermes outbox; the VPS outbox worker delivers it
 # through the native transport and ACKs the delivery status back.
 
@@ -10,7 +12,7 @@ on:
   workflow_dispatch:
     inputs:
       to:
-        description: Recipient phone in international digits only (e.g. 5358477839 for Cuba +53 58477839)
+        description: "Recipient — either phone in international digits only (e.g. 5358477839) or a group: group:<jid> (e.g. group:120363041234567@g.us) or group:alias:<alias> (e.g. group:alias:rosmel-ventas-cuba, resolved via whatsapp_groups.json)"
         required: true
         type: string
       message:
@@ -54,11 +56,35 @@ jobs:
           set -euo pipefail
           python3 - <<'PY'
           import os, sys
-          digits = ''.join(ch for ch in os.environ['INPUT_TO'] if ch.isdigit())
-          if not 8 <= len(digits) <= 15:
-              print(f'INVALID_RECIPIENT len={len(digits)}', flush=True); sys.exit(2)
-          print(f'RECIPIENT_DIGITS={digits}', flush=True)
+          to_raw = os.environ['INPUT_TO'].strip()
+          recipient = None
+          recipient_type = None
+          if to_raw.startswith('group:'):
+              rest = to_raw[len('group:'):]
+              if rest.startswith('alias:'):
+                  alias = rest[len('alias:'):].strip().lower()
+                  if not alias or len(alias) > 64 or not all(c.isalnum() or c in '-_' for c in alias):
+                      print(f'INVALID_GROUP_ALIAS={alias}', flush=True); sys.exit(2)
+                  recipient = f'group:alias:{alias}'
+              else:
+                  local, sep, domain = rest.rpartition('@')
+                  if not sep or domain != 'g.us' or not local.isdigit() or not 5 <= len(local) <= 30:
+                      print('INVALID_GROUP_JID=expected <digits>@g.us', flush=True); sys.exit(2)
+                  recipient = f'group:{rest}'
+              recipient_type = 'group'
+          else:
+              digits = ''.join(ch for ch in to_raw if ch.isdigit())
+              if not 8 <= len(digits) <= 15:
+                  print(f'INVALID_RECIPIENT len={len(digits)}', flush=True); sys.exit(2)
+              recipient = digits
+              recipient_type = 'individual'
+          print(f'RECIPIENT={recipient}', flush=True)
+          print(f'RECIPIENT_TYPE={recipient_type}', flush=True)
           print(f'DRY_RUN={os.environ["INPUT_DRY_RUN"]}', flush=True)
+          # Persist for the next step.
+          with open(os.environ['GITHUB_ENV'], 'a') as fh:
+              fh.write(f'RECIPIENT_VALUE={recipient}\n')
+              fh.write(f'RECIPIENT_TYPE={recipient_type}\n')
           PY
 
       - name: Enqueue and track delivery
@@ -75,14 +101,17 @@ jobs:
           if len(bridge_key) < 24:
               print('BRIDGE_SECRET_MISSING', flush=True); sys.exit(2)
 
-          digits = ''.join(ch for ch in os.environ['INPUT_TO'] if ch.isdigit())
+          recipient = os.environ['RECIPIENT_VALUE']
+          recipient_type = os.environ.get('RECIPIENT_TYPE', 'individual')
           body = os.environ['INPUT_MESSAGE']
           if not (1 <= len(body) <= 1000):
               print(f'INVALID_MESSAGE_LEN={len(body)}', flush=True); sys.exit(3)
           dry = os.environ['INPUT_DRY_RUN'] == 'true'
 
           print('NOTICE: sending a first-contact message to a new number can trigger WhatsApp spam detection and risk the business number. Dispatching this workflow is the owner accepting that risk.', flush=True)
-          print(f'DIRECT_SEND to={digits} chars={len(body)} dry_run={dry}', flush=True)
+          if recipient_type == 'group':
+              print('NOTICE: group messages are visible to EVERY group member. A message that reads as spam or off-topic can be reported by any member and risks the business number. Send only owner-approved content.', flush=True)
+          print(f'DIRECT_SEND to={recipient} type={recipient_type} chars={len(body)} dry_run={dry}', flush=True)
           if dry:
               print('DRY_RUN_OK=no message enqueued', flush=True)
               sys.exit(0)
@@ -112,7 +141,7 @@ jobs:
               except Exception as e:
                   return {'status': 'poll_error', 'error': str(e)[:200]}
 
-          code, resp = post('/whatsapp/hermes/outbox/enqueue', {'recipient': digits, 'body': body})
+          code, resp = post('/whatsapp/hermes/outbox/enqueue', {'recipient': recipient, 'body': body})
           print(f'ENQUEUE_HTTP={code}', flush=True)
           if code != 200 or resp.get('status') != 'queued':
               print('ENQUEUE_FAILED ' + json.dumps(resp)[:500], flush=True); sys.exit(4)
