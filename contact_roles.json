@@ -54,5 +54,41 @@
     "role_description": "SERVICE PROVIDER: freight trucking (camion VP020) for merchandise/equipment/materials transport in Cuba. WE (SAHJONY/Juan) are the CLIENT requesting rates.",
     "language": "es"
   },
-  "_comment": "Contact role registry for Sofia WhatsApp. Keyed by E.164 phone. The runtime injects the matching entry into the system prompt so the bot NEVER reverses buyer/seller roles. Update when new contacts are added."
+  "_comment": "Contact role registry for Sofia WhatsApp. Keyed by E.164 phone. The runtime injects the matching entry into the system prompt so the bot NEVER reverses buyer/seller roles. Update when new contacts are added.",
+  "+5352586029": {
+    "name": "Arroz guyanés (mayorista)",
+    "role": "seller",
+    "role_description": "SELLER: Cuba wholesaler of Guyanese rice, 50 kg sacks. Sofia buys wholesale from them for the agent network.",
+    "never": "Never offer to sell them anything. Never ask what quantity they want to acquire, billing data, or payment method as if they were buying."
+  },
+  "+5359709623": {
+    "name": "Harina Campeche (mayorista)",
+    "role": "seller",
+    "role_description": "SELLER: Cuba wholesaler of Harina multiuso Campeche/VIPER 1 kg. Sofia buys wholesale from them for the agent network.",
+    "never": "Never offer to sell them anything. Never ask what quantity they want to acquire, billing data, or payment method as if they were buying."
+  },
+  "+5351737599": {
+    "name": "Picadillo de pollo (mayorista)",
+    "role": "seller",
+    "role_description": "SELLER: Cuba wholesaler of chicken picadillo, 44 lb box. Sofia buys wholesale from them for the agent network.",
+    "never": "Never offer to sell them anything. Never ask what quantity they want to acquire, billing data, or payment method as if they were buying."
+  },
+  "+5359754574": {
+    "name": "Harina PortoBello (mayorista)",
+    "role": "seller",
+    "role_description": "SELLER: Cuba wholesaler of PortoBello wheat flour, 50 kg sacks. Sofia buys wholesale from them for the agent network.",
+    "never": "Never offer to sell them anything. Never ask what quantity they want to acquire, billing data, or payment method as if they were buying."
+  },
+  "+5351131823": {
+    "name": "Azúcar blanca (mayorista)",
+    "role": "seller",
+    "role_description": "SELLER: Cuba wholesaler of white sugar 25 kg sacks (also rice, salt). Sofia buys wholesale from them for the agent network.",
+    "never": "Never offer to sell them anything. Never ask what quantity they want to acquire, billing data, or payment method as if they were buying."
+  },
+  "+5353062582": {
+    "name": "Harina (mayorista, tipo por confirmar)",
+    "role": "seller",
+    "role_description": "SELLER: Cuba wholesaler of flour (type unconfirmed). Sofia buys wholesale from them for the agent network.",
+    "never": "Never offer to sell them anything. Never ask what quantity they want to acquire, billing data, or payment method as if they were buying."
+  }
 }
