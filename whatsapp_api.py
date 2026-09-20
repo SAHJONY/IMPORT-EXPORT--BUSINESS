@@ -1482,6 +1482,46 @@ async def hermes_groups_activity(
     return {"status": "ok", "count": len(items), "messages": items}
 
 
+class GroupJoinRequest(BaseModel):
+    code: str | None = Field(None, max_length=64)
+    link: str | None = Field(None, max_length=256)
+
+
+@app.post("/whatsapp/hermes/groups/join")
+async def hermes_groups_join(
+    payload: GroupJoinRequest,
+    x_sahjony_timestamp: str | None = Header(None, alias="X-Bridge-Timestamp"),
+    x_sahjony_signature: str | None = Header(None, alias="X-Bridge-Signature"),
+) -> dict[str, Any]:
+    """Join a WhatsApp group via invite code or full invite link.
+
+    Forwards to the Hermes bridge POST /join-group (Baileys groupAcceptInvite).
+    Bridge-signed like the other Hermes owner endpoints. Lets Sofia join
+    supplier sales groups she was invited to and read their product posts via
+    GET /whatsapp/hermes/groups/activity, instead of Juan having to join
+    manually and forward everything.
+    """
+    raw = (payload.code or "") + (payload.link or "")
+    _verify_hermes_signature(raw.encode("utf-8"), x_sahjony_timestamp, x_sahjony_signature)
+    if not _hermes_bridge_configured():
+        raise HTTPException(status_code=503, detail="Hermes application bridge is not configured")
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(
+                _SOFIA_BRIDGE_MESSAGES_URL.replace("/messages", "/join-group"),
+                json={"code": payload.code, "link": payload.link},
+            )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Bridge unreachable: {exc}")
+    try:
+        data = resp.json()
+    except Exception:
+        data = {"error": resp.text[:200]}
+    if resp.status_code != 200 or not data.get("success"):
+        raise HTTPException(status_code=502, detail=f"Join failed: {data.get('error', 'unknown')}")
+    return {"status": "ok", "group_jid": data.get("groupJid")}
+
+
 @app.get("/whatsapp/webhook")
 async def whatsapp_webhook_verify(
     hub_mode: str | None = Query(None, alias="hub.mode"),
