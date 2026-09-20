@@ -1,1 +1,54 @@
-{"admin_status_values":["admin","member","unknown"],"description":"Registry of WhatsApp business groups Sofia may publish to. Each group is addressed by alias (group:alias:<alias>) or raw JID (group:<jid>@g.us). Entries are added/edited via pull request — Juan approves every registry change. Never invent a JID: leave \"jid\" null until the real @g.us JID is discovered (see docs/whatsapp-group-send-design.md).","groups":[{"admin_status":"unknown","admin_verified_at":null,"admin_verified_by":null,"agent":"Example Agent","agent_phone":"5350000000","alias":"example-group","example":true,"jid":"120363000000000@g.us","language":"es","name":"EXAMPLE — SAHJONY Sales Group","notes":"Schema example only. Do not send here.","purpose":"sales","region":"cuba"},{"admin_status":"admin","admin_verified_at":"2026-09-20","admin_verified_by":"juan","agent":"Rosmel","agent_phone":"5352985393","alias":"rosmel-ventas-cuba","jid":null,"language":"es","name":"SAHJONY • Ventas Cuba – Rosmel","notes":"Rosmel's sales group. Sofia is admin (added 2026-09-20 per Juan). JID pending discovery — populate before first group send.","purpose":"sales","region":"cuba"}],"version":1}
+{
+  "admin_status_values": [
+    "admin",
+    "member",
+    "unknown"
+  ],
+  "description": "Registry of WhatsApp business groups Sofia may publish to. Each group is addressed by alias (group:alias:<alias>) or raw JID (group:<jid>@g.us). Entries are added/edited via pull request — Juan approves every registry change. Never invent a JID: leave \"jid\" null until the real @g.us JID is discovered (see docs/whatsapp-group-send-design.md).",
+  "groups": [
+    {
+      "admin_status": "unknown",
+      "admin_verified_at": null,
+      "admin_verified_by": null,
+      "agent": "Example Agent",
+      "agent_phone": "5350000000",
+      "alias": "example-group",
+      "example": true,
+      "jid": "120363000000000@g.us",
+      "language": "es",
+      "name": "EXAMPLE — SAHJONY Sales Group",
+      "notes": "Schema example only. Do not send here.",
+      "purpose": "sales",
+      "region": "cuba"
+    },
+    {
+      "admin_status": "admin",
+      "admin_verified_at": "2026-09-20",
+      "admin_verified_by": "juan",
+      "agent": "Rosmel",
+      "agent_phone": "5352985393",
+      "alias": "rosmel-ventas-cuba",
+      "jid": null,
+      "language": "es",
+      "name": "SAHJONY • Ventas Cuba – Rosmel",
+      "notes": "Rosmel's sales group. Sofia is admin (added 2026-09-20 per Juan). JID pending discovery — populate before first group send.",
+      "purpose": "sales",
+      "region": "cuba"
+    },
+    {
+      "alias": "familia",
+      "name": "Familia",
+      "jid": null,
+      "purpose": "recruitment",
+      "agent": "Sofia",
+      "agent_phone": "12816628581",
+      "region": "cuba",
+      "language": "es",
+      "admin_status": "unknown",
+      "admin_verified_at": null,
+      "admin_verified_by": null,
+      "notes": "Juan's family group (11 members). Recruitment message for the Cuba sales team. JID pending discovery — populate after Sofia is added to the group and first activity is observed. Added 2026-09-20 per Juan."
+    }
+  ],
+  "version": 1
+}
