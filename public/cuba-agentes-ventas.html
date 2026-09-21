@@ -84,6 +84,7 @@ a{color:inherit;text-decoration:none}
       <div class="fgrid">
         <div class="field"><label for="nombre">Nombre completo</label><input id="nombre" name="contact_name" required placeholder="Tu nombre"></div>
         <div class="field"><label for="wa">WhatsApp</label><input id="wa" name="phone" required placeholder="+53 5 ..."></div>
+        <div class="field"><label for="correo">Correo (si tienes)</label><input id="correo" name="email" type="email" placeholder="tu@correo.com — opcional"></div>
         <div class="field"><label for="prov">Provincia</label>
           <select id="prov" name="province" required>
             <option value="">Selecciona…</option>
@@ -121,22 +122,38 @@ a{color:inherit;text-decoration:none}
   var f=document.getElementById('f'),msg=document.getElementById('msg'),btn=document.getElementById('btn');
   f.addEventListener('submit',function(e){
     e.preventDefault();
-    var p={};
-    new FormData(f).forEach(function(v,k){p[k]=v});
+    var d={};new FormData(f).forEach(function(v,k){d[k]=v});
+    var digits=String(d.phone||'').replace(/\D/g,'');
+    var email=String(d.email||'').trim();
+    if(!email){email='agente.cuba.'+digits+'@sahjony.com';}
+    var p={
+      legal_name:d.contact_name,
+      contact_name:d.contact_name,
+      email:email,
+      phone:d.phone||undefined,
+      product_need:'CUBA SALES AGENT APPLICATION: '+(d.sales_channel||'')+' — '+(d.province||'')+'/'+(d.municipality||''),
+      destination_country:'CU',
+      notes:'lead_type=CUBA_SALES_AGENT; provincia='+(d.province||'')+'; municipio='+(d.municipality||'')+
+            '; canal='+(d.sales_channel||'')+'; referido_por='+(d.referred_by||'')+
+            '; terminos_50_50=aceptado; email_sintetico='+(String(d.email||'').trim()?'no':'si')+
+            '; '+(d.notes||'')
+    };
+    Object.keys(p).forEach(function(k){if(p[k]===undefined)delete p[k];});
     p.lead_type='CUBA_SALES_AGENT';
     p.page='cuba-agentes-ventas';
     if(window.SAHJONY_ATTRIBUTION&&window.SAHJONY_ATTRIBUTION.get){try{p.attribution=window.SAHJONY_ATTRIBUTION.get()}catch(e){}}
     btn.disabled=true;btn.textContent='Enviando…';
     fetch('/crm/intake',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)})
-      .then(function(r){return r.json().catch(function(){return{}})})
-      .then(function(d){
+      .then(function(r){return r.json().then(function(j){return{r:r,j:j};});})
+      .then(function(x){
+        if(!x.r.ok)throw new Error((x.j&&x.j.detail)||'No se pudo enviar');
         msg.className='msg ok';
-        msg.textContent='Listo, '+p.contact_name+'. Ya estás registrado. Te escribimos por WhatsApp para activarte y darte tu grupo de ventas. ¡Bienvenido a SAHJONY LLC!';
+        msg.textContent='Listo, '+d.contact_name+'. Ya estás registrado. Te escribimos por WhatsApp para activarte y darte tu grupo de ventas. ¡Bienvenido a SAHJONY LLC!';
         f.reset();
       })
-      .catch(function(){
+      .catch(function(err){
         msg.className='msg err';
-        msg.textContent='Hubo un problema enviando el registro. Inténtalo de nuevo en un momento.';
+        msg.textContent='Hubo un problema enviando el registro: '+(err.message||'inténtalo de nuevo')+'.';
       })
       .finally(function(){btn.disabled=false;btn.textContent='Registrarme como agente'});
   });
