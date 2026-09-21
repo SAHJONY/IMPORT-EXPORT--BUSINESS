@@ -11,6 +11,7 @@ from typing import Any
 import httpx
 
 from insforge_backend import get_backend
+import sofia_memory
 from sofia_adaptive_intelligence import adaptive_context, record_lesson
 from sofia_agentic_sales_os import orchestrate_sales_turn
 from sofia_hermes_nim_brain import generate as hermes_generate
@@ -931,6 +932,15 @@ async def _generate_sofia_reply_unguarded(
     history = await _history(phone)
     transcript = _transcript(history)
     memory = await _relationship_memory(lead_id, lead)
+    # Temporal memory (dated long-term facts). Additive: never raises, and an
+    # empty result leaves the prompt unchanged (today's behavior).
+    temporal_block = ""
+    if phone:
+        try:
+            temporal = await sofia_memory.recall(phone, text)
+            temporal_block = str(temporal.get("block") or "")
+        except Exception:
+            temporal_block = ""
     crm_context: dict[str, Any] = {
         "status": "not_resolved",
         "crm_connected": False,
@@ -1023,6 +1033,13 @@ async def _generate_sofia_reply_unguarded(
         "next_questions": (memory.get("next_questions") or [])[:2],
     }, ensure_ascii=False, default=str)
     system += "\n\nBUSINESS KNOWLEDGE PREFLIGHT — SOURCE-GROUNDED\n" + json.dumps(knowledge, ensure_ascii=False, default=str)[:24000]
+    if temporal_block:
+        system += (
+            "\n\nTEMPORAL MEMORY — dated long-term facts. "
+            "Treat every fact below as KNOWN. "
+            "Never ask the contact for information stated here.\n"
+            + temporal_block
+        )
     system += "\n\nCRM CONTACT CONTEXT\n" + json.dumps({
         "crm_connected": bool(crm_context.get("crm_connected")),
         "customers": (crm_context.get("customers") or [])[:3],
