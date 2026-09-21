@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 
 from auth import verify_owner_token
 from insforge_backend import get_backend, persistent_backend_status
+import sofia_memory
 from sofia_hermes_whatsapp_environment import generate_hermes_whatsapp_reply
 from sofia_whatsapp_runtime import generate_sofia_reply
 from sofia_hermes_nim_brain import configured as hermes_configured, model_name as hermes_model_name
@@ -362,6 +363,12 @@ async def _record_outbound(
             "provider": provider,
             "received_at": _now(),
         })
+    except Exception:
+        pass
+    # Background temporal-memory consolidation over the full turn. Fire-and-
+    # forget: never on the reply path, never raises, never blocks sends.
+    try:
+        sofia_memory.queue_consolidation(phone=_normalize_phone(to), lead_id=lead_id)
     except Exception:
         pass
 
