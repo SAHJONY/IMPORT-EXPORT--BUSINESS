@@ -6,8 +6,8 @@ name: Hostinger Anthropic Brain Setup Once
 # secret AND approves this run. Never auto-runs on push.
 #
 # Economical model picks (verified against Sep 2026 provider pricing):
-#   OpenAI primary    gpt-5.6-terra   (~$2/$12 per 1M in/out)  was gpt-5.6-sol (~$4-5/$20-30)
-#   Anthropic frontier claude-opus-5  (~$5/$25)                was claude-fable-5 (~$10/$50)
+#   OpenAI primary    gpt-5.6-sol       (~$4-5/$20-30 per 1M in/out) flagship 5.6 tier
+#   Anthropic frontier claude-opus-5  (~$5/$25)
 #   Anthropic primary  claude-sonnet-5 (~$2/$10)
 #   Anthropic fast     claude-haiku-4-5 (~$1/$5)
 # Routing stays AUTO (code default): OpenAI <-> Anthropic failover per reply.
@@ -102,7 +102,7 @@ jobs:
           assert key.startswith('sk-ant-'), 'unexpected anthropic key format'
           updates = {
               'ANTHROPIC_API_KEY': key,
-              'OPENAI_PRIMARY_MODEL': 'gpt-5.6-terra',
+              'OPENAI_PRIMARY_MODEL': 'gpt-5.6-sol',
               'ANTHROPIC_FRONTIER_MODEL': 'claude-opus-5',
               'ANTHROPIC_PRIMARY_MODEL': 'claude-sonnet-5',
               'ANTHROPIC_FAST_MODEL': 'claude-haiku-4-5',
@@ -128,7 +128,7 @@ jobs:
 
           # Smoke checks: names + formats only, never the secret value.
           grep -q '^ANTHROPIC_API_KEY=sk-ant-' "$ENV_FILE" && echo ANTHROPIC_KEY_FORMAT_OK=1
-          grep -q '^OPENAI_PRIMARY_MODEL=gpt-5.6-terra$' "$ENV_FILE" && echo OPENAI_MODEL_PIN_OK=1
+          grep -q '^OPENAI_PRIMARY_MODEL=gpt-5.6-sol$' "$ENV_FILE" && echo OPENAI_MODEL_PIN_OK=1
           grep -q '^ANTHROPIC_PRIMARY_MODEL=claude-sonnet-5$' "$ENV_FILE" && echo ANTHROPIC_MODEL_PIN_OK=1
           echo DONE_NO_RESTART=1
           REMOTE
