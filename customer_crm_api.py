@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import hashlib, json, os, secrets
+import hashlib, os, secrets
 from datetime import datetime, timedelta, timezone
 from typing import Literal
 from fastapi import FastAPI, Header, HTTPException
@@ -370,28 +370,6 @@ async def public_intake(p:IntakeIn):
         await _bridge_intake_to_owner_queue(backend,ts,p,intake_id,customer_id,first_touch)
     except Exception as exc:
         await audit({'role':'system','id':'intake-bridge'},'queue_bridge_failed','Owner queue bridge failed; canonical intake persisted',customer_id,intake_id,{'error_type':type(exc).__name__})
-    # Sofia notify outbox: every CUBA_SALES_AGENT registration is appended to a
-    # local JSONL file that Sofia's watch job reads (read-only) so she receives
-    # the full agent details without needing owner credentials. Best-effort —
-    # a failure here must never block a real registration.
-    if (p.lead_type or '').upper() == 'CUBA_SALES_AGENT':
-        try:
-            outbox_dir = os.environ.get('AGENT_REGISTRATION_OUTBOX_DIR', '/opt/sahjony-fallback/data')
-            os.makedirs(outbox_dir, exist_ok=True)
-            with open(os.path.join(outbox_dir, 'agent-registrations.jsonl'), 'a', encoding='utf-8') as fh:
-                fh.write(json.dumps({
-                    'intake_id': intake_id,
-                    'customer_id': customer_id,
-                    'nombre': p.contact_name,
-                    'whatsapp': p.phone,
-                    'email': email,
-                    'provincia_municipio': (p.product_need or '').replace('CUBA SALES AGENT APPLICATION: ', ''),
-                    'detalle': p.product_need,
-                    'notas': p.notes,
-                    'created_at': ts,
-                }, ensure_ascii=False) + '\n')
-        except Exception:
-            pass
     attachment=public_attachment_readiness()
     capability={'available':False,**attachment}
     if attachment['ready']:
