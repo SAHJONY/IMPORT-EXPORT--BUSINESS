@@ -270,8 +270,11 @@ def _embedded_signup_ready(cfg: dict[str, str]) -> bool:
 
 
 def _ai_auto_reply_enabled() -> bool:
+    # Fail-closed: an unset flag must NEVER enable autonomous replies.
+    # (Before 2026-09-21 the default was "true", so any deployment missing the
+    # explicit opt-in silently allowed unapproved AI sends.)
     automation = os.getenv("WHATSAPP_AUTOMATION_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}
-    ai_enabled = os.getenv("WHATSAPP_AI_AUTO_REPLY_ENABLED", "true").strip().lower() == "true"
+    ai_enabled = os.getenv("WHATSAPP_AI_AUTO_REPLY_ENABLED", "false").strip().lower() == "true"
     return automation and ai_enabled
 
 
@@ -854,7 +857,7 @@ async def whatsapp_health() -> dict[str, Any]:
             "durable_backend_provider": persistence["provider"],
             "lead_capture_enabled": persistence["configured"],
             "webhook_idempotency_enabled": persistence["configured"],
-            "ai_auto_reply_enabled": True,
+            "ai_auto_reply_enabled": _ai_auto_reply_enabled(),
             "ai_ready": hermes_configured() or _openai_ready(),
             "cognition_runtime": "hermes",
             "hermes_primary_configured": hermes_configured(),
@@ -1760,6 +1763,15 @@ async def _handle_bridge_message(msg: dict[str, Any]) -> None:
     await _record_inbound_event(
         clean_phone or phone, message_id or None, body, "text", lead_id, provider="hermes_whatsapp"
     )
+    # Kill-switch (incident 2026-09-21: an unapproved AI reply went out to a
+    # contact while WHATSAPP_AI_AUTO_REPLY_ENABLED=false). The bridge poller
+    # must never generate or queue a reply while the flag is off. Inbound
+    # recording above still runs, so the Sofia brain keeps its memory and the
+    # 24/7 watch loop keeps working — only the unapproved send is blocked.
+    # Owner-approved sends go through _enqueue_hermes_message directly and are
+    # unaffected by this gate.
+    if not _ai_auto_reply_enabled():
+        return
     # The real Sofia brain.
     try:
         reply = await generate_sofia_reply(body, contact_name, sender_phone=clean_phone or None)
