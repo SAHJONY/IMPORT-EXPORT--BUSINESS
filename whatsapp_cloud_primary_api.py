@@ -20,6 +20,7 @@ from whatsapp_api import (
     hermes_event,
     hermes_heartbeat,
     hermes_groups_activity,
+    hermes_groups_join,
     hermes_groups_list,
     hermes_outbox,
     hermes_outbox_ack,
@@ -65,6 +66,7 @@ app.add_api_route("/whatsapp/hermes/outbox/enqueue", hermes_outbox_enqueue, meth
 app.add_api_route("/whatsapp/hermes/outbox/status", hermes_outbox_status, methods=["GET"])
 app.add_api_route("/whatsapp/hermes/groups", hermes_groups_list, methods=["GET"])
 app.add_api_route("/whatsapp/hermes/groups/activity", hermes_groups_activity, methods=["GET"])
+app.add_api_route("/whatsapp/hermes/groups/join", hermes_groups_join, methods=["POST"])
 app.include_router(crm_bridge_router)
 app.include_router(agentmail_router)
 

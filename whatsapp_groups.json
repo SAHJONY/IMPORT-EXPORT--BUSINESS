@@ -62,6 +62,20 @@
       "notes": "Ingrid (Juan's niece) sales group. She is creating it with Sofia as admin (2026-09-20 per Juan). JID pending discovery — populate before first group send.",
       "purpose": "sales",
       "region": "cuba"
+    },
+    {
+      "admin_status": "admin",
+      "admin_verified_at": "2026-09-21",
+      "admin_verified_by": "juan",
+      "agent": "Sofia",
+      "agent_phone": "12816628581",
+      "alias": "sahjony-command-center",
+      "jid": null,
+      "language": "es",
+      "name": "SAHJONY • Command Center",
+      "notes": "Command center group created by Juan 2026-09-21 (on-device name may vary slightly; confirm after JID discovery). Members: Rosmel, Jazmine, Tony, Daniel, Rolando, Ingrid. Sofia tagged as CEO. JID pending discovery via invite link — populate before first group send.",
+      "purpose": "command",
+      "region": "cuba"
     }
   ],
   "version": 1
