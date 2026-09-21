@@ -1,54 +1,119 @@
 # Hostinger one-shot: write the OpenAI key into the WhatsApp service env
 # Manual dispatch only. Writes OPENAI_API_KEY (GitHub secret) into
 # /etc/sahjony-fallback/import-export.env alongside the Anthropic key.
+# Key travels via SCP to a 600 root-only temp file and is shredded after.
 # Backs up the env file first. Does NOT restart the service.
 # Model pin OPENAI_PRIMARY_MODEL=gpt-5.6-sol is already set by the
 # anthropic setup workflow; this only adds the missing key.
+
 name: hostinger-openai-key-setup-once
 
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
 
-permissions: {}
+permissions:
+  contents: read
+
+concurrency:
+  group: hostinger-openai-key-setup-once
+  cancel-in-progress: false
 
 jobs:
   configure-openai-key:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      HOST: '69.62.68.67'
+      USER: root
+      PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+      OPENAI_API_KEY_GH: ${{ secrets.OPENAI_API_KEY }}
     steps:
+      - name: Validate required secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "${PRIVATE_KEY:-}" ]] || { echo HOSTINGER_SSH_PRIVATE_KEY_MISSING=1 >&2; exit 2; }
+          [[ -n "${OPENAI_API_KEY_GH:-}" ]] || { echo OPENAI_API_KEY_GITHUB_SECRET_MISSING=1 >&2; exit 3; }
+          echo OPENAI_API_KEY_GITHUB_SECRET_PRESENT=1
+
+      - name: Prepare secure SSH
+        shell: bash
+        run: |
+          set -euo pipefail
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/hostinger-openai
+          chmod 600 ~/.ssh/hostinger-openai
+          ssh-keygen -y -f ~/.ssh/hostinger-openai >/dev/null
+
+      - name: Transfer OpenAI key securely to Hostinger VPS
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          printf '%s' "$OPENAI_API_KEY_GH" > "$RUNNER_TEMP/openai-api-key"
+          chmod 600 "$RUNNER_TEMP/openai-api-key"
+          ok=0
+          for attempt in 1 2 3 4; do
+            if scp -q -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=12 \
+              -i ~/.ssh/hostinger-openai "$RUNNER_TEMP/openai-api-key" "$USER@$HOST:/root/.openai-api-key.once"; then
+              ok=1
+              break
+            fi
+            echo "SSH_TRANSFER_ATTEMPT_${attempt}_FAILED=1"
+            sleep $((attempt * 4))
+          done
+          rm -f "$RUNNER_TEMP/openai-api-key"
+          [[ "$ok" == "1" ]] || { echo HOSTINGER_SSH_TRANSFER_FAILED=1 >&2; exit 5; }
+
       - name: Write OpenAI key into WhatsApp service env
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.HOSTINGER_SSH_HOST }}
-          username: ${{ secrets.HOSTINGER_SSH_USER }}
-          key: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
-          script: |
-            set -euo pipefail
-            ENV_FILE=/etc/sahjony-fallback/import-export.env
-            [ -f "$ENV_FILE" ] || { echo "MISSING_ENV_FILE=1"; exit 1; }
-            BACKUP_DIR=/root/env-backups
-            mkdir -p "$BACKUP_DIR"
-            cp "$ENV_FILE" "$BACKUP_DIR/import-export.env.openai-key.$(date +%Y%m%d-%H%M%S)"
-            echo BACKUP_WRITTEN=1
-            KEY='${{ secrets.OPENAI_API_KEY }}'
-            if [ -z "$KEY" ]; then echo "EMPTY_SECRET=1"; exit 1; fi
-            case "$KEY" in
-              sk-*) echo OPENAI_KEY_FORMAT_OK=1 ;;
-              *)   echo "OPENAI_KEY_FORMAT_BAD=1"; exit 1 ;;
-            esac
-            python3 - "$ENV_FILE" "$KEY" <<'EOF'
-            import sys
-            env_file, key = sys.argv[1], sys.argv[2]
-            name = 'OPENAI_API_KEY'
-            lines = open(env_file).read().splitlines()
-            found = False
-            for i, ln in enumerate(lines):
-                if ln.startswith(name + '='):
-                    lines[i] = f'{name}={key}'
-                    found = True
-            if not found:
-                lines.append(f'{name}={key}')
-            open(env_file, 'w').write('\n'.join(lines) + '\n')
-            print(('REPLACED_' if found else 'ADDED_') + name + '=<redacted>')
-            EOF
-            grep -q '^OPENAI_API_KEY=sk-' "$ENV_FILE" && echo OPENAI_KEY_PIN_OK=1
-            echo DONE_NO_RESTART=1
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=12 \
+            -i ~/.ssh/hostinger-openai "$USER@$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          KEY_TMP=/root/.openai-api-key.once
+          ENV_FILE=/etc/sahjony-fallback/import-export.env
+          trap 'rm -f "$KEY_TMP"' EXIT
+
+          echo HOSTINGER_VPS_SCOPE_ONLY=1
+          [[ -s "$KEY_TMP" ]] || { echo OPENAI_KEY_TRANSFER_MISSING=1 >&2; exit 20; }
+          [[ -f "$ENV_FILE" ]] || { echo WHATSAPP_ENV_FILE_MISSING=1 >&2; exit 21; }
+          chmod 600 "$KEY_TMP"
+
+          install -d -m 700 /root/env-backups
+          cp "$ENV_FILE" "/root/env-backups/import-export.env.pre-openai-key-$(date +%Y%m%d%H%M%S)"
+          echo ENV_BACKUP_WRITTEN=1
+
+          # Upsert key. Key value never leaves this box.
+          KEY_TMP="$KEY_TMP" ENV_FILE="$ENV_FILE" python3 - <<'PY'
+          import os
+          env_file = os.environ['ENV_FILE']
+          key = open(os.environ['KEY_TMP']).read().strip()
+          assert key.startswith('sk-'), 'unexpected openai key format'
+          updates = {'OPENAI_API_KEY': key}
+          lines = open(env_file).read().splitlines()
+          seen = set()
+          out = []
+          for ln in lines:
+              name = ln.split('=', 1)[0] if '=' in ln else ln
+              if name in updates:
+                  seen.add(name)
+                  continue  # drop old value; re-append below
+              out.append(ln)
+          for name, val in updates.items():
+              out.append(f'{name}={val}')
+              if name in seen:
+                  print(f'REPLACED_{name}=1')
+              else:
+                  print(f'ADDED_{name}=1')
+          open(env_file, 'w').write('\n'.join(out) + '\n')
+          PY
+          chmod 600 "$ENV_FILE"
+
+          # Smoke checks: names + formats only, never the secret value.
+          grep -q '^OPENAI_API_KEY=sk-' "$ENV_FILE" && echo OPENAI_KEY_FORMAT_OK=1
+          grep -q '^ANTHROPIC_API_KEY=sk-ant-' "$ENV_FILE" && echo ANTHROPIC_KEY_STILL_PRESENT=1
+          grep -q '^OPENAI_PRIMARY_MODEL=gpt-5.6-sol$' "$ENV_FILE" && echo OPENAI_MODEL_PIN_OK=1
+          echo DONE_NO_RESTART=1
+          REMOTE
