@@ -348,6 +348,22 @@ async def _record_outbound(
         })
     except Exception:
         pass
+    # Mirror into whatsapp_messages so the Sofia brain's conversation history
+    # (_history / _transcript in sofia_whatsapp_runtime) sees Sofia's own
+    # turns. Without this, the transcript only ever contains one side.
+    try:
+        await get_backend().insert("whatsapp_messages", {
+            "message_id": notification_id or f"ntf_{secrets.token_urlsafe(16)}",
+            "direction": "outbound",
+            "phone": _normalize_phone(to),
+            "contact_name": None,
+            "message_type": "text",
+            "text": body[:4096],
+            "provider": provider,
+            "received_at": _now(),
+        })
+    except Exception:
+        pass
 
 
 async def _send_text(
@@ -1722,6 +1738,18 @@ async def _handle_bridge_message(msg: dict[str, Any]) -> None:
         return
     contact_name = str(msg.get("senderName") or msg.get("pushName") or msg.get("contactName") or "") or None
     lead_id = await _upsert_whatsapp_lead(clean_phone, body, contact_name) if clean_phone else None
+    # Persist the inbound turn into whatsapp_messages — this is what the Sofia
+    # brain's _history() reads. Without it the runtime has no memory of 1:1
+    # chats and its known-fact guard can never fire.
+    await _register_inbound_message(
+        phone=clean_phone or phone,
+        message_id=message_id or None,
+        message_type="text",
+        text=body,
+        contact_name=contact_name,
+        provider="hermes_whatsapp",
+        direction="inbound",
+    )
     await _record_inbound_event(
         clean_phone or phone, message_id or None, body, "text", lead_id, provider="hermes_whatsapp"
     )
