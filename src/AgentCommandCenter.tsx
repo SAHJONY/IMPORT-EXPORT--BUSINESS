@@ -2,7 +2,7 @@ import {useEffect,useMemo,useState} from 'react';
 import './agent-command.css';
 type State={ok:boolean;detail:string};
 const services=[
- {key:'platform',name:'SAHJONY Platform',kind:'Core',endpoint:'/api/health',detail:'Trading OS and command APIs'},
+ {key:'platform',name:'SAHJONY Platform',kind:'Core',endpoint:'/api/health',detail:'SAHJONY LLC platform and command APIs'},
  {key:'tinyfish',name:'TinyFish Live Browser',kind:'Cloud browser',detail:'Primary isolated web execution'},
  {key:'codex',name:'Codex / ChatGPT',kind:'Agent brain',detail:'Planning, code and tool orchestration'},
  {key:'desktop',name:'Remote Desktop Commander',kind:'Mac bridge',detail:'Authorized filesystem and terminal access'},
