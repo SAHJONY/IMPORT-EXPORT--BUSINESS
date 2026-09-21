@@ -4,7 +4,7 @@ type Health={ok:boolean;label:string;detail:string};
 type Probe={key:string;label:string;url:string};
 
 const probes:Probe[]=[
-  {key:'app',label:'Trading OS',url:'/api/health'},
+  {key:'app',label:'SAHJONY LLC',url:'/api/health'},
   {key:'whatsapp',label:'WhatsApp',url:'/whatsapp/health'},
   {key:'worldwide',label:'Worldwide Connect',url:'/api/connect/worldwide/health'},
 ];
