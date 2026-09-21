@@ -43,7 +43,6 @@ def supabase_auth_jwks_url() -> str:
     return f"{base}/.well-known/jwks.json" if base else ""
 
 
-# Backward-compatible aliases retained while modules are renamed incrementally.
 def neon_auth_url() -> str:
     return supabase_auth_url()
 
@@ -149,10 +148,20 @@ def verify_employee_neon_token(token: str) -> dict | None:
     claims = decode_supabase_jwt(token)
     if not claims:
         return None
-    membership = _membership(str(claims.get("sub") or ""), {"employee", "owner"})
+    membership = _membership(str(claims.get("sub") or ""), {"employee", "ai_operator", "owner", "platform_owner"})
     if not membership:
         return None
     return {**claims, "app_role": membership.get("role"), "employee_id": membership.get("employee_id")}
+
+
+def verify_ai_operator_token(token: str) -> dict | None:
+    claims = decode_supabase_jwt(token)
+    if not claims:
+        return None
+    membership = _membership(str(claims.get("sub") or ""), {"ai_operator"})
+    if not membership:
+        return None
+    return {**claims, "app_role": "ai_operator", "employee_id": membership.get("employee_id")}
 
 
 def owner_email() -> str:
@@ -172,12 +181,10 @@ def _session_secret() -> str:
 
 
 def owner_password_configured() -> bool:
-    # Compatibility health signal. Owner credentials are canonical in Supabase Auth.
     return bool(_supabase_url() and _supabase_server_key())
 
 
 def verify_owner_password(provided: str) -> bool:
-    # Deprecated. Password verification is performed by Supabase Auth.
     return bool(provided)
 
 
@@ -251,13 +258,9 @@ def _supabase_aal2(claims: dict) -> bool:
 
 
 def decode_owner_session(token: str) -> dict | None:
-    # Raw Supabase access tokens are accepted for owner scope only when the
-    # user has an active owner membership and the token satisfies AAL2 if MFA
-    # is required. The application-issued owner session is the compatibility
-    # path after password + TOTP login through /owner-auth/login.
     claims = decode_supabase_jwt(token)
     if claims:
-        membership = _membership(str(claims.get("sub") or ""), {"owner"})
+        membership = _membership(str(claims.get("sub") or ""), {"owner", "platform_owner"})
         if membership and (not owner_mfa_required() or _supabase_aal2(claims)):
             return {
                 "role": "owner",
@@ -295,7 +298,7 @@ def verify_customer_token(provided: str):
     claims = decode_supabase_jwt(provided)
     if not claims:
         return None
-    membership = _membership(str(claims.get("sub") or ""), {"customer", "employee", "owner"})
+    membership = _membership(str(claims.get("sub") or ""), {"customer", "employee", "ai_operator", "owner", "platform_owner"})
     if not membership:
         return None
     metadata = claims.get("user_metadata") if isinstance(claims.get("user_metadata"), dict) else {}
