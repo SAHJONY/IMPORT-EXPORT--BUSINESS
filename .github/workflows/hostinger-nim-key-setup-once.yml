@@ -1,0 +1,124 @@
+# Hostinger one-shot: write the NVIDIA NIM key into the WhatsApp service env
+# Manual dispatch only. Writes NVIDIA_NIM_API_KEY (GitHub secret, nvapi-... from
+# build.nvidia.com) into /etc/sahjony-fallback/import-export.env alongside the
+# OpenAI and Anthropic keys, and pins NVIDIA_NIM_MODEL.
+# Key travels via SCP to a 600 root-only temp file and is shredded after.
+# Backs up the env file first. Does NOT restart the service.
+# NIM is the brain's third failover (OpenAI -> Anthropic -> NVIDIA NIM) and only
+# fires when both primaries fail, so its trial-style free credits last.
+
+name: hostinger-nim-key-setup-once
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hostinger-nim-key-setup-once
+  cancel-in-progress: false
+
+jobs:
+  configure-nim-key:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      HOST: '69.62.68.67'
+      USER: root
+      PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+      NVIDIA_NIM_API_KEY_GH: ${{ secrets.NVIDIA_NIM_API_KEY }}
+    steps:
+      - name: Validate required secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "${PRIVATE_KEY:-}" ]] || { echo HOSTINGER_SSH_PRIVATE_KEY_MISSING=1 >&2; exit 2; }
+          [[ -n "${NVIDIA_NIM_API_KEY_GH:-}" ]] || { echo NVIDIA_NIM_API_KEY_GITHUB_SECRET_MISSING=1 >&2; exit 3; }
+          echo NVIDIA_NIM_API_KEY_GITHUB_SECRET_PRESENT=1
+
+      - name: Prepare secure SSH
+        shell: bash
+        run: |
+          set -euo pipefail
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/hostinger-nim
+          chmod 600 ~/.ssh/hostinger-nim
+          ssh-keygen -y -f ~/.ssh/hostinger-nim >/dev/null
+
+      - name: Transfer NVIDIA NIM key securely to Hostinger VPS
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          printf '%s' "$NVIDIA_NIM_API_KEY_GH" > "$RUNNER_TEMP/nim-api-key"
+          chmod 600 "$RUNNER_TEMP/nim-api-key"
+          ok=0
+          for attempt in 1 2 3 4; do
+            if scp -q -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=12 \
+              -i ~/.ssh/hostinger-nim "$RUNNER_TEMP/nim-api-key" "$USER@$HOST:/root/.nim-api-key.once"; then
+              ok=1
+              break
+            fi
+            echo "SSH_TRANSFER_ATTEMPT_${attempt}_FAILED=1"
+            sleep $((attempt * 4))
+          done
+          rm -f "$RUNNER_TEMP/nim-api-key"
+          [[ "$ok" == "1" ]] || { echo HOSTINGER_SSH_TRANSFER_FAILED=1 >&2; exit 5; }
+
+      - name: Write NVIDIA NIM key into WhatsApp service env
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=12 \
+            -i ~/.ssh/hostinger-nim "$USER@$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          KEY_TMP=/root/.nim-api-key.once
+          ENV_FILE=/etc/sahjony-fallback/import-export.env
+          trap 'rm -f "$KEY_TMP"' EXIT
+
+          echo HOSTINGER_VPS_SCOPE_ONLY=1
+          [[ -s "$KEY_TMP" ]] || { echo NIM_KEY_TRANSFER_MISSING=1 >&2; exit 20; }
+          [[ -f "$ENV_FILE" ]] || { echo WHATSAPP_ENV_FILE_MISSING=1 >&2; exit 21; }
+          chmod 600 "$KEY_TMP"
+
+          install -d -m 700 /root/env-backups
+          cp "$ENV_FILE" "/root/env-backups/import-export.env.pre-nim-key-$(date +%Y%m%d%H%M%S)"
+          echo ENV_BACKUP_WRITTEN=1
+
+          # Upsert key + model pin. Key value never leaves this box.
+          KEY_TMP="$KEY_TMP" ENV_FILE="$ENV_FILE" python3 - <<'PY'
+          import os
+          env_file = os.environ['ENV_FILE']
+          key = open(os.environ['KEY_TMP']).read().strip()
+          assert key.startswith('nvapi-'), 'unexpected nvidia nim key format'
+          updates = {
+              'NVIDIA_NIM_API_KEY': key,
+              'NVIDIA_NIM_MODEL': 'meta/llama-3.3-70b-instruct',
+          }
+          lines = open(env_file).read().splitlines()
+          seen = set()
+          out = []
+          for ln in lines:
+              name = ln.split('=', 1)[0] if '=' in ln else ln
+              if name in updates:
+                  seen.add(name)
+                  continue  # drop old value; re-append below
+              out.append(ln)
+          for name, val in updates.items():
+              out.append(f'{name}={val}')
+              if name in seen:
+                  print(f'REPLACED_{name}=1')
+              else:
+                  print(f'ADDED_{name}=1')
+          open(env_file, 'w').write('\n'.join(out) + '\n')
+          PY
+          chmod 600 "$ENV_FILE"
+
+          # Smoke checks: names + formats only, never the secret value.
+          grep -q '^NVIDIA_NIM_API_KEY=nvapi-' "$ENV_FILE" && echo NIM_KEY_FORMAT_OK=1
+          grep -q '^OPENAI_API_KEY=sk-' "$ENV_FILE" && echo OPENAI_KEY_STILL_PRESENT=1
+          grep -q '^ANTHROPIC_API_KEY=sk-ant-' "$ENV_FILE" && echo ANTHROPIC_KEY_STILL_PRESENT=1
+          grep -q '^NVIDIA_NIM_MODEL=meta/llama-3.3-70b-instruct$' "$ENV_FILE" && echo NIM_MODEL_PIN_OK=1
+          echo DONE_NO_RESTART=1
+          REMOTE

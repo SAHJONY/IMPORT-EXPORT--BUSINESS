@@ -30,7 +30,7 @@ TaskType = Literal[
     'CUSTOMER_RESPONSE',
     'GENERAL_ANALYSIS',
 ]
-RoutingMode = Literal['AUTO', 'OPENAI', 'ANTHROPIC', 'CONSENSUS']
+RoutingMode = Literal['AUTO', 'OPENAI', 'ANTHROPIC', 'NIM', 'CONSENSUS']
 
 HIGH_STAKES = {'COMPLIANCE_ANALYSIS', 'PAYMENT_ANALYSIS', 'EXECUTIVE_STRATEGY'}
 PROHIBITED_EXECUTION_PHRASES = {
@@ -130,6 +130,10 @@ def anthropic_configured() -> bool:
     return bool(os.getenv('ANTHROPIC_API_KEY', '').strip())
 
 
+def nim_configured() -> bool:
+    return bool(os.getenv('NVIDIA_NIM_API_KEY', '').strip())
+
+
 MODEL_STACK = {
     'openai_primary': lambda: model('OPENAI_PRIMARY_MODEL', 'gpt-5.6-sol'),
     'openai_fast': lambda: model('OPENAI_PRIMARY_MODEL', 'gpt-5.6-sol'),
@@ -137,6 +141,9 @@ MODEL_STACK = {
     'anthropic_frontier': lambda: model('ANTHROPIC_FRONTIER_MODEL', 'claude-fable-5'),
     'anthropic_primary': lambda: model('ANTHROPIC_PRIMARY_MODEL', 'claude-opus-5'),
     'anthropic_fast': lambda: model('ANTHROPIC_FAST_MODEL', 'claude-sonnet-5'),
+    # Third failover: NVIDIA NIM hosted inference (OpenAI-compatible /v1/chat/completions).
+    # Model IDs are vendor-prefixed and rotate; verify against GET /v1/models at deploy.
+    'nim_primary': lambda: model('NVIDIA_NIM_MODEL', 'meta/llama-3.3-70b-instruct'),
 }
 
 SYSTEM_POLICY = '''You are the decision-support brain for SAHJONY Global Trade, a managed import-export and global sourcing business.
@@ -221,7 +228,41 @@ async def call_anthropic(prompt: str, model_id: str, max_tokens: int, system_pol
     return {'provider': 'anthropic', 'model': model_id, 'text': text, 'raw_id': j.get('id')}
 
 
+async def call_nim(prompt: str, model_id: str, max_tokens: int, system_policy: str = SYSTEM_POLICY) -> dict:
+    """Third failover: NVIDIA NIM hosted inference.
+
+    OpenAI-compatible chat completions at https://integrate.api.nvidia.com/v1.
+    Key is the nvapi-... token from build.nvidia.com (NVIDIA_NIM_API_KEY).
+    Only fires when OpenAI and Anthropic both fail, so free-tier credits last.
+    """
+    key = os.getenv('NVIDIA_NIM_API_KEY', '').strip()
+    if not key:
+        raise RuntimeError('NVIDIA_NIM_API_KEY is not configured')
+    base = os.getenv('NVIDIA_NIM_BASE_URL', 'https://integrate.api.nvidia.com/v1').strip() or 'https://integrate.api.nvidia.com/v1'
+    payload = {
+        'model': model_id,
+        'max_tokens': max_tokens,
+        'stream': False,
+        'messages': [
+            {'role': 'system', 'content': system_policy},
+            {'role': 'user', 'content': prompt},
+        ],
+    }
+    async with httpx.AsyncClient(timeout=90) as client:
+        r = await client.post(f'{base}/chat/completions', headers={'Authorization': f'Bearer {key}', 'Content-Type': 'application/json'}, json=payload)
+        if r.status_code >= 400:
+            raise RuntimeError(f'NvidiaNIM HTTP {r.status_code}: {r.text[:500]}')
+        j = r.json()
+    text = ''
+    choices = j.get('choices', [])
+    if choices:
+        text = (choices[0].get('message', {}) or {}).get('content') or ''
+    return {'provider': 'nvidia_nim', 'model': model_id, 'text': text, 'raw_id': j.get('id')}
+
+
 def route(task: str, mode: str, high_stakes: bool) -> tuple[str, str, str | None, str | None]:
+    if mode == 'NIM':
+        return 'nvidia_nim', MODEL_STACK['nim_primary'](), None, None
     if mode == 'ANTHROPIC':
         return 'anthropic', MODEL_STACK['anthropic_primary'](), None, None
     if mode == 'CONSENSUS' or high_stakes:
@@ -265,9 +306,11 @@ async def health():
     return {
         'status': 'ok',
         'service': 'sahjony-gpt-5.6-sol-business-brain',
-        'version': '2.3.0',
+        'version': '2.4.0',
         'openai_configured': openai_configured(),
         'anthropic_configured': anthropic_configured(),
+        'nim_configured': nim_configured(),
+        'failover_chain': ['openai', 'anthropic', 'nvidia_nim'],
         'models': {k: v() for k, v in MODEL_STACK.items()},
         'primary_reasoning_authority': 'gpt-5.6-sol',
         'anthropic_role': 'independent_review_consensus_and_resilience',
@@ -321,7 +364,26 @@ async def run_brain(
     await audit(base)
 
     async def invoke(provider: str, model_id: str):
-        return await (call_openai(prompt, model_id, payload.max_output_tokens, active_system_policy) if provider == 'openai' else call_anthropic(prompt, model_id, payload.max_output_tokens, active_system_policy))
+        if provider == 'openai':
+            return await call_openai(prompt, model_id, payload.max_output_tokens, active_system_policy)
+        if provider == 'anthropic':
+            return await call_anthropic(prompt, model_id, payload.max_output_tokens, active_system_policy)
+        return await call_nim(prompt, model_id, payload.max_output_tokens, active_system_policy)
+
+    def failover_chain() -> list[tuple[str, str]]:
+        """Sequential provider chain: primary -> secondary -> anthropic -> nvidia_nim.
+
+        NIM is the last resort by design: it only fires when OpenAI and Anthropic
+        both fail, so its trial-style free credits are spent only in emergencies.
+        """
+        chain: list[tuple[str, str]] = [(p_provider, p_model)]
+        if s_provider and s_model and (s_provider, s_model) not in chain:
+            chain.append((s_provider, s_model))
+        if anthropic_configured() and all(p != 'anthropic' for p, _ in chain):
+            chain.append(('anthropic', MODEL_STACK['anthropic_primary']()))
+        if nim_configured() and all(p != 'nvidia_nim' for p, _ in chain):
+            chain.append(('nvidia_nim', MODEL_STACK['nim_primary']()))
+        return chain
 
     try:
         if s_provider and s_model:
@@ -342,9 +404,18 @@ async def run_brain(
                     answer = 'MODEL A:\n' + good[0]['text'] + '\n\nMODEL B:\n' + good[1]['text']
                 consensus = {'mode': 'DUAL_MODEL_CONSENSUS', 'providers': [{'provider': x['provider'], 'model': x['model']} for x in good], 'errors': errors}
         else:
-            result = await invoke(p_provider, p_model)
+            errors: list[str] = []
+            result = None
+            for provider, model_id in failover_chain():
+                try:
+                    result = await invoke(provider, model_id)
+                    break
+                except Exception as exc:
+                    errors.append(f'{provider}/{model_id}: {exc}')
+            if result is None:
+                raise RuntimeError('All AI providers failed: ' + '; '.join(errors))
             answer = result['text']
-            consensus = {'mode': 'SINGLE_MODEL', 'providers': [{'provider': result['provider'], 'model': result['model']}]}
+            consensus = {'mode': 'SINGLE_MODEL_WITH_FAILOVER', 'providers': [{'provider': result['provider'], 'model': result['model']}], 'failover_errors': errors}
 
         answer, truthfulness_gate_applied = enforce_execution_truthfulness(answer, evidence)
         customer_internal_separation_applied = False
