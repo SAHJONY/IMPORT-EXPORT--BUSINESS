@@ -1,0 +1,134 @@
+name: Hostinger Anthropic Brain Setup Once
+
+# Wires the Anthropic side of Sofia's WhatsApp brain (ai_brain_api.py) on the
+# Hostinger VPS and pins BOTH providers to the most economical current models.
+# Trigger: manual dispatch only, after Juan saves ANTHROPIC_API_KEY as a repo
+# secret AND approves this run. Never auto-runs on push.
+#
+# Economical model picks (verified against Sep 2026 provider pricing):
+#   OpenAI primary    gpt-5.6-terra   (~$2/$12 per 1M in/out)  was gpt-5.6-sol (~$4-5/$20-30)
+#   Anthropic frontier claude-opus-5  (~$5/$25)                was claude-fable-5 (~$10/$50)
+#   Anthropic primary  claude-sonnet-5 (~$2/$10)
+#   Anthropic fast     claude-haiku-4-5 (~$1/$5)
+# Routing stays AUTO (code default): OpenAI <-> Anthropic failover per reply.
+#
+# Safety: key travels via SCP to a 600 root-only temp file, is written into the
+# root-owned 600 service env file, and the temp file is shredded. The key value
+# is NEVER echoed to logs. Does NOT restart any service (restart needs Juan's
+# explicit approval at dispatch time).
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hostinger-anthropic-brain-setup-once
+  cancel-in-progress: false
+
+jobs:
+  configure-anthropic-brain:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      HOST: '69.62.68.67'
+      USER: root
+      PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+      ANTHROPIC_API_KEY_GH: ${{ secrets.ANTHROPIC_API_KEY }}
+    steps:
+      - name: Validate required secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "${PRIVATE_KEY:-}" ]] || { echo HOSTINGER_SSH_PRIVATE_KEY_MISSING=1 >&2; exit 2; }
+          [[ -n "${ANTHROPIC_API_KEY_GH:-}" ]] || { echo ANTHROPIC_API_KEY_GITHUB_SECRET_MISSING=1 >&2; exit 3; }
+          echo ANTHROPIC_API_KEY_GITHUB_SECRET_PRESENT=1
+
+      - name: Prepare secure SSH
+        shell: bash
+        run: |
+          set -euo pipefail
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/hostinger-anthropic
+          chmod 600 ~/.ssh/hostinger-anthropic
+          ssh-keygen -y -f ~/.ssh/hostinger-anthropic >/dev/null
+
+      - name: Transfer Anthropic key securely to Hostinger VPS
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          printf '%s' "$ANTHROPIC_API_KEY_GH" > "$RUNNER_TEMP/anthropic-api-key"
+          chmod 600 "$RUNNER_TEMP/anthropic-api-key"
+          ok=0
+          for attempt in 1 2 3 4; do
+            if scp -q -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=12 \
+              -i ~/.ssh/hostinger-anthropic "$RUNNER_TEMP/anthropic-api-key" "$USER@$HOST:/root/.anthropic-api-key.once"; then
+              ok=1
+              break
+            fi
+            echo "SSH_TRANSFER_ATTEMPT_${attempt}_FAILED=1"
+            sleep $((attempt * 4))
+          done
+          rm -f "$RUNNER_TEMP/anthropic-api-key"
+          [[ "$ok" == "1" ]] || { echo HOSTINGER_SSH_TRANSFER_FAILED=1 >&2; exit 5; }
+
+      - name: Write Anthropic key + economical models into WhatsApp service env
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=12 \
+            -i ~/.ssh/hostinger-anthropic "$USER@$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          KEY_TMP=/root/.anthropic-api-key.once
+          ENV_FILE=/etc/sahjony-fallback/import-export.env
+          trap 'rm -f "$KEY_TMP"' EXIT
+
+          echo HOSTINGER_VPS_SCOPE_ONLY=1
+          [[ -s "$KEY_TMP" ]] || { echo ANTHROPIC_KEY_TRANSFER_MISSING=1 >&2; exit 20; }
+          [[ -f "$ENV_FILE" ]] || { echo WHATSAPP_ENV_FILE_MISSING=1 >&2; exit 21; }
+          chmod 600 "$KEY_TMP"
+
+          install -d -m 700 /root/env-backups
+          cp "$ENV_FILE" "/root/env-backups/import-export.env.pre-anthropic-$(date +%Y%m%d%H%M%S)"
+          echo ENV_BACKUP_WRITTEN=1
+
+          # Upsert key + economical model pins. Key value never leaves this box.
+          KEY_TMP="$KEY_TMP" ENV_FILE="$ENV_FILE" python3 - <<'PY'
+          import os
+          env_file = os.environ['ENV_FILE']
+          key = open(os.environ['KEY_TMP']).read().strip()
+          assert key.startswith('sk-ant-'), 'unexpected anthropic key format'
+          updates = {
+              'ANTHROPIC_API_KEY': key,
+              'OPENAI_PRIMARY_MODEL': 'gpt-5.6-terra',
+              'ANTHROPIC_FRONTIER_MODEL': 'claude-opus-5',
+              'ANTHROPIC_PRIMARY_MODEL': 'claude-sonnet-5',
+              'ANTHROPIC_FAST_MODEL': 'claude-haiku-4-5',
+          }
+          lines = open(env_file).read().splitlines()
+          seen = set()
+          out = []
+          for ln in lines:
+              name = ln.split('=', 1)[0] if '=' in ln else ln
+              if name in updates:
+                  seen.add(name)
+                  continue  # drop old value; re-append below
+              out.append(ln)
+          for name, val in updates.items():
+              out.append(f'{name}={val}')
+              if name in seen:
+                  print(f'REPLACED_{name}=1')
+              else:
+                  print(f'ADDED_{name}=1')
+          open(env_file, 'w').write('\n'.join(out) + '\n')
+          PY
+          chmod 600 "$ENV_FILE"
+
+          # Smoke checks: names + formats only, never the secret value.
+          grep -q '^ANTHROPIC_API_KEY=sk-ant-' "$ENV_FILE" && echo ANTHROPIC_KEY_FORMAT_OK=1
+          grep -q '^OPENAI_PRIMARY_MODEL=gpt-5.6-terra$' "$ENV_FILE" && echo OPENAI_MODEL_PIN_OK=1
+          grep -q '^ANTHROPIC_PRIMARY_MODEL=claude-sonnet-5$' "$ENV_FILE" && echo ANTHROPIC_MODEL_PIN_OK=1
+          echo DONE_NO_RESTART=1
+          REMOTE
