@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field
 from auth import verify_owner_token
 from insforge_backend import get_backend, persistent_backend_status
 import sofia_memory
+import whatsapp_audio
 from sofia_hermes_whatsapp_environment import generate_hermes_whatsapp_reply
 from sofia_whatsapp_runtime import generate_sofia_reply
 from sofia_hermes_nim_brain import configured as hermes_configured, model_name as hermes_model_name
@@ -329,6 +330,7 @@ async def _record_outbound(
     provider: str = "meta_whatsapp_cloud",
     delivery_status: str = "submitted",
     notification_id: str | None = None,
+    message_type: str = "text",
 ) -> None:
     try:
         await get_backend().insert("outbound_notifications", {
@@ -361,7 +363,7 @@ async def _record_outbound(
             "direction": "outbound",
             "phone": _normalize_phone(to),
             "contact_name": None,
-            "message_type": "text",
+            "message_type": message_type,
             "text": body[:4096],
             "provider": provider,
             "received_at": _now(),
@@ -413,6 +415,65 @@ async def _send_text(
         customer_id=customer_id,
         source_url=source_url,
         autonomous=autonomous,
+    )
+    return {"status": "submitted", "provider": "meta_whatsapp_cloud", "message_id": message_id, "recipient": recipient}
+
+
+async def _send_audio(
+    cfg: dict[str, str],
+    *,
+    to: str,
+    audio: bytes,
+    transcript: str = "",
+    lead_id: str | None = None,
+    customer_id: str | None = None,
+    source_url: str | None = None,
+    autonomous: bool = False,
+) -> dict[str, Any]:
+    """Send a Sofia reply as a WhatsApp audio message (Cloud API path).
+
+    Mirrors _send_text: same config check, same 24h compliance gate, same
+    outbound recording. The spoken reply's transcript is stored in the
+    whatsapp_messages row so the Sofia brain's conversation history still
+    sees what was said. Uploads the MP3 via the Graph media endpoint first,
+    then sends it by media id.
+    """
+    if not _send_ready(cfg):
+        raise HTTPException(status_code=503, detail="WhatsApp Cloud API is not configured for sending")
+    if not audio:
+        raise HTTPException(status_code=400, detail="Empty audio payload")
+    eligibility = await _assert_compliant_session_outbound(to)
+    recipient = eligibility["recipient"]
+    media_id = await whatsapp_audio.upload_media(
+        cfg.get("graph_api_version", ""),
+        cfg["phone_number_id"],
+        cfg.get("access_token", ""),
+        audio,
+    )
+    result = await _meta_json(
+        _graph_url(cfg, f"{cfg['phone_number_id']}/messages"),
+        access_token=cfg["access_token"],
+        method="POST",
+        payload={
+            "messaging_product": "whatsapp",
+            "recipient_type": "individual",
+            "to": recipient,
+            "type": "audio",
+            "audio": {"id": media_id},
+        },
+    )
+    messages = result.get("messages") or []
+    message_id = messages[0].get("id") if messages and isinstance(messages[0], dict) else None
+    body = transcript.strip()[:4096] if transcript and transcript.strip() else "[audio reply]"
+    await _record_outbound(
+        to=recipient,
+        body=body,
+        provider_message_id=message_id,
+        lead_id=lead_id,
+        customer_id=customer_id,
+        source_url=source_url,
+        autonomous=autonomous,
+        message_type="audio",
     )
     return {"status": "submitted", "provider": "meta_whatsapp_cloud", "message_id": message_id, "recipient": recipient}
 
@@ -790,6 +851,7 @@ async def _process_inbound(
     message_type: str,
     text: str,
     contact_name: str | None,
+    audio_media_id: str | None = None,
 ) -> None:
     try:
         clean_phone = _normalize_phone(phone or "") if phone else ""
@@ -798,10 +860,41 @@ async def _process_inbound(
     if await _is_owner_whatsapp(clean_phone or phone):
         await _record_owner_private_whatsapp_event(phone=clean_phone or phone, message_id=message_id, text=text, message_type=message_type, direction="inbound")
         return
-    opted_out = bool(text and _opt_out(text))
-    lead_id = await _upsert_whatsapp_lead(clean_phone, text, contact_name, opted_out=opted_out) if clean_phone else None
-    await _record_inbound_event(clean_phone or phone, message_id, text, message_type, lead_id)
-    if not clean_phone or message_type != "text":
+    # Voice-note turn: transcribe via Whisper so the transcription is what
+    # memory, the lead record, and the Sofia brain see. Fail-closed: the audio
+    # pipeline only runs when every gate passes AND transcription succeeds;
+    # otherwise the turn is recorded below exactly like today's non-text
+    # messages (no reply). The raw "[audio received]" turn is also recorded by
+    # the caller, so nothing is ever lost.
+    is_audio_turn = message_type == "audio" and bool(audio_media_id)
+    effective_text = text
+    if is_audio_turn:
+        pipeline_ok = (
+            _ai_auto_reply_enabled()
+            and whatsapp_audio.audio_pipeline_ready()
+            and _send_ready(cfg)
+        )
+        transcription = ""
+        if pipeline_ok:
+            try:
+                audio_bytes, _mime = await whatsapp_audio.download_whatsapp_media(
+                    cfg.get("graph_api_version", ""),
+                    cfg.get("access_token", ""),
+                    audio_media_id or "",
+                )
+                transcription = (await whatsapp_audio.transcribe_audio(audio_bytes) or "").strip()
+            except Exception:
+                transcription = ""
+        if transcription:
+            effective_text = transcription
+        else:
+            is_audio_turn = False
+    opted_out = bool(effective_text and _opt_out(effective_text))
+    lead_id = await _upsert_whatsapp_lead(clean_phone, effective_text, contact_name, opted_out=opted_out) if clean_phone else None
+    await _record_inbound_event(clean_phone or phone, message_id, effective_text, message_type, lead_id)
+    if not clean_phone:
+        return
+    if not is_audio_turn and message_type != "text":
         return
     if opted_out:
         try:
@@ -819,11 +912,21 @@ async def _process_inbound(
     if not (_ai_auto_reply_enabled() and cognition_ready and _send_ready(cfg)):
         return
     reply = await generate_sofia_reply(
-        text, contact_name,
+        effective_text, contact_name,
         owner_context=await _is_owner_whatsapp(phone),
         sender_phone=clean_phone or None,
     )
-    if not reply:
+    if not reply or not reply.strip():
+        return
+    reply = reply.strip()[:4096]
+    if is_audio_turn:
+        # Audio in -> audio out. Never a text fallback: the contact spoke, so
+        # Sofia answers spoken. TTS failure => no reply (fail closed).
+        try:
+            speech = await whatsapp_audio.synthesize_speech(reply)
+            await _send_audio(cfg, to=clean_phone, audio=speech, transcript=reply, lead_id=lead_id, autonomous=True)
+        except Exception:
+            pass
         return
     try:
         await _send_text(cfg, to=clean_phone, body=reply, lead_id=lead_id, autonomous=True)
@@ -1618,8 +1721,13 @@ async def whatsapp_webhook_receive(
                     continue
                 if msg_type == "text":
                     text = str((msg.get("text") or {}).get("body") or "")
+                    audio_media_id = None
+                elif msg_type == "audio":
+                    audio_media_id = whatsapp_audio.extract_audio_media_id(msg)
+                    text = "[audio received]"
                 else:
                     text = f"[{msg_type} received]"
+                    audio_media_id = None
                 contact_name = contacts.get(phone or "") or None
                 await _register_inbound_message(
                     phone=phone,
@@ -1636,6 +1744,7 @@ async def whatsapp_webhook_receive(
                     message_type=msg_type,
                     text=text,
                     contact_name=contact_name,
+                    audio_media_id=audio_media_id,
                 )
                 accepted += 1
     return {
@@ -1702,6 +1811,37 @@ def _bridge_sender_phone(msg: dict[str, Any]) -> str:
 async def _handle_bridge_message(msg: dict[str, Any]) -> None:
     body = str(msg.get("body") or msg.get("text") or "").strip()
     if not body:
+        # Voice notes on the Hermes bridge arrive without text body and were
+        # silently dropped here. Detect explicit audio markers, record the
+        # turn so it is visible (not lost), and return without replying: the
+        # bridge does not expose a documented media-download schema in this
+        # repo, so audio->audio on the bridge path is not yet wired. The Meta
+        # Cloud API webhook path (whatsapp_webhook_receive) is the supported
+        # voice-note pipeline.
+        if whatsapp_audio.bridge_message_is_audio(msg) and not (msg.get("fromMe") or msg.get("fromOwner")):
+            phone = _bridge_sender_phone(msg)
+            if phone and not await _is_owner_whatsapp(phone):
+                try:
+                    clean = _normalize_phone(phone)
+                except HTTPException:
+                    clean = ""
+                message_id = str(
+                    msg.get("id") or msg.get("messageId") or (msg.get("key") or {}).get("id") or ""
+                ) or None
+                if message_id and not await _message_seen(message_id):
+                    contact_name = str(msg.get("senderName") or msg.get("pushName") or msg.get("contactName") or "") or None
+                    await _register_inbound_message(
+                        phone=clean or phone,
+                        message_id=message_id,
+                        message_type="audio",
+                        text="[audio received]",
+                        contact_name=contact_name,
+                        provider="hermes_whatsapp",
+                        direction="inbound",
+                    )
+                    await _record_inbound_event(
+                        clean or phone, message_id, "[audio received]", "audio", None, provider="hermes_whatsapp"
+                    )
         return
     body = body[:4000]
     # Never reply to our own echoes or the owner's messages.
