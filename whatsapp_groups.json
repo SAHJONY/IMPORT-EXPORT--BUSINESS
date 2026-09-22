@@ -76,6 +76,20 @@
       "notes": "Command center group created by Juan 2026-09-21 (on-device name may vary slightly; confirm after JID discovery). Members: Rosmel, Jazmine, Tony, Daniel, Rolando, Ingrid. Sofia tagged as CEO. JID pending discovery via invite link — populate before first group send.",
       "purpose": "command",
       "region": "cuba"
+    },
+    {
+      "alias": "reinier-ventas-cuba",
+      "name": "Emprendedor… (Reinier Balmaseda Galan) — full name pending, screenshot truncated",
+      "jid": "120363411178697280@g.us",
+      "purpose": "sales",
+      "agent": "Reinier Balmaseda Galan",
+      "agent_phone": null,
+      "region": "cuba",
+      "language": "es",
+      "admin_status": "admin",
+      "admin_verified_at": "2026-09-22",
+      "admin_verified_by": "juan",
+      "notes": "Created by Reinier Balmaseda Galan 2026-09-21 11:01 PM CDT; 2 members (Sofia + Reinier). JID discovered via /whatsapp/hermes/groups/join 2026-09-22. How-it-works explanation posted 2026-09-22 (4 msgs, Juan-approved). Admin status unverified — confirm Sofia is admin. Sofia is admin (confirmed by Juan 2026-09-22)."
     }
   ],
   "version": 1
