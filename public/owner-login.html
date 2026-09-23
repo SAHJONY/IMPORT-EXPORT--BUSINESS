@@ -597,12 +597,12 @@
       const SUPABASE_KEY = "sb_publishable_-I-dlfNYk4byxK5WQKuqlQ_WIAGkuA-";
       const initialAuthFragment = location.hash;
       const requestedNext =
-        new URLSearchParams(location.search).get("next") || "/owner/dashboard";
+        new URLSearchParams(location.search).get("next") || "/owner/cuba-mipymes";
       const ownerNext =
         /^\/owner(?:\/|$)/.test(requestedNext) &&
         !requestedNext.startsWith("//")
           ? requestedNext
-          : "/owner/dashboard";
+          : "/owner/cuba-mipymes";
       const sb = window.supabase?.createClient
         ? window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
             auth: {
