@@ -44,7 +44,7 @@ async function load(reset){
  if(busy)return;if(reset)offset=0;busy=true;$('status').textContent='LOADING';$('status').className='pending';$('content').className='status';$('content').textContent='Consultando registros…';$('prev').disabled=true;$('next').disabled=true;
  var controller=new AbortController(),timeout=setTimeout(function(){controller.abort()},18000);
  try{
-  var q=$('search').value.trim(),province=$('province').value,p=new URLSearchParams({limit:String(limit),offset:String(offset)});if(q)p.set('q',q);if(province)p.set('province',province);
+  var q=$('search').value.trim(),province=$('province').value,p=new URLSearchParams({limit:String(limit),offset:String(offset),sort:'contact'});if(q)p.set('q',q);if(province)p.set('province',province);
   var r=await fetch('/crm/cuba-mipymes/list?'+p.toString(),{headers:{Authorization:'Bearer '+token},cache:'no-store',signal:controller.signal});var j=await r.json();
   if(r.status===401||r.status===403){sessionStorage.removeItem('sahjony.owner.token');location.replace('/owner-login?next='+encodeURIComponent(location.pathname+location.search));return}
   if(!r.ok)throw new Error(j.detail||('HTTP '+r.status));

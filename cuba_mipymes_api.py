@@ -37,9 +37,12 @@ async def rows():
    if len(p)<1000: break
    off+=len(p)
  return out
-async def paged_private_rows(limit:int,offset:int,q:str|None=None,province_filter:str|None=None):
+async def paged_private_rows(limit:int,offset:int,q:str|None=None,province_filter:str|None=None,sort:str|None=None):
  u,k=cfg(); h={'apikey':k,'Authorization':f'Bearer {k}','Accept':'application/json','Prefer':'count=exact'}
- params={'logical_table':'eq.external_trade_prospects','data->>actor_type':'in.(MIPYME_PRIVADA,EMPRESA_PRIVADA,OTHER_NON_STATE_VERIFIED)','select':'record_key,data','order':'record_key.asc','limit':str(limit),'offset':str(offset)}
+ order='record_key.asc'
+ if sort=='contact':
+  order='data->>public_email.nullslast,data->>public_phone.nullslast,record_key.asc'
+ params={'logical_table':'eq.external_trade_prospects','data->>actor_type':'in.(MIPYME_PRIVADA,EMPRESA_PRIVADA,OTHER_NON_STATE_VERIFIED)','select':'record_key,data','order':order,'limit':str(limit),'offset':str(offset)}
  if q:
   term=re.sub(r'[^0-9A-Za-zÁÉÍÓÚÜÑáéíóúüñ .&@+-]+',' ',q).strip()[:120]
   if term: params['or']=f'(data->>buyer_company.ilike.*{term}*,data->>company_name.ilike.*{term}*,data->>business_name.ilike.*{term}*,data->>primary_activity.ilike.*{term}*)'
@@ -178,8 +181,8 @@ async def health():
 @app.get('/cuba-mipymes-api/list')
 @app.get('/crm/cuba-mipymes')
 @app.get('/crm/cuba-mipymes/list')
-async def list_records(limit:int=Query(100,ge=1,le=250),offset:int=Query(0,ge=0),q:str|None=Query(None,max_length=120),province:str|None=Query(None,max_length=80)):
- page,total=await paged_private_rows(limit,offset,q,province); seen=set(); out=[]
+async def list_records(limit:int=Query(100,ge=1,le=250),offset:int=Query(0,ge=0),q:str|None=Query(None,max_length=120),province:str|None=Query(None,max_length=80),sort:str|None=Query(None,max_length=20)):
+ page,total=await paged_private_rows(limit,offset,q,province,sort); seen=set(); out=[]
  for r in page:
   k=norm(r.get('buyer_company') or r.get('company_name') or r.get('business_name'))
   if not k or k in seen or not is_private(r):continue
@@ -189,7 +192,13 @@ async def list_records(limit:int=Query(100,ge=1,le=250),offset:int=Query(0,ge=0)
   for x in ('public_email','public_phone','buyer_contact','contact_source_name','contact_source_url','contact_verified_at'):
    if flat.get(x):rec[x]=flat.get(x)
   out.append(rec)
- out.sort(key=lambda x:str(x.get('buyer_company') or '').casefold())
+ if sort=='contact':
+  def _contact_rank(x):
+   email=bool(x.get('public_email')); phone=bool(x.get('public_phone'))
+   return (0 if (email and phone) else 1 if (email or phone) else 2, str(x.get('buyer_company') or '').casefold())
+  out.sort(key=_contact_rank)
+ else:
+  out.sort(key=lambda x:str(x.get('buyer_company') or '').casefold())
  return {'status':'ok','count':len(out),'total':total,'limit':limit,'offset':offset,'has_more':offset+limit<total,'records':out,'classification':'RESEARCH / VERIFIED PUBLIC SOURCE','notice':'Registry-only records are not active buyers or RFQs without independent demand evidence.'}
 MAX_CONTACT_ITEMS=100
 PHONE_RE=re.compile(r'^[\d\s+\-()/]{6,40}$')
