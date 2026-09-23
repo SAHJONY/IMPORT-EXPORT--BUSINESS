@@ -23,14 +23,15 @@ if(!token){location.replace('/owner-login?next='+encodeURIComponent(location.pat
 var $=function(id){return document.getElementById(id)},limit=100,offset=0,busy=false,searchTimer=null,lastQuery='',onlyMissing=false,lastRecords=[];
 function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
 function cleanPhone(v){return String(v||'').replace(/[^\d+]/g,'')}
+function companyName(r){if(r.buyer_company)return r.buyer_company;var k=String(r.record_key||'').split(':').pop().replace(/_/g,' ').replace(/\s+/g,' ').trim();if(!k)return 'Empresa privada';k=k.replace(/\bsurl$/i,'S.U.R.L.').replace(/\bsrl$/i,'S.R.L.').replace(/\bsa$/i,'S.A.');return k.toUpperCase()}
 function paramsFor(r){
- var p=new URLSearchParams();p.set('company',r.buyer_company||'');p.set('contact',r.buyer_contact||'');p.set('phone',r.public_phone||'');p.set('record',r.external_reference||'');p.set('source',r.source_url||'');
+ var p=new URLSearchParams(); p.set('company',companyName(r));p.set('contact',r.buyer_contact||'');p.set('phone',r.public_phone||'');p.set('record',r.external_reference||'');p.set('source',r.source_url||'');
  return '/owner/communications-os?'+p.toString()
 }
 function render(records){
  if(!records.length){$('content').className='status';$('content').innerHTML=onlyMissing?'Sin registros sin contacto en esta página.':'No se encontraron registros con estos filtros.';return}
  $('content').className='cards';$('content').innerHTML=records.map(function(r){
-  var company=r.buyer_company||'Empresa privada';var activity=r.product_category||r.product_description||'Actividad pendiente de enriquecer';var location=[r.municipality,r.province,'Cuba'].filter(Boolean).join(' · ');
+  var company=companyName(r);var activity=r.product_category||r.product_description||'Actividad pendiente de enriquecer';var location=[r.municipality,r.province,'Cuba'].filter(Boolean).join(' · ');
   var email=r.public_email||'';var phone=cleanPhone(r.public_phone||'');var hasContact=!!(email||phone);
   var cBadge=hasContact?'<span class="tag ct-ok">Contacto completo</span>':'<span class="tag ct-no">Sin contacto</span>';
   var cSrc='';if(r.contact_source_name){var cSrcName=esc(r.contact_source_name);cSrc='<div class="csrc">Fuente del contacto: '+(r.contact_source_url?'<a target="_blank" rel="noopener" href="'+esc(r.contact_source_url)+'">'+cSrcName+'</a>':cSrcName)+'</div>'}
