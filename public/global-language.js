@@ -87,7 +87,7 @@
   }
   function restore(){if(originalTitle)document.title=originalTitle;const walker=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT);let node;while((node=walker.nextNode()))if(originalText.has(node))node.nodeValue=originalText.get(node);document.querySelectorAll('*').forEach(el=>{const map=originalAttrs.get(el);if(map)for(const [key,value] of Object.entries(map))el.setAttribute(key,value);if(el.tagName==='OPTION'&&originalText.has(el))el.textContent=originalText.get(el)})}
   function state(kind,label){const root=document.querySelector('.sahjony-language');if(!root)return;root.dataset.state=kind;const small=root.querySelector('small');if(small)small.textContent=label||''}
-  const ES_FALLBACK={'/marketplace':'/es','/industrial-marketplace.html':'/es','/marketplace-search.html':'/es','/partners':'/es','/partners.html':'/es','/how-it-works':'/es','/customer-guide':'/es','/customer-guide.html':'/es','/global-sourcing':'/es','/global-sourcing.html':'/es','/suppliers':'/es/suppliers','/suppliers.html':'/es/suppliers','/supplier-commercial-terms':'/es/supplier-commercial-terms','/supplier-commercial-terms.html':'/es/supplier-commercial-terms','/supplier-cuba-terms':'/es/supplier-cuba-terms','/customer-payments':'/es/customer-payments','/lead-scout':'/es','/government-contracting':'/es'};
+  const ES_FALLBACK={'/marketplace':'/es','/industrial-marketplace.html':'/es','/marketplace-search':'/es/marketplace-search','/marketplace-search.html':'/es/marketplace-search','/partners':'/es/partners','/partners.html':'/es/partners','/how-it-works':'/es','/customer-guide':'/es','/customer-guide.html':'/es','/global-sourcing':'/es','/global-sourcing.html':'/es','/suppliers':'/es/suppliers','/suppliers.html':'/es/suppliers','/supplier-commercial-terms':'/es/supplier-commercial-terms','/supplier-commercial-terms.html':'/es/supplier-commercial-terms','/supplier-cuba-terms':'/es/supplier-cuba-terms','/customer-payments':'/es/customer-payments','/lead-scout':'/es','/government-contracting':'/es'};
   function spanishFallback(target){
     if(baseLocale(target)!=='es')return '';
     const path=(location.pathname||'/').toLowerCase().replace(/\/+$/,'')||'/';
@@ -106,12 +106,16 @@
     if(currentPath==='/start'&&baseLocale(target)==='es'){setStored('es');location.assign('/es/start');return}
     if((currentPath==='/about'||currentPath==='/about.html')&&baseLocale(target)==='es'){setStored('es');location.assign('/es/about');return}
     if((currentPath==='/trust-center'||currentPath==='/trust-center.html')&&baseLocale(target)==='es'){setStored('es');location.assign('/es/trust-center');return}
-    if((currentPath==='/find'||currentPath==='/find.html')&&baseLocale(target)==='es'){setStored('es');location.assign('/es/find');return}
+    if((currentPath==='/find'||currentPath==='/find.html')&&baseLocale(target)==='es'){setStored('es');location.assign('/es/marketplace-search');return}
+    if((currentPath==='/marketplace-search'||currentPath==='/marketplace-search.html')&&baseLocale(target)==='es'){setStored('es');location.assign('/es/marketplace-search');return}
+    if((currentPath==='/partners'||currentPath==='/partners.html')&&baseLocale(target)==='es'){setStored('es');location.assign('/es/partners');return}
     if(currentPath==='/customer-payments'&&baseLocale(target)==='es'){setStored('es');location.assign('/es/customer-payments');return}
     if(currentPath==='/supplier-commercial-terms'&&baseLocale(target)==='es'){setStored('es');location.assign('/es/supplier-commercial-terms');return}
     if(currentPath==='/suppliers'&&baseLocale(target)==='es'){setStored('es');location.assign('/es/suppliers');return}
     if(currentPath==='/supplier-cuba-terms'&&baseLocale(target)==='es'){setStored('es');location.assign('/es/supplier-cuba-terms');return}
-    if(currentPath==='/es/find'&&baseLocale(target)==='en'){setStored('en-US');location.assign('/find.html');return}
+    if(currentPath==='/es/find'&&baseLocale(target)==='en'){setStored('en-US');location.assign('/marketplace-search');return}
+    if((currentPath==='/es/marketplace-search')&&baseLocale(target)==='en'){setStored('en-US');location.assign('/marketplace-search');return}
+    if(currentPath==='/es/partners'&&baseLocale(target)==='en'){setStored('en-US');location.assign('/partners');return}
     if(currentPath==='/es/customer-payments'&&baseLocale(target)==='en'){setStored('en-US');location.assign('/customer-payments');return}
     if(currentPath==='/es/supplier-commercial-terms'&&baseLocale(target)==='en'){setStored('en-US');location.assign('/supplier-commercial-terms');return}
     if(currentPath==='/es/suppliers'&&baseLocale(target)==='en'){setStored('en-US');location.assign('/suppliers');return}

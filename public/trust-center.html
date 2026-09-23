@@ -1,7 +1,9 @@
 <!doctype html>
-<html lang="es">
+<html lang="en" data-source-locale="en">
 <head>
 <meta charset="utf-8">
+<link rel="alternate" hreflang="es" href="https://www.sahjony.com/es/trust-center">
+<link rel="alternate" hreflang="en" href="https://www.sahjony.com/trust-center.html">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#05080c">
 <title>Trust Center | SAHJONY LLC Global Trade</title>
@@ -24,15 +26,44 @@
 <section class="section"><div class="ey">COMMERCIAL CLAIMS POLICY</div><h2>How SAHJONY distinguishes progress from outcome.</h2><div class="grid3"><article class="card"><small>PIPELINE</small><h3>Opportunity ≠ revenue</h3><p>A potential margin or commission can be modeled for decision-making, but it remains projected until the underlying transaction completes and the relevant compensation is earned and reconciled.</p></article><article class="card"><small>QUOTE</small><h3>Quote ≠ contract</h3><p>A supplier quotation can be genuine while buyer acceptance, payment mechanics, intermediary protection or other conditions remain unresolved.</p></article><article class="card"><small>CONTRACT</small><h3>Contract ≠ collection</h3><p>A signed document does not by itself establish shipment, delivery, payment or collected revenue. Those later stages require their own evidence.</p></article></div></section>
 <section class="section"><div class="ey">AUDIENCE GUIDE</div><h2>What happens after you contact us.</h2><div class="grid3"><article class="card"><small>BUYER / PROCUREMENT</small><h3>Submit a requirement</h3><p>We review the business identity and commercial requirement, clarify missing specifications and determine whether sourcing should proceed.</p><div class="actions"><a class="btn primary" href="/start">Buyer RFQ</a></div></article><article class="card"><small>MANUFACTURER / EXPORTER</small><h3>Present supply</h3><p>We review capability, target markets and available evidence before the supplier is treated as a qualified commercial option for a specific requirement.</p><div class="actions"><a class="btn primary" href="/suppliers">Supplier registration</a></div></article><article class="card"><small>INTRODUCER / PARTNER</small><h3>Present an opportunity</h3><p>We evaluate legitimacy, evidence quality, counterparties and the proposed role. Compensation requires written commercial terms when applicable.</p><div class="actions"><a class="btn primary" href="/partners">Partner pathway</a></div></article></div></section>
 <section class="section" id="company-identity"><div class="ey">COMPANY IDENTITY</div><h2>Who operates SAHJONY.</h2><div class="checklist" id="company-identity-list"></div></section>
-<script src="/sahjony-company.js" defer></script>
 <script>
-(function(){function r(){var c=window.SAHJONY_COMPANY||{};var el=document.getElementById('company-identity-list');if(!el)return;function esc(x){return String(x).replace(/&/g,'&amp;').replace(/</g,'&lt;')}var html='';if(c.legalName)html+='<div class="check"><b>Legal name</b>'+esc(c.legalName)+'</div>';var loc=[c.city,c.state,c.country].filter(Boolean).map(esc).join(', ');if(loc)html+='<div class="check"><b>Location</b>'+loc+'</div>';var contact=[c.phoneVoice,c.emailSales].filter(Boolean).map(esc).join(' · ');if(contact)html+='<div class="check"><b>Contact</b>'+contact+'</div>';el.innerHTML=html}if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',r);else r})();
+/* SAHJONY LLC — public company identity, embedded fallback.
+ * Source of truth: /sahjony-company.js (loaded next and overwrites these
+ * values when reachable). Embedded so the Company Identity section still
+ * renders on static hosts even if the external file fails to load.
+ * Standing owner rule: street address and registration are intentionally
+ * omitted — empty values render NOTHING (no placeholders, no notices). */
+window.SAHJONY_COMPANY = window.SAHJONY_COMPANY || {
+  legalName: 'SAHJONY LLC',
+  streetAddress: '',
+  city: 'Houston',
+  state: 'Texas',
+  postalCode: '',
+  country: 'USA',
+  registrationNumber: '',
+  registrationAuthority: '',
+  phoneVoice: '+1 281-662-8581',
+  phoneWhatsApp: '+1 281-662-8581',
+  emailSales: 'ventas@sahjony.com',
+  emailCuba: 'cuba@sahjony.com',
+  website: 'https://www.sahjony.com'
+};
+</script>
+<script src="/sahjony-company.js"></script>
+<script>
+(function(){function r(){var c=window.SAHJONY_COMPANY||{};var el=document.getElementById('company-identity-list');if(!el)return;function esc(x){return String(x).replace(/&/g,'&amp;').replace(/</g,'&lt;')}var html='';if(c.legalName)html+='<div class="check"><b>Legal name</b>'+esc(c.legalName)+'</div>';var loc=[c.city,c.state,c.country].filter(Boolean).map(esc).join(', ');if(loc)html+='<div class="check"><b>Location</b>'+loc+'</div>';var contact=[c.phoneVoice,c.emailSales].filter(Boolean).map(esc).join(' · ');if(contact)html+='<div class="check"><b>Contact</b>'+contact+'</div>';el.innerHTML=html}if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',r);else r()})();
 </script>
 <section class="section"><div class="ey">BEFORE YOU ENGAGE</div><h2>Questions you should be able to answer from this site.</h2><div class="checklist"><div class="check"><b>What does SAHJONY do?</b>International sourcing, origination, qualification and governed commercial coordination.</div><div class="check"><b>Does SAHJONY own all advertised supply?</b>No. Supply must be supported by the relevant counterparty and current evidence.</div><div class="check"><b>Does “worldwide” mean every country?</b>No. Each corridor is subject to law, transaction fit, counterparties and operational availability.</div><div class="check"><b>Does AI sign or move money?</b>No. Binding commitments and high-consequence financial actions remain human-controlled.</div><div class="check"><b>Is pipeline profit booked revenue?</b>No. Possible profit is a decision estimate until earned and reconciled.</div><div class="check"><b>What should I submit first?</b>Business identity plus the minimum commercial requirement/capability data needed to qualify the opportunity.</div></div><div class="actions"><a class="btn primary" href="/start">Start with a real requirement</a><a class="btn" href="/how-it-works">Read the customer guide</a><a class="btn" href="/">Return home</a></div></section>
 <footer class="footer">SAHJONY LLC · Trust Center · Public operating standards for evidence-led international sourcing and trade coordination. This page describes process and controls; it is not a guarantee that any specific transaction, country, product or counterparty will qualify.</footer>
 </main>
+<script type="application/json" id="sj-deals-fallback">{"dealCount":6,"firmCount":3,"evidenceCount":6,"updated":"2026-08-27","note":"Embedded snapshot of /canonical-deals.json (2026-08-27). Used only when the live fetch fails; refresh when the JSON is updated."}</script>
 <script>
-(async()=>{try{const r=await fetch('/canonical-deals.json',{cache:'no-store'});if(!r.ok)throw 0;const d=await r.json();const x=Array.isArray(d.deals)?d.deals:[];document.getElementById('dealCount').textContent=x.length;document.getElementById('firmCount').textContent=x.filter(v=>v.stage==='FIRM_QUOTE').length;document.getElementById('evidenceCount').textContent=x.filter(v=>Array.isArray(v.evidence)&&v.evidence.length).length;document.getElementById('updated').textContent=(d.updated_at||'').slice(0,10)||'—'}catch(_){for(const id of ['dealCount','firmCount','evidenceCount','updated'])document.getElementById(id).textContent='—'}})();
+/* Pipeline counters: live /canonical-deals.json first, embedded snapshot
+ * fallback so the Trust Center never renders blank on static hosts. */
+(function(){function paint(c){document.getElementById('dealCount').textContent=c.dealCount;document.getElementById('firmCount').textContent=c.firmCount;document.getElementById('evidenceCount').textContent=c.evidenceCount;document.getElementById('updated').textContent=c.updated||'—'}
+function fromDeals(d){var x=Array.isArray(d.deals)?d.deals:[];return{dealCount:x.length,firmCount:x.filter(function(v){return v.stage==='FIRM_QUOTE'}).length,evidenceCount:x.filter(function(v){return Array.isArray(v.evidence)&&v.evidence.length}).length,updated:(d.updated_at||'').slice(0,10)}}
+function fallback(){try{var el=document.getElementById('sj-deals-fallback');if(!el)throw 0;paint(JSON.parse(el.textContent))}catch(_){for(const id of ['dealCount','firmCount','evidenceCount','updated'])document.getElementById(id).textContent='—'}}
+(async()=>{try{const r=await fetch('/canonical-deals.json',{cache:'no-store'});if(!r.ok)throw 0;paint(fromDeals(await r.json()))}catch(_){fallback()}})();})();
 </script>
 <script src="/global-language.js" defer></script>
 </body>

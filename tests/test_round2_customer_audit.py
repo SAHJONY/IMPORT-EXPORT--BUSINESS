@@ -40,4 +40,7 @@ def test_native_spanish_routes_and_language_bridge():
         assert f'"src": "{route}"' in routes
     assert "location.assign('/es/about')" in runtime
     assert "location.assign('/es/trust-center')" in runtime
-    assert "location.assign('/es/find')" in runtime
+    # /find was consolidated into marketplace-search: Spanish users land on the
+    # real search page, never on the dead /es/find target
+    assert "location.assign('/es/marketplace-search')" in runtime
+    assert "location.assign('/es/find')" not in runtime
