@@ -31,6 +31,8 @@ env:
   VM_ID: '767852'
   VPS_HOST: '69.62.68.67'
   VPS_USER: root
+  # Mismo proyecto Supabase que sahjony.com (servicio unificado :8101).
+  SB_URL: 'https://qprlbmcoksrpuvodxjtt.supabase.co'
 
 jobs:
   deliver:
@@ -41,13 +43,12 @@ jobs:
       - name: Deliver Supabase env to VPS
         env:
           SSH_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
-          SB_URL: ${{ secrets.VPS_SUPABASE_URL }}
-          SB_KEY: ${{ secrets.VPS_SUPABASE_SERVICE_ROLE_KEY }}
+          SB_KEY: ${{ secrets.VPS_CRM_SUPABASE_SERVICE_ROLE_KEY }}
         run: |
           set -euo pipefail
           [[ -n "$SSH_KEY" ]] || { echo "HOSTINGER_SSH_PRIVATE_KEY secret missing" >&2; exit 1; }
           [[ "$SB_URL" == https://*.supabase.co ]] || { echo "bad Supabase URL" >&2; exit 1; }
-          [[ "${#SB_KEY}" -ge 20 ]] || { echo "VPS_SUPABASE_SERVICE_ROLE_KEY missing or too short — Juan must add it in repo Settings > Secrets and variables > Actions" >&2; exit 1; }
+          [[ "${#SB_KEY}" -ge 20 ]] || { echo "VPS_CRM_SUPABASE_SERVICE_ROLE_KEY missing or too short — Juan must add it in repo Settings > Secrets and variables > Actions" >&2; exit 1; }
           mkdir -p ~/.ssh && chmod 700 ~/.ssh
           printf '%s\n' "$SSH_KEY" > ~/.ssh/vps-key
           chmod 600 ~/.ssh/vps-key
