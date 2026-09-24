@@ -45,11 +45,21 @@ _AGENCY_COOKIE = "_sjn_agency"
 # (http) se desactiva con AGENCY_COOKIE_SECURE=0.
 _COOKIE_SECURE = os.environ.get("AGENCY_COOKIE_SECURE", "1") == "1"
 
-# Throttle en memoria (por proceso).
+# Throttle: Supabase primero (persistente entre reinicios), memoria como respaldo.
+try:
+    import supa as _supa
+except ImportError:
+    _supa = None  # type: ignore
+
 _ATTEMPTS: dict[str, list[float]] = {}
 
 
 def _throttle_ok(key: str, limit: int = 10, window: int = 300) -> bool:
+    if _supa is not None:
+        try:
+            return _supa.throttle_ok("agencia:" + key, limit, window)
+        except Exception:
+            pass
     now = time.time()
     hits = [t for t in _ATTEMPTS.get(key, []) if now - t < window]
     _ATTEMPTS[key] = hits
@@ -57,6 +67,11 @@ def _throttle_ok(key: str, limit: int = 10, window: int = 300) -> bool:
 
 
 def _throttle_hit(key: str) -> None:
+    if _supa is not None:
+        try:
+            _supa.throttle_hit("agencia:" + key)
+        except Exception:
+            pass
     _ATTEMPTS.setdefault(key, []).append(time.time())
 
 

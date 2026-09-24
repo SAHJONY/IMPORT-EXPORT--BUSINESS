@@ -1,0 +1,96 @@
+name: Paquetes Supabase Env
+
+# One-time (repeat-safe) delivery of the Supabase credentials to the
+# PAQUETES.SAHJONY.com VPS service (port 8105).
+#
+# What it does:
+#   1. Copies VPS_SUPABASE_URL + VPS_SUPABASE_SERVICE_ROLE_KEY to the VPS as
+#      files (secrets never appear in a command line or log).
+#   2. Writes /etc/sahjony-packages-supabase.env (root-only 600).
+#   3. Adds a systemd drop-in so sahjony-packages.service reads it.
+#   4. Restarts the service and smoke-tests Supabase REST reachability.
+#
+# Owner-gated: Juan dispatches explicitly with confirm=YES.
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: "Type YES to deliver Supabase env to the packages VPS service"
+        required: true
+        default: "NO"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hostinger-vm-767852-mutation
+  cancel-in-progress: false
+
+env:
+  VM_ID: '767852'
+  VPS_HOST: '69.62.68.67'
+  VPS_USER: root
+
+jobs:
+  deliver:
+    if: ${{ inputs.confirm == 'YES' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Deliver Supabase env to VPS
+        env:
+          SSH_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+          SB_URL: ${{ secrets.VPS_SUPABASE_URL }}
+          SB_KEY: ${{ secrets.VPS_SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          set -euo pipefail
+          [[ -n "$SSH_KEY" ]] || { echo "HOSTINGER_SSH_PRIVATE_KEY secret missing" >&2; exit 1; }
+          [[ "$SB_URL" == https://*.supabase.co ]] || { echo "bad Supabase URL" >&2; exit 1; }
+          [[ "${#SB_KEY}" -ge 20 ]] || { echo "VPS_SUPABASE_SERVICE_ROLE_KEY missing or too short — Juan must add it in repo Settings > Secrets and variables > Actions" >&2; exit 1; }
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/vps-key
+          chmod 600 ~/.ssh/vps-key
+          SSH="ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=15 -i ~/.ssh/vps-key"
+          SCP="scp -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=15 -i ~/.ssh/vps-key"
+          # Secrets travel as files so their values never appear in any command line or log.
+          printf '%s' "$SB_URL" > /tmp/sb_url_src; chmod 600 /tmp/sb_url_src
+          printf '%s' "$SB_KEY" > /tmp/sb_key_src; chmod 600 /tmp/sb_key_src
+          $SCP /tmp/sb_url_src "$VPS_USER@$VPS_HOST:/tmp/sb_url_incoming"
+          $SCP /tmp/sb_key_src "$VPS_USER@$VPS_HOST:/tmp/sb_key_incoming"
+          shred -u /tmp/sb_url_src /tmp/sb_key_src
+          unset SB_KEY
+          $SSH "$VPS_USER@$VPS_HOST" 'bash -s' <<'VPS_EOF'
+          set -euo pipefail
+          SB_URL="$(cat /tmp/sb_url_incoming)"; shred -u /tmp/sb_url_incoming
+          SB_KEY="$(cat /tmp/sb_key_incoming)"; shred -u /tmp/sb_key_incoming
+          [[ "$SB_URL" == https://*.supabase.co ]] || { echo "BAD_URL"; exit 2; }
+          [[ "${#SB_KEY}" -ge 20 ]] || { echo "BAD_KEY"; exit 2; }
+          mkdir -p /root/env-backups
+          if [[ -f /etc/sahjony-packages-supabase.env ]]; then
+            cp /etc/sahjony-packages-supabase.env "/root/env-backups/sahjony-packages-supabase.env.pre-$(date +%Y%m%d%H%M%S)"
+          fi
+          printf 'SUPABASE_URL=%s\n' "$SB_URL" > /etc/sahjony-packages-supabase.env.tmp
+          printf 'SUPABASE_SERVICE_ROLE_KEY=%s\n' "$SB_KEY" >> /etc/sahjony-packages-supabase.env.tmp
+          chmod 600 /etc/sahjony-packages-supabase.env.tmp
+          mv /etc/sahjony-packages-supabase.env.tmp /etc/sahjony-packages-supabase.env
+          unset SB_URL SB_KEY
+          mkdir -p /etc/systemd/system/sahjony-packages.service.d
+          printf '[Service]\nEnvironmentFile=/etc/sahjony-packages-supabase.env\n' \
+            > /etc/systemd/system/sahjony-packages.service.d/supabase-env.conf
+          chmod 644 /etc/systemd/system/sahjony-packages.service.d/supabase-env.conf
+          systemctl daemon-reload
+          systemctl restart sahjony-packages.service
+          sleep 8
+          systemctl is-active sahjony-packages.service
+          # Supabase REST reachability (key stays in a file, never in the command line)
+          SB_URL2="$(grep '^SUPABASE_URL=' /etc/sahjony-packages-supabase.env | cut -d= -f2-)"
+          SB_KEY2="$(grep '^SUPABASE_SERVICE_ROLE_KEY=' /etc/sahjony-packages-supabase.env | cut -d= -f2-)"
+          CODE="$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 \
+            "$SB_URL2/rest/v1/" -H "apikey: $SB_KEY2" -H "Authorization: Bearer $SB_KEY2")"
+          unset SB_KEY2
+          echo "SUPABASE_REST_HTTP=$CODE"
+          [[ "$CODE" == "200" ]] || { echo "Supabase REST no responde 200"; exit 3; }
+          echo DELIVER_OK
+          VPS_EOF
+          rm -f ~/.ssh/vps-key

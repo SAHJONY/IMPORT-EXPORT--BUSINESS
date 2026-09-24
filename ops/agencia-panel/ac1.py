@@ -16,7 +16,9 @@ def agencia_login_form(request: Request, error: str = ""):
             'autocomplete="username"></label>'
             '<label>Contraseña<input name="password" type="password" required '
             'autocomplete="current-password"></label>'
-            '<button class="btn" style="width:100%">Entrar</button></form></div>')
+            '<button class="btn" style="width:100%">Entrar</button></form>'
+            '<p class="muted" style="text-align:center;margin-top:10px">'
+            '<a href="/agencia/recuperar">¿Olvidaste tu contraseña?</a></p></div>')
     return HTMLResponse(_layout("Entrar",
                                {"email": "", "agencies": [], "multi": False, "unread": 0},
                                body))
@@ -98,6 +100,71 @@ async def agencia_password(request: Request):
     finally:
         conn.close()
     return RedirectResponse("/agencia/panel", status_code=303)
+
+
+@router.get("/agencia/recuperar", response_class=HTMLResponse)
+def agencia_recover_form(request: Request, token: str = ""):
+    body = ('<div class="card"><h2>Recupera tu acceso</h2>'
+            '<p class="muted">Pídele a SAHJONY LLC tu enlace de recuperación '
+            'y ábrelo aquí (o pega el código).</p>'
+            '<form method="post">'
+            '<label>Código del enlace<input name="token" value="%s" required '
+            'autocomplete="off"></label>'
+            '<label>Nueva contraseña (mínimo 8 caracteres)'
+            '<input name="p1" type="password" required autocomplete="new-password"></label>'
+            '<label>Repite la contraseña<input name="p2" type="password" required '
+            'autocomplete="new-password"></label>'
+            '<button class="btn ok" style="width:100%">Guardar</button></form></div>'
+            % _e(token))
+    return HTMLResponse(_layout(
+        "Recuperar acceso",
+        {"email": "", "agencies": [], "multi": False, "unread": 0}, body))
+
+
+@router.post("/agencia/recuperar", response_class=HTMLResponse)
+async def agencia_recover(request: Request):
+    form = await request.form()
+    tok = (form.get("token") or "").strip()
+    if "token=" in tok:  # admite pegar el enlace completo
+        tok = tok.split("token=")[-1].split("&")[0].split("#")[0]
+    p1, p2 = form.get("p1") or "", form.get("p2") or ""
+    blank = {"email": "", "agencies": [], "multi": False, "unread": 0}
+
+    def _err(msg):
+        return HTMLResponse(_layout(
+            "Recuperar acceso", blank,
+            '<div class="card"><div class="err">%s</div>'
+            '<a class="btn sec" href="/agencia/recuperar">Reintentar</a></div>'
+            % _e(msg)), status_code=400)
+
+    if p1 != p2 or len(p1) < 8:
+        return _err("Las contraseñas no coinciden o son muy cortas (mínimo 8).")
+    try:
+        import supa as _supa
+    except ImportError:
+        return _err("Servicio no disponible ahora mismo. Intenta más tarde.")
+    try:
+        email = _supa.reset_consume(tok)
+    except Exception:
+        return _err("Servicio no disponible ahora mismo. Intenta más tarde.")
+    if not email:
+        return _err("Ese enlace no es válido o ya venció. Pide uno nuevo a SAHJONY LLC.")
+    conn = dbmod.get_db()
+    try:
+        rows = adb.owner_agencies(conn, email)
+        if not rows:
+            return _err("No hay agencias con ese correo.")
+        adb.owner_set_password(conn, email, p1)
+        adb.audit(conn, rows[0]["id"], "owner", "password_reset",
+                  detail="email=%s via enlace de un solo uso" % email,
+                  actor_id=email)
+    finally:
+        conn.close()
+    return HTMLResponse(_layout(
+        "Recuperar acceso", blank,
+        '<div class="card"><div class="okmsg">Contraseña actualizada. '
+        'Ya puedes entrar.</div>'
+        '<a class="btn" href="/agencia/login">Entrar</a></div>'))
 
 
 @router.get("/agencia/mas", response_class=HTMLResponse)

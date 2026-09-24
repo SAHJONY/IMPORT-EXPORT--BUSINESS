@@ -143,6 +143,17 @@ async def agencia_scan(request: Request):
         return redir
     form = await request.form()
     ag = _write_agency(ctx, form.get("loc") or "")
+    # Límite: 120 escaneos por hora y agencia (Supabase; fail-open si no responde).
+    try:
+        import supa as _supa
+        if not _supa.scan_ok(ag["id"], 120, 3600):
+            raise HTTPException(
+                429, "Límite de escaneos por hora alcanzado. Intenta más tarde.")
+        _supa.scan_hit(ag["id"])
+    except HTTPException:
+        raise
+    except Exception as _exc:
+        print("[scan] supa: %s" % _exc, flush=True)
     label = (form.get("label") or "").strip()[:120] or "Escaneo"
     uploads = form.getlist("fotos")
     # Límites: máx 20 archivos, 15 MB cada uno, solo imágenes verificadas.
