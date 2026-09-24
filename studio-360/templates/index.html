@@ -631,5 +631,123 @@ $('btnProduce').onclick = async () => {
   const script = $('pScript').value.trim();
   if (!script) { say(msg, 'Escribe el guion para los subtítulos. ✍️', 'err'); return; }
   const btn = $('btnProduce');
-  btn.disabled = true; btn.innerHTML = '<span class="spin">⏳</span> Arm
+  btn.disabled = true; btn.innerHTML = '<span class="spin">⏳</span> Armando…';
+  say(msg, '🎬 Armando tu video vertical…');
+  try {
+    const fd = new FormData();
+    fd.append('voice', voice);
+    if (music) fd.append('music', music);
+    fd.append('bg', bg);
+    if (logo) fd.append('logo', logo);
+    fd.append('script', script);
+    fd.append('brand', ($('pBrand').value || 'SAHJONY').trim() || 'SAHJONY');
+    const r = await fetch('/api/produce', { method: 'POST', body: fd });
+    const d = await r.json();
+    if (!r.ok || !d.ok) { say(msg, '❌ ' + (d.error || 'No se pudo armar.'), 'err'); return; }
+    say(msg, '✅ ¡En producción! El video aparece abajo cuando esté listo. 📦', 'good');
+    loadJobs('produce');
+  } catch (e) { say(msg, '❌ Error de conexión. Inténtalo de nuevo.', 'err'); }
+  finally { btn.disabled = false; btn.textContent = '🎬 Armar video vertical'; }
+};
+$('btnProduceRefresh').onclick = () => { loadJobs('produce'); loadOutputs(); };
+
+/* ---------- publish ---------- */
+async function loadPublish() {
+  try {
+    const r = await fetch('/api/publish');
+    const d = await r.json();
+    const box = $('pubPlats');
+    box.innerHTML = '';
+    (d.platforms || []).forEach(p => {
+      const lab = document.createElement('label');
+      const cb = document.createElement('input');
+      cb.type = 'checkbox'; cb.value = p;
+      lab.appendChild(cb);
+      lab.appendChild(document.createTextNode(' ' + p));
+      box.appendChild(lab);
+    });
+    const list = $('pubList');
+    list.innerHTML = '';
+    if (!d.items || !d.items.length) { list.innerHTML = '<div class="hint">Cola vacía.</div>'; return; }
+    d.items.forEach(it => {
+      const div = document.createElement('div');
+      div.className = 'job';
+      const badge = it.status === 'aprobado'
+        ? '<span class="badge ok2">aprobado</span>'
+        : '<span class="badge draft">borrador</span>';
+      div.innerHTML = '<div class="jt">' + escapeHtml(it.file) + ' ' + badge + '</div>' +
+        '<div class="jp">' + escapeHtml((it.platforms || []).join(' · ')) + '</div>' +
+        '<div class="jp">' + escapeHtml(it.caption || '') + '</div>' +
+        '<video class="preview" controls preload="none" src="' + it.url + '"></video>' +
+        '<div class="row">' +
+        (it.status === 'borrador'
+          ? '<button class="secondary small" data-act="approve" data-pid="' + it.id + '">✅ Aprobar</button>'
+          : '<button class="secondary small" data-act="unapprove" data-pid="' + it.id + '">↩️ Volver a borrador</button>') +
+        '<button class="danger small" data-act="del" data-pid="' + it.id + '">🗑️ Quitar</button></div>';
+      list.appendChild(div);
+    });
+    list.querySelectorAll('[data-act]').forEach(b => b.onclick = async () => {
+      const pid = b.dataset.pid, act = b.dataset.act;
+      if (act === 'del' && !confirm('¿Quitar este video de la cola?')) return;
+      const url = act === 'del' ? '/api/publish/' + pid : '/api/publish/' + pid + '/' + act;
+      await fetch(url, { method: act === 'del' ? 'DELETE' : 'POST' });
+      loadPublish();
+    });
+  } catch (e) {}
+}
+$('btnPubRefresh').onclick = loadPublish;
+$('btnQueue').onclick = async () => {
+  const msg = $('pubMsg');
+  const file = $('pubFile').value;
+  const caption = $('pubCaption').value.trim();
+  const platforms = Array.from($('pubPlats').querySelectorAll('input:checked')).map(i => i.value);
+  try {
+    const r = await fetch('/api/publish', { method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ file: file, caption: caption, platforms: platforms }) });
+    const d = await r.json();
+    if (!r.ok || !d.ok) { say(msg, '❌ ' + (d.error || 'No se pudo poner en cola.'), 'err'); return; }
+    say(msg, '✅ En cola como borrador. Nada se publica sin tu aprobación. 🔒', 'good');
+    $('pubCaption').value = '';
+    loadPublish();
+  } catch (e) { say(msg, '❌ Error de conexión. Inténtalo de nuevo.', 'err'); }
+};
+
+/* ---------- settings ---------- */
+async function loadSettings() {
+  try {
+    const r = await fetch('/api/settings');
+    const d = await r.json();
+    $('kElevenSt').textContent = d.elevenlabs_set ? '✅ Llave guardada' : 'Sin llave todavía';
+    $('kFalSt').textContent = d.fal_set ? '✅ Llave guardada' : 'Sin llave todavía';
+    $('setNotes').textContent = [d.music_note, d.video_note].filter(Boolean).join(' ');
+    $('setLicense').textContent = d.license_note || '';
+  } catch (e) {}
+}
+$('btnKeys').onclick = async () => {
+  const msg = $('keysMsg');
+  try {
+    const r = await fetch('/api/settings', { method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ elevenlabs: $('kEleven').value, fal: $('kFal').value }) });
+    const d = await r.json();
+    if (!r.ok || !d.ok) { say(msg, '❌ ' + (d.error || 'No se pudo guardar.'), 'err'); return; }
+    say(msg, '✅ ' + (d.msg || 'Llaves guardadas. 🔐'), 'good');
+    $('kEleven').value = ''; $('kFal').value = '';
+    loadSettings();
+  } catch (e) { say(msg, '❌ Error de conexión. Inténtalo de nuevo.', 'err'); }
+};
+
+/* ---------- init ---------- */
+loadVideoModels();
+checkStatus();
+loadVoices();
+try {
+  const t = localStorage.getItem('studio360_tab');
+  if (t && document.querySelector('#tabs button[data-tab="' + t + '"]')) showTab(t);
+} catch (e) {}
+</script>
+</body>
+</html>
+
 ...[truncated 5983 chars]
