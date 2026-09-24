@@ -27,6 +27,27 @@ import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 
+
+def _load_env_file(path: str) -> None:
+    """Carga KEY=valor a os.environ si no existen (sin dependencia dotenv)."""
+    try:
+        with open(path) as fh:
+            for line in fh:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                k, v = line.split("=", 1)
+                k = k.strip()
+                v = v.strip().strip("'\"")
+                if k and k not in os.environ:
+                    os.environ[k] = v
+    except OSError:
+        pass
+
+
+# Ruta estable en el VPS (sobrevive deploys por git): se crea una vez.
+_load_env_file("/etc/sahjony-packages/supabase.env")
+
 _URL = os.environ.get("SUPABASE_URL", "").strip().rstrip("/")
 _KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "").strip()
 
