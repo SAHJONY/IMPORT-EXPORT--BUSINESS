@@ -11,10 +11,11 @@ Provider choice: OpenAI is used for both transcription (whisper-1) and TTS
 (gpt-4o-mini-tts) because OPENAI_API_KEY is already present in the WhatsApp
 service env (/etc/sahjony-fallback/import-export.env) — no new secrets needed.
 
-VOICE NOTE (honest): Juan's chosen Sofia voice (avocado_v2:vdc_NOID21) is a
-Meta Shortwave voice ID. It does NOT exist on OpenAI and cannot be used here.
-SOFIA_TTS_VOICE defaults to "nova" — OpenAI's female voice with the strongest
-Spanish rendering. It is not Cuban-accented; no OpenAI TTS voice is.
+VOICE NOTE (honest): Juan's chosen Sofia voice is OpenAI "sage" at speed 1.25
+with his direct, natural business tone (locked 2026-09-25 as Sofia's permanent
+voice for every audio she generates). SOFIA_TTS_VOICE defaults to "sage";
+SOFIA_TTS_SPEED defaults to "1.25". It is not Cuban-accented; no OpenAI TTS
+voice is.
 
 Fail-closed everywhere: missing key, download failure, transcription failure,
 or TTS failure produces NO reply. The inbound turn is always recorded by the
@@ -33,8 +34,20 @@ OPENAI_SPEECH_URL = "https://api.openai.com/v1/audio/speech"
 
 WHISPER_MODEL = os.getenv("SOFIA_WHISPER_MODEL", "whisper-1")
 TTS_MODEL = os.getenv("SOFIA_TTS_MODEL", "gpt-4o-mini-tts")
-# See VOICE NOTE above: Shortwave voice IDs do not work with OpenAI TTS.
-TTS_VOICE = os.getenv("SOFIA_TTS_VOICE", "nova")
+# Sofia's permanent voice (Juan, 2026-09-25): sage at 1.25 speed.
+TTS_VOICE = os.getenv("SOFIA_TTS_VOICE", "sage")
+
+
+def _tts_speed() -> float:
+    try:
+        speed = float(os.getenv("SOFIA_TTS_SPEED", "1.25"))
+    except (TypeError, ValueError):
+        speed = 1.25
+    # OpenAI /audio/speech accepts 0.25 - 4.0.
+    return min(4.0, max(0.25, speed))
+
+
+TTS_SPEED = _tts_speed()
 TTS_INSTRUCTIONS = os.getenv(
     "SOFIA_TTS_INSTRUCTIONS",
     "Habla español de forma cálida, clara y natural, como una ejecutiva amable.",
@@ -129,6 +142,7 @@ async def synthesize_speech(text: str) -> bytes:
         "voice": TTS_VOICE,
         "input": clean,
         "response_format": "mp3",
+        "speed": TTS_SPEED,
     }
     # `instructions` is only accepted by gpt-4o-mini-tts; other TTS models
     # reject unknown fields, so gate it.
