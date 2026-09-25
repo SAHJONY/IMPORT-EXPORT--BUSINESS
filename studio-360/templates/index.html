@@ -1,0 +1,753 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>🎬 SAHJONY Studio 360</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, system-ui, "Segoe UI", Roboto, sans-serif;
+         margin: 0; padding: 16px; background: #101014; color: #f2f2f2;
+         max-width: 640px; margin-left: auto; margin-right: auto; }
+  h1 { font-size: 1.4rem; margin: 8px 0 4px; }
+  h2 { font-size: 1.2rem; margin: 0 0 12px; color: #ffd75e; }
+  .card { background: #1b1b22; border-radius: 14px; padding: 18px;
+          margin: 14px 0; border: 1px solid #2c2c38; }
+  #status { border-radius: 12px; padding: 12px 14px; font-weight: 600;
+            margin: 10px 0 4px; font-size: 0.95rem; }
+  #status.ok { background: #123d22; color: #7de2a0; border: 1px solid #1f6b3a; }
+  #status.bad { background: #3d1212; color: #f2a0a0; border: 1px solid #6b1f1f; }
+  label { display: block; margin: 12px 0 6px; font-weight: 600; }
+  input[type=text], input[type=file], input[type=password], textarea, select {
+    width: 100%; font-size: 1.05rem; padding: 14px; border-radius: 10px;
+    border: 1px solid #3a3a48; background: #26262f; color: #fff; }
+  textarea { min-height: 120px; resize: vertical; }
+  textarea.short { min-height: 70px; }
+  .hint { font-size: 0.85rem; color: #a9a9b8; margin-top: 6px; }
+  .warn { font-size: 0.85rem; color: #ffcf7d; margin-top: 6px; }
+  button { width: 100%; font-size: 1.15rem; font-weight: 700; padding: 16px;
+           border: none; border-radius: 12px; margin-top: 14px;
+           background: #ffd75e; color: #191900; cursor: pointer; }
+  button:disabled { opacity: 0.5; cursor: wait; }
+  button.secondary { background: #2c2c38; color: #ffd75e; font-size: 1rem; padding: 12px; }
+  button.danger { background: #3d1212; color: #ff9d9d; font-size: 1rem; padding: 12px; }
+  button.small { font-size: 0.95rem; padding: 10px; margin-top: 8px; }
+  #voices { list-style: none; padding: 0; margin: 8px 0 0; }
+  #voices li { background: #26262f; border-radius: 10px; padding: 12px 14px;
+               margin: 8px 0; font-size: 1.05rem; display: flex;
+               justify-content: space-between; align-items: center; }
+  #voices li .tag { font-size: 0.8rem; color: #a9a9b8; }
+  #voices li .pface { display: flex; align-items: center; gap: 12px; }
+  #voices li img.face { width: 52px; height: 52px; border-radius: 50%;
+    object-fit: cover; border: 2px solid #ffd75e; background: #101014; flex: none; }
+  #voices li img.body { width: 40px; height: 56px; border-radius: 8px;
+    object-fit: cover; border: 2px solid #7db8ff; background: #101014; flex: none; }
+  #voices li .pname { font-weight: 700; }
+  #voices li .psub { font-size: 0.8rem; color: #a9a9b8; }
+  #voices li video.mov { width: 100%; max-height: 180px; border-radius: 10px;
+    margin-top: 10px; background: #000; }
+  #voices li .pwrap { width: 100%; }
+  audio { width: 100%; margin-top: 12px; }
+  video.preview { width: 100%; max-height: 420px; border-radius: 10px;
+    margin-top: 12px; background: #000; }
+  #dl { display: none; margin-top: 10px; text-align: center; font-size: 1.05rem; }
+  #dl a { color: #ffd75e; font-weight: 700; }
+  .msg { margin-top: 12px; font-size: 0.95rem; }
+  .msg.err { color: #ff9d9d; } .msg.good { color: #7de2a0; }
+  .counter { text-align: right; font-size: 0.8rem; color: #a9a9b8; }
+  .spin { display: inline-block; animation: spin 1s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  /* tabs */
+  .tabs { display: flex; gap: 6px; overflow-x: auto; margin: 12px 0 4px;
+          padding-bottom: 6px; -webkit-overflow-scrolling: touch; }
+  .tabs button { width: auto; flex: none; font-size: 0.95rem; padding: 10px 14px;
+                 margin: 0; background: #26262f; color: #cfcfda; border-radius: 999px; }
+  .tabs button.active { background: #ffd75e; color: #191900; }
+  .tabpane { display: none; }
+  .tabpane.active { display: block; }
+  .job { background: #26262f; border-radius: 10px; padding: 12px 14px; margin: 10px 0; }
+  .job .jt { font-weight: 700; font-size: 1rem; }
+  .job .jp { font-size: 0.9rem; color: #a9a9b8; margin-top: 4px; }
+  .job .je { font-size: 0.9rem; color: #ff9d9d; margin-top: 4px; }
+  .job .row { display: flex; gap: 8px; margin-top: 8px; }
+  .job .row button { margin-top: 0; }
+  .est { font-size: 0.95rem; color: #7de2a0; font-weight: 700; margin-top: 8px; }
+  .chk { display: flex; align-items: center; gap: 10px; margin-top: 12px;
+         font-size: 1.05rem; }
+  .chk input { width: 22px; height: 22px; }
+  input[type=range] { width: 100%; margin-top: 8px; accent-color: #ffd75e; }
+  .plat { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+  .plat label { margin: 0; font-weight: 400; font-size: 0.95rem;
+    background: #26262f; border-radius: 999px; padding: 8px 14px; }
+  .plat input { width: 18px; height: 18px; vertical-align: -3px; }
+  .badge { display: inline-block; font-size: 0.75rem; font-weight: 700;
+    border-radius: 999px; padding: 3px 10px; margin-left: 8px; }
+  .badge.draft { background: #3a3a48; color: #cfcfda; }
+  .badge.ok2 { background: #123d22; color: #7de2a0; }
+  .topbar { display: flex; justify-content: space-between; align-items: center; }
+  .topbar a { color: #a9a9b8; font-size: 0.9rem; }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <h1>🎬 SAHJONY Studio 360</h1>
+  <a href="/logout">Salir</a>
+</div>
+<div id="status" class="bad">Revisando el motor…</div>
+
+<nav class="tabs" id="tabs">
+  <button data-tab="voz" class="active">🎙️ Voz</button>
+  <button data-tab="musica">🎵 Música</button>
+  <button data-tab="video">🎬 Video</button>
+  <button data-tab="producir">🎥 Producir</button>
+  <button data-tab="publicar">📤 Publicar</button>
+  <button data-tab="ajustes">⚙️ Ajustes</button>
+</nav>
+
+<!-- ================= VOZ ================= -->
+<div class="tabpane active" id="tab-voz">
+<div class="card">
+  <h2>1️⃣ Clonar una persona (cara + voz)</h2>
+  <label for="audio">Audio de la voz (mp3, wav o m4a)</label>
+  <input type="file" id="audio" accept="audio/*,.mp3,.wav,.m4a">
+  <div class="hint">De 6 a 30 segundos, que se oiga clarita la voz: sin música ni bulla de fondo.</div>
+  <div class="hint" style="margin-top:10px">— o pega el enlace de un video —</div>
+  <label for="vurl">Enlace del video (YouTube, Instagram, Facebook, TikTok…)</label>
+  <input type="text" id="vurl" placeholder="https://…" autocomplete="off">
+  <div class="hint">Tomo 30 segundos del audio del video (del segundo 10 al 40) para sacar la voz, y guardo también un clip de sus movimientos y una foto de cuerpo completo como referencia del personaje. 🎬</div>
+  <label for="vname">Nombre de la persona</label>
+  <input type="text" id="vname" placeholder="ej: chuito-cabiosile" autocomplete="off">
+  <label for="photo">Foto de la persona (opcional)</label>
+  <input type="file" id="photo" accept="image/*,.jpg,.jpeg,.png,.webp">
+  <div class="hint">La foto es la cara del personaje para el noticiero. 🎭</div>
+  <button id="btnClone">💾 Guardar persona</button>
+  <div class="msg" id="cloneMsg"></div>
+</div>
+
+<div class="card">
+  <h2>2️⃣ Mis personas</h2>
+  <button class="secondary" id="btnRefresh">🔄 Actualizar lista</button>
+  <ul id="voices"><li><span class="tag">Cargando…</span></li></ul>
+</div>
+
+<div class="card">
+  <h2>3️⃣ Generar audio</h2>
+  <label for="voicePick">Voz</label>
+  <select id="voicePick"><option value="">— primero clona una voz —</option></select>
+  <label for="langPick">Idioma</label>
+  <select id="langPick">
+    <option value="es" selected>🇨🇺 Español (Cuba)</option>
+    <option value="en">English</option>
+    <option value="pt">Português</option>
+    <option value="fr">Français</option>
+    <option value="de">Deutsch</option>
+    <option value="it">Italiano</option>
+  </select>
+  <div class="hint">La cubanidad la ponen tu voz clonada y tu texto. 😉</div>
+  <label for="txt">Texto</label>
+  <textarea id="txt" placeholder="Escribe aquí lo que quieres que diga…"></textarea>
+  <div class="counter"><span id="count">0</span>/600</div>
+  <button id="btnSpeak">🔊 Generar audio</button>
+  <div class="hint">Puede tardar unos minutos, el teléfono hace el trabajo pesado. No cierres la página.</div>
+  <div class="msg" id="speakMsg"></div>
+  <audio id="player" controls style="display:none"></audio>
+  <div id="dl"><a id="dlLink" href="#" download>⬇️ Descargar audio</a></div>
+</div>
+</div>
+
+<!-- ================= MÚSICA ================= -->
+<div class="tabpane" id="tab-musica">
+<div class="card">
+  <h2>🎵 Estudio de música IA</h2>
+  <div class="hint">Canciones completas con letra y voz, o instrumentales. Generado por ElevenLabs.</div>
+  <label for="mPrompt">Estilo + letra</label>
+  <textarea id="mPrompt" placeholder="Ej: Reguetón cubano bailable, 95 BPM, con trompetas. Letra:&#10;[Verse]&#10;Esta noche la rumba no para…&#10;[Chorus]&#10;¡Dale, que la fiesta empezó!"></textarea>
+  <div class="hint">Describe el estilo primero y escribe la letra con [Verse], [Chorus], [Bridge]. Si es instrumental, marca abajo y no hace falta letra.</div>
+  <label class="chk"><input type="checkbox" id="mInst"> Solo instrumental (sin voz)</label>
+  <label for="mSecs">Duración: <span id="mSecsVal">60</span>s</label>
+  <input type="range" id="mSecs" min="15" max="300" value="60" step="15">
+  <label for="mModel">Modelo</label>
+  <select id="mModel">
+    <option value="music_v1" selected>music_v1 (rápido)</option>
+    <option value="music_v2">music_v2 (calidad de estudio)</option>
+  </select>
+  <div class="est" id="mEst">Costo aprox: $0.75</div>
+  <button id="btnMusic">🎼 Componer canción</button>
+  <div class="msg" id="musicMsg"></div>
+</div>
+<div class="card">
+  <h2>🎶 Mis canciones</h2>
+  <button class="secondary small" id="btnMusicRefresh">🔄 Actualizar</button>
+  <div id="musicJobs"><div class="hint">Todavía no hay canciones.</div></div>
+</div>
+</div>
+
+<!-- ================= VIDEO ================= -->
+<div class="tabpane" id="tab-video">
+<div class="card">
+  <h2>🎬 Estudio de video IA</h2>
+  <div class="hint">Escenas de película: de texto o desde una imagen. Generado por fal.ai.</div>
+  <label for="vPrompt">Describe la escena</label>
+  <textarea id="vPrompt" class="short" placeholder="Ej: Un noticiero cubano de noche, la presentadora sonríe a cámara, plano medio, iluminación cálida…"></textarea>
+  <label for="vMode">Modo</label>
+  <select id="vMode">
+    <option value="text" selected>📝 Texto → video</option>
+    <option value="image">🖼️ Imagen → video</option>
+  </select>
+  <div id="vImgBox" style="display:none">
+    <label for="vImage">Imagen de partida</label>
+    <input type="file" id="vImage" accept="image/*,.jpg,.jpeg,.png,.webp">
+    <div class="hint" id="vImgHint"></div>
+  </div>
+  <label for="vModel">Modelo</label>
+  <select id="vModel"></select>
+  <div class="hint" id="vModelNote"></div>
+  <label for="vSecs">Duración: <span id="vSecsVal">8</span>s</label>
+  <input type="range" id="vSecs" min="2" max="10" value="8" step="1">
+  <div class="est" id="vEst">Costo aprox: $3.20</div>
+  <button id="btnVideo">🎥 Generar escena</button>
+  <div class="msg" id="videoMsg"></div>
+</div>
+<div class="card">
+  <h2>🎞️ Mis escenas</h2>
+  <button class="secondary small" id="btnVideoRefresh">🔄 Actualizar</button>
+  <div id="videoJobs"><div class="hint">Todavía no hay escenas.</div></div>
+</div>
+</div>
+
+<!-- ================= PRODUCIR ================= -->
+<div class="tabpane" id="tab-producir">
+<div class="card">
+  <h2>🎥 Producción TikTok</h2>
+  <div class="hint">Junta voz + música + fondo + subtítulos + marca SAHJONY en un video vertical 1080×1920 listo para publicar.</div>
+  <label for="pVoice">1. Audio de la voz</label>
+  <select id="pVoice"><option value="">— genera un audio en la pestaña Voz —</option></select>
+  <div class="hint">— o sube uno —</div>
+  <input type="file" id="pVoiceUp" accept="audio/*,.mp3,.wav,.m4a">
+  <label for="pMusic">2. Música de fondo (opcional)</label>
+  <select id="pMusic"><option value="">— sin música —</option></select>
+  <div class="hint">— o sube una —</div>
+  <input type="file" id="pMusicUp" accept="audio/*,.mp3,.wav,.m4a">
+  <label for="pBg">3. Fondo (imagen o video)</label>
+  <input type="file" id="pBg" accept="image/*,video/mp4,.jpg,.jpeg,.png,.webp,.mp4">
+  <div class="hint">La imagen se anima con un zoom lento; el video se recorta a vertical.</div>
+  <label for="pLogo">4. Logo (opcional, PNG)</label>
+  <input type="file" id="pLogo" accept="image/*,.png,.jpg,.jpeg,.webp">
+  <div class="hint">Si no subes logo, la marca SAHJONY sale como texto animado.</div>
+  <label for="pScript">5. Guion (para los subtítulos)</label>
+  <textarea id="pScript" placeholder="Escribe aquí lo mismo que dice la voz…"></textarea>
+  <label for="pBrand">Marca</label>
+  <input type="text" id="pBrand" value="SAHJONY" autocomplete="off">
+  <button id="btnProduce">🎬 Armar video vertical</button>
+  <div class="msg" id="produceMsg"></div>
+</div>
+<div class="card">
+  <h2>📦 Mis producciones</h2>
+  <button class="secondary small" id="btnProduceRefresh">🔄 Actualizar</button>
+  <div id="produceJobs"><div class="hint">Todavía no hay producciones.</div></div>
+</div>
+</div>
+
+<!-- ================= PUBLICAR ================= -->
+<div class="tabpane" id="tab-publicar">
+<div class="card">
+  <h2>📤 Cola de publicación</h2>
+  <div class="warn">🔒 Nada se publica solo. Cada video queda en borrador hasta que TÚ lo apruebes aquí.</div>
+  <label for="pubFile">Video final</label>
+  <select id="pubFile"><option value="">— arma un video en la pestaña Producir —</option></select>
+  <label for="pubCaption">Texto del post</label>
+  <textarea id="pubCaption" class="short" placeholder="Escribe el caption con hashtags…"></textarea>
+  <label>Redes</label>
+  <div class="plat" id="pubPlats"></div>
+  <button id="btnQueue">➕ Poner en cola</button>
+  <div class="msg" id="pubMsg"></div>
+</div>
+<div class="card">
+  <h2>🗂️ En cola</h2>
+  <button class="secondary small" id="btnPubRefresh">🔄 Actualizar</button>
+  <div id="pubList"><div class="hint">Cola vacía.</div></div>
+</div>
+</div>
+
+<!-- ================= AJUSTES ================= -->
+<div class="tabpane" id="tab-ajustes">
+<div class="card">
+  <h2>⚙️ Ajustes y llaves</h2>
+  <div class="hint">Las llaves se guardan solo en el servidor (nadie las ve). Tú las creas en las páginas oficiales y las pegas aquí.</div>
+  <label for="kEleven">ElevenLabs API key (música)</label>
+  <input type="password" id="kEleven" placeholder="sk_…" autocomplete="off">
+  <div class="hint" id="kElevenSt"></div>
+  <label for="kFal">fal.ai API key (video)</label>
+  <input type="password" id="kFal" placeholder="…" autocomplete="off">
+  <div class="hint" id="kFalSt"></div>
+  <button id="btnKeys">🔐 Guardar llaves</button>
+  <div class="msg" id="keysMsg"></div>
+</div>
+<div class="card">
+  <h2>💰 Costos y licencias</h2>
+  <div class="hint" id="setNotes"></div>
+  <div class="warn" id="setLicense" style="margin-top:10px"></div>
+</div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const statusEl = $('status'), cloneMsg = $('cloneMsg'), speakMsg = $('speakMsg');
+function say(el, text, cls) { el.textContent = text; el.className = 'msg ' + (cls || ''); }
+
+/* ---------- tabs ---------- */
+const tabBtns = document.querySelectorAll('#tabs button');
+function showTab(name) {
+  tabBtns.forEach(b => b.classList.toggle('active', b.dataset.tab === name));
+  document.querySelectorAll('.tabpane').forEach(p =>
+    p.classList.toggle('active', p.id === 'tab-' + name));
+  try { localStorage.setItem('studio360_tab', name); } catch (e) {}
+  if (name === 'musica') loadJobs('music');
+  if (name === 'video') loadJobs('video');
+  if (name === 'producir') { loadJobs('produce'); loadOutputs(); }
+  if (name === 'publicar') { loadPublish(); loadOutputs(); }
+  if (name === 'ajustes') loadSettings();
+}
+tabBtns.forEach(b => b.onclick = () => showTab(b.dataset.tab));
+
+/* ---------- voice (existing) ---------- */
+async function checkStatus() {
+  try {
+    const r = await fetch('/api/status');
+    const s = await r.json();
+    statusEl.className = s.engine_ready ? 'ok' : 'bad';
+    statusEl.textContent = (s.engine_ready ? '✅ ' : '⚠️ ') + s.detail;
+    return s.engine_ready;
+  } catch (e) {
+    statusEl.className = 'bad';
+    statusEl.textContent = '⚠️ No me puedo conectar al servidor. ¿Está corriendo?';
+    return false;
+  }
+}
+async function loadVoices() {
+  const ul = $('voices'), pick = $('voicePick');
+  try {
+    const r = await fetch('/api/voices');
+    const d = await r.json();
+    const vs = d.voices || [];
+    ul.innerHTML = vs.length ? '' : '<li><span class="tag">Todavía no hay voces. ¡Clona la primera arriba! 👆</span></li>';
+    pick.innerHTML = vs.length ? '' : '<option value="">— primero clona una voz —</option>';
+    vs.forEach(v => {
+      const li = document.createElement('li');
+      li.style.display = 'block';
+      const safeName = v.name.replace(/</g, '&lt;');
+      const face = v.photo_url
+        ? '<img class="face" src="' + v.photo_url + '" alt="" title="Cara">'
+        : '<img class="face" alt="" style="visibility:hidden">';
+      const body = v.body_url
+        ? '<img class="body" src="' + v.body_url + '" alt="" title="Cuerpo completo">'
+        : '';
+      const bits = [];
+      if (v.photo_url) bits.push('cara'); else bits.push('sin foto');
+      if (v.body_url) bits.push('cuerpo');
+      bits.push('voz');
+      if (v.movements_url) bits.push('movimientos');
+      let mov = '';
+      if (v.movements_url) {
+        mov = '<video class="mov" controls preload="none" src="' + v.movements_url + '"></video>' +
+              '<div class="hint">🎬 Clip de movimientos guardado (para animar al personaje después).</div>';
+      }
+      li.innerHTML = '<div class="pwrap"><span class="pface">' + face + body +
+        '<span><span class="pname">🎤 ' + safeName + '</span><br>' +
+        '<span class="psub">' + bits.join(' + ') + ' listos</span></span></span>' +
+        mov + '</div>';
+      ul.appendChild(li);
+      const o = document.createElement('option');
+      o.value = v.name; o.textContent = v.name;
+      pick.appendChild(o);
+    });
+  } catch (e) {
+    ul.innerHTML = '<li><span class="tag">No se pudo cargar la lista.</span></li>';
+  }
+}
+$('btnRefresh').onclick = () => { loadVoices(); checkStatus(); };
+$('txt').oninput = e => { $('count').textContent = e.target.value.length; };
+$('btnClone').onclick = async () => {
+  const f = $('audio').files[0];
+  const vurl = $('vurl').value.trim();
+  const name = $('vname').value.trim();
+  const photo = $('photo').files[0];
+  if (!f && !vurl) { say(cloneMsg, 'Escoge un archivo de audio o pega el enlace de un video. 🎧', 'err'); return; }
+  if (!name) { say(cloneMsg, 'Ponle un nombre a la persona. ✍️', 'err'); return; }
+  const btn = $('btnClone');
+  btn.disabled = true; btn.innerHTML = '<span class="spin">⏳</span> Guardando…';
+  say(cloneMsg, vurl && !f ? '⬇️ Bajando el audio del video… esto puede tardar un minuto.' : '');
+  const fd = new FormData();
+  fd.append('name', name);
+  if (photo) fd.append('photo', photo);
+  let url, opts;
+  if (vurl && !f) { url = '/api/voices/from-url'; fd.append('url', vurl); opts = { method: 'POST', body: fd }; }
+  else { url = '/api/voices'; fd.append('audio', f); opts = { method: 'POST', body: fd }; }
+  const doPost = async () => {
+    let r = await fetch(url, opts);
+    let d = await r.json();
+    if (r.status === 409 && d.error === 'exists' && !opts._retried) {
+      if (confirm(d.message)) { opts._retried = true; fd.append('overwrite', '1'); r = await fetch(url, opts); d = await r.json(); }
+      else { say(cloneMsg, 'No se guardó. Ponle otro nombre. 🙂'); return null; }
+    }
+    return { r, d };
+  };
+  try {
+    const res = await doPost();
+    if (!res) return;
+    const { r, d } = res;
+    if (!r.ok || !d.ok) { say(cloneMsg, '❌ ' + (d.error || 'No se pudo guardar.'), 'err'); return; }
+    say(cloneMsg, '✅ ¡Persona guardada! Ya la puedes usar abajo. 🎉' + (d.note ? ' ' + d.note : ''), 'good');
+    $('vname').value = ''; $('audio').value = ''; $('vurl').value = ''; $('photo').value = '';
+    loadVoices();
+  } catch (e) { say(cloneMsg, '❌ Error de conexión. Inténtalo de nuevo.', 'err'); }
+  finally { btn.disabled = false; btn.textContent = '💾 Guardar persona'; }
+};
+$('btnSpeak').onclick = async () => {
+  const voice = $('voicePick').value;
+  const text = $('txt').value.trim();
+  if (!voice) { say(speakMsg, 'Escoge una voz primero. 🎤', 'err'); return; }
+  if (!text) { say(speakMsg, 'Escribe el texto primero. ✍️', 'err'); return; }
+  const btn = $('btnSpeak');
+  btn.disabled = true; btn.innerHTML = '<span class="spin">⏳</span> Generando… dale unos minutos';
+  say(speakMsg, '🎙️ Generando el audio… esto puede tardar unos minutos, no cierres la página.');
+  $('player').style.display = 'none'; $('dl').style.display = 'none';
+  try {
+    const r = await fetch('/api/speak', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ voice, text, language: $('langPick').value }) });
+    const d = await r.json();
+    if (!r.ok || !d.ok) { say(speakMsg, '❌ ' + (d.error || 'No se pudo generar.'), 'err'); return; }
+    say(speakMsg, '✅ ¡Listo! Dale play 👇', 'good');
+    const p = $('player');
+    p.src = d.audio_url; p.style.display = 'block'; p.load();
+    const a = $('dlLink');
+    a.href = d.audio_url; a.download = voice + '.mp3';
+    $('dl').style.display = 'block';
+  } catch (e) { say(speakMsg, '❌ Se cortó la conexión (¿tardó mucho?). Inténtalo de nuevo.', 'err'); }
+  finally { btn.disabled = false; btn.textContent = '🔊 Generar audio'; }
+};
+
+/* ---------- generic job polling ---------- */
+const pollers = {};
+function pollJob(jid, render) {
+  if (pollers[jid]) return;
+  pollers[jid] = setInterval(async () => {
+    try {
+      const r = await fetch('/api/jobs/' + jid);
+      const d = await r.json();
+      const job = d.job;
+      render(job);
+      if (['done', 'error', 'cancelled'].includes(job.status)) {
+        clearInterval(pollers[jid]); delete pollers[jid];
+        render(job);
+      }
+    } catch (e) {}
+  }, 4000);
+}
+function jobCard(job, extra) {
+  const el = document.createElement('div');
+  el.className = 'job';
+  const st = job.status === 'done' ? '✅' : job.status === 'error' ? '❌'
+    : job.status === 'cancelled' ? '🚫' : '<span class="spin">⏳</span>';
+  let html = '<div class="jt">' + st + ' ' + escapeHtml(job.label || job.kind) + '</div>' +
+    '<div class="jp">' + escapeHtml(job.progress || '') + '</div>';
+  if (job.cost_est != null && job.status !== 'done')
+    html += '<div class="jp">Costo aprox: $' + job.cost_est + '</div>';
+  if (job.error) html += '<div class="je">' + escapeHtml(job.error) + '</div>';
+  if (job.status === 'done' && job.result) {
+    const u = job.result.url;
+    if (job.kind === 'video' || job.kind === 'produce')
+      html += '<video class="preview" controls preload="none" src="' + u + '"></video>';
+    else
+      html += '<audio controls preload="none" src="' + u + '" style="width:100%;margin-top:8px"></audio>';
+    html += '<div class="row"><a href="' + u + '" download style="flex:1"><button class="secondary small" type="button">⬇️ Descargar</button></a>';
+    if (extra) html += extra(job);
+    html += '</div>';
+  } else if (job.status === 'working' || job.status === 'queued') {
+    html += '<div class="row"><button class="danger small" type="button" data-cancel="' + job.id + '">✖ Cancelar</button></div>';
+  }
+  el.innerHTML = html;
+  el.querySelectorAll('[data-cancel]').forEach(b => b.onclick = async () => {
+    await fetch('/api/jobs/' + b.dataset.cancel + '/cancel', { method: 'POST' });
+  });
+  return el;
+}
+function escapeHtml(s) { return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+async function loadJobs(kind) {
+  const box = kind === 'music' ? $('musicJobs') : kind === 'video' ? $('videoJobs') : $('produceJobs');
+  try {
+    const r = await fetch('/api/jobs?kind=' + kind);
+    const d = await r.json();
+    box.innerHTML = '';
+    if (!d.jobs.length) { box.innerHTML = '<div class="hint">Todavía no hay nada aquí.</div>'; return; }
+    d.jobs.forEach(job => {
+      const card = jobCard(job);
+      box.appendChild(card);
+      if (['queued', 'working'].includes(job.status)) pollJob(job.id, j => {
+        const nc = jobCard(j);
+        card.replaceWith(nc);
+      });
+    });
+  } catch (e) {}
+}
+
+/* ---------- music ---------- */
+function mEstimate() {
+  const s = +$('mSecs').value;
+  $('mSecsVal').textContent = s;
+  $('mEst').textContent = 'Costo aprox: $' + ((Math.ceil(s / 60) * 0.75).toFixed(2));
+}
+$('mSecs').oninput = mEstimate;
+$('btnMusic').onclick = async () => {
+  const prompt = $('mPrompt').value.trim();
+  if (!prompt) { say($('musicMsg'), 'Describe el estilo y la letra primero. 🎵', 'err'); return; }
+  const secs = +$('mSecs').value;
+  if (!confirm('Componer ' + secs + 's de música cuesta aprox. $' + (Math.ceil(secs / 60) * 0.75).toFixed(2) + '.\n¿Seguir?')) return;
+  const btn = $('btnMusic');
+  btn.disabled = true; btn.innerHTML = '<span class="spin">⏳</span> Componiendo…';
+  say($('musicMsg'), '🎼 Mandando a componer… puedes seguir usando el estudio, te aviso aquí.');
+  try {
+    const r = await fetch('/api/music', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt, instrumental: $('mInst').checked, secs, model: $('mModel').value }) });
+    const d = await r.json();
+    if (!r.ok || !d.ok) { say($('musicMsg'), '❌ ' + (d.error || 'No se pudo.'), 'err'); return; }
+    say($('musicMsg'), '✅ En proceso… la canción aparece abajo cuando esté lista.', 'good');
+    loadJobs('music');
+  } catch (e) { say($('musicMsg'), '❌ Error de conexión.', 'err'); }
+  finally { btn.disabled = false; btn.textContent = '🎼 Componer canción'; }
+};
+$('btnMusicRefresh').onclick = () => loadJobs('music');
+
+/* ---------- video ---------- */
+const VIDEO_MODELS = {};
+function vEstimate() {
+  const m = VIDEO_MODELS[$('vModel').value];
+  const s = +$('vSecs').value;
+  $('vSecsVal').textContent = s;
+  if (m) {
+    $('vEst').textContent = 'Costo aprox: $' + (s * m.usd_s).toFixed(2);
+    $('vModelNote').textContent = m.note;
+    $('vSecs').max = m.max_s;
+  }
+}
+$('vSecs').oninput = vEstimate;
+$('vModel').onchange = () => { const m = VIDEO_MODELS[$('vModel').value]; if (m && +$('vSecs').value > m.max_s) $('vSecs').value = m.max_s; vEstimate(); };
+$('vMode').onchange = () => { $('vImgBox').style.display = $('vMode').value === 'image' ? 'block' : 'none'; };
+async function loadVideoModels() {
+  // model list mirrors the server; prices are approximate
+  const defs = [
+    { k: 'veo3', label: 'Veo 3 Fast — video CON audio 🎙️', usd_s: 0.40, max_s: 8, def_s: 8, note: 'El mejor para personajes que hablan. ~8 s por clip. Precio aprox.' },
+    { k: 'kling', label: 'Kling 2.5 Turbo — b-roll barato 💸', usd_s: 0.07, max_s: 10, def_s: 5, note: 'Sin audio; ideal para fondos y escenas. Precio aprox.' },
+    { k: 'hailuo', label: 'Hailuo MiniMax — económico 💸', usd_s: 0.055, max_s: 10, def_s: 6, note: 'Texto→video barato. Precio aprox.' },
+  ];
+  const sel = $('vModel');
+  defs.forEach(d => { VIDEO_MODELS[d.k] = d; const o = document.createElement('option'); o.value = d.k; o.textContent = d.label; sel.appendChild(o); });
+  $('vSecs').value = 8;
+  vEstimate();
+}
+let vImageUrl = '';
+$('vImage').onchange = async () => {
+  const f = $('vImage').files[0];
+  if (!f) return;
+  $('vImgHint').textContent = '⬆️ Subiendo imagen…';
+  const fd = new FormData(); fd.append('file', f);
+  try {
+    const r = await fetch('/api/upload', { method: 'POST', body: fd });
+    const d = await r.json();
+    if (!r.ok || !d.ok) { $('vImgHint').textContent = '❌ ' + (d.error || 'No se pudo subir.'); return; }
+    vImageUrl = d.public_url;
+    $('vImgHint').textContent = '✅ Imagen lista para el video.';
+  } catch (e) { $('vImgHint').textContent = '❌ Error de conexión.'; }
+};
+$('btnVideo').onclick = async () => {
+  const prompt = $('vPrompt').value.trim();
+  if (!prompt) { say($('videoMsg'), 'Describe la escena primero. 🎬', 'err'); return; }
+  const mode = $('vMode').value;
+  if (mode === 'image' && !vImageUrl) { say($('videoMsg'), 'Sube la imagen de partida primero. 🖼️', 'err'); return; }
+  const m = VIDEO_MODELS[$('vModel').value];
+  const secs = +$('vSecs').value;
+  if (!confirm('Generar ' + secs + 's de video cuesta aprox. $' + (secs * m.usd_s).toFixed(2) + '.\n¿Seguir?')) return;
+  const btn = $('btnVideo');
+  btn.disabled = true; btn.innerHTML = '<span class="spin">⏳</span> Generando…';
+  say($('videoMsg'), '🎥 Mandando a generar… tarda unos minutos, puedes seguir usando el estudio.');
+  try {
+    const r = await fetch('/api/video', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt, mode, image_url: vImageUrl, model: $('vModel').value, secs }) });
+    const d = await r.json();
+    if (!r.ok || !d.ok) { say($('videoMsg'), '❌ ' + (d.error || 'No se pudo.'), 'err'); return; }
+    say($('videoMsg'), '✅ En proceso… la escena aparece abajo cuando esté lista.', 'good');
+    loadJobs('video');
+  } catch (e) { say($('videoMsg'), '❌ Error de conexión.', 'err'); }
+  finally { btn.disabled = false; btn.textContent = '🎥 Generar escena'; }
+};
+$('btnVideoRefresh').onclick = () => loadJobs('video');
+
+/* ---------- produce ---------- */
+let studioFiles = { audios: [], videos: [] };
+async function loadOutputs() {
+  try {
+    const r = await fetch('/api/outputs');
+    const d = await r.json();
+    studioFiles = d;
+    const pv = $('pVoice'), pm = $('pMusic'), pf = $('pubFile');
+    pv.innerHTML = '<option value="">— genera un audio en la pestaña Voz —</option>';
+    pm.innerHTML = '<option value="">— sin música —</option>';
+    pf.innerHTML = '<option value="">— arma un video en la pestaña Producir —</option>';
+    d.audios.forEach(a => {
+      const o1 = document.createElement('option');
+      o1.value = a.name;
+      o1.textContent = (a.kind === 'musica' ? '🎵 ' : '🎙️ ') + a.name + (a.secs ? ' (' + a.secs + 's)' : '');
+      pv.appendChild(o1);
+      if (a.kind === 'musica') { const o2 = o1.cloneNode(true); pm.appendChild(o2); }
+    });
+    d.videos.forEach(v => {
+      if (v.kind !== 'final') return;
+      const o = document.createElement('option');
+      o.value = v.name; o.textContent = '🎥 ' + v.name + (v.secs ? ' (' + v.secs + 's)' : '');
+      pf.appendChild(o);
+    });
+  } catch (e) {}
+}
+async function uploadField(inputEl, msgEl) {
+  const f = inputEl.files[0];
+  if (!f) return '';
+  say(msgEl, '⬆️ Subiendo ' + f.name + '…');
+  const fd = new FormData(); fd.append('file', f);
+  const r = await fetch('/api/upload', { method: 'POST', body: fd });
+  const d = await r.json();
+  if (!r.ok || !d.ok) { say(msgEl, '❌ ' + (d.error || 'No se pudo subir.'), 'err'); return ''; }
+  return d.file;
+}
+$('btnProduce').onclick = async () => {
+  const msg = $('produceMsg');
+  let voice = $('pVoice').value, music = $('pMusic').value, bg = '', logo = '';
+  if (!voice) voice = await uploadField($('pVoiceUp'), msg);
+  if (!voice) { say(msg, 'Pon el audio de la voz (o súbelo). 🎙️', 'err'); return; }
+  if (!music) music = await uploadField($('pMusicUp'), msg);
+  bg = await uploadField($('pBg'), msg);
+  if (!bg) { say(msg, 'Sube la imagen o video de fondo. 🖼️', 'err'); return; }
+  if ($('pLogo').files[0]) logo = await uploadField($('pLogo'), msg);
+  const script = $('pScript').value.trim();
+  if (!script) { say(msg, 'Escribe el guion para los subtítulos. ✍️', 'err'); return; }
+  const btn = $('btnProduce');
+  btn.disabled = true; btn.innerHTML = '<span class="spin">⏳</span> Armando…';
+  say(msg, '🎬 Armando tu video vertical…');
+  try {
+    const fd = new FormData();
+    fd.append('voice', voice);
+    if (music) fd.append('music', music);
+    fd.append('bg', bg);
+    if (logo) fd.append('logo', logo);
+    fd.append('script', script);
+    fd.append('brand', ($('pBrand').value || 'SAHJONY').trim() || 'SAHJONY');
+    const r = await fetch('/api/produce', { method: 'POST', body: fd });
+    const d = await r.json();
+    if (!r.ok || !d.ok) { say(msg, '❌ ' + (d.error || 'No se pudo armar.'), 'err'); return; }
+    say(msg, '✅ ¡En producción! El video aparece abajo cuando esté listo. 📦', 'good');
+    loadJobs('produce');
+  } catch (e) { say(msg, '❌ Error de conexión. Inténtalo de nuevo.', 'err'); }
+  finally { btn.disabled = false; btn.textContent = '🎬 Armar video vertical'; }
+};
+$('btnProduceRefresh').onclick = () => { loadJobs('produce'); loadOutputs(); };
+
+/* ---------- publish ---------- */
+async function loadPublish() {
+  try {
+    const r = await fetch('/api/publish');
+    const d = await r.json();
+    const box = $('pubPlats');
+    box.innerHTML = '';
+    (d.platforms || []).forEach(p => {
+      const lab = document.createElement('label');
+      const cb = document.createElement('input');
+      cb.type = 'checkbox'; cb.value = p;
+      lab.appendChild(cb);
+      lab.appendChild(document.createTextNode(' ' + p));
+      box.appendChild(lab);
+    });
+    const list = $('pubList');
+    list.innerHTML = '';
+    if (!d.items || !d.items.length) { list.innerHTML = '<div class="hint">Cola vacía.</div>'; return; }
+    d.items.forEach(it => {
+      const div = document.createElement('div');
+      div.className = 'job';
+      const badge = it.status === 'aprobado'
+        ? '<span class="badge ok2">aprobado</span>'
+        : '<span class="badge draft">borrador</span>';
+      div.innerHTML = '<div class="jt">' + escapeHtml(it.file) + ' ' + badge + '</div>' +
+        '<div class="jp">' + escapeHtml((it.platforms || []).join(' · ')) + '</div>' +
+        '<div class="jp">' + escapeHtml(it.caption || '') + '</div>' +
+        '<video class="preview" controls preload="none" src="' + it.url + '"></video>' +
+        '<div class="row">' +
+        (it.status === 'borrador'
+          ? '<button class="secondary small" data-act="approve" data-pid="' + it.id + '">✅ Aprobar</button>'
+          : '<button class="secondary small" data-act="unapprove" data-pid="' + it.id + '">↩️ Volver a borrador</button>') +
+        '<button class="danger small" data-act="del" data-pid="' + it.id + '">🗑️ Quitar</button></div>';
+      list.appendChild(div);
+    });
+    list.querySelectorAll('[data-act]').forEach(b => b.onclick = async () => {
+      const pid = b.dataset.pid, act = b.dataset.act;
+      if (act === 'del' && !confirm('¿Quitar este video de la cola?')) return;
+      const url = act === 'del' ? '/api/publish/' + pid : '/api/publish/' + pid + '/' + act;
+      await fetch(url, { method: act === 'del' ? 'DELETE' : 'POST' });
+      loadPublish();
+    });
+  } catch (e) {}
+}
+$('btnPubRefresh').onclick = loadPublish;
+$('btnQueue').onclick = async () => {
+  const msg = $('pubMsg');
+  const file = $('pubFile').value;
+  const caption = $('pubCaption').value.trim();
+  const platforms = Array.from($('pubPlats').querySelectorAll('input:checked')).map(i => i.value);
+  try {
+    const r = await fetch('/api/publish', { method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ file: file, caption: caption, platforms: platforms }) });
+    const d = await r.json();
+    if (!r.ok || !d.ok) { say(msg, '❌ ' + (d.error || 'No se pudo poner en cola.'), 'err'); return; }
+    say(msg, '✅ En cola como borrador. Nada se publica sin tu aprobación. 🔒', 'good');
+    $('pubCaption').value = '';
+    loadPublish();
+  } catch (e) { say(msg, '❌ Error de conexión. Inténtalo de nuevo.', 'err'); }
+};
+
+/* ---------- settings ---------- */
+async function loadSettings() {
+  try {
+    const r = await fetch('/api/settings');
+    const d = await r.json();
+    $('kElevenSt').textContent = d.elevenlabs_set ? '✅ Llave guardada' : 'Sin llave todavía';
+    $('kFalSt').textContent = d.fal_set ? '✅ Llave guardada' : 'Sin llave todavía';
+    $('setNotes').textContent = [d.music_note, d.video_note].filter(Boolean).join(' ');
+    $('setLicense').textContent = d.license_note || '';
+  } catch (e) {}
+}
+$('btnKeys').onclick = async () => {
+  const msg = $('keysMsg');
+  try {
+    const r = await fetch('/api/settings', { method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ elevenlabs: $('kEleven').value, fal: $('kFal').value }) });
+    const d = await r.json();
+    if (!r.ok || !d.ok) { say(msg, '❌ ' + (d.error || 'No se pudo guardar.'), 'err'); return; }
+    say(msg, '✅ ' + (d.msg || 'Llaves guardadas. 🔐'), 'good');
+    $('kEleven').value = ''; $('kFal').value = '';
+    loadSettings();
+  } catch (e) { say(msg, '❌ Error de conexión. Inténtalo de nuevo.', 'err'); }
+};
+
+/* ---------- init ---------- */
+loadVideoModels();
+checkStatus();
+loadVoices();
+try {
+  const t = localStorage.getItem('studio360_tab');
+  if (t && document.querySelector('#tabs button[data-tab="' + t + '"]')) showTab(t);
+} catch (e) {}
+</script>
+</body>
+</html>
+
+...[truncated 5983 chars]

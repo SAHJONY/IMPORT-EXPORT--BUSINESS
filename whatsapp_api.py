@@ -13,7 +13,7 @@ from typing import Any, Literal
 import httpx
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Query, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from auth import verify_owner_token
 from insforge_backend import get_backend, persistent_backend_status
@@ -1321,6 +1321,8 @@ async def hermes_outbox(
             "recipient_type": claimed.get("recipient_type") or "individual",
             "group_jid": claimed.get("group_jid"),
             "body": claimed["body"],
+            "media_type": claimed.get("media_type"),
+            "media_base64": claimed.get("media_base64"),
             "lease_token": lease_token,
             "lease_expires_at": lease_expires_at,
             "release_mode": claimed.get("release_mode"),
@@ -1379,7 +1381,28 @@ async def hermes_outbox_ack(
 
 class HermesDirectSend(BaseModel):
     recipient: str = Field(min_length=8, max_length=64)
-    body: str = Field(min_length=1, max_length=1000)
+    body: str | None = Field(default=None, min_length=1, max_length=1000)
+    # Voice-note support (feat/whatsapp-voice-notes): base64-encoded audio
+    # (MP3 or OGG). The outbox worker hands it to the bridge /send-media,
+    # which converts to ogg/opus so WhatsApp renders a native ptt bubble.
+    # body is optional for audio sends; when omitted the row keeps a
+    # "[voice note]" marker so history stays readable.
+    audio_base64: str | None = Field(default=None, min_length=100, max_length=2_000_000)
+
+    @model_validator(mode="after")
+    def _require_body_or_audio(self):
+        has_body = bool(self.body and self.body.strip())
+        has_audio = bool(self.audio_base64 and self.audio_base64.strip())
+        if not has_body and not has_audio:
+            raise ValueError("Either body or audio_base64 is required")
+        if has_audio:
+            try:
+                raw = base64.b64decode(self.audio_base64, validate=True)  # type: ignore[arg-type]
+            except Exception:
+                raise ValueError("audio_base64 is not valid base64")
+            if not (1_000 <= len(raw) <= 1_500_000):
+                raise ValueError("audio payload must decode to between 1KB and 1.5MB")
+        return self
 
 
 # ---------------------------------------------------------------------------
@@ -1481,12 +1504,22 @@ async def hermes_outbox_enqueue(
         extra = {"recipient_type": recipient_type}
     command_id = f"wad_{secrets.token_urlsafe(18)}"
     ts = _now()
+    body_text = (payload.body or "").strip()
+    media_type: str | None = None
+    media_base64: str | None = None
+    if payload.audio_base64 and payload.audio_base64.strip():
+        media_type = "audio"
+        media_base64 = payload.audio_base64.strip()
+        if not body_text:
+            body_text = "[voice note]"
     await get_backend().insert("whatsapp_openclaw_outbox", {
         "command_id": command_id,
         "channel": "whatsapp",
         "account_id": "default",
         "recipient": recipient,
-        "body": payload.body,
+        "body": body_text,
+        "media_type": media_type,
+        "media_base64": media_base64,
         "preview_url": False,
         "lead_id": None,
         "customer_id": None,
@@ -1503,7 +1536,7 @@ async def hermes_outbox_enqueue(
         **extra,
     })
     return {"status": "queued", "command_id": command_id, "recipient": recipient,
-            "recipient_type": recipient_type}
+            "recipient_type": recipient_type, "media_type": media_type}
 
 
 @app.get("/whatsapp/hermes/outbox/status")
