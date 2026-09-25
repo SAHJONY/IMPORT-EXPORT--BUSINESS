@@ -16,8 +16,12 @@ on:
         required: true
         type: string
       message:
-        description: Message text (1-1000 chars, plain text)
-        required: true
+        description: Message text (1-1000 chars, plain text). Optional when audio_base64 is provided (then used as the transcript label).
+        required: false
+        type: string
+      audio_base64:
+        description: "Optional base64-encoded audio (MP3/OGG, 1KB-1.5MB decoded) — sent as a native WhatsApp voice note (ptt). Either message or audio_base64 is required."
+        required: false
         type: string
       dry_run:
         description: Validate only — do not send
@@ -50,6 +54,7 @@ jobs:
       INPUT_TO: ${{ inputs.to }}
       INPUT_DRY_RUN: ${{ inputs.dry_run }}
       INPUT_MESSAGE: ${{ inputs.message }}
+      INPUT_AUDIO_BASE64: ${{ inputs.audio_base64 }}
     steps:
       - name: Validate inputs and show ban-risk notice
         run: |
@@ -81,10 +86,32 @@ jobs:
           print(f'RECIPIENT={recipient}', flush=True)
           print(f'RECIPIENT_TYPE={recipient_type}', flush=True)
           print(f'DRY_RUN={os.environ["INPUT_DRY_RUN"]}', flush=True)
-          # Persist for the next step.
+          # Voice-note mode: audio_base64 present means a native ptt send.
+          import base64 as _b64
+          audio_b64 = (os.environ.get('INPUT_AUDIO_BASE64') or '').strip()
+          audio_bytes = 0
+          if audio_b64:
+              try:
+                  audio_bytes = len(_b64.b64decode(audio_b64, validate=True))
+              except Exception:
+                  print('INVALID_AUDIO_BASE64=not valid base64', flush=True); sys.exit(2)
+              if not (1_000 <= audio_bytes <= 1_500_000):
+                  print(f'INVALID_AUDIO_SIZE={audio_bytes}', flush=True); sys.exit(2)
+              print(f'AUDIO_BYTES={audio_bytes}', flush=True)
+          body_text = (os.environ.get('INPUT_MESSAGE') or '').strip()
+          if not body_text and not audio_b64:
+              print('INVALID_INPUT=message or audio_base64 required', flush=True); sys.exit(2)
+          if body_text and not (1 <= len(body_text) <= 1000):
+              print(f'INVALID_MESSAGE_LEN={len(body_text)}', flush=True); sys.exit(3)
+          # Persist for the next step (message text stays in INPUT_MESSAGE env).
           with open(os.environ['GITHUB_ENV'], 'a') as fh:
               fh.write(f'RECIPIENT_VALUE={recipient}\n')
               fh.write(f'RECIPIENT_TYPE={recipient_type}\n')
+              fh.write(f'HAS_AUDIO={"1" if audio_b64 else "0"}\n')
+          # audio_b64 is large; pass via file to avoid env limits.
+          if audio_b64:
+              with open('/tmp/voice_audio.b64', 'w') as fh:
+                  fh.write(audio_b64)
           PY
 
       - name: Enqueue and track delivery
@@ -103,15 +130,24 @@ jobs:
 
           recipient = os.environ['RECIPIENT_VALUE']
           recipient_type = os.environ.get('RECIPIENT_TYPE', 'individual')
-          body = os.environ['INPUT_MESSAGE']
-          if not (1 <= len(body) <= 1000):
+          body = (os.environ.get('INPUT_MESSAGE') or '').strip()
+          has_audio = os.environ.get('HAS_AUDIO') == '1'
+          audio_b64 = ''
+          if has_audio:
+              with open('/tmp/voice_audio.b64') as fh:
+                  audio_b64 = fh.read().strip()
+          if not body and not has_audio:
+              print('INVALID_INPUT=message or audio_base64 required', flush=True); sys.exit(3)
+          if body and not (1 <= len(body) <= 1000):
               print(f'INVALID_MESSAGE_LEN={len(body)}', flush=True); sys.exit(3)
           dry = os.environ['INPUT_DRY_RUN'] == 'true'
 
           print('NOTICE: sending a first-contact message to a new number can trigger WhatsApp spam detection and risk the business number. Dispatching this workflow is the owner accepting that risk.', flush=True)
           if recipient_type == 'group':
               print('NOTICE: group messages are visible to EVERY group member. A message that reads as spam or off-topic can be reported by any member and risks the business number. Send only owner-approved content.', flush=True)
-          print(f'DIRECT_SEND to={recipient} type={recipient_type} chars={len(body)} dry_run={dry}', flush=True)
+          if has_audio:
+              print('NOTICE: voice notes render as native ptt bubbles from the business number. Same ban risk as text.', flush=True)
+          print(f'DIRECT_SEND to={recipient} type={recipient_type} chars={len(body)} audio={has_audio} dry_run={dry}', flush=True)
           if dry:
               print('DRY_RUN_OK=no message enqueued', flush=True)
               sys.exit(0)
@@ -141,7 +177,10 @@ jobs:
               except Exception as e:
                   return {'status': 'poll_error', 'error': str(e)[:200]}
 
-          code, resp = post('/whatsapp/hermes/outbox/enqueue', {'recipient': recipient, 'body': body})
+          payload = {'recipient': recipient, 'body': body or None}
+          if has_audio:
+              payload['audio_base64'] = audio_b64
+          code, resp = post('/whatsapp/hermes/outbox/enqueue', payload)
           print(f'ENQUEUE_HTTP={code}', flush=True)
           if code != 200 or resp.get('status') != 'queued':
               print('ENQUEUE_FAILED ' + json.dumps(resp)[:500], flush=True); sys.exit(4)

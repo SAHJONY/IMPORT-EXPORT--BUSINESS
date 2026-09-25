@@ -47,7 +47,7 @@ jobs:
           # NOTE: BASE points at the VPS-local WhatsApp API (127.0.0.1:8102), not the
           # public domain — the public domain may be down (e.g. Vercel 402) while the
           # local API is up. Do not change back to the public URL without a fallback.
-          import hashlib, hmac, json, os, time, urllib.request, urllib.error
+          import hashlib, hmac, json, os, secrets, time, urllib.request, urllib.error
           from datetime import datetime, timezone
 
           BASE='http://127.0.0.1:8102'
@@ -98,6 +98,47 @@ jobs:
           def send_local(cmd):
               if str(cmd.get('release_mode') or '') != 'customer_service_window':
                   raise RuntimeError('compliance_release_missing')
+              # Voice-note path (feat/whatsapp-voice-notes): base64 audio from the
+              # outbox row -> temp file -> bridge /send-media with mediaType audio.
+              # The bridge converts to ogg/opus via ffmpeg so WhatsApp renders a
+              # native ptt voice bubble. Temp file is always cleaned up.
+              if str(cmd.get('media_type') or '') == 'audio' and cmd.get('media_base64'):
+                  import base64 as _b64, os as _os
+                  raw = _b64.b64decode(str(cmd['media_base64']))
+                  if not (1_000 <= len(raw) <= 1_500_000):
+                      raise RuntimeError('invalid audio payload size')
+                  tmp = '/tmp/hermes_voice_%s.mp3' % secrets.token_hex(8)
+                  try:
+                      with open(tmp, 'wb') as fh:
+                          fh.write(raw)
+                      if str(cmd.get('recipient_type') or '') == 'group':
+                          group_jid = str(cmd.get('group_jid') or '').strip()
+                          if not group_jid:
+                              raw_r = str(cmd.get('recipient') or '')
+                              group_jid = raw_r[len('group:'):] if raw_r.startswith('group:') else ''
+                          local, _, domain = group_jid.rpartition('@')
+                          if domain != 'g.us' or not local.isdigit() or not local:
+                              raise RuntimeError('invalid group_jid')
+                          candidates = [group_jid]
+                      else:
+                          recipient = ''.join(ch for ch in str(cmd.get('recipient') or '') if ch.isdigit())
+                          if not recipient:
+                              raise RuntimeError('invalid recipient')
+                          candidates = [recipient + '@s.whatsapp.net', recipient]
+                      last = None
+                      for chat in candidates:
+                          try:
+                              out = json_request(BRIDGE + '/send-media', 'POST',
+                                  {'chatId': chat, 'filePath': tmp, 'mediaType': 'audio'}, timeout=90)
+                              return str(out.get('messageId') or out.get('id') or '') or None
+                          except Exception as e:
+                              last = e
+                      raise last or RuntimeError('send-media failed')
+                  finally:
+                      try:
+                          _os.unlink(tmp)
+                      except Exception:
+                          pass
               body=str(cmd.get('body') or '')[:4096]
               if str(cmd.get('recipient_type') or '') == 'group':
                   # Group send: address the @g.us JID verbatim. Never append

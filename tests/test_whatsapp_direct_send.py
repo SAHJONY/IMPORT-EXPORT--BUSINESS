@@ -13,8 +13,11 @@ def _route_source():
 
 def test_direct_send_enqueue_route_exists_with_validation():
     route = _route_source()
-    # Pydantic model caps the message at WhatsApp-friendly length.
-    assert "body: str = Field(min_length=1, max_length=1000)" in route
+    # Pydantic model caps the message at WhatsApp-friendly length (optional for audio sends).
+    assert "body: str | None = Field(default=None, min_length=1, max_length=1000)" in route
+    # Voice-note support: base64 audio, body-or-audio required.
+    assert "audio_base64: str | None = Field(default=None" in route
+    assert "Either body or audio_base64 is required" in route
     # Recipient is normalized to digits and bounded to E.164 range.
     assert 'if not 8 <= len(digits) <= 15:' in route
     # The worker only releases commands carrying the compliance release mode.
@@ -25,6 +28,9 @@ def test_direct_send_enqueue_route_exists_with_validation():
     assert "_verify_hermes_signature(raw, x_sahjony_timestamp, x_sahjony_signature)" in route
     # Provenance is traceable per command.
     assert '"source_url": f"owner:direct-send:{command_id}"' in route
+    # Audio rows carry media fields for the worker; text path unchanged.
+    assert '"media_type": media_type' in route
+    assert '"media_base64": media_base64' in route
 
 
 def test_direct_send_status_route_exists():
