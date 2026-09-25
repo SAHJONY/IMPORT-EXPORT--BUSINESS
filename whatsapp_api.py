@@ -8,6 +8,7 @@ import json
 import os
 import secrets
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any, Literal
 
 import httpx
@@ -754,15 +755,12 @@ async def _hermes_gateway_state() -> dict[str, Any]:
     }
 
 
-async def _enqueue_hermes_message(payload: WhatsAppSend) -> dict[str, Any]:
-    if not _hermes_bridge_configured():
-        raise HTTPException(status_code=503, detail="Hermes application bridge is not configured")
-    if os.getenv("WHATSAPP_AUTOMATION_ENABLED", "false").strip().lower() not in {"1", "true", "yes", "on"}:
-        raise HTTPException(status_code=503, detail="WhatsApp automation is paused by safety control")
-    eligibility = await _assert_compliant_session_outbound(payload.to)
-    recipient = eligibility["recipient"]
-    body = payload.body[:4096]
-    fingerprint = hashlib.sha256(f"{recipient}|{body}".encode("utf-8")).hexdigest()
+async def _outbox_duplicate(recipient: str, fingerprint: str) -> dict[str, Any] | None:
+    """Return the suppression result when an identical outbox row was recently queued.
+
+    Shared by the text and voice-note enqueue paths: one recipient never gets
+    the same payload twice inside the 10-minute window.
+    """
     recent = await get_backend().select(
         "whatsapp_openclaw_outbox",
         params={"recipient": f"eq.{recipient}", "limit": "250"},
@@ -778,6 +776,144 @@ async def _enqueue_hermes_message(payload: WhatsAppSend) -> dict[str, Any]:
             created = datetime.now(timezone.utc)
         if created.astimezone(timezone.utc) >= cutoff and str(existing.get("status") or "") in {"queued", "dispatching", "sent"}:
             return {"status": "duplicate_suppressed", "provider": "hermes_whatsapp", "command_id": existing.get("command_id"), "recipient": recipient}
+    return None
+
+
+async def _bridge_audio_cache_dir() -> Path:
+    """Directory where the Hermes bridge caches downloaded inbound audio."""
+    return Path(os.path.expanduser("~/.hermes/audio_cache"))
+
+
+async def _resolve_bridge_audio_bytes(msg: dict[str, Any]) -> bytes | None:
+    """Read the bridge's cached inbound audio file for a voice-note event.
+
+    The Hermes bridge downloads inbound audio into ~/.hermes/audio_cache and
+    exposes the local file path via mediaUrls. This resolves that reference
+    SAFELY: only paths inside the audio cache directory are accepted, which
+    blocks path-traversal and arbitrary file reads. Returns the raw bytes, or
+    None when the reference is missing, untrusted, oversized, or unreadable.
+    """
+    urls = msg.get("mediaUrls") or []
+    if isinstance(urls, str):
+        urls = [urls]
+    candidates = [str(u).strip() for u in urls if str(u or "").strip()]
+    single = str(msg.get("mediaUrl") or msg.get("mediaPath") or "").strip()
+    if single:
+        candidates.append(single)
+    cache = (await _bridge_audio_cache_dir()).resolve()
+    for cand in candidates:
+        try:
+            path = Path(cand).expanduser().resolve()
+        except Exception:
+            continue
+        if path != cache and cache not in path.parents:
+            continue  # untrusted location: never read
+        if not path.is_file():
+            continue
+        try:
+            size = path.stat().st_size
+        except OSError:
+            continue
+        if not (1 <= size <= whatsapp_audio.MAX_AUDIO_BYTES):
+            continue
+        try:
+            return path.read_bytes()
+        except OSError:
+            continue
+    return None
+
+
+async def _enqueue_hermes_audio(
+    *,
+    to: str,
+    audio_b64: str,
+    transcript: str,
+    lead_id: str | None = None,
+    customer_id: str | None = None,
+    source_url: str | None = None,
+) -> dict[str, Any]:
+    """Queue a voice-note (ptt) reply through the Hermes outbox.
+
+    The outbox worker delivers rows with media_type='audio' via the bridge
+    /send-media endpoint, which converts to ogg/opus so WhatsApp renders a
+    native voice bubble. The transcript is stored as the row body so records
+    stay searchable. Same compliance gate, dedupe, and audit trail as text.
+    """
+    if not _hermes_bridge_configured():
+        raise HTTPException(status_code=503, detail="Hermes application bridge is not configured")
+    if os.getenv("WHATSAPP_AUTOMATION_ENABLED", "false").strip().lower() not in {"1", "true", "yes", "on"}:
+        raise HTTPException(status_code=503, detail="WhatsApp automation is paused by safety control")
+    try:
+        raw = base64.b64decode(str(audio_b64 or ""))
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid audio payload")
+    if not (1_000 <= len(raw) <= 1_500_000):
+        raise HTTPException(status_code=400, detail="Invalid audio payload size")
+    eligibility = await _assert_compliant_session_outbound(to)
+    recipient = eligibility["recipient"]
+    body = (transcript or "[voice note]").strip()[:4096]
+    audio_sha = hashlib.sha256(raw).hexdigest()
+    fingerprint = hashlib.sha256(f"{recipient}|audio|{audio_sha}".encode("utf-8")).hexdigest()
+    duplicate = await _outbox_duplicate(recipient, fingerprint)
+    if duplicate is not None:
+        return duplicate
+    command_id = f"waq_{secrets.token_urlsafe(18)}"
+    row = {
+        "command_id": command_id,
+        "channel": "whatsapp",
+        "account_id": "default",
+        "recipient": recipient,
+        "body": body,
+        "media_type": "audio",
+        "media_base64": str(audio_b64),
+        "dedupe_fingerprint": fingerprint,
+        "preview_url": None,
+        "lead_id": lead_id,
+        "customer_id": customer_id,
+        "source_url": source_url,
+        "status": "queued",
+        "release_mode": eligibility["mode"],
+        "compliance_released_at": _now(),
+        "attempts": 0,
+        "lease_token": None,
+        "lease_expires_at": None,
+        "provider_message_id": None,
+        "last_error": None,
+        "created_at": _now(),
+        "updated_at": _now(),
+    }
+    await get_backend().insert("whatsapp_openclaw_outbox", row)
+    await _record_outbound(
+        to=recipient,
+        body=body,
+        provider_message_id=None,
+        lead_id=lead_id,
+        customer_id=customer_id,
+        source_url=source_url,
+        provider="hermes_whatsapp",
+        delivery_status="queued",
+        notification_id=command_id,
+    )
+    return {
+        "status": "queued",
+        "provider": "hermes_whatsapp",
+        "command_id": command_id,
+        "recipient": recipient,
+    }
+
+
+async def _enqueue_hermes_message(payload: WhatsAppSend) -> dict[str, Any]:
+    if not _hermes_bridge_configured():
+        raise HTTPException(status_code=503, detail="Hermes application bridge is not configured")
+    if os.getenv("WHATSAPP_AUTOMATION_ENABLED", "false").strip().lower() not in {"1", "true", "yes", "on"}:
+        raise HTTPException(status_code=503, detail="WhatsApp automation is paused by safety control")
+    eligibility = await _assert_compliant_session_outbound(payload.to)
+    recipient = eligibility["recipient"]
+    body = payload.body[:4096]
+    fingerprint = hashlib.sha256(f"{recipient}|{body}".encode("utf-8")).hexdigest()
+    duplicate = await _outbox_duplicate(recipient, fingerprint)
+    if duplicate is not None:
+        return duplicate
     command_id = f"waq_{secrets.token_urlsafe(18)}"
     row = {
         "command_id": command_id,
@@ -1841,43 +1977,65 @@ def _bridge_sender_phone(msg: dict[str, Any]) -> str:
     return ""
 
 
+async def _record_untranscribed_bridge_audio(msg: dict[str, Any]) -> None:
+    """Legacy record-only fallback for bridge audio that could not be transcribed.
+
+    Fail-closed: the turn is recorded as "[audio received]" so it is visible,
+    but no reply is ever generated from audio we could not understand.
+    """
+    phone = _bridge_sender_phone(msg)
+    if phone and not await _is_owner_whatsapp(phone):
+        try:
+            clean = _normalize_phone(phone)
+        except HTTPException:
+            clean = ""
+        message_id = str(
+            msg.get("id") or msg.get("messageId") or (msg.get("key") or {}).get("id") or ""
+        ) or None
+        if message_id and not await _message_seen(message_id):
+            contact_name = str(msg.get("senderName") or msg.get("pushName") or msg.get("contactName") or "") or None
+            await _register_inbound_message(
+                phone=clean or phone,
+                message_id=message_id,
+                message_type="audio",
+                text="[audio received]",
+                contact_name=contact_name,
+                provider="hermes_whatsapp",
+                direction="inbound",
+            )
+            await _record_inbound_event(
+                clean or phone, message_id, "[audio received]", "audio", None, provider="hermes_whatsapp"
+            )
+
+
 async def _handle_bridge_message(msg: dict[str, Any]) -> None:
     body = str(msg.get("body") or msg.get("text") or "").strip()
+    is_voice_event = whatsapp_audio.bridge_message_is_audio(msg) and not (
+        msg.get("fromMe") or msg.get("fromOwner")
+    )
+    # Voice-note turn on the Hermes bridge: the bridge already downloaded the
+    # audio into ~/.hermes/audio_cache and exposed the local path via
+    # mediaUrls. Resolve it safely, transcribe with Whisper, and treat the
+    # transcription as the turn's text. Fail-closed: anything that cannot be
+    # transcribed is recorded as "[audio received]" with no reply.
+    voice_text: str | None = None
+    if not body and is_voice_event:
+        audio_bytes = await _resolve_bridge_audio_bytes(msg)
+        if audio_bytes and whatsapp_audio.audio_pipeline_ready():
+            try:
+                voice_text = (await whatsapp_audio.transcribe_audio(audio_bytes) or "").strip() or None
+            except Exception:
+                voice_text = None
+        if voice_text:
+            body = voice_text[:4000]
     if not body:
-        # Voice notes on the Hermes bridge arrive without text body and were
-        # silently dropped here. Detect explicit audio markers, record the
-        # turn so it is visible (not lost), and return without replying: the
-        # bridge does not expose a documented media-download schema in this
-        # repo, so audio->audio on the bridge path is not yet wired. The Meta
-        # Cloud API webhook path (whatsapp_webhook_receive) is the supported
-        # voice-note pipeline.
-        if whatsapp_audio.bridge_message_is_audio(msg) and not (msg.get("fromMe") or msg.get("fromOwner")):
-            phone = _bridge_sender_phone(msg)
-            if phone and not await _is_owner_whatsapp(phone):
-                try:
-                    clean = _normalize_phone(phone)
-                except HTTPException:
-                    clean = ""
-                message_id = str(
-                    msg.get("id") or msg.get("messageId") or (msg.get("key") or {}).get("id") or ""
-                ) or None
-                if message_id and not await _message_seen(message_id):
-                    contact_name = str(msg.get("senderName") or msg.get("pushName") or msg.get("contactName") or "") or None
-                    await _register_inbound_message(
-                        phone=clean or phone,
-                        message_id=message_id,
-                        message_type="audio",
-                        text="[audio received]",
-                        contact_name=contact_name,
-                        provider="hermes_whatsapp",
-                        direction="inbound",
-                    )
-                    await _record_inbound_event(
-                        clean or phone, message_id, "[audio received]", "audio", None, provider="hermes_whatsapp"
-                    )
+        if is_voice_event:
+            await _record_untranscribed_bridge_audio(msg)
         return
     body = body[:4000]
-    # Never reply to our own echoes or the owner's messages.
+    is_voice = voice_text is not None
+    message_kind = "audio" if is_voice else "text"
+    # Never reply to our own echoes.
     if msg.get("fromMe") or msg.get("fromOwner"):
         return
     message_id = str(
@@ -1901,7 +2059,7 @@ async def _handle_bridge_message(msg: dict[str, Any]) -> None:
         await _register_inbound_message(
             phone=group_jid,
             message_id=message_id or None,
-            message_type="text",
+            message_type=message_kind,
             text=body,
             contact_name=contact_label,
             provider="hermes_whatsapp",
@@ -1911,12 +2069,60 @@ async def _handle_bridge_message(msg: dict[str, Any]) -> None:
     phone = _bridge_sender_phone(msg)
     if not phone:
         return
-    if await _is_owner_whatsapp(phone):
-        return
     try:
         clean_phone = _normalize_phone(phone)
     except HTTPException:
         clean_phone = ""
+    # OWNER CONVERSATION (Juan): his messages are private, never become leads,
+    # and get replies through the owner-context Sofia brain. Text in -> text
+    # out; voice note in -> voice note out.
+    if await _is_owner_whatsapp(phone):
+        await _register_inbound_message(
+            phone=clean_phone or phone,
+            message_id=message_id or None,
+            message_type=message_kind,
+            text=body,
+            contact_name="Juan",
+            provider="hermes_whatsapp",
+            direction="inbound",
+        )
+        await _record_owner_private_whatsapp_event(
+            phone=clean_phone or phone,
+            message_id=message_id or None,
+            text=body,
+            message_type=message_kind,
+            direction="inbound",
+        )
+        if _opt_out(body):
+            return
+        # Kill-switch (incident 2026-09-21) also gates owner replies: the
+        # poller never generates or queues a reply while the flag is off.
+        if not _ai_auto_reply_enabled():
+            return
+        try:
+            reply = await generate_sofia_reply(
+                body, "Juan", owner_context=True, sender_phone=clean_phone or None
+            )
+        except Exception:
+            return
+        if not reply or not reply.strip():
+            return
+        reply = reply.strip()[:4096]
+        try:
+            if is_voice:
+                audio = await whatsapp_audio.synthesize_speech(reply)
+                await _enqueue_hermes_audio(
+                    to=clean_phone or phone,
+                    audio_b64=base64.b64encode(audio).decode("ascii"),
+                    transcript=reply,
+                )
+            else:
+                await _enqueue_hermes_message(
+                    WhatsAppSend(to=clean_phone or phone, body=reply)
+                )
+        except Exception:
+            pass
+        return
     if _opt_out(body):
         return
     contact_name = str(msg.get("senderName") or msg.get("pushName") or msg.get("contactName") or "") or None
@@ -1927,14 +2133,14 @@ async def _handle_bridge_message(msg: dict[str, Any]) -> None:
     await _register_inbound_message(
         phone=clean_phone or phone,
         message_id=message_id or None,
-        message_type="text",
+        message_type=message_kind,
         text=body,
         contact_name=contact_name,
         provider="hermes_whatsapp",
         direction="inbound",
     )
     await _record_inbound_event(
-        clean_phone or phone, message_id or None, body, "text", lead_id, provider="hermes_whatsapp"
+        clean_phone or phone, message_id or None, body, message_kind, lead_id, provider="hermes_whatsapp"
     )
     # Kill-switch (incident 2026-09-21: an unapproved AI reply went out to a
     # contact while WHATSAPP_AI_AUTO_REPLY_ENABLED=false). The bridge poller
@@ -1952,11 +2158,22 @@ async def _handle_bridge_message(msg: dict[str, Any]) -> None:
         return
     if not reply or not reply.strip():
         return
-    # Queue for the Hermes outbox worker — the bridge delivers it.
+    reply = reply.strip()[:4096]
+    # Queue for the Hermes outbox worker — the bridge delivers it. Voice in ->
+    # voice out (native ptt bubble); text in -> text out.
     try:
-        await _enqueue_hermes_message(
-            WhatsAppSend(to=clean_phone or phone, body=reply.strip()[:4096], lead_id=lead_id)
-        )
+        if is_voice:
+            audio = await whatsapp_audio.synthesize_speech(reply)
+            await _enqueue_hermes_audio(
+                to=clean_phone or phone,
+                audio_b64=base64.b64encode(audio).decode("ascii"),
+                transcript=reply,
+                lead_id=lead_id,
+            )
+        else:
+            await _enqueue_hermes_message(
+                WhatsAppSend(to=clean_phone or phone, body=reply.strip()[:4096], lead_id=lead_id)
+            )
     except Exception:
         pass
 
