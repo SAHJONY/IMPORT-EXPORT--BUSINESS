@@ -1,6 +1,18 @@
 {
-  "updatedAt": "2026-09-26T05:34:21.594Z",
+  "updatedAt": "2026-09-26T11:51:21.063Z",
   "snapshots": [
+    {
+      "generatedAt": "2026-09-26T11:51:21.063Z",
+      "summary": {
+        "candidates": 0,
+        "verifiedLandedCost": 0,
+        "partiallyVerified": 0,
+        "blocked": 0,
+        "quoteReady": 0
+      },
+      "labels": [],
+      "candidates": []
+    },
     {
       "generatedAt": "2026-09-26T05:34:21.594Z",
       "summary": {
