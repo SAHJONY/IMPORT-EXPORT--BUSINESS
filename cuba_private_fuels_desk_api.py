@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 from auth import verify_owner_token
 from insforge_backend import get_backend, persistent_backend_status
 
-app = FastAPI(title='SAHJONY Cuba Private Sector Fuels Desk', version='1.1.0', docs_url=None, redoc_url=None)
+app = FastAPI(title='SAHJONY Cuba Private Sector Fuels Desk', version='1.2.0', docs_url=None, redoc_url=None)
 
 FuelType = Literal['GASOLINE','DIESEL','KEROSENE','JET_FUEL','FUEL_OIL','LPG','LUBRICANTS','CRUDE_OIL','OTHER_PETROLEUM']
 EndUserType = Literal['INDEPENDENT_PRIVATE_BUSINESS','INDIVIDUAL_CONSUMER','OTHER']
@@ -137,12 +137,13 @@ async def health():
     return {
         'status':'ok' if p['configured'] else 'configuration_required',
         'service':'sahjony-cuba-private-sector-fuels-desk',
-        'version':'1.1.0',
+        'version':'1.2.0',
         'country':'CU',
         'us_origin_gas_petroleum_scp_workflow':True,
         'individual_consumer_customer_crm':True,
         'individual_consumer_direct_sale_control':True,
         'individual_consumer_personal_family_use_control':True,
+        'fuel_buying_club':True,
         'supported_fuels':['GASOLINE','DIESEL','KEROSENE','JET_FUEL','FUEL_OIL','LPG','LUBRICANTS','CRUDE_OIL','OTHER_PETROLEUM'],
         'default_status':'HOLD',
         'cuban_owned_bank_scp_path_allowed':False,
@@ -385,3 +386,129 @@ async def summary(authorization: str | None = Header(None, alias='Authorization'
         'by_fuel_type':by_type,
         'note':'Eligibility is transaction-specific. This desk operationalizes current BIS/OFAC guidance; it does not replace legal/compliance review.',
     }
+
+
+# ---------------------------------------------------------------------------
+# Club de compra de combustible (private owner desk)
+# ---------------------------------------------------------------------------
+
+ClubGate = Literal['LEGAL', 'DEMANDA', 'DINERO', 'LOGISTICA']
+ClubGateStatus = Literal['ROJO', 'AMARILLO', 'VERDE']
+BuyerState = Literal['INTERES', 'KYC', 'LOI']
+ClubProduct = Literal['DIESEL', 'GASOLINE']
+
+CLUB_CONFIG_ID = 'default'
+CLUB_GATES: list[str] = ['LEGAL', 'DEMANDA', 'DINERO', 'LOGISTICA']
+
+
+class ClubBuyerIn(BaseModel):
+    negocio: str = Field(min_length=2, max_length=300)
+    contacto: str | None = Field(default=None, max_length=300)
+    producto: ClubProduct = 'DIESEL'
+    litros: float = Field(gt=0)
+    provincia: str | None = Field(default=None, max_length=180)
+    estado: BuyerState = 'INTERES'
+
+
+class ClubBuyerEstadoIn(BaseModel):
+    estado: BuyerState
+
+
+class ClubConfigIn(BaseModel):
+    target_liters: float | None = Field(default=None, gt=0)
+    product: ClubProduct | None = None
+
+
+class ClubGateIn(BaseModel):
+    gate: ClubGate
+    status: ClubGateStatus
+
+
+async def get_club_config() -> dict:
+    backend = get_backend()
+    rows = await backend.select('cuba_fuel_club_config', params={'config_id': f'eq.{CLUB_CONFIG_ID}', 'limit': '1'}) or []
+    if rows:
+        return rows[0]
+    ts = now()
+    row = {
+        'config_id': CLUB_CONFIG_ID, 'target_liters': 24000, 'product': 'DIESEL',
+        'gate_legal': 'ROJO', 'gate_demanda': 'ROJO', 'gate_dinero': 'ROJO', 'gate_logistica': 'ROJO',
+        'created_at': ts, 'updated_at': ts,
+    }
+    await backend.insert('cuba_fuel_club_config', row)
+    return row
+
+
+@app.get('/cuba-fuels/club')
+async def club_state(authorization: str | None = Header(None, alias='Authorization')):
+    owner(authorization)
+    config = await get_club_config()
+    buyers = await get_backend().select(
+        'cuba_fuel_club_buyers',
+        params={'status': 'eq.ACTIVE', 'order': 'created_at.asc', 'limit': '1000'},
+    ) or []
+    return {
+        'config': {'target_liters': config.get('target_liters'), 'product': config.get('product')},
+        'gates': {g: config.get(f'gate_{g.lower()}', 'ROJO') for g in CLUB_GATES},
+        'buyers': buyers,
+    }
+
+
+@app.post('/cuba-fuels/club/buyers')
+async def club_add_buyer(payload: ClubBuyerIn, authorization: str | None = Header(None, alias='Authorization')):
+    owner(authorization)
+    ts = now()
+    row = {
+        'buyer_id': f'cfb_{secrets.token_urlsafe(10)}',
+        **payload.model_dump(),
+        'status': 'ACTIVE', 'created_at': ts, 'updated_at': ts,
+    }
+    await get_backend().insert('cuba_fuel_club_buyers', row)
+    return {'buyer': row}
+
+
+@app.patch('/cuba-fuels/club/buyers/{buyer_id}')
+async def club_update_buyer(buyer_id: str, payload: ClubBuyerEstadoIn, authorization: str | None = Header(None, alias='Authorization')):
+    owner(authorization)
+    await get_backend().patch(
+        'cuba_fuel_club_buyers',
+        {'estado': payload.estado, 'updated_at': now()},
+        params={'buyer_id': f'eq.{buyer_id}'},
+    )
+    return {'buyer_id': buyer_id, 'estado': payload.estado}
+
+
+@app.delete('/cuba-fuels/club/buyers/{buyer_id}')
+async def club_remove_buyer(buyer_id: str, authorization: str | None = Header(None, alias='Authorization')):
+    owner(authorization)
+    await get_backend().patch(
+        'cuba_fuel_club_buyers',
+        {'status': 'REMOVED', 'updated_at': now()},
+        params={'buyer_id': f'eq.{buyer_id}'},
+    )
+    return {'buyer_id': buyer_id, 'removed': True}
+
+
+@app.patch('/cuba-fuels/club/config')
+async def club_config(payload: ClubConfigIn, authorization: str | None = Header(None, alias='Authorization')):
+    owner(authorization)
+    await get_club_config()
+    patch: dict = {'updated_at': now()}
+    if payload.target_liters:
+        patch['target_liters'] = payload.target_liters
+    if payload.product:
+        patch['product'] = payload.product
+    await get_backend().patch('cuba_fuel_club_config', patch, params={'config_id': f'eq.{CLUB_CONFIG_ID}'})
+    return {'config': patch}
+
+
+@app.post('/cuba-fuels/club/gates')
+async def club_gate(payload: ClubGateIn, authorization: str | None = Header(None, alias='Authorization')):
+    owner(authorization)
+    await get_club_config()
+    await get_backend().patch(
+        'cuba_fuel_club_config',
+        {f'gate_{payload.gate.lower()}': payload.status, 'updated_at': now()},
+        params={'config_id': f'eq.{CLUB_CONFIG_ID}'},
+    )
+    return {'gate': payload.gate, 'status': payload.status}
