@@ -90,5 +90,26 @@
     "role": "seller",
     "role_description": "SELLER: Cuba wholesaler of flour (type unconfirmed). Sofia buys wholesale from them for the agent network.",
     "never": "Never offer to sell them anything. Never ask what quantity they want to acquire, billing data, or payment method as if they were buying."
+  },
+  "+5363893138": {
+    "name": "Dayana Perez Martinez",
+    "role": "seller",
+    "role_description": "SELLER (Cuba): sugar by the container — 'contenedor de azúcar en 33 USD, 1000 sacos' (group post 2026-09-20). WE (SAHJONY/Juan) are the BUYER.",
+    "language": "es",
+    "never": "Never offer to sell her anything. Never treat her as a buyer: never ask for billing/invoicing data, payment method, or what quantity SHE wants to acquire. Never mention any other contact, product, or price from another conversation thread in her chat."
+  },
+  "+5352634946": {
+    "name": "Ruben Sanchez",
+    "role": "seller",
+    "role_description": "SELLER (Cuba): wholesale products unknown — left only his phone in a group comment (2026-09-20). Ask what he sells on first contact. WE (SAHJONY/Juan) are the BUYER.",
+    "language": "es",
+    "never": "Never offer to sell him anything. Never treat him as a buyer: never ask for billing/invoicing data, payment method, or what quantity HE wants to acquire. Do not assume what product he sells. Never mention any other contact, product, or price from another conversation thread in his chat."
+  },
+  "+5350064189": {
+    "name": "Caribbean Food Company",
+    "role": "seller",
+    "role_description": "SELLER (Cuba): sugar 50 kg — $62 USD per container, 500 sacks (FB post 2026-08-26, via Joel Hernández share). WhatsApp wa.me/5350064189, Grupo MIPYME Habana. WE (SAHJONY/Juan) are the BUYER.",
+    "language": "es",
+    "never": "Never offer to sell them anything. Never treat them as a buyer: never ask for billing/invoicing data, payment method, or what quantity THEY want to acquire. Never mention any other contact, product, or price from another conversation thread in their chat."
   }
 }
