@@ -1,4 +1,4 @@
-SAHJONY TRADING OS
+SAHJONY LLC
 Release: Owner Deal Command Center v2
 Commit: 7cfa89ed31a8512646fec698bc8e437ab5392ad7
 Scope: owner business operations only
