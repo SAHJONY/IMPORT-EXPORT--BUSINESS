@@ -2015,11 +2015,16 @@ async def _handle_bridge_message(msg: dict[str, Any]) -> None:
     )
     # Voice-note turn on the Hermes bridge: the bridge already downloaded the
     # audio into ~/.hermes/audio_cache and exposed the local path via
-    # mediaUrls. Resolve it safely, transcribe with Whisper, and treat the
-    # transcription as the turn's text. Fail-closed: anything that cannot be
-    # transcribed is recorded as "[audio received]" with no reply.
+    # mediaUrls. Resolve it safely, transcribe with Whisper (Spanish), and
+    # treat OUR transcription as the turn's text. Incident 2026-09-29: the
+    # gateway shipped its own garbled English transcription inside body for a
+    # Spanish voice note and the brain answered the garbage in English. For
+    # audio we therefore ALWAYS self-transcribe and ignore any
+    # gateway-provided body; the gateway body is only a fallback when our
+    # transcription fails. Fail-closed: anything that cannot be transcribed
+    # is recorded as "[audio received]" with no reply.
     voice_text: str | None = None
-    if not body and is_voice_event:
+    if is_voice_event:
         audio_bytes = await _resolve_bridge_audio_bytes(msg)
         if audio_bytes and whatsapp_audio.audio_pipeline_ready():
             try:

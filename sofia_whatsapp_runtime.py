@@ -385,14 +385,18 @@ def reply_language_name(text: str, transcript: str = "", sender_phone: str | Non
     return LANGUAGE_NAMES.get(detect_reply_language(text, transcript, sender_phone), "Spanish")
 
 
-def language_rule(text: str, transcript: str = "", sender_phone: str | None = None) -> str:
+def language_rule(text: str, transcript: str = "", sender_phone: str | None = None, owner_context: bool = False) -> str:
     """Top-priority system-prompt block forcing Sofia to answer in the
     customer's language. The model otherwise defaults to English.
 
     Standing owner rule (2026-09-19): every Cuba WhatsApp customer (+53)
     is ALWAYS answered in Spanish, even if they write in English.
+
+    Incident 2026-09-29: the owner got an English reply because the input
+    was a garbled English machine transcription. With the owner, ALWAYS
+    Spanish, no matter what language the input appears to be in.
     """
-    if _is_cuba_number(sender_phone):
+    if owner_context or _is_cuba_number(sender_phone):
         return (
             "LANGUAGE RULE — HIGHEST PRIORITY, OVERRIDES ALL OTHER STYLE GUIDANCE:\n"
             "- This contact is a CUBA customer (Cuban +53 phone number). STANDING OWNER RULE: "
@@ -435,6 +439,7 @@ def language_rule(text: str, transcript: str = "", sender_phone: str | None = No
 # ---------------------------------------------------------------------------
 
 _INTERNAL_JARGON_PATTERNS = [
+    r"\bcrm\b",
     r"endpoint",
     r"modo\s+degradado",
     r"\bdegraded\b",
@@ -936,6 +941,7 @@ ABSOLUTE BANS
 - NEVER ask the contact for information you already have (name, province, anything from earlier messages or memory).
 - NEVER reveal suppliers, costs, margins, profits, strategies, or infrastructure.
 - NEVER invent price, stock, availability, delivery dates, documents, licenses, or completed actions. If it is not verified, say you will check and get back.
+- NEVER answer a garbled machine transcription as if it made sense. If the message looks like a bad auto-transcription (nonsense words, wrong language for the speaker, e.g. "event stories" / "Prut"), say it came through garbled and ask them to repeat or clarify — in Spanish, warmly, briefly. Never build questionnaires, plans, or commitments on top of garbage input.
 - NEVER promise contracts, payments, or commitments — those go to Juan for approval.
 - Payments: never bring up payment terms unless Juan already introduced them in this conversation.
 - Say "llega", never "YEYA".
@@ -1034,7 +1040,7 @@ async def _generate_sofia_reply_unguarded(
                 "source_states": {"owner_report": {"state": "RUNTIME_ERROR", "error_class": type(exc).__name__}},
             }
     system = build_sofia_prompt(memory)
-    system = language_rule(text, transcript, sender_phone) + "\n" + system
+    system = language_rule(text, transcript, sender_phone, owner_context) + "\n" + system
     system = _SOFIA_PERSONA_PRIMER + "\n\n" + system
     system += "\n\n" + adaptive
     system += "\n\n" + _SOFIA_IDENTITY_BLOCK
@@ -1055,7 +1061,7 @@ async def _generate_sofia_reply_unguarded(
     system += str(track_resolution.get("prompt_addition") or "")
     system += _contact_role_block(sender_phone)
     if owner_context:
-        system += "\n\nOWNER EXECUTIVE MODE\n- The current sender is the authenticated SAHJONY owner. Treat this as an internal executive request, not a customer sales intake.\n- Never ask the owner to export/upload CRM data as the first response. Use the connected SAHJONY source snapshot supplied below first.\n- Distinguish verified zero from unknown/unreadable. Never convert source failure into zero.\n- If one source is unavailable, give the best partial report from healthy sources and isolate the blocker.\n- Do not fabricate cash, revenue, profit, invoices, payments, opportunities, shipments, or system health.\n- Only ask the owner for something when it is genuinely owner-only and cannot be resolved from connected systems."
+        system += "\n\nOWNER EXECUTIVE MODE\n- The current sender is the authenticated SAHJONY owner. Treat this as an internal executive request, not a customer sales intake.\n- You are Sofía talking to Juan: warm, brief, in Spanish, like a person — never a corporate consultant, never numbered intake questionnaires.\n- If his message looks like a garbled transcription, say so plainly in Spanish and ask him to repeat or clarify. Never build plans, questions, or commitments on garbage input.\n- Never ask the owner to export/upload CRM data as the first response. Use the connected SAHJONY source snapshot supplied below first.\n- Distinguish verified zero from unknown/unreadable. Never convert source failure into zero.\n- If one source is unavailable, give the best partial report from healthy sources and isolate the blocker.\n- Do not fabricate cash, revenue, profit, invoices, payments, opportunities, shipments, or system health.\n- Only ask the owner for something when it is genuinely owner-only and cannot be resolved from connected systems."
         system += "\n\nLIVE OWNER SOURCE SNAPSHOT\n" + json.dumps(owner_report or {}, ensure_ascii=False, default=str)[:30000]
     system += "\n\nRELATIONSHIP MEMORY\n" + json.dumps({
         "known": memory.get("known") or {},
