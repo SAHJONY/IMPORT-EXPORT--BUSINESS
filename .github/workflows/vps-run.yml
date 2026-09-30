@@ -111,5 +111,5 @@ jobs:
           printf '%s' "$SPORT_OWNER_PASSWORD" | ssh $SSH_OPTS "$SSH_USER@$HOST" \
             'umask 077 && mkdir -p /etc/sahjony-sport && python3 /opt/sahjony-sport/apps/api/scripts/make_owner_hash.py > /etc/sahjony-sport/.owner_hash.tmp && chmod 600 /etc/sahjony-sport/.owner_hash.tmp && echo HASH_OK'
           # Paso 2: el usuario viaja por stdin y se arma owner.env (solo hash, sin clave en plano).
-          printf '%s' "$SPORT_OWNER_USER" | ssh $SSH_OPTS "$SSH_USER@$HOST" \
+          printf '%s\n' "$SPORT_OWNER_USER" | ssh $SSH_OPTS "$SSH_USER@$HOST" \
             'umask 077 && read -r OUSER && { printf "OWNER_USERNAME=%s\n" "$OUSER"; printf "OWNER_PASSWORD_HASH="; cat /etc/sahjony-sport/.owner_hash.tmp; printf "\n"; } > /etc/sahjony-sport/owner.env && rm -f /etc/sahjony-sport/.owner_hash.tmp && chmod 600 /etc/sahjony-sport/owner.env && mkdir -p /etc/systemd/system/sahjony-sport.service.d && printf "[Service]\nEnvironmentFile=/etc/sahjony-sport/owner.env\n" > /etc/systemd/system/sahjony-sport.service.d/owner-auth.conf && systemctl daemon-reload && systemctl restart sahjony-sport && sleep 4 && curl -sf http://127.0.0.1:8108/api/v1/health >/dev/null && echo INSTALL_OK'
