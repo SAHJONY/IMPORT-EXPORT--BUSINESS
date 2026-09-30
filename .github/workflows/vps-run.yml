@@ -34,7 +34,7 @@ env:
 
 jobs:
   run:
-    if: ${{ inputs.confirm == 'YES' && inputs.command != 'INSTALL_ODDS_KEY' && inputs.command != 'INSTALL_OWNER_AUTH' }}
+    if: ${{ inputs.confirm == 'YES' && inputs.command != 'INSTALL_ODDS_KEY' && inputs.command != 'INSTALL_OWNER_AUTH' && inputs.command != 'INSTALL_AIS_KEY' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
@@ -113,3 +113,31 @@ jobs:
           # Paso 2: el usuario viaja por stdin y se arma owner.env (solo hash, sin clave en plano).
           printf '%s\n' "$SPORT_OWNER_USER" | ssh $SSH_OPTS "$SSH_USER@$HOST" \
             'umask 077 && read -r OUSER && { printf "OWNER_USERNAME=%s\n" "$OUSER"; printf "OWNER_PASSWORD_HASH="; cat /etc/sahjony-sport/.owner_hash.tmp; printf "\n"; } > /etc/sahjony-sport/owner.env && rm -f /etc/sahjony-sport/.owner_hash.tmp && chmod 600 /etc/sahjony-sport/owner.env && mkdir -p /etc/systemd/system/sahjony-sport.service.d && printf "[Service]\nEnvironmentFile=/etc/sahjony-sport/owner.env\n" > /etc/systemd/system/sahjony-sport.service.d/owner-auth.conf && systemctl daemon-reload && systemctl restart sahjony-sport && sleep 4 && curl -sf http://127.0.0.1:8108/api/v1/health >/dev/null && echo INSTALL_OK'
+
+  # Instalación segura de AISSTREAM_API_KEY (God's Eye View) en el VPS.
+  # Juan agrega el secret AISSTREAM_API_KEY en Settings → Secrets → Actions
+  # de este repo. La llave viaja del GitHub secret al VPS por stdin (nunca
+  # aparece en comandos, logs ni chat) y queda en /etc/gods-eye-view/ais.env
+  # (600), cargado por gods-eye-view.service vía drop-in EnvironmentFile.
+  # Se despacha con command=INSTALL_AIS_KEY.
+  install-ais-key:
+    if: ${{ inputs.confirm == 'YES' && inputs.command == 'INSTALL_AIS_KEY' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      SSH_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Install AISSTREAM_API_KEY on VPS
+        shell: bash
+        env:
+          AISSTREAM_API_KEY: ${{ secrets.AISSTREAM_API_KEY }}
+        run: |
+          set -euo pipefail
+          [[ -n "$SSH_KEY" ]] || { echo "HOSTINGER_SSH_PRIVATE_KEY secret missing" >&2; exit 1; }
+          [[ -n "$AISSTREAM_API_KEY" ]] || { echo "AISSTREAM_API_KEY secret missing: agrégalo en Settings → Secrets → Actions del repo" >&2; exit 1; }
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/vps-key
+          chmod 600 ~/.ssh/vps-key
+          SSH_OPTS="-o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=15 -i ~/.ssh/vps-key"
+          printf '%s' "$AISSTREAM_API_KEY" | ssh $SSH_OPTS "$SSH_USER@$HOST" \
+            'umask 077 && mkdir -p /etc/gods-eye-view && cat > /etc/gods-eye-view/ais.env.tmp && { printf "AISSTREAM_API_KEY="; cat /etc/gods-eye-view/ais.env.tmp; printf "\n"; } > /etc/gods-eye-view/ais.env && rm -f /etc/gods-eye-view/ais.env.tmp && chmod 600 /etc/gods-eye-view/ais.env && mkdir -p /etc/systemd/system/gods-eye-view.service.d && printf "[Service]\nEnvironmentFile=/etc/gods-eye-view/ais.env\n" > /etc/systemd/system/gods-eye-view.service.d/ais-key.conf && systemctl daemon-reload && systemctl restart gods-eye-view.service && sleep 10 && curl -sf http://127.0.0.1:8200/api/ais-live >/dev/null && echo INSTALL_OK'
