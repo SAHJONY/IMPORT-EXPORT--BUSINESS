@@ -34,7 +34,7 @@ env:
 
 jobs:
   run:
-    if: ${{ inputs.confirm == 'YES' }}
+    if: ${{ inputs.confirm == 'YES' && inputs.command != 'INSTALL_ODDS_KEY' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
@@ -53,3 +53,28 @@ jobs:
           ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
             -o ConnectTimeout=15 -i ~/.ssh/vps-key "$SSH_USER@$HOST" "$VPS_COMMAND"
           echo "VPS_RUN_EXIT=$?"
+
+  # Instalación segura de ODDS_API_KEY (SAHJONY SPORT) en el VPS.
+  # La llave viaja del GitHub secret al VPS por stdin: nunca aparece en
+  # comandos, logs ni chat. Se despacha con command=INSTALL_ODDS_KEY.
+  install-odds-key:
+    if: ${{ inputs.confirm == 'YES' && inputs.command == 'INSTALL_ODDS_KEY' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      SSH_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Install ODDS_API_KEY on VPS
+        shell: bash
+        env:
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+        run: |
+          set -euo pipefail
+          [[ -n "$SSH_KEY" ]] || { echo "HOSTINGER_SSH_PRIVATE_KEY secret missing" >&2; exit 1; }
+          [[ -n "$ODDS_API_KEY" ]] || { echo "ODDS_API_KEY secret missing: agrégalo en Settings → Secrets → Actions del repo" >&2; exit 1; }
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/vps-key
+          chmod 600 ~/.ssh/vps-key
+          printf '%s' "$ODDS_API_KEY" | ssh -o BatchMode=yes -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null -o ConnectTimeout=15 -i ~/.ssh/vps-key \
+            "$SSH_USER@$HOST" 'umask 077 && mkdir -p /etc/sahjony-sport && cat > /etc/sahjony-sport/odds.env.tmp && { printf "ODDS_API_KEY="; cat /etc/sahjony-sport/odds.env.tmp; echo; } > /etc/sahjony-sport/odds.env && rm -f /etc/sahjony-sport/odds.env.tmp && chmod 600 /etc/sahjony-sport/odds.env && systemctl enable --now sahjony-odds-sync.timer && systemctl restart sahjony-sport && echo INSTALL_OK'
