@@ -87,22 +87,24 @@
   }
   function restore(){if(originalTitle)document.title=originalTitle;const walker=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT);let node;while((node=walker.nextNode()))if(originalText.has(node))node.nodeValue=originalText.get(node);document.querySelectorAll('*').forEach(el=>{const map=originalAttrs.get(el);if(map)for(const [key,value] of Object.entries(map))el.setAttribute(key,value);if(el.tagName==='OPTION'&&originalText.has(el))el.textContent=originalText.get(el)})}
   function state(kind,label){const root=document.querySelector('.sahjony-language');if(!root)return;root.dataset.state=kind;const small=root.querySelector('small');if(small)small.textContent=label||''}
-  const ES_FALLBACK={'/marketplace':'/es','/industrial-marketplace.html':'/es','/marketplace-search':'/es/marketplace-search','/marketplace-search.html':'/es/marketplace-search','/partners':'/es/partners','/partners.html':'/es/partners','/how-it-works':'/es','/customer-guide':'/es','/customer-guide.html':'/es','/global-sourcing':'/es','/global-sourcing.html':'/es','/suppliers':'/es/suppliers','/suppliers.html':'/es/suppliers','/supplier-commercial-terms':'/es/supplier-commercial-terms','/supplier-commercial-terms.html':'/es/supplier-commercial-terms','/supplier-cuba-terms':'/es/supplier-cuba-terms','/customer-payments':'/es/customer-payments','/lead-scout':'/es','/government-contracting':'/es'};
+  const ES_FALLBACK={'/marketplace':'/','/industrial-marketplace.html':'/','/marketplace-search':'/es/marketplace-search','/marketplace-search.html':'/es/marketplace-search','/partners':'/es/partners','/partners.html':'/es/partners','/how-it-works':'/','/customer-guide':'/','/customer-guide.html':'/','/global-sourcing':'/','/global-sourcing.html':'/','/suppliers':'/es/suppliers','/suppliers.html':'/es/suppliers','/supplier-commercial-terms':'/es/supplier-commercial-terms','/supplier-commercial-terms.html':'/es/supplier-commercial-terms','/supplier-cuba-terms':'/es/supplier-cuba-terms','/customer-payments':'/es/customer-payments','/lead-scout':'/','/government-contracting':'/'};
   function spanishFallback(target){
     if(baseLocale(target)!=='es')return '';
     const path=(location.pathname||'/').toLowerCase().replace(/\/+$/,'')||'/';
     if(path==='/owner-login'||path==='/owner'||path.startsWith('/owner/'))return '';
     if(path.startsWith('/es'))return '';
     if(baseLocale(sourceLocale)==='es')return '';
-    return ES_FALLBACK[path]||'/es';
+    return ES_FALLBACK[path]||'/';
   }
   function applyDirection(locale){document.documentElement.lang=normalizeLocale(locale)||sourceLocale;document.documentElement.dir=direction(locale)}
   async function translateBatch(texts,target){const key=sourceLocale+'>'+target+'|'+texts.join('\u241e');if(cache.has(key))return cache.get(key);const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),20000);try{const response=await fetch(UI_TRANSLATE,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({texts,target_locale:target,source_locale:sourceLocale}),signal:controller.signal});const payload=await response.json().catch(()=>({}));if(!response.ok)throw new Error(payload.detail||'UI translation unavailable');const result=payload.translations||[];if(result.length!==texts.length)throw new Error('UI translation response mismatch');cache.set(key,payload);return payload}finally{clearTimeout(timer)}}
   async function applyLanguage(locale,{persist=true}={}){
     if(busy)return;const target=normalizeLocale(locale)||sourceLocale;
     const currentPath=location.pathname.replace(/\/+$/,'')||'/';
-    if((currentPath==='/'||currentPath==='/business')&&baseLocale(target)==='es'){setStored('es');location.assign('/es');return}
-    if(currentPath==='/es'&&baseLocale(target)==='en'){setStored('en-US');location.assign('/');return}
+    if(currentPath==='/es'){setStored('es');location.assign('/');return}
+    if(currentPath==='/business'&&baseLocale(target)==='es'){setStored('es');location.assign('/');return}
+    if(currentPath==='/'&&baseLocale(target)==='en'){setStored('en-US');location.assign('/en');return}
+    if(currentPath==='/en'&&baseLocale(target)==='es'){setStored('es');location.assign('/');return}
     if(currentPath==='/start'&&baseLocale(target)==='es'){setStored('es');location.assign('/es/start');return}
     if((currentPath==='/about'||currentPath==='/about.html')&&baseLocale(target)==='es'){setStored('es');location.assign('/es/about');return}
     if((currentPath==='/trust-center'||currentPath==='/trust-center.html')&&baseLocale(target)==='es'){setStored('es');location.assign('/es/trust-center');return}
@@ -123,7 +125,6 @@
     if(currentPath==='/es/about'&&baseLocale(target)==='en'){setStored('en-US');location.assign('/about');return}
     if(currentPath==='/es/trust-center'&&baseLocale(target)==='en'){setStored('en-US');location.assign('/trust-center.html');return}
     if(currentPath==='/es/start'&&baseLocale(target)==='en'){setStored('en-US');location.assign('/start');return}
-    if(currentPath==='/es'&&baseLocale(target)==='en'){setStored('en-US');location.assign('/');return}
     active=target;if(persist){setStored(target);rewriteUrl(target)}propagateNavigation(target);announceLocale(target);
     if(sameLanguage(target,sourceLocale)){restore();applyDirection(target);state('ok',baseLocale(target)==='en'?'English':'Original');return}
     busy=true;state('busy',baseLocale(target)==='es'?'Traduciendo…':'Translating…');
