@@ -37,6 +37,12 @@ body{margin:0;background:radial-gradient(120% 40% at 50% 0%,rgba(245,185,66,.08)
 .badge{display:inline-block;align-self:flex-start;font-size:10px;font-weight:800;letter-spacing:.08em;padding:5px 10px;border-radius:999px}
 .badge.ok{background:rgba(95,227,161,.14);color:var(--green);border:1px solid rgba(95,227,161,.35)}
 .badge.quote{background:rgba(245,185,66,.12);color:var(--amber);border:1px solid rgba(245,185,66,.35)}
+.pulse{margin:8px 0 0}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
+.chip{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:700;padding:8px 12px;border-radius:999px;border:1px solid var(--line);background:var(--panel);color:var(--txt)}
+.chip.up{border-color:rgba(245,185,66,.45);color:var(--amber)}
+.chip.down{border-color:rgba(95,227,161,.45);color:var(--green)}
+.chip.flat{color:var(--mut)}
 .price{font-size:20px;font-weight:800;color:#fff}
 .price small{display:block;font-size:11px;font-weight:600;color:var(--mut);margin-top:2px}
 .card .btn-wa{margin-top:auto;justify-content:center;padding:12px;font-size:13px}
@@ -71,6 +77,22 @@ footer a{color:#9db2c5;text-decoration:none}
 <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2a10 10 0 0 0-8.6 15.1L2 22l5-1.3A10 10 0 1 0 12 2zm5.2 14.2c-.2.6-1.3 1.2-1.8 1.2-.5.1-1 .2-3.4-.7-2.9-1.2-4.7-4.1-4.9-4.3-.1-.2-1.1-1.5-1.1-2.9s.7-2 1-2.3c.2-.3.5-.3.7-.3h.5c.2 0 .4 0 .6.5s.8 1.9.8 2c.1.1.1.3 0 .5-.3.6-.6.8-.4 1.2.6 1.1 1.4 1.9 2.5 2.5.4.2.6.1.9-.1l.7-.8c.2-.3.4-.2.7-.1l2 1c.3.1.5.2.6.4 0 .1 0 .7-.2 1.2z"/></svg>
 Cotizar ahora</a>
 <a class="btn btn-ghost" href="#lanes">Ver los 20 productos</a>
+</div>
+</section>
+
+<section class="pulse">
+<div class="sec-t">PULSO DEL MERCADO</div>
+<h2 class="sec-h">Cómo se mueve el mercado</h2>
+<p class="sec-p">Tendencias de 7 días en precios de referencia en Cuba — para que compres antes de que suba. <span id="pulse-date">Actualizado 1 oct 2026.</span></p>
+<div class="chips" id="pulse-chips">
+<span class="chip down">📉 Aceite · a la baja</span>
+<span class="chip up">📈 Arroz · al alza</span>
+<span class="chip up">📈 Cerdo · al alza</span>
+<span class="chip up">📈 Frijoles · al alza</span>
+<span class="chip down">📉 Huevos · a la baja</span>
+<span class="chip up">📈 Pastas · al alza</span>
+<span class="chip flat">➡️ Pollo · estable</span>
+<span class="chip up">📈 Queso · al alza</span>
 </div>
 </section>
 
@@ -250,5 +272,18 @@ Cotizar ahora</a>
 <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2a10 10 0 0 0-8.6 15.1L2 22l5-1.3A10 10 0 1 0 12 2zm5.2 14.2c-.2.6-1.3 1.2-1.8 1.2-.5.1-1 .2-3.4-.7-2.9-1.2-4.7-4.1-4.9-4.3-.1-.2-1.1-1.5-1.1-2.9s.7-2 1-2.3c.2-.3.5-.3.7-.3h.5c.2 0 .4 0 .6.5s.8 1.9.8 2c.1.1.1.3 0 .5-.3.6-.6.8-.4 1.2.6 1.1 1.4 1.9 2.5 2.5.4.2.6.1.9-.1l.7-.8c.2-.3.4-.2.7-.1l2 1c.3.1.5.2.6.4 0 .1 0 .7-.2 1.2z"/></svg>
 WhatsApp</a>
 </div>
+<script>
+fetch('pulse-data.json',{cache:'no-store'}).then(function(r){return r.ok?r.json():null}).then(function(d){
+if(!d||!d.items||!d.items.length)return;
+var el=document.getElementById('pulse-chips'),dt=document.getElementById('pulse-date');
+if(dt&&d.updated_es)dt.textContent='Actualizado '+d.updated_es+'.';
+el.innerHTML=d.items.map(function(it){
+var cls=it.dir==='UP'?'up':it.dir==='DOWN'?'down':'flat';
+var emo=it.dir==='UP'?'📈':it.dir==='DOWN'?'📉':'➡️';
+var lbl=it.dir==='UP'?'al alza':it.dir==='DOWN'?'a la baja':'estable';
+return '<span class="chip '+cls+'">'+emo+' '+it.name+' · '+lbl+'</span>';
+}).join('');
+}).catch(function(){});
+</script>
 </body>
 </html>
