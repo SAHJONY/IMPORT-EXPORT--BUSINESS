@@ -284,6 +284,15 @@ def _openai_ready() -> bool:
     return bool(os.getenv("OPENAI_API_KEY", "").strip())
 
 
+def _anthropic_ready() -> bool:
+    return bool(os.getenv("ANTHROPIC_API_KEY", "").strip() and os.getenv("SOFIA_ANTHROPIC_MODEL", "").strip())
+
+
+def _inference_ready() -> bool:
+    """Owner-ordered chain (2026-10-01): OpenAI primary, Anthropic secondary, NVIDIA fallback."""
+    return _openai_ready() or _anthropic_ready() or hermes_configured()
+
+
 def _graph_url(cfg: dict[str, str], path: str) -> str:
     version = cfg.get("graph_api_version", "").strip()
     if not version:
@@ -1044,7 +1053,7 @@ async def _process_inbound(
         except Exception:
             pass
         return
-    cognition_ready = hermes_configured() or _openai_ready()
+    cognition_ready = _inference_ready()
     if not (_ai_auto_reply_enabled() and cognition_ready and _send_ready(cfg)):
         return
     reply = await generate_sofia_reply(
@@ -1097,7 +1106,8 @@ async def whatsapp_health() -> dict[str, Any]:
             "lead_capture_enabled": persistence["configured"],
             "webhook_idempotency_enabled": persistence["configured"],
             "ai_auto_reply_enabled": _ai_auto_reply_enabled(),
-            "ai_ready": hermes_configured() or _openai_ready(),
+            "ai_ready": _inference_ready(),
+            "inference_chain": "openai > anthropic > nvidia_nim",
             "cognition_runtime": "hermes",
             "hermes_primary_configured": hermes_configured(),
             "hermes_primary_model": hermes_model_name() if hermes_configured() else None,
@@ -1128,7 +1138,8 @@ async def whatsapp_health() -> dict[str, Any]:
         "lead_capture_enabled": persistence["configured"],
         "webhook_idempotency_enabled": persistence["configured"],
         "ai_auto_reply_enabled": _ai_auto_reply_enabled(),
-        "ai_ready": hermes_configured() or _openai_ready(),
+        "ai_ready": _inference_ready(),
+            "inference_chain": "openai > anthropic > nvidia_nim",
         "cognition_runtime": "hermes",
         "hermes_primary_configured": hermes_configured(),
         "hermes_primary_model": hermes_model_name() if hermes_configured() else None,

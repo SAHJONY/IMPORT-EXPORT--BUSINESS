@@ -34,7 +34,7 @@ env:
 
 jobs:
   run:
-    if: ${{ inputs.confirm == 'YES' && inputs.command != 'INSTALL_ODDS_KEY' && inputs.command != 'INSTALL_OWNER_AUTH' && inputs.command != 'INSTALL_AIS_KEY' }}
+    if: ${{ inputs.confirm == 'YES' && inputs.command != 'INSTALL_ODDS_KEY' && inputs.command != 'INSTALL_OWNER_AUTH' && inputs.command != 'INSTALL_AIS_KEY' && inputs.command != 'INSTALL_NVIDIA_KEY' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
@@ -141,3 +141,33 @@ jobs:
           SSH_OPTS="-o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=15 -i ~/.ssh/vps-key"
           printf '%s' "$AISSTREAM_API_KEY" | ssh $SSH_OPTS "$SSH_USER@$HOST" \
             'umask 077 && mkdir -p /etc/gods-eye-view && cat > /etc/gods-eye-view/ais.env.tmp && { printf "AISSTREAM_API_KEY="; cat /etc/gods-eye-view/ais.env.tmp; printf "\n"; } > /etc/gods-eye-view/ais.env && rm -f /etc/gods-eye-view/ais.env.tmp && chmod 600 /etc/gods-eye-view/ais.env && mkdir -p /etc/systemd/system/gods-eye-view.service.d && printf "[Service]\nEnvironmentFile=/etc/gods-eye-view/ais.env\n" > /etc/systemd/system/gods-eye-view.service.d/ais-key.conf && systemctl daemon-reload && systemctl restart gods-eye-view.service && sleep 10 && curl -sf http://127.0.0.1:8200/api/ais-live >/dev/null && echo INSTALL_OK'
+
+  # Instalación segura de NVIDIA_API_KEY (Sofia WhatsApp, fallback NIM) en el VPS.
+  # Juan agrega el secret NVIDIA_API_KEY en Settings → Secrets → Actions de
+  # este repo. La llave viaja del GitHub secret al VPS por stdin (nunca aparece
+  # en comandos, logs ni chat) y queda como NVIDIA_API_KEY dentro de
+  # /etc/sahjony-fallback/import-export.env (600), que ya carga
+  # sahjony-fallback-whatsapp.service vía EnvironmentFile. Update-or-append:
+  # re-ejecutable sin duplicar la línea. No reinicia el servicio; el deploy
+  # posterior lo hace. Se despacha con command=INSTALL_NVIDIA_KEY.
+  install-nvidia-key:
+    if: ${{ inputs.confirm == 'YES' && inputs.command == 'INSTALL_NVIDIA_KEY' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      SSH_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Install NVIDIA_API_KEY on VPS
+        shell: bash
+        env:
+          NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
+        run: |
+          set -euo pipefail
+          [[ -n "$SSH_KEY" ]] || { echo "HOSTINGER_SSH_PRIVATE_KEY secret missing" >&2; exit 1; }
+          [[ -n "$NVIDIA_API_KEY" ]] || { echo "NVIDIA_API_KEY secret missing: agrégalo en Settings → Secrets → Actions del repo" >&2; exit 1; }
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/vps-key
+          chmod 600 ~/.ssh/vps-key
+          SSH_OPTS="-o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=15 -i ~/.ssh/vps-key"
+          printf '%s' "$NVIDIA_API_KEY" | ssh $SSH_OPTS "$SSH_USER@$HOST" \
+            'umask 077 && F=/etc/sahjony-fallback/import-export.env && cp $F $F.bak.$(date +%Y%m%d%H%M%S) && KEY=$(cat) && grep -v "^NVIDIA_API_KEY=" $F > $F.tmp && printf "NVIDIA_API_KEY=%s\n" "$KEY" >> $F.tmp && mv $F.tmp $F && chmod 600 $F && grep -c "^NVIDIA_API_KEY=." $F && echo INSTALL_OK'
