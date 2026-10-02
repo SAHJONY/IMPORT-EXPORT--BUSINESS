@@ -88,6 +88,24 @@ def _coerce(value: str) -> Any:
         return value
 
 
+def _safe_eq(actual: Any, expected: Any) -> bool:
+    """Type-tolerant equality for the client-side re-filter.
+
+    The durable store keeps everything inside a JSONB `data` column, so a
+    phone like "15559998877" is a string while `_coerce` turns the filter
+    value into int 15559998877. Strict `==` then wrongly rejects the row and
+    every phone-keyed read (conversation history, CRM lookups) silently
+    returns empty. Fall back to string comparison when types differ; the
+    server-side PostgREST filter already compares `data->>` as text, so this
+    keeps client and server semantics consistent.
+    """
+    if actual == expected:
+        return True
+    if actual is None or expected is None:
+        return False
+    return str(actual) == str(expected)
+
+
 def _matches(row: dict[str, Any], params: dict[str, str]) -> bool:
     for field, expression in params.items():
         if field in {"limit", "order", "offset", "select"}:
@@ -100,14 +118,14 @@ def _matches(row: dict[str, Any], params: dict[str, str]) -> bool:
             continue
         op, raw = expression.split(".", 1)
         expected = _coerce(raw)
-        if op == "eq" and actual != expected: return False
-        if op == "neq" and actual == expected: return False
+        if op == "eq" and not _safe_eq(actual, expected): return False
+        if op == "neq" and _safe_eq(actual, expected): return False
         if op == "is":
             if expected is None and actual is not None: return False
-            if expected is not None and actual != expected: return False
+            if expected is not None and not _safe_eq(actual, expected): return False
         if op == "in":
             allowed = {_coerce(item.strip()) for item in raw.strip("()").split(",") if item.strip()}
-            if actual not in allowed: return False
+            if not any(_safe_eq(actual, cand) for cand in allowed): return False
         if op in {"gt", "gte", "lt", "lte"}:
             try:
                 if op == "gt" and not actual > expected: return False
