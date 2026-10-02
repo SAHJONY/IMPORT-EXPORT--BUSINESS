@@ -733,6 +733,8 @@ async def owner_update_report() -> dict[str, Any]:
     intakes, intakes_source = await source_select("customer_trade_intakes", {"limit": "5000"})
     messages, messages_source = await source_select("whatsapp_messages", {"limit": "5000"})
     operations, operations_source = await source_select("crm_bridge_operations", {"limit": "500"})
+    suppliers, suppliers_source = await source_select("supplier_candidates", {"limit": "5000"})
+    prospects, prospects_source = await source_select("external_trade_prospects", {"limit": "5000"})
 
     stage_counts: dict[str, int] = {}
     if accounts is not None:
@@ -767,6 +769,8 @@ async def owner_update_report() -> dict[str, Any]:
         "customer_trade_intakes": intakes_source,
         "whatsapp_messages": messages_source,
         "crm_bridge_operations": operations_source,
+        "supplier_candidates": suppliers_source,
+        "external_trade_prospects": prospects_source,
     }
     degraded = any(source["state"] not in {"HEALTHY_CURRENT", "HEALTHY_EMPTY"} for source in source_states.values())
 
@@ -795,6 +799,14 @@ async def owner_update_report() -> dict[str, Any]:
         "crm_bridge_operations": {
             "status": "verified" if operations is not None else "unknown",
             "total_observed": len(operations) if operations is not None else None,
+        },
+        "suppliers": {
+            "status": "verified" if suppliers is not None else "unknown",
+            "candidate_suppliers_total": len(suppliers) if suppliers is not None else None,
+        },
+        "external_trade_prospects": {
+            "status": "verified" if prospects is not None else "unknown",
+            "total": len(prospects) if prospects is not None else None,
         },
         "financials": {
             "status": "not_computed_by_this_read_only_report",
