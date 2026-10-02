@@ -191,6 +191,54 @@ async def _openai_fallback(system: str, user: str) -> tuple[str, dict[str, Any]]
     }
 
 
+async def _anthropic_secondary(system: str, user: str) -> tuple[str, dict[str, Any]]:
+    """Anthropic secondary inference (owner directive 2026-10-01: OpenAI
+    primary, Anthropic secondary, NVIDIA NIM fallback). Model comes from
+    SOFIA_ANTHROPIC_MODEL; when unset Anthropic is skipped (not configured)."""
+    key = os.getenv("ANTHROPIC_API_KEY", "").strip()
+    model = os.getenv("SOFIA_ANTHROPIC_MODEL", "").strip()
+    if not key or not model:
+        return "", {"provider": "anthropic", "configured": False}
+    payload = {
+        "model": model,
+        "max_tokens": 700,
+        "system": system,
+        "messages": [{"role": "user", "content": user}],
+    }
+    async with httpx.AsyncClient(timeout=45) as client:
+        response = await client.post(
+            "https://api.anthropic.com/v1/messages",
+            headers={
+                "x-api-key": key,
+                "anthropic-version": os.getenv("ANTHROPIC_VERSION", "2023-06-01"),
+                "Content-Type": "application/json",
+            },
+            json=payload,
+        )
+    if response.status_code >= 400:
+        return "", {"provider": "anthropic", "configured": True, "status_code": response.status_code, "model": model}
+    data = response.json()
+    text = "\n".join(
+        x.get("text", "") for x in (data.get("content") or []) if isinstance(x, dict) and x.get("type") == "text"
+    ).strip()
+    return text[:4096], {
+        "provider": "anthropic", "configured": True, "status_code": response.status_code, "model": model
+    }
+
+
+async def _inference_chain(system: str, user: str) -> tuple[str, str, dict[str, Any]]:
+    """Owner-ordered inference chain (2026-10-01): OpenAI primary, Anthropic
+    secondary, NVIDIA NIM fallback. Returns (reply, provider_name, meta)."""
+    reply, meta = await _openai_fallback(system, user)
+    if reply:
+        return reply, "openai", {"primary": meta}
+    second, meta2 = await _anthropic_secondary(system, user)
+    if second:
+        return second, "anthropic", {"primary": meta, "secondary": meta2}
+    nim_reply, nim_meta = await hermes_generate(system=system, user=user, max_tokens=900, temperature=0.6)
+    return nim_reply, "nvidia_nim", {"primary": meta, "secondary": meta2, "nvidia_fallback": nim_meta}
+
+
 async def _resolve_business_track(
     text: str,
     *,
@@ -964,10 +1012,26 @@ async def _generate_sofia_reply_unguarded(
     sender_phone: str | None = None,
     _guard_ctx: dict[str, Any] | None = None,
 ) -> tuple[str, dict[str, Any]]:
-    if not hermes_configured() and not os.getenv("OPENAI_API_KEY", "").strip():
+    if not (
+        os.getenv("OPENAI_API_KEY", "").strip()
+        or os.getenv("ANTHROPIC_API_KEY", "").strip()
+        or hermes_configured()
+    ):
         return "", (_guard_ctx if _guard_ctx is not None else {})
 
-    phone, lead_id, lead = await _find_current_contact(text, contact_name)
+    # Prefer the sender phone threaded from the inbound path: resolving the
+    # contact by exact message text races the webhook write and silently
+    # drops history/memory/CRM (the "no tiene memoria" bug, 2026-10-01).
+    if sender_phone:
+        phone = sender_phone
+        lead_id = "wa_" + hashlib.sha256(phone.encode("utf-8")).hexdigest()[:24]
+        try:
+            leads = await get_backend().select("whatsapp_leads", params={"lead_id": f"eq.{lead_id}", "limit": "1"}) or []
+        except Exception:
+            leads = []
+        lead = leads[0] if leads else {}
+    else:
+        phone, lead_id, lead = await _find_current_contact(text, contact_name)
     history = await _history(phone)
     transcript = _transcript(history)
     memory = await _relationship_memory(lead_id, lead)
@@ -1148,13 +1212,9 @@ WHATSAPP HUMAN CONVERSATION RULES
     )
 
     try:
-        reply, meta = await hermes_generate(system=system, user=user, max_tokens=900, temperature=0.6)
+        reply, provider, meta = await _inference_chain(system, user)
         if not reply:
-            fallback, fallback_meta = await _openai_fallback(system, user)
-            reply = fallback
-            meta = {"primary": meta, "fallback": fallback_meta}
-        if not reply:
-            await _audit(lead_id, "sofia_reply_failure", {"summary": "NVIDIA NIM and OpenAI fallback returned no usable reply"})
+            await _audit(lead_id, "sofia_reply_failure", {"summary": "OpenAI, Anthropic and NVIDIA fallback returned no usable reply"})
             await record_lesson(
                 lesson="Sofía inference providers returned no usable reply; preserve continuity through the verified sales fallback.",
                 signal="reply_primary_failure",
@@ -1164,9 +1224,8 @@ WHATSAPP HUMAN CONVERSATION RULES
 
         reply = reply[:4096]
         await _audit(lead_id, "sofia_reply_generated", {
-            "summary": "Hermes-style NVIDIA NIM executive response generated",
-            "primary_provider": "nvidia_nim" if hermes_configured() else "openai_fallback",
-            "primary_model": hermes_model_name() if hermes_configured() else None,
+            "summary": "Sofía WhatsApp reply generated (OpenAI primary, Anthropic secondary, NVIDIA fallback)",
+            "primary_provider": provider,
             "inference": meta,
             "memory_loaded": True,
             "crm_context_loaded": bool(crm_context.get("crm_connected")),
@@ -1185,14 +1244,14 @@ WHATSAPP HUMAN CONVERSATION RULES
         await record_lesson(
             lesson="Successful Sofía response used the Hermes-style cognition loop with durable relationship memory, CRM context, progressive discovery and guarded executive autonomy.",
             signal="reply_success",
-            metadata={"lead_id": lead_id, "reply_chars": len(reply), "model": hermes_model_name() if hermes_configured() else "fallback"},
+            metadata={"lead_id": lead_id, "reply_chars": len(reply), "provider": provider},
         )
         return reply, (_guard_ctx if _guard_ctx is not None else {})
     except Exception as exc:
         try:
-            fallback, _ = await _openai_fallback(system, user)
-            if fallback:
-                return fallback[:4096], (_guard_ctx if _guard_ctx is not None else {})
+            chained, _, _ = await _inference_chain(system, user)
+            if chained:
+                return chained[:4096], (_guard_ctx if _guard_ctx is not None else {})
         except Exception:
             pass
         await _audit(lead_id, "sofia_reply_failure", {"summary": type(exc).__name__})

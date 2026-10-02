@@ -256,8 +256,13 @@ async def generate_hermes_whatsapp_reply(text: str, contact_name: str | None) ->
 def health() -> dict[str, Any]:
     brain = nim_health()
     enabled = environment_enabled()
+    # Owner-ordered inference chain (2026-10-01): OpenAI primary, Anthropic
+    # secondary, NVIDIA NIM fallback.
+    openai_ready = bool(os.getenv("OPENAI_API_KEY", "").strip())
+    anthropic_ready = bool(os.getenv("ANTHROPIC_API_KEY", "").strip() and os.getenv("SOFIA_ANTHROPIC_MODEL", "").strip())
+    chain_ready = openai_ready or anthropic_ready or nim_configured()
     return {
-        "status": "ok" if enabled and nim_configured() else ("degraded" if enabled else "configuration_required"),
+        "status": "ok" if enabled and chain_ready else ("degraded" if enabled else "configuration_required"),
         "service": "sofia-hermes-whatsapp-environment",
         "environment": "hermes-agent",
         "hermes_version": HERMES_BASELINE,
@@ -267,10 +272,14 @@ def health() -> dict[str, Any]:
         "cognition_runtime": "hermes",
         "hostinger_native_transport": True,
         "openclaw_dependency": False,
+        "inference_chain": [
+            {"provider": "openai", "model": os.getenv("SOFIA_WHATSAPP_MODEL", "").strip() or "gpt-5.6-sol", "configured": openai_ready},
+            {"provider": "anthropic", "model": os.getenv("SOFIA_ANTHROPIC_MODEL", "").strip() or None, "configured": anthropic_ready},
+            {"provider": brain.get("provider"), "model": brain.get("model"), "configured": nim_configured()},
+        ],
         "primary_inference": {
-            "provider": brain.get("provider"),
-            "model": brain.get("model"),
-            "configured": nim_configured(),
+            "provider": "openai" if openai_ready else ("anthropic" if anthropic_ready else brain.get("provider")),
+            "configured": chain_ready,
         },
         "openai_fallback_preserved": True,
         "relationship_memory": True,
