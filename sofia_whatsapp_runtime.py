@@ -226,16 +226,43 @@ async def _anthropic_secondary(system: str, user: str) -> tuple[str, dict[str, A
     }
 
 
+# Generic model refusals ("I'm sorry, but I can't help with that", ...) are
+# transient and must never reach the contact: a refusing provider is treated
+# as a failed provider so the chain falls through to the next one
+# (incident 2026-10-02: the owner got a bare refusal twice).
+_REFUSAL_PATTERNS = (
+    "i'm sorry, but i can't help with that",
+    "i can't help with that",
+    "i'm unable to help with that",
+    "i am unable to help with that",
+    "lo siento, no puedo ayudar",
+    "lo siento, pero no puedo ayudar",
+    "no puedo ayudarte con eso",
+)
+
+
+def _looks_like_refusal(reply: str) -> bool:
+    normalized = re.sub(r"\s+", " ", (reply or "").strip().lower())
+    return any(pattern in normalized[:240] for pattern in _REFUSAL_PATTERNS)
+
+
 async def _inference_chain(system: str, user: str) -> tuple[str, str, dict[str, Any]]:
     """Owner-ordered inference chain (2026-10-01): OpenAI primary, Anthropic
     secondary, NVIDIA NIM fallback. Returns (reply, provider_name, meta)."""
     reply, meta = await _openai_fallback(system, user)
-    if reply:
+    if reply and not _looks_like_refusal(reply):
         return reply, "openai", {"primary": meta}
+    if reply:
+        meta = {**meta, "refused": True}
     second, meta2 = await _anthropic_secondary(system, user)
-    if second:
+    if second and not _looks_like_refusal(second):
         return second, "anthropic", {"primary": meta, "secondary": meta2}
+    if second:
+        meta2 = {**meta2, "refused": True}
     nim_reply, nim_meta = await hermes_generate(system=system, user=user, max_tokens=900, temperature=0.6)
+    if _looks_like_refusal(nim_reply):
+        nim_meta = {**nim_meta, "refused": True}
+        return "", "nvidia_nim", {"primary": meta, "secondary": meta2, "nvidia_fallback": nim_meta}
     return nim_reply, "nvidia_nim", {"primary": meta, "secondary": meta2, "nvidia_fallback": nim_meta}
 
 
@@ -1061,28 +1088,48 @@ async def _generate_sofia_reply_unguarded(
                 "trade_intakes": [],
             }
 
-    try:
-        sales = await analyze_sales_conversation(
-            transcript=transcript or f"customer: {text}",
-            current_stage=str(memory.get("relationship_stage") or lead.get("status") or "NEW"),
-            complexity="normal",
-            relationship_memory=memory,
-        )
-    except Exception:
+    if owner_context:
+        # The owner is not a sales lead: skip the sales-brain extraction so his
+        # messages are never misfiled as product needs or qualification facts
+        # (incident 2026-10-02: "quien soy yo" was stored as a product need).
         sales = {
-            "missing_fields": memory.get("next_questions") or [],
-            "next_best_action": memory.get("next_action") or "Answer directly and move the legitimate commercial conversation one step forward.",
-            "risk_flags": ["sales_intelligence_temporarily_unavailable"],
+            "intent": "owner_executive",
+            "missing_fields": [],
+            "next_best_action": "Answer the owner directly, warmly and briefly.",
+            "risk_flags": [],
         }
+        sales_plan = {
+            "mission": "owner_executive_turn",
+            "deal_score": None,
+            "next_best_action": "Answer the owner directly.",
+            "autonomous_actions": [],
+            "approval_queue": [],
+            "missing_fields": [],
+            "risk_flags": [],
+        }
+    else:
+        try:
+            sales = await analyze_sales_conversation(
+                transcript=transcript or f"customer: {text}",
+                current_stage=str(memory.get("relationship_stage") or lead.get("status") or "NEW"),
+                complexity="normal",
+                relationship_memory=memory,
+            )
+        except Exception:
+            sales = {
+                "missing_fields": memory.get("next_questions") or [],
+                "next_best_action": memory.get("next_action") or "Answer directly and move the legitimate commercial conversation one step forward.",
+                "risk_flags": ["sales_intelligence_temporarily_unavailable"],
+            }
 
-    sales_plan = orchestrate_sales_turn(
-        lead_id=lead_id,
-        customer_text=text,
-        stage=str(memory.get("relationship_stage") or lead.get("status") or "NEW"),
-        memory=memory,
-        sales_intelligence=sales,
-        crm_context=crm_context,
-    )
+        sales_plan = orchestrate_sales_turn(
+            lead_id=lead_id,
+            customer_text=text,
+            stage=str(memory.get("relationship_stage") or lead.get("status") or "NEW"),
+            memory=memory,
+            sales_intelligence=sales,
+            crm_context=crm_context,
+        )
     if _guard_ctx is not None:
         _guard_ctx.update(
             memory=memory,
@@ -1125,6 +1172,12 @@ async def _generate_sofia_reply_unguarded(
     system += str(track_resolution.get("prompt_addition") or "")
     system += _contact_role_block(sender_phone)
     if owner_context:
+        system += (
+            "\n\nOWNER IDENTITY — HIGHEST PRIORITY FOR IDENTITY QUESTIONS\n"
+            "- The human writing to you right now IS Juan Gonzalez, the authenticated owner of SAHJONY LLC (WhatsApp +1 678 346-6284). This is certain. You know his name; it is a verified fact, not something to look up.\n"
+            "- If he asks who he is ('quién soy yo', 'quien soy yo', 'who am I', etc.), answer directly and warmly: he is Juan, the owner of SAHJONY, and you are Sofía, his right hand. Never say you do not know his name. Never ask for his name. Never treat him as an unknown contact.\n"
+            "- This overrides any empty or conflicting name fields in the RELATIONSHIP MEMORY, CRM, or sales blocks below: those blocks describe sales leads, never the owner."
+        )
         system += "\n\nOWNER EXECUTIVE MODE\n- The current sender is the authenticated SAHJONY owner. Treat this as an internal executive request, not a customer sales intake.\n- You are Sofía talking to Juan: warm, brief, in Spanish, like a person — never a corporate consultant, never numbered intake questionnaires.\n- If his message looks like a garbled transcription, say so plainly in Spanish and ask him to repeat or clarify. Never build plans, questions, or commitments on garbage input.\n- Never ask the owner to export/upload CRM data as the first response. Use the connected SAHJONY source snapshot supplied below first.\n- Distinguish verified zero from unknown/unreadable. Never convert source failure into zero.\n- If one source is unavailable, give the best partial report from healthy sources and isolate the blocker.\n- Do not fabricate cash, revenue, profit, invoices, payments, opportunities, shipments, or system health.\n- Only ask the owner for something when it is genuinely owner-only and cannot be resolved from connected systems."
         system += "\n\nLIVE OWNER SOURCE SNAPSHOT\n" + json.dumps(owner_report or {}, ensure_ascii=False, default=str)[:30000]
     system += "\n\nRELATIONSHIP MEMORY\n" + json.dumps({
@@ -1204,8 +1257,17 @@ WHATSAPP HUMAN CONVERSATION RULES
             "Never reverse buyer and seller."
         )
 
+    # Identity of the sender, stated plainly in the user turn: fallback
+    # providers (Anthropic/NVIDIA) have ignored the system-prompt owner block
+    # (incident 2026-10-02: "no tengo tu nombre" to the owner).
+    sender_line = (
+        "Sender: Juan Gonzalez, the authenticated SAHJONY owner. You know exactly who he is — never ask his name, never say you don't know it.\n"
+        if owner_context
+        else "Sender: WhatsApp contact (use relationship memory for their name; never invent it).\n"
+    )
     user = (
-        f"Latest customer message:\n{text[:5000]}\n\n"
+        sender_line +
+        f"Latest message:\n{text[:5000]}\n\n"
         f"Recent conversation:\n{transcript[-18000:]}\n\n"
         "Write only Sofía's next WhatsApp message. No analysis, private reasoning, labels, or internal metadata.\n"
         f"Reply in {reply_language_name(text, transcript, sender_phone)}."
