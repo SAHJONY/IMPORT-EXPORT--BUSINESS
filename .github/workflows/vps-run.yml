@@ -34,7 +34,7 @@ env:
 
 jobs:
   run:
-    if: ${{ inputs.confirm == 'YES' && inputs.command != 'INSTALL_ODDS_KEY' && inputs.command != 'INSTALL_OWNER_AUTH' && inputs.command != 'INSTALL_AIS_KEY' && inputs.command != 'INSTALL_NVIDIA_KEY' }}
+    if: ${{ inputs.confirm == 'YES' && inputs.command != 'INSTALL_ODDS_KEY' && inputs.command != 'INSTALL_OWNER_AUTH' && inputs.command != 'INSTALL_AIS_KEY' && inputs.command != 'INSTALL_NVIDIA_KEY' && inputs.command != 'INSTALL_PORTAL_OWNER_KEY' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
@@ -171,3 +171,31 @@ jobs:
           SSH_OPTS="-o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=15 -i ~/.ssh/vps-key"
           printf '%s' "$NVIDIA_API_KEY" | ssh $SSH_OPTS "$SSH_USER@$HOST" \
             'umask 077 && F=/etc/sahjony-fallback/import-export.env && cp $F $F.bak.$(date +%Y%m%d%H%M%S) && KEY=$(cat) && grep -v "^NVIDIA_API_KEY=" $F > $F.tmp && printf "NVIDIA_API_KEY=%s\n" "$KEY" >> $F.tmp && mv $F.tmp $F && chmod 600 $F && grep -c "^NVIDIA_API_KEY=." $F && echo INSTALL_OK'
+
+  # Instalación segura de PORTAL_OWNER_KEY (portal del dueño, gods-eye-view).
+  # Juan agrega el secret PORTAL_OWNER_KEY en Settings → Secrets → Actions de
+  # este repo. La llave viaja del GitHub secret al VPS por stdin (nunca aparece
+  # en comandos, logs ni chat) y queda en /etc/gods-eye-view/portal-owner.env
+  # (600), cargado por gods-eye-view.service vía drop-in EnvironmentFile.
+  # Se despacha con command=INSTALL_PORTAL_OWNER_KEY.
+  install-portal-owner-key:
+    if: ${{ inputs.confirm == 'YES' && inputs.command == 'INSTALL_PORTAL_OWNER_KEY' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      SSH_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Install PORTAL_OWNER_KEY on VPS
+        shell: bash
+        env:
+          PORTAL_OWNER_KEY: ${{ secrets.PORTAL_OWNER_KEY }}
+        run: |
+          set -euo pipefail
+          [[ -n "$SSH_KEY" ]] || { echo "HOSTINGER_SSH_PRIVATE_KEY secret missing" >&2; exit 1; }
+          [[ -n "$PORTAL_OWNER_KEY" ]] || { echo "PORTAL_OWNER_KEY secret missing: agrégalo en Settings → Secrets → Actions del repo" >&2; exit 1; }
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/vps-key
+          chmod 600 ~/.ssh/vps-key
+          SSH_OPTS="-o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=15 -i ~/.ssh/vps-key"
+          printf '%s' "$PORTAL_OWNER_KEY" | ssh $SSH_OPTS "$SSH_USER@$HOST" \
+            'umask 077 && mkdir -p /etc/gods-eye-view && KEY=$(cat) && printf "PORTAL_OWNER_KEY=%s\n" "$KEY" > /etc/gods-eye-view/portal-owner.env && chmod 600 /etc/gods-eye-view/portal-owner.env && mkdir -p /etc/systemd/system/gods-eye-view.service.d && printf "[Service]\nEnvironmentFile=/etc/gods-eye-view/portal-owner.env\n" > /etc/systemd/system/gods-eye-view.service.d/portal-owner-key.conf && systemctl daemon-reload && systemctl restart gods-eye-view.service && sleep 12 && systemctl is-active gods-eye-view.service && OK=$(curl -s -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $KEY" http://127.0.0.1:8200/api/portal/admin/buyer-requests) && NOKEY=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8200/api/portal/admin/buyer-requests) && echo "WITH_KEY=$OK WITHOUT_KEY=$NOKEY" && [ "$OK" = "200" ] && [ "$NOKEY" = "401" ] && echo INSTALL_OK'
