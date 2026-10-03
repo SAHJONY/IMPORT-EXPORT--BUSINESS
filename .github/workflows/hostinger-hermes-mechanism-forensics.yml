@@ -1,0 +1,66 @@
+name: Hostinger Hermes WhatsApp Mechanism Forensics (read-only)
+
+# READ-ONLY. Understands: (1) what platforms.whatsapp.extra holds (key names only),
+# (2) what writes the channel_connected heartbeat the 8102 health check needs,
+# (3) how inbound WhatsApp DMs are routed (old-agent reply path).
+# Source-code reads only; never prints config values or secrets.
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: hostinger-vm-767852-hermes-clean
+  cancel-in-progress: false
+
+jobs:
+  forensics:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    env:
+      HOST: 69.62.68.67
+      SSH_USER: root
+      PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Prepare SSH
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "${PRIVATE_KEY:-}" ]] || { echo HOSTINGER_SSH_PRIVATE_KEY_MISSING=1 >&2; exit 2; }
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/key
+          chmod 600 ~/.ssh/key
+          ssh-keygen -y -f ~/.ssh/key >/dev/null
+
+      - name: Mechanism forensics (read-only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          opts=(-o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=12 -i ~/.ssh/key)
+          ssh "${opts[@]}" "$SSH_USER@$HOST" 'bash -s' <<'REMOTE'
+          set -uo pipefail
+          V=/root/.hermes/hermes-agent/venv/bin/python
+          echo '=== 1. platforms.whatsapp.extra sub-key NAMES only ==='
+          $V - <<'PY' 2>&1 | head -8
+          import yaml
+          cfg = yaml.safe_load(open('/root/.hermes/config.yaml'))
+          extra = ((cfg.get('platforms') or {}).get('whatsapp') or {}).get('extra')
+          print('extra type:', type(extra).__name__)
+          print('extra sub-keys:', sorted(extra.keys()) if isinstance(extra, dict) else extra)
+          PY
+          echo '=== 2. who writes channel_connected heartbeat? (source grep) ==='
+          grep -rln 'channel_connected' /root/.hermes/hermes-agent --include='*.py' 2>/dev/null | head -5
+          grep -rln 'whatsapp_openclaw_gateways' /root/.hermes/hermes-agent --include='*.py' 2>/dev/null | head -5
+          grep -rln 'channel_connected' /opt/sahjony-fallback/import-export --include='*.py' 2>/dev/null | head -5
+          echo '=== 3. heartbeat writer context ==='
+          f=$(grep -rln 'channel_connected' /root/.hermes/hermes-agent --include='*.py' 2>/dev/null | head -1)
+          if [[ -n "$f" ]]; then grep -n -B3 -A8 'channel_connected' "$f" | head -40; else echo NO_WRITER_IN_HERMES_AGENT=1; fi
+          echo '=== 4. how are inbound whatsapp DMs handled? (agent reply path) ==='
+          grep -rn 'dm_policy' /root/.hermes/hermes-agent --include='*.py' 2>/dev/null | head -5 || echo NO_DM_POLICY_IN_CODE=1
+          echo '=== 5. whatsapp platform adapter: what does enabled=false skip? ==='
+          ls /root/.hermes/hermes-agent/gateway/platforms/ 2>/dev/null || find /root/.hermes/hermes-agent -maxdepth 3 -iname '*whatsapp*' 2>/dev/null | head -10
+          echo FORENSICS2_DONE=1
+          REMOTE
+
+      - name: Cleanup local key
+        if: always()
+        run: rm -f ~/.ssh/key
