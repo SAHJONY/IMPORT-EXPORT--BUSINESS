@@ -1,0 +1,94 @@
+name: Hostinger Hermes Gateway Diagnostic (read-only)
+
+# READ-ONLY diagnosis of the hermes-gateway user unit on 69.62.68.67.
+# Makes zero changes: no restarts, no writes under /root/.hermes or /opt/sahjony-hermes,
+# no config dumps (a previous run leaked a provider credential by grepping config.yaml).
+# Created 2026-10-03 to diagnose the hermes_agent_not_ready outage (down since 2026-10-02 ~19:24 CDT)
+# and the 4 consecutive 'Hostinger Hermes Safe Clean' failures at its gateway-restart step.
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: hostinger-vm-767852-hermes-clean
+  cancel-in-progress: false
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    env:
+      HOST: 69.62.68.67
+      SSH_USER: root
+      PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Prepare SSH
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "${PRIVATE_KEY:-}" ]] || { echo HOSTINGER_SSH_PRIVATE_KEY_MISSING=1 >&2; exit 2; }
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/key
+          chmod 600 ~/.ssh/key
+          ssh-keygen -y -f ~/.ssh/key >/dev/null
+
+      - name: Diagnose gateway (read-only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          opts=(-o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=12 -i ~/.ssh/key)
+          ssh "${opts[@]}" "$SSH_USER@$HOST" 'bash -s' <<'REMOTE'
+          set -uo pipefail
+          H=/root/.hermes
+
+          echo '=== 1. gateway unit state (stderr shown on purpose) ==='
+          systemctl --user is-active hermes-gateway.service
+          echo "is-active exit=$?"
+
+          echo '=== 2. gateway unit status ==='
+          systemctl --user status hermes-gateway.service --no-pager --lines=5 2>&1 | head -20
+
+          echo '=== 3. gateway journal (last 40 lines) ==='
+          journalctl --user -u hermes-gateway.service --no-pager -n 40 2>&1 | tail -40
+
+          echo '=== 4. running hermes/bridge processes ==='
+          pgrep -af 'hermes|whatsapp-bridge|bridge\.js' 2>/dev/null || echo NO_MATCHING_PROCESSES=1
+
+          echo '=== 5. bridge log presence + tail ==='
+          BL="$H/platforms/whatsapp/bridge.log"
+          if [[ -f "$BL" ]]; then stat -c 'bridge.log mtime=%y size=%s' "$BL"; tail -c 2500 "$BL"; else echo BRIDGE_LOG_MISSING=1; fi
+
+          echo '=== 6. drain-request state (read-only) ==='
+          find "$H" -maxdepth 3 -iname '*drain*' 2>/dev/null | head -10
+          PYTHONPATH=/root/.hermes/hermes-agent /root/.hermes/hermes-agent/venv/bin/python - <<'PY' 2>&1 | head -10
+          try:
+              from gateway import drain_control
+              names = [n for n in dir(drain_control) if 'drain' in n.lower()]
+              print('drain_control funcs:', names)
+          except Exception as e:
+              print('drain_control import failed:', e)
+          PY
+
+          echo '=== 7. whatsapp adapter flag ONLY (single key, never dump config) ==='
+          /root/.hermes/hermes-agent/venv/bin/python - <<'PY' 2>&1 | head -5
+          try:
+              import yaml
+              cfg = yaml.safe_load(open('/root/.hermes/config.yaml'))
+              wa = ((cfg.get('platforms') or {}).get('whatsapp') or {})
+              print('platforms.whatsapp.enabled =', wa.get('enabled'))
+              print('dm_policy =', cfg.get('dm_policy'))
+          except Exception as e:
+              print('config flag read failed:', e)
+          PY
+
+          echo '=== 8. listening ports 3000/8102 ==='
+          ss -tlnp 2>/dev/null | grep -E ':(3000|8102)\b' || echo NO_3000_8102_LISTENERS=1
+
+          echo '=== 9. root user-manager linger ==='
+          loginctl show-user root -p Linger 2>&1 | head -3 || true
+          echo DIAGNOSTIC_DONE=1
+          REMOTE
+
+      - name: Cleanup local key
+        if: always()
+        run: rm -f ~/.ssh/key
