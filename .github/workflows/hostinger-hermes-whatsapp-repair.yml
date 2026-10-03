@@ -1,0 +1,166 @@
+name: Hostinger Hermes WhatsApp Repair
+
+# REPAIR for the hermes_agent_not_ready outage (down since 2026-10-02 ~19:24 CDT).
+# Root cause (verified 2026-10-03 by read-only forensics):
+#   - /root/.hermes/config.yaml has platforms.whatsapp.enabled=false (deliberate Oct-2
+#     change to silence the rogue old agent). With the adapter disabled the gateway
+#     never brings up a WhatsApp channel, so the 8102 health check
+#     (whatsapp_self_healing.py -> whatsapp_openclaw_gateways row, channel_connected
+#     + last_seen_at<=5min) reports hermes_agent_not_ready -> degraded/safe_mode.
+#   - The Oct-2 top-level `dm_policy: disabled` was a NO-OP (that key does not exist
+#     at top level); the real per-platform key platforms.whatsapp.extra.dm_policy
+#     is already 'disabled', so re-enabling the adapter will NOT bring back the
+#     old agent's DM replies.
+# This workflow: backup config, re-enable the adapter (surgical line edit),
+# fix the invalid drop-in line, clear stale pair-only bridges holding :3000,
+# restart the gateway, and verify the channel + local health.
+# Manual dispatch ONLY. Makes no WhatsApp sends; never prints secrets.
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: hostinger-vm-767852-hermes-clean
+  cancel-in-progress: false
+
+jobs:
+  repair:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      HOST: 69.62.68.67
+      SSH_USER: root
+      PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Prepare SSH
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "${PRIVATE_KEY:-}" ]] || { echo HOSTINGER_SSH_PRIVATE_KEY_MISSING=1 >&2; exit 2; }
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/key
+          chmod 600 ~/.ssh/key
+          ssh-keygen -y -f ~/.ssh/key >/dev/null
+
+      - name: Repair WhatsApp adapter (surgical)
+        shell: bash
+        run: |
+          set -euo pipefail
+          opts=(-o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=12 -i ~/.ssh/key)
+          ssh "${opts[@]}" "$SSH_USER@$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          H=/root/.hermes
+          stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+          V=$H/hermes-agent/venv/bin/python
+
+          echo '=== 1. backup config ==='
+          mkdir -p "$H/maintenance-backups/$stamp"
+          cp -p "$H/config.yaml" "$H/maintenance-backups/$stamp/config.yaml.before-repair"
+          echo "backup=$H/maintenance-backups/$stamp/config.yaml.before-repair"
+
+          echo '=== 2. re-enable platforms.whatsapp.enabled (surgical line edit) ==='
+          $V - <<'PY'
+          import re, yaml
+          p = '/root/.hermes/config.yaml'
+          raw = open(p).read()
+          cfg = yaml.safe_load(raw)
+          wa = (cfg.get('platforms') or {}).get('whatsapp') or {}
+          assert wa.get('enabled') is False, 'unexpected: whatsapp.enabled is not False, aborting'
+          assert (wa.get('extra') or {}).get('dm_policy') == 'disabled', 'dm_policy guard missing, aborting'
+          lines = raw.split('\n')
+          # locate 'whatsapp:' under 'platforms:', then its 'enabled:' line
+          in_platforms = False; wa_idx = None
+          for i, ln in enumerate(lines):
+              if re.match(r'^platforms:\s*$', ln): in_platforms = True; continue
+              if in_platforms and re.match(r'^\S', ln): in_platforms = False
+              if in_platforms and re.match(r'^\s+whatsapp:\s*$', ln): wa_idx = i; break
+          assert wa_idx is not None, 'whatsapp section not found'
+          wa_indent = len(lines[wa_idx]) - len(lines[wa_idx].lstrip())
+          en_idx = None
+          for i in range(wa_idx + 1, len(lines)):
+              ln = lines[i]
+              if re.match(r'^\s*\S', ln) and (len(ln) - len(ln.lstrip())) <= wa_indent and ln.strip():
+                  break
+              m = re.match(r'^(\s*enabled:\s*)false(\s*(#.*)?)$', ln)
+              if m and (len(m.group(1)) - len('enabled:')) > wa_indent:
+                  en_idx = i; break
+          assert en_idx is not None, 'enabled line not found under whatsapp'
+          lines[en_idx] = re.sub(r'^(\s*enabled:\s*)false', r'\1true', lines[en_idx])
+          open(p, 'w').write('\n'.join(lines))
+          cfg2 = yaml.safe_load(open(p).read())
+          wa2 = (cfg2.get('platforms') or {}).get('whatsapp') or {}
+          print('platforms.whatsapp.enabled =', wa2.get('enabled'))
+          print('platforms.whatsapp.extra.dm_policy =', (wa2.get('extra') or {}).get('dm_policy'))
+          assert wa2.get('enabled') is True
+          print('CONFIG_EDIT_OK=1')
+          PY
+
+          echo '=== 3. fix invalid drop-in syntax (startup warning) ==='
+          D=/root/.config/systemd/user/hermes-gateway.service.d/20-sahjony-whatsapp-sales.conf
+          cp -p "$D" "$D.bak-$stamp"
+          $V - <<'PY'
+          import re
+          p = '/root/.config/systemd/user/hermes-gateway.service.d/20-sahjony-whatsapp-sales.conf'
+          lines = open(p).read().split('\n')
+          fixed = False
+          for i, ln in enumerate(lines):
+              if re.match(r'^WHATSAPP_ALLOWED_USERS=', ln):
+                  lines[i] = 'Environment="WHATSAPP_ALLOWED_USERS=*"'
+                  fixed = True
+          if fixed:
+              open(p, 'w').write('\n'.join(lines))
+              print('drop-in line fixed ->', [l for l in lines if 'WHATSAPP_ALLOWED_USERS' in l])
+              print('DROPIN_FIX_OK=1')
+          else:
+              print('DROPIN_ALREADY_OK=1')
+          PY
+
+          echo '=== 4. stale pair-only bridges holding :3000? ==='
+          if ss -tlnp 2>/dev/null | grep -q ':3000\b'; then
+            holder=$(ss -tlnp 2>/dev/null | grep ':3000\b' | head -1)
+            echo "port3000: $holder"
+            for pid in $(pgrep -f 'bridge\.js --pair-only' 2>/dev/null); do
+              echo "killing stale pair-only bridge pid=$pid"
+              kill "$pid" 2>/dev/null || true
+            done
+            sleep 2
+            ss -tlnp 2>/dev/null | grep -q ':3000\b' && echo PORT3000_STILL_HELD=1 || echo PORT3000_FREE=1
+          else
+            echo PORT3000_FREE=1
+          fi
+
+          echo '=== 5. clear any drain request (defensive) + restart gateway ==='
+          PYTHONPATH=$H/hermes-agent $H/hermes-agent/venv/bin/python -c "
+          from gateway.drain_control import clear_drain_request, drain_requested
+          print('drain_requested before =', drain_requested())
+          clear_drain_request()
+          print('drain_requested after =', drain_requested())
+          "
+          systemctl --user daemon-reload
+          systemctl --user restart hermes-gateway.service
+          sleep 30
+          systemctl --user is-active --quiet hermes-gateway.service && echo GATEWAY_ACTIVE=1
+
+          echo '=== 6. bridge + channel state after restart ==='
+          pgrep -af 'bridge\.js' | head -4 || echo NO_BRIDGE_YET=1
+          ls -la --time-style=+%H:%M:%S "$H/platforms/whatsapp/bridge.log" 2>/dev/null | awk '{print "bridge.log mtime:", $6, "size:", $5}' || echo BRIDGE_LOG_MISSING=1
+
+          echo '=== 7. local 8102 health (poll until ok, heartbeat loop ~30s cadence) ==='
+          for attempt in 1 2 3 4 5 6 7 8; do
+            curl -s --max-time 15 'http://127.0.0.1:8102/whatsapp/health' -o /tmp/hp.json -w "attempt=$attempt HTTP %{http_code}\n"
+            st=$($V -c "
+            import json
+            d = json.load(open('/tmp/hp.json'))
+            r = d.get('recovery_status') or {}
+            print(d.get('status'), '| send_ready:', d.get('send_ready'), '| issues:', r.get('issues'), '| checked_at:', r.get('checked_at'))
+            " 2>/dev/null)
+            echo "health: $st"
+            case "$st" in ok*) echo HEALTH_OK=1; break;; esac
+            sleep 20
+          done
+          echo REPAIR_DONE=1
+          REMOTE
+
+      - name: Cleanup local key
+        if: always()
+        run: rm -f ~/.ssh/key
