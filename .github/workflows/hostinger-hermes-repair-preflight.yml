@@ -1,0 +1,69 @@
+name: Hostinger Hermes Repair Preflight (read-only)
+
+# READ-ONLY preflight for the gateway repair. Gathers:
+# 1. current platforms.whatsapp.extra.dm_policy VALUE (policy string, not a secret)
+# 2. valid dm_policy values in the hermes whatsapp adapter source
+# 3. how the openclaw health-sidecar is scheduled (timer/cron/service)
+# 4. what `openclaw channels status --probe` reports right now (the exact readiness signal)
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: hostinger-vm-767852-hermes-clean
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    env:
+      HOST: 69.62.68.67
+      SSH_USER: root
+      PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Prepare SSH
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "${PRIVATE_KEY:-}" ]] || { echo HOSTINGER_SSH_PRIVATE_KEY_MISSING=1 >&2; exit 2; }
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/key
+          chmod 600 ~/.ssh/key
+          ssh-keygen -y -f ~/.ssh/key >/dev/null
+
+      - name: Repair preflight (read-only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          opts=(-o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=12 -i ~/.ssh/key)
+          ssh "${opts[@]}" "$SSH_USER@$HOST" 'bash -s' <<'REMOTE'
+          set -uo pipefail
+          V=/root/.hermes/hermes-agent/venv/bin/python
+          echo '=== 1. current extra.dm_policy VALUE ==='
+          $V -c "
+          import yaml
+          cfg = yaml.safe_load(open('/root/.hermes/config.yaml'))
+          extra = ((cfg.get('platforms') or {}).get('whatsapp') or {}).get('extra') or {}
+          print('dm_policy =', repr(extra.get('dm_policy')))
+          " 2>&1 | tail -2
+          echo '=== 2. dm_policy semantics in whatsapp adapter source ==='
+          grep -rn 'dm_policy' /root/.hermes/hermes-agent/gateway/platforms/whatsapp_common.py 2>/dev/null | head -10
+          grep -rn "'disabled'" /root/.hermes/hermes-agent/gateway/platforms/whatsapp_common.py 2>/dev/null | head -5
+          echo '=== 3. health-sidecar scheduling ==='
+          systemctl --user list-timers --no-pager 2>/dev/null | grep -i 'sidecar\|health\|heartbeat' || echo NO_USER_TIMER_MATCH=1
+          systemctl list-timers --no-pager 2>/dev/null | grep -i 'sidecar\|health\|heartbeat' || echo NO_SYSTEM_TIMER_MATCH=1
+          ls /etc/cron.d/ 2>/dev/null | head; grep -rl 'health-sidecar' /etc/cron.d/ 2>/dev/null || echo NO_CRON_MATCH=1
+          echo '=== 4. live channel probe (the readiness signal) ==='
+          timeout 30 /root/.hermes/tools/python-3.14.7+20260901-linux-x64/bin/python3 -I -c "
+          import sys
+          sys.path.insert(0, '/root/.hermes/hermes-agent')
+          " 2>/dev/null || true
+          ls /root/.hermes/bin/ 2>/dev/null | head -5; which openclaw 2>/dev/null || echo NO_OPENCLAW_IN_PATH=1
+          find /root/.hermes -maxdepth 2 -name 'openclaw' -type f 2>/dev/null | head -3
+          echo PREFLIGHT_DONE=1
+          REMOTE
+
+      - name: Cleanup local key
+        if: always()
+        run: rm -f ~/.ssh/key
