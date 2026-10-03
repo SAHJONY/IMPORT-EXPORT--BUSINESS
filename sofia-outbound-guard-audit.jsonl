@@ -1,0 +1,1 @@
+{"ts": "2026-09-29T22:14:55.255212+00:00", "guard_version": "2.0", "recipient_sha256": null, "blocked": true, "block_reason": "internal_jargon", "jargon_hits": ["\\bcrm\\b"], "known_fact_questions_dropped": 0, "excess_questions_dropped": 0, "fallback_used": true}
