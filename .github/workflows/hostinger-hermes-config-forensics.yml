@@ -1,0 +1,76 @@
+name: Hostinger Hermes Config Forensics (read-only)
+
+# READ-ONLY. Investigates /root/.hermes/config.yaml STRUCTURE only (key names, never values)
+# plus the pre-clean backups, to understand the dm_policy / platforms.whatsapp state
+# before any repair. Never prints secret values.
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: hostinger-vm-767852-hermes-clean
+  cancel-in-progress: false
+
+jobs:
+  forensics:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    env:
+      HOST: 69.62.68.67
+      SSH_USER: root
+      PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Prepare SSH
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "${PRIVATE_KEY:-}" ]] || { echo HOSTINGER_SSH_PRIVATE_KEY_MISSING=1 >&2; exit 2; }
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/key
+          chmod 600 ~/.ssh/key
+          ssh-keygen -y -f ~/.ssh/key >/dev/null
+
+      - name: Config forensics (keys only, no values)
+        shell: bash
+        run: |
+          set -euo pipefail
+          opts=(-o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=12 -i ~/.ssh/key)
+          ssh "${opts[@]}" "$SSH_USER@$HOST" 'bash -s' <<'REMOTE'
+          set -uo pipefail
+          H=/root/.hermes
+          /root/.hermes/hermes-agent/venv/bin/python - <<'PY' 2>&1
+          import yaml, glob, os
+          def keys_only(path):
+              try:
+                  cfg = yaml.safe_load(open(path))
+              except Exception as e:
+                  print(path, 'LOAD_FAIL', e); return
+              if not isinstance(cfg, dict):
+                  print(path, 'NOT_A_DICT'); return
+              print(path)
+              print('  top-level keys:', sorted(cfg.keys()))
+              plats = cfg.get('platforms') or {}
+              print('  platforms keys:', sorted(plats.keys()) if isinstance(plats, dict) else type(plats))
+              wa = plats.get('whatsapp') if isinstance(plats, dict) else None
+              print('  platforms.whatsapp keys:', sorted(wa.keys()) if isinstance(wa, dict) else wa)
+              print('  dm_policy present:', 'dm_policy' in cfg, '| value:', repr(cfg.get('dm_policy')))
+              print('  platforms.whatsapp.enabled value:', repr((wa or {}).get('enabled')))
+          keys_only('/root/.hermes/config.yaml')
+          print('--- backups (newest 3) ---')
+          backs = sorted(glob.glob('/root/.hermes/maintenance-backups/*/config.yaml'))[-3:]
+          for b in backs:
+              keys_only(b)
+          PY
+          echo '=== drain currently requested? ==='
+          PYTHONPATH=/root/.hermes/hermes-agent /root/.hermes/hermes-agent/venv/bin/python -c "
+          from gateway import drain_control
+          print('drain_requested =', drain_control.drain_requested())
+          " 2>&1 | tail -2
+          echo '=== bridge process now? ==='
+          pgrep -af 'bridge\.js' 2>/dev/null || echo NO_BRIDGE_PROCESS=1
+          echo FORENSICS_DONE=1
+          REMOTE
+
+      - name: Cleanup local key
+        if: always()
+        run: rm -f ~/.ssh/key
